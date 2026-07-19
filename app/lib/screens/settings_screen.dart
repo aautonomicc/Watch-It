@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
 import '../services/library_store.dart';
+import '../services/stream_settings.dart';
 import '../theme/tokens.dart';
 import 'list_edit_screen.dart';
 
@@ -15,6 +16,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   List<MediaList>? _lists;
+  String _gateway = '';
 
   @override
   void initState() {
@@ -24,7 +26,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _reload() async {
     final lists = await LibraryStore.load();
-    if (mounted) setState(() => _lists = lists);
+    final gateway = await StreamSettings.gatewayUrl();
+    if (mounted) {
+      setState(() {
+        _lists = lists;
+        _gateway = gateway;
+      });
+    }
+  }
+
+  Future<void> _editGateway() async {
+    final url = await promptForText(
+      context,
+      title: 'AntTP gateway URL',
+      hint: 'http://host:18888',
+      initial: _gateway,
+    );
+    if (url == null) return;
+    await StreamSettings.setGatewayUrl(url);
+    if (mounted) setState(() => _gateway = url.trim());
   }
 
   Future<void> _createList() async {
@@ -105,6 +125,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     trailing: Icon(Icons.chevron_right, color: t.ash),
                     onTap: () => _openList(list),
                   ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
+                  child: Text(
+                    'STREAMING',
+                    style: TextStyle(
+                      fontSize: 11,
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.w700,
+                      color: t.ash,
+                    ),
+                  ),
+                ),
+                ListTile(
+                  leading: Icon(Icons.cloud_outlined, color: t.copper),
+                  title: Text('AntTP gateway',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    _gateway.isEmpty ? 'Not set' : _gateway,
+                    style: TextStyle(
+                      color: t.ash,
+                      fontSize: 12,
+                      fontFamily: wiMonoFamily,
+                      fontFamilyFallback: wiMonoFallback,
+                    ),
+                  ),
+                  trailing: Icon(Icons.edit_outlined, color: t.ash, size: 18),
+                  onTap: _editGateway,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
+                  child: Text(
+                    'HTTP gateway (AntTP) that serves Autonomi content — '
+                    'playback streams through it. Use your gateway\'s LAN '
+                    'address at home, or its public address when away.',
+                    style: TextStyle(fontSize: 11.5, color: t.ash),
+                  ),
+                ),
               ],
             ),
     );

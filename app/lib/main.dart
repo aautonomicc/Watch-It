@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 
 import 'models/media_list.dart';
+import 'screens/detail_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/library_store.dart';
+import 'services/metadata.dart';
 import 'theme/tokens.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   runApp(const WatchItApp());
 }
 
@@ -40,6 +45,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _reload() async {
+    await LibraryStore.ensureDefaults();
     final lists = await LibraryStore.load();
     if (mounted) setState(() => _lists = lists);
   }
@@ -49,6 +55,12 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialPageRoute(builder: (_) => const SettingsScreen()),
     );
     await _reload();
+  }
+
+  Future<void> _openEntry(MediaEntry entry) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => DetailScreen(entry: entry)),
+    );
   }
 
   @override
@@ -86,7 +98,7 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         for (final list in _lists) ...[
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Text(
               list.title,
               style: TextStyle(
@@ -103,16 +115,75 @@ class _HomeScreenState extends State<HomeScreen> {
                 'Empty list — add entries in Settings.',
                 style: TextStyle(fontSize: 12, color: t.ash),
               ),
-            ),
-          for (final entry in list.entries)
-            ListTile(
-              dense: true,
-              leading: Icon(Icons.movie_outlined, color: t.copper, size: 20),
-              title: Text(entry.name,
-                  style: TextStyle(color: t.boneDim, fontSize: 13)),
+            )
+          else
+            SizedBox(
+              height: 232,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: list.entries.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 12),
+                itemBuilder: (context, i) => _PosterCard(
+                  entry: list.entries[i],
+                  tokens: t,
+                  onTap: () => _openEntry(list.entries[i]),
+                ),
+              ),
             ),
         ],
       ],
+    );
+  }
+}
+
+class _PosterCard extends StatelessWidget {
+  const _PosterCard({
+    required this.entry,
+    required this.tokens,
+    required this.onTap,
+  });
+
+  final MediaEntry entry;
+  final WiTokens tokens;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = tokens;
+    final meta = metadataFor(entry);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        width: 120,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox(
+                width: 120,
+                height: 180,
+                child: meta.posterAsset != null
+                    ? Image.asset(meta.posterAsset!, fit: BoxFit.cover)
+                    : Container(
+                        color: t.ink2,
+                        child: Icon(Icons.movie_outlined,
+                            color: t.ash, size: 40),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              meta.year != null ? '${meta.title} (${meta.year})' : meta.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11.5, color: t.boneDim),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
