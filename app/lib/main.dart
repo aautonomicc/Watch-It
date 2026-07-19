@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'models/media_list.dart';
+import 'screens/settings_screen.dart';
+import 'services/library_store.dart';
 import 'theme/tokens.dart';
 
 void main() {
@@ -20,8 +23,33 @@ class WatchItApp extends StatelessWidget {
   }
 }
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  List<MediaList> _lists = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    final lists = await LibraryStore.load();
+    if (mounted) setState(() => _lists = lists);
+  }
+
+  Future<void> _openSettings() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+    );
+    await _reload();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -40,28 +68,83 @@ class HomeScreen extends StatelessWidget {
             color: t.bone,
           ),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Settings',
+            icon: Icon(Icons.settings_outlined, color: t.boneDim),
+            onPressed: _openSettings,
+          ),
+        ],
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.play_circle_outline, size: 64, color: t.copper),
-            const SizedBox(height: 16),
-            Text(
-              'Your library is empty',
+      body: _lists.isEmpty ? _EmptyState(tokens: t) : _libraryView(t),
+    );
+  }
+
+  Widget _libraryView(WiTokens t) {
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      children: [
+        for (final list in _lists) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+            child: Text(
+              list.title,
               style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
                 color: t.bone,
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              'etch it. fetch it. watch it.',
-              style: TextStyle(fontSize: 12, color: t.ash),
+          ),
+          if (list.entries.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'Empty list — add entries in Settings.',
+                style: TextStyle(fontSize: 12, color: t.ash),
+              ),
             ),
-          ],
-        ),
+          for (final entry in list.entries)
+            ListTile(
+              dense: true,
+              leading: Icon(Icons.movie_outlined, color: t.copper, size: 20),
+              title: Text(entry.name,
+                  style: TextStyle(color: t.boneDim, fontSize: 13)),
+            ),
+        ],
+      ],
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.tokens});
+
+  final WiTokens tokens;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = tokens;
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.play_circle_outline, size: 64, color: t.copper),
+          const SizedBox(height: 16),
+          Text(
+            'Your library is empty',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: t.bone,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Create a media list in Settings to get started.',
+            style: TextStyle(fontSize: 12, color: t.ash),
+          ),
+        ],
       ),
     );
   }
