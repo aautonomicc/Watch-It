@@ -1,24 +1,45 @@
 # Roadmap
 
+**Status (2026-07-19):** v0.1.0-alpha.12 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)).
+Phase 0 is essentially done on Android: signed APK streams a real movie from the live
+Autonomi network via the embedded Rust client (`native/watchit_core`), with seek,
+buffering progress, configurable buffer size, and etchit-family branding (copper `[>]`
+icon + matching app-bar lockup). Outstanding from Phase 0: CI, and the Linux desktop
+build (blocked on toolchain install). Phase 1 is partially started.
+
 ## Phase 0 — Foundations (1–2 weeks)
-- [ ] Flutter project scaffold in `app/` targeting Linux + Android first (dev machines)
-- [ ] media_kit playing a local file with basic controls on both
-- [ ] **Autonomi spike**: fetch a known public file by XOR address with ant-client;
-      test range/offset access → done: embedded Rust-FFI client (watchit_core)
+- [x] Flutter project scaffold in `app/` targeting Linux + Android first (dev machines)
+      → Android fully working; Linux desktop blocked on toolchain
+      (clang/ninja/libgtk-3-dev not yet installed)
+- [x] media_kit playing with basic controls → done on Android, streaming from the
+      network; player controls lifted clear of the nav bar, thicker seek bar (alpha.11)
+- [x] **Autonomi spike**: fetch a known public file by XOR address;
+      test range/offset access → done: embedded Rust-FFI client (watchit_core),
+      HTTP Range seek verified byte-exact against the live network
 - [ ] CI: `flutter analyze` + `flutter test` on push
-- [ ] Decide accent color / app icon
+- [x] Decide accent color / app icon → copper #c9732b accent; adaptive `[>]` chevron
+      icon on ink, app-bar wordmark lockup matches (alpha.12); see BRAND.md
 
 **Exit criteria:** play a video file on Linux and Android, and prove seekable playback
-of an Autonomi-hosted file by address.
+of an Autonomi-hosted file by address. → **Met on Android** (streaming + seek proven);
+Linux playback pending the desktop toolchain.
 
 ## Phase 1 — Lists + metadata MVP
 - [ ] List model in SQLite; add-entry flow (paste XOR address + file name)
+      → add/edit/remove entries works today (Settings → media lists), but persists
+      via shared_preferences as a stand-in; SQLite (drift) migration still to do
 - [ ] Filename → title/year/episode parser; TMDB artwork/description/category fetch,
-      cached locally
+      cached locally → stubbed only: seeded metadata for the default movie,
+      no live TMDB matching yet
 - [ ] Home (Continue Watching / Recently Added), Library grid, Detail page
-- [ ] Stream playback from Autonomi via the Phase-0 mechanism
+      → home poster grid + network status bar and Detail page (artwork, description,
+      Play) exist; Continue Watching / Recently Added rows not yet
+- [x] Stream playback from Autonomi via the Phase-0 mechanism → done (alpha.4–.10):
+      embedded client, buffering overlay with live MB counter, error surfacing,
+      configurable buffer size
 - [ ] Resume points + watched state
 - [ ] Packaging: AppImage (Linux) + APK (Android)
+      → signed APK on GitHub Releases since alpha.1; AppImage pending Linux build
 
 **Exit criteria:** paste addresses → poster wall with real artwork → press play →
 streams from the network → resume works after app restart. v0.1 release.
