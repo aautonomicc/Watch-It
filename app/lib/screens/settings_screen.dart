@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/media_list.dart';
+import '../services/app_settings.dart';
 import '../services/library_store.dart';
 import '../services/embedded_client.dart';
 import '../theme/tokens.dart';
@@ -22,6 +23,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   ClientHealth? _health;
   String? _version;
   Timer? _healthTimer;
+  int _bufferSizeMb = AppSettings.defaultBufferSizeMb;
 
   @override
   void initState() {
@@ -52,10 +54,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _reload() async {
     final lists = await LibraryStore.load();
     final health = await EmbeddedClient.health();
+    final bufferSizeMb = await AppSettings.bufferSizeMb();
     if (mounted) {
       setState(() {
         _lists = lists;
         _health = health;
+        _bufferSizeMb = bufferSizeMb;
       });
     }
   }
@@ -90,6 +94,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ));
     await LibraryStore.save(lists);
     if (mounted) setState(() => _lists = lists);
+  }
+
+  Future<void> _pickBufferSize() async {
+    final t = WiTokens.of(context);
+    final picked = await showDialog<int>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        backgroundColor: t.ink2,
+        title: Text('Buffer size',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        children: [
+          RadioGroup<int>(
+            groupValue: _bufferSizeMb,
+            onChanged: (v) => Navigator.of(context).pop(v),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final mb in AppSettings.bufferSizeOptionsMb)
+                  RadioListTile<int>(
+                    value: mb,
+                    activeColor: t.copper,
+                    title: Text(
+                      '$mb MB'
+                      '${mb == AppSettings.defaultBufferSizeMb ? '  ·  default' : ''}',
+                      style: TextStyle(color: t.bone, fontSize: 14),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    if (picked == null) return;
+    await AppSettings.setBufferSizeMb(picked);
+    if (mounted) setState(() => _bufferSizeMb = picked);
   }
 
   Future<void> _openList(MediaList list) async {
@@ -183,6 +223,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     'Playback streams through the Autonomi client embedded '
                     'in the app — nothing to set up. Tap to refresh the '
                     'connection status.',
+                    style: TextStyle(fontSize: 11.5, color: t.ash),
+                  ),
+                ),
+                ListTile(
+                  leading: Icon(Icons.memory_outlined, color: t.copper),
+                  title: Text('Buffer size',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    '$_bufferSizeMb MB',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  trailing: Icon(Icons.chevron_right, color: t.ash),
+                  onTap: _pickBufferSize,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                  child: Text(
+                    'How much video the player keeps in memory while '
+                    'streaming. Larger buffers ride out slow patches of the '
+                    'network but use more RAM (the same amount again is kept '
+                    'behind the play position for instant rewind). Takes '
+                    'effect the next time you press Play.',
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
                 ),

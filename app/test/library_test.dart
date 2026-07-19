@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:watchit/main.dart';
 import 'package:watchit/models/media_list.dart';
+import 'package:watchit/services/app_settings.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata.dart';
 import 'package:watchit/services/embedded_client.dart';
@@ -176,9 +177,34 @@ void main() {
       expect(find.text('MEDIA LISTS'), findsOneWidget);
       expect(find.text('New list'), findsOneWidget);
 
+      // Streaming section: buffer size tile showing the current value.
+      await tester.scrollUntilVisible(find.text('Buffer size'), 100);
+      expect(find.text('32 MB'), findsOneWidget);
+
       // About section: app blurb and installed version.
+      await tester.scrollUntilVisible(find.text('Version'), 100);
       expect(find.text('ABOUT'), findsOneWidget);
       expect(find.text('Version'), findsOneWidget);
+    });
+
+    testWidgets('buffer size can be changed and persists', (tester) async {
+      await tester.pumpWidget(const WatchItApp());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+
+      await tester.scrollUntilVisible(find.text('Buffer size'), 100);
+      await tester.tap(find.text('Buffer size'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('32 MB  ·  default'), findsOneWidget);
+      await tester.tap(find.text('128 MB'));
+      await tester.pumpAndSettle();
+
+      // Tile reflects the new choice, and the store holds it.
+      expect(find.text('128 MB'), findsOneWidget);
+      expect(await AppSettings.bufferSizeMb(), 128);
     });
 
     testWidgets('create a titled list, then add an entry', (tester) async {
