@@ -4,7 +4,7 @@
 - [ ] Flutter project scaffold in `app/` targeting Linux + Android first (dev machines)
 - [ ] media_kit playing a local file with basic controls on both
 - [ ] **Autonomi spike**: fetch a known public file by XOR address with ant-client;
-      test range/offset access → decide gateway-sidecar vs Rust-FFI
+      test range/offset access → done: embedded Rust-FFI client (watchit_core)
 - [ ] CI: `flutter analyze` + `flutter test` on push
 - [ ] Decide accent color / app icon
 

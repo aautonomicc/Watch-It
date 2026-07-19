@@ -33,6 +33,22 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // watchit_core (embedded Autonomi client) is built for arm64 only —
+        // see native/build-android.sh. Keep the APK's ABI claim in sync so
+        // 32-bit devices don't install a build whose native client is missing.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // Plugin AARs (media_kit's libmpv etc.) ship other ABIs; the
+            // Flutter plugin ignores abiFilters for those, so strip them
+            // here — an APK claiming armeabi-v7a without libwatchit_core
+            // would install on 32-bit devices and fail to stream.
+            excludes += listOf("lib/armeabi-v7a/**", "lib/x86/**", "lib/x86_64/**")
+        }
     }
 
     signingConfigs {

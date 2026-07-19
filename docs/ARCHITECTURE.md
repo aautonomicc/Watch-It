@@ -74,18 +74,14 @@ A **list** is the unit of library organization. Each entry:
 
 ### Autonomi access
 
-Two candidate mechanisms (decide in Phase 0 spike):
-
-1. **Local HTTP gateway sidecar** — a small bundled binary (ant-client based) exposing
-   `GET /<address>` with **HTTP range support**. libmpv plays the URL directly and
-   gets seeking for free. Easy on desktop + Android; iOS background process rules make
-   it harder.
-2. **FFI into the Rust client** — link the autonomi client library and feed libmpv via
-   a custom stream callback. One less process, works on iOS, more integration work.
-
-Either way, chunk-level fetch means downloads are resumable and streaming needs range
-(or chunk-offset) access for seek. `ant` CLI download (ant-client 0.2.3) is the
-reference for correct fetch behavior.
+**Decided (Phase 0): embedded Rust client, in-process.** `native/watchit_core` links
+ant-core (WithAutonomi/ant-client, pinned rev) as a cdylib the app loads over
+dart:ffi. It runs a tokio runtime plus a **localhost HTTP server** inside the app
+process: `GET /xor/<address>` with full **HTTP range support** (via
+`self_encryption::streaming_decrypt().get_range`), so libmpv plays the URL directly
+and gets seeking for free — while staying a single self-contained app with no
+sidecar process and nothing for users to set up. Bootstrap peers are compiled in
+(overridable via FFI). `GET /health` reports connection state to the Settings UI.
 
 ### Downloads / offline
 
@@ -97,7 +93,8 @@ reference for correct fetch behavior.
 
 ### Playback
 
-- `media_kit` (libmpv) everywhere; plays local files (downloads) and the gateway URL.
+- `media_kit` (libmpv) everywhere; plays local files (downloads) and the embedded
+  localhost streaming URL.
 - Subtitles: embedded + sidecar; external subtitle files can be their own list entries
   attached to a media entry (open question 3).
 - Watch state: positions saved every ~10s to SQLite.
@@ -128,7 +125,7 @@ Watch-It/
 ├── app/                  # Flutter project
 │   ├── lib/
 │   │   ├── core/         # models, db, playback controller, download manager
-│   │   ├── autonomi/     # network access (gateway client or FFI)
+│   │   ├── autonomi/     # network access (dart:ffi into watchit_core)
 │   │   ├── metadata/     # filename parser + TMDB fetcher
 │   │   ├── ui/           # screens & widgets
 │   │   └── main.dart
@@ -139,8 +136,8 @@ Watch-It/
 
 ## Open questions
 
-1. **Gateway sidecar vs Rust FFI** for network access (see above) — spike in Phase 0.
-   The iOS answer probably decides it.
+1. ~~Gateway sidecar vs Rust FFI~~ — **resolved**: embedded Rust FFI client with an
+   in-process localhost server (see Autonomi access).
 2. TMDB API key strategy — bundled shared key vs bring-your-own (rate limits).
 3. Subtitles for streamed items: sidecar files as linked list entries, or embedded-only
    in v1?

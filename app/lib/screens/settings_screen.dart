@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
 import '../services/library_store.dart';
-import '../services/stream_settings.dart';
+import '../services/embedded_client.dart';
 import '../theme/tokens.dart';
 import 'list_edit_screen.dart';
 
@@ -16,7 +16,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   List<MediaList>? _lists;
-  String _gateway = '';
+  ClientHealth? _health;
 
   @override
   void initState() {
@@ -26,25 +26,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _reload() async {
     final lists = await LibraryStore.load();
-    final gateway = await StreamSettings.gatewayUrl();
+    final health = await EmbeddedClient.health();
     if (mounted) {
       setState(() {
         _lists = lists;
-        _gateway = gateway;
+        _health = health;
       });
     }
   }
 
-  Future<void> _editGateway() async {
-    final url = await promptForText(
-      context,
-      title: 'AntTP gateway URL',
-      hint: 'http://host:18888',
-      initial: _gateway,
-    );
-    if (url == null) return;
-    await StreamSettings.setGatewayUrl(url);
-    if (mounted) setState(() => _gateway = url.trim());
+  Future<void> _refreshHealth() async {
+    final health = await EmbeddedClient.health();
+    if (mounted) setState(() => _health = health);
   }
 
   Future<void> _createList() async {
@@ -139,26 +132,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 ListTile(
                   leading: Icon(Icons.cloud_outlined, color: t.copper),
-                  title: Text('AntTP gateway',
+                  title: Text('Built-in Autonomi client',
                       style: TextStyle(color: t.bone, fontSize: 15)),
                   subtitle: Text(
-                    _gateway.isEmpty ? 'Not set' : _gateway,
-                    style: TextStyle(
-                      color: t.ash,
-                      fontSize: 12,
-                      fontFamily: wiMonoFamily,
-                      fontFamilyFallback: wiMonoFallback,
-                    ),
+                    _health?.label ?? 'Checking…',
+                    style: TextStyle(color: t.ash, fontSize: 12),
                   ),
-                  trailing: Icon(Icons.edit_outlined, color: t.ash, size: 18),
-                  onTap: _editGateway,
+                  trailing: Icon(Icons.refresh, color: t.ash, size: 18),
+                  onTap: _refreshHealth,
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
                   child: Text(
-                    'HTTP gateway (AntTP) that serves Autonomi content — '
-                    'playback streams through it. Use your gateway\'s LAN '
-                    'address at home, or its public address when away.',
+                    'Playback streams through the Autonomi client embedded '
+                    'in the app — nothing to set up. Tap to refresh the '
+                    'connection status.',
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
                 ),

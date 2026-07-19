@@ -6,7 +6,7 @@ import 'package:watchit/main.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata.dart';
-import 'package:watchit/services/stream_settings.dart';
+import 'package:watchit/services/embedded_client.dart';
 
 const _addr =
     'a3f1c9e07b6d5a4f2e8c1b0d9f7a6e5c4b3a2d1e0f9c8b7a6d5e4f3c2b1a0d9e';
@@ -108,20 +108,21 @@ void main() {
   group('Stream URL', () {
     const entry = MediaEntry(name: 'Movie.mkv', address: _addr);
 
-    test('joins gateway and address, trimming trailing slashes', () {
-      expect(streamUrl('http://192.168.20.2:18888', entry),
-          'http://192.168.20.2:18888/$_addr');
-      expect(streamUrl('http://gw:18888///', entry),
-          'http://gw:18888/$_addr');
+    test('joins server base and address, trimming trailing slashes', () {
+      expect(streamUrl('http://127.0.0.1:43210', entry),
+          'http://127.0.0.1:43210/xor/$_addr');
+      expect(streamUrl('http://127.0.0.1:43210///', entry),
+          'http://127.0.0.1:43210/xor/$_addr');
     });
 
     test('strips 0x prefix and lowercases the address', () {
       final upper = MediaEntry(
           name: 'Movie.mkv', address: '0x${_addr.toUpperCase()}');
-      expect(streamUrl('http://gw', upper), 'http://gw/$_addr');
+      expect(streamUrl('http://gw', upper), 'http://gw/xor/$_addr');
     });
 
-    test('empty gateway yields null', () {
+    test('missing server yields null', () {
+      expect(streamUrl(null, entry), isNull);
       expect(streamUrl('', entry), isNull);
       expect(streamUrl('   ', entry), isNull);
     });

@@ -4,6 +4,7 @@ import 'package:media_kit/media_kit.dart';
 import 'models/media_list.dart';
 import 'screens/detail_screen.dart';
 import 'screens/settings_screen.dart';
+import 'services/embedded_client.dart';
 import 'services/library_store.dart';
 import 'services/metadata.dart';
 import 'theme/tokens.dart';
@@ -11,6 +12,9 @@ import 'theme/tokens.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  // Start the embedded Autonomi client early so the network bootstrap
+  // (tens of seconds) overlaps with browsing instead of delaying playback.
+  EmbeddedClient.baseUrl();
   runApp(const WatchItApp());
 }
 
