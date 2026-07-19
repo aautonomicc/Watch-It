@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../services/app_settings.dart';
 import '../services/embedded_client.dart';
 import '../theme/tokens.dart';
 
@@ -15,10 +16,18 @@ import '../theme/tokens.dart';
 /// far — instead of a bare spinner, and surfaces mpv errors that would
 /// otherwise leave the spinner running forever.
 class PlayerScreen extends StatefulWidget {
-  const PlayerScreen({super.key, required this.url, required this.title});
+  const PlayerScreen({
+    super.key,
+    required this.url,
+    required this.title,
+    this.bufferSizeMb = AppSettings.defaultBufferSizeMb,
+  });
 
   final String url;
   final String title;
+
+  /// mpv demuxer cache cap (Settings → Streaming → Buffer size).
+  final int bufferSizeMb;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -38,7 +47,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
-    _player = Player();
+    _player = Player(
+      configuration: PlayerConfiguration(
+        bufferSize: widget.bufferSizeMb * 1024 * 1024,
+      ),
+    );
     _controller = VideoController(_player);
     final platform = _player.platform;
     if (platform is NativePlayer) {
