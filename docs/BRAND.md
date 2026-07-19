@@ -14,6 +14,10 @@ The family pattern is a lowercase compound with a separator glyph
 
 > **`watch-it`** — mono family, 18px, weight 700, lowercase.
 
+In app chrome (the home app bar) the wordmark is locked up with the launcher
+icon's mark: **`[>] watch-it`** — the `[>]` in copper, the wordmark in bone,
+same mono/size/weight throughout.
+
 Tagline slot in the family: *etch it. fetch it. **watch it.***
 
 ## Theme tokens
