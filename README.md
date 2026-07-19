@@ -26,7 +26,12 @@ server compatibility** — Autonomi *is* the backend.
 
 ## Status
 
-Early design phase. See:
+**Working alpha on Android** — [v0.1.0-alpha.12](https://github.com/aautonomicc/Watch-It/releases)
+ships a signed APK that connects to the live Autonomi network with an embedded Rust
+client (no gateway, no sidecar) and streams a seeded demo movie by XOR address, with
+seeking, buffering progress, and a configurable stream buffer. Media lists can be
+managed in Settings. Desktop builds, live TMDB metadata matching, downloads, and
+resume state are next — see the roadmap. Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — tech stack decision and app structure
