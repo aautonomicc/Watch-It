@@ -78,14 +78,20 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
-        title: Text(
-          'watch-it',
-          style: TextStyle(
-            fontFamily: wiMonoFamily,
-            fontFamilyFallback: wiMonoFallback,
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: t.bone,
+        // App-bar lockup: the launcher icon's copper [>] mark + wordmark.
+        title: Text.rich(
+          TextSpan(
+            style: TextStyle(
+              fontFamily: wiMonoFamily,
+              fontFamilyFallback: wiMonoFallback,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: t.bone,
+            ),
+            children: [
+              TextSpan(text: '[>] ', style: TextStyle(color: t.copper)),
+              const TextSpan(text: 'watch-it'),
+            ],
           ),
         ),
         actions: [

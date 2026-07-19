@@ -7,7 +7,7 @@ void main() {
   testWidgets('home screen shows wordmark and empty state', (tester) async {
     await tester.pumpWidget(const WatchItApp());
 
-    expect(find.text('watch-it'), findsOneWidget);
+    expect(find.text('[>] watch-it'), findsOneWidget);
     expect(find.text('Your library is empty'), findsOneWidget);
   });
 
