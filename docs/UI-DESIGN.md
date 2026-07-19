@@ -5,15 +5,20 @@ poster art everywhere, minimal chrome.
 
 ## Design language
 
-- **Dark-first.** Near-black background (#0e0e12), poster art provides the color.
-  Light theme later.
-- **One accent color** (candidate: warm amber/orange — distinct from Plex yellow-orange,
-  Jellyfin purple, Emby green).
+Colours, fonts, and type scale live in **[BRAND.md](BRAND.md)** — Watch-It follows
+the etchit.io family design language (fetch>it / etch/it): warm near-black
+"ink" surfaces, bone-white text, copper `#c9732b` accent, system UI fonts,
+mono for XOR addresses, lowercase `watch-it` wordmark.
+
+- **Dark-first.** `--ink` (#0a0a0a) canvas, poster art provides the colour.
+  Three themes (dark / dim / light), dark default.
+- **One accent — copper** (#c9732b): distinct from Plex yellow-orange,
+  Jellyfin purple, Emby green; used for play/focus/progress only, never
+  large surfaces.
 - Poster cards with rounded corners, hover/focus scale on desktop, watched-progress bar
-  along the card bottom, unwatched-count badge for shows.
-- **Download/offline state on every card**: small badge (cloud = stream-only,
-  check = downloaded, spinner/progress ring = downloading).
-- Typography: Inter (UI) — clean, free, everywhere.
+  along the card bottom (copper fill), unwatched-count badge for shows.
+- **Download/offline state on every card**: small badge (ash outline = stream-only,
+  green check = downloaded, copper progress ring = downloading).
 
 ## Screens
 
