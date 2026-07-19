@@ -6330,6 +6330,7 @@ dependencies = [
  "ant-core",
  "axum",
  "bytes",
+ "cc",
  "futures",
  "hex",
  "self_encryption",
