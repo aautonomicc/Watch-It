@@ -63,7 +63,7 @@ void main() {
       final lists = await LibraryStore.load();
       final seeded = lists.singleWhere((l) => l.title == 'Test Movies');
       expect(seeded.entries.single.address, kDefaultMovieAddress);
-      expect(seeded.entries.single.name, 'Night Of The Living Dead (1968)');
+      expect(seeded.entries.single.name, kDefaultMovieName);
     });
 
     test('does not re-seed after the user deletes it', () async {
@@ -72,12 +72,39 @@ void main() {
       await LibraryStore.ensureDefaults();
       expect(await LibraryStore.load(), isEmpty);
     });
+
+    test('rewrites the stale pre-alpha.5 default address in place', () async {
+      await LibraryStore.save([
+        const MediaList(
+          id: 'default-test-movies',
+          title: 'Test Movies',
+          entries: [
+            MediaEntry(
+              name: 'Night Of The Living Dead (1968)',
+              address: kLegacyDefaultMovieAddress,
+            ),
+          ],
+        ),
+      ]);
+      await LibraryStore.ensureDefaults();
+      final lists = await LibraryStore.load();
+      final seeded = lists.singleWhere((l) => l.title == 'Test Movies');
+      expect(seeded.entries.single.address, kDefaultMovieAddress);
+      expect(seeded.entries.single.name, kDefaultMovieName);
+      // Other lists/entries with the current address are not duplicated.
+      expect(
+        lists
+            .expand((l) => l.entries)
+            .where((e) => e.address == kDefaultMovieAddress),
+        hasLength(1),
+      );
+    });
   });
 
   group('Metadata', () {
     test('default movie resolves from the bundled catalog', () {
       final meta = metadataFor(const MediaEntry(
-        name: 'Night Of The Living Dead (1968)',
+        name: kDefaultMovieName,
         address: kDefaultMovieAddress,
       ));
       expect(meta.title, 'Night of the Living Dead');
@@ -139,6 +166,10 @@ void main() {
 
       expect(find.text('MEDIA LISTS'), findsOneWidget);
       expect(find.text('New list'), findsOneWidget);
+
+      // About section: app blurb and installed version.
+      expect(find.text('ABOUT'), findsOneWidget);
+      expect(find.text('Version'), findsOneWidget);
     });
 
     testWidgets('create a titled list, then add an entry', (tester) async {

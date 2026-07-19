@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/media_list.dart';
 import '../services/library_store.dart';
@@ -17,11 +18,13 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   List<MediaList>? _lists;
   ClientHealth? _health;
+  String? _version;
 
   @override
   void initState() {
     super.initState();
     _reload();
+    _loadVersion();
   }
 
   Future<void> _reload() async {
@@ -32,6 +35,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _lists = lists;
         _health = health;
       });
+    }
+  }
+
+  Future<void> _loadVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() => _version = '${info.version} (build ${info.buildNumber})');
+      }
+    } catch (_) {
+      // Platform channel unavailable (tests, bare desktop builds).
     }
   }
 
@@ -142,7 +156,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onTap: _refreshHealth,
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                   child: Text(
                     'Playback streams through the Autonomi client embedded '
                     'in the app — nothing to set up. Tap to refresh the '
@@ -150,6 +164,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
                 ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
+                  child: Text(
+                    'ABOUT',
+                    style: TextStyle(
+                      fontSize: 11,
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.w700,
+                      color: t.ash,
+                    ),
+                  ),
+                ),
+                ListTile(
+                  leading: Icon(Icons.play_circle_outline, color: t.copper),
+                  title: Text(
+                    'watch-it',
+                    style: TextStyle(
+                      fontFamily: wiMonoFamily,
+                      fontFamilyFallback: wiMonoFallback,
+                      fontWeight: FontWeight.w700,
+                      color: t.bone,
+                      fontSize: 15,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'Media player for the Autonomi network. Client-only: '
+                    'your library is a set of lists you hold on this '
+                    'device — no server, no accounts, no telemetry.',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                ),
+                ListTile(
+                  leading: Icon(Icons.info_outline, color: t.copper),
+                  title: Text('Version',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    _version ?? 'Unknown',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                ),
+                const SizedBox(height: 80),
               ],
             ),
     );
