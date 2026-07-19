@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Brand-spec [>] mark for the launcher icon foreground.
+
+    Sized to match etchit's launcher icon side-by-side: same scale,
+    same path-coord system, same viewport. The two apps read as a
+    matched pair on the home screen — only the centre glyph differs
+    (chevron here, slash for etchit). Scale 2× from the source viewBox
+    (32×16) into our adaptive-icon viewport (108×108):
+
+        x' = x*2 + 22    y' = y*2 + 38
+
+    Mark bounding box: (30..78, 42..66). Max distance from centre
+    is ~27 — comfortably inside the ~33 safe-circle radius launchers
+    crop to.
+
+    Filled paths from the canonical brand SVG (private/fetchit-brand.html
+    § "the chevron vs. the slash"). Copper #c9732b.
+    Background (ink #0a0a0a) supplied by the adaptive-icon XML.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#c9732b"
+        android:pathData="
+            M 30 42 L 42 42 L 42 46 L 34 46 L 34 62 L 42 62 L 42 66 L 30 66 Z
+            M 66 42 L 78 42 L 78 66 L 66 66 L 66 62 L 74 62 L 74 46 L 66 46 Z
+            M 46 42 L 52 42 L 62 54 L 52 66 L 46 66 L 56 54 Z" />
+
+</vector>
