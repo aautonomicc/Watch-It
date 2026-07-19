@@ -2,3 +2,5 @@
 native/watchit_core/target/
 # Cross-compiled native libs are build artifacts (native/build-android.sh)
 app/android/app/src/main/jniLibs/
+# AppImage build output
+dist/

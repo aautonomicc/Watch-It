@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Watch-It
+Comment=Client-only media player for the Autonomi network
+Exec=watchit
+Icon=watchit
+Type=Application
+Categories=AudioVideo;Video;Player;
+Terminal=false
