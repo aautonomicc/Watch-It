@@ -13,7 +13,7 @@ In `app/`: `flutter analyze`, `flutter test` (PATH needs `~/flutter/bin`; `sourc
 `flutter run -d linux` in `app/` — blocked until clang/ninja/libgtk-3-dev are apt-installed (Linux desktop toolchain incomplete; Android is fully working).
 
 ## Current Status
-Phase 0 in progress: Flutter scaffold done, first signed Android APK built (v0.1.0-alpha.1). Remaining Phase 0: media_kit local playback, Autonomi fetch/seek spike, CI. Release signing: keystore ~/keystores/watchit-release.jks + password in ~/keystores/watchit-key.properties (copy to app/android/key.properties, gitignored). gh CLI not authenticated — tags push over SSH but GitHub Releases with APK attachment need `gh auth login`.
+Phase 0 in progress: Flutter scaffold done, first signed Android APK built (v0.1.0-alpha.1). Remaining Phase 0: media_kit local playback, Autonomi fetch/seek spike, CI. Release signing: keystore ~/keystores/watchit-release.jks + password in ~/keystores/watchit-key.properties (copy to app/android/key.properties, gitignored). gh CLI authenticated as aautonomicc; publish APKs via `gh release create`.
 
 ## Architecture Notes
 - Library = user-held **lists**; each entry is `{XOR public file address, file name}`. Multiple lists; import/export; later publish/subscribe lists on Autonomi
@@ -25,7 +25,7 @@ Phase 0 in progress: Flutter scaffold done, first signed Android APK built (v0.1
 - Repo: github.com/aautonomicc/Watch-It (MIT)
 
 ## Recent Changes
-- [2026-07-19] APK published for phone download on orphan branch `apk` (gh CLI unauthenticated, so no GitHub Release yet): https://github.com/aautonomicc/Watch-It/raw/apk/watch-it-v0.1.0-alpha.1.apk (SHA-256 8a9e...60d4)
+- [2026-07-19] Proper GitHub Release created (gh now authenticated): APK attached to https://github.com/aautonomicc/Watch-It/releases/tag/v0.1.0-alpha.1 (SHA-256 8a9e...60d4); orphan `apk` branch workaround deleted locally and on origin
 - [2026-07-19] Phase 0 scaffold: Flutter app in app/ (android+linux), WiTokens ThemeExtension from BRAND.md, branded home screen, widget+token tests. Signed release APK built and verified (cert CN=Watch-It, SHA-256 7911...0a69); tag v0.1.0-alpha.1 pushed; APK copied to ~/watch-it-v0.1.0-alpha.1.apk
 - [2026-07-19] Installed Flutter 3.44.6 stable to ~/flutter; Android SDK licenses accepted; release keystore generated (~/keystores/, 30-yr validity)
 - [2026-07-19] Android TV added as sixth first-class platform (was in "Later"): same Android APK + leanback launcher entry, D-pad focus nav shared with desktop keyboard map, 10-foot layout mode; scheduled in Phase 4; tvOS stays in Later
