@@ -157,13 +157,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
             // The stock controls draw their own grey buffering spinner in
             // the centre of the video; our branded overlay already covers
             // buffering, so blank out the built-in one on all platforms.
+            // The bottom controls default to zero bottom margin, which puts
+            // them on top of the Android navigation buttons — lift them
+            // clear, and draw the seek bar at twice the stock thickness.
             MaterialVideoControlsTheme(
               normal: kDefaultMaterialVideoControlsThemeData.copyWith(
                 bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
+                bottomButtonBarMargin:
+                    const EdgeInsets.only(left: 16, right: 8, bottom: 48),
+                seekBarMargin:
+                    const EdgeInsets.only(left: 16, right: 16, bottom: 48),
+                seekBarHeight: 4.8,
               ),
               fullscreen:
                   kDefaultMaterialVideoControlsThemeDataFullscreen.copyWith(
                 bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
+                bottomButtonBarMargin:
+                    const EdgeInsets.only(left: 16, right: 8, bottom: 64),
+                seekBarMargin:
+                    const EdgeInsets.only(left: 16, right: 16, bottom: 64),
+                seekBarHeight: 4.8,
               ),
               child: MaterialDesktopVideoControlsTheme(
                 normal: kDefaultMaterialDesktopVideoControlsThemeData.copyWith(
