@@ -27,10 +27,13 @@ pub fn router(engine: &'static Engine) -> Router {
 }
 
 async fn health(engine: &'static Engine) -> Response {
+    use std::sync::atomic::Ordering;
     let body = if engine.is_ready() {
         serde_json::json!({
             "state": "ready",
             "peers": engine.connected_peer_count().await,
+            "fetched_chunks": crate::engine::FETCHED_CHUNKS.load(Ordering::Relaxed),
+            "fetched_bytes": crate::engine::FETCHED_BYTES.load(Ordering::Relaxed),
         })
     } else {
         // The engine retries forever in the background, so a recorded

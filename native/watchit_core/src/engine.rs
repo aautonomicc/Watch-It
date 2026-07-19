@@ -36,6 +36,21 @@ const DEFAULT_PEERS: &[&str] = &[
 /// (at most one boundary chunk refetched) small without holding much RAM.
 const RANGE_STEP: usize = 8 * 1024 * 1024;
 
+/// First `get_range` step of a Range response. A step blocks the response
+/// until every chunk under it is fetched, so the opening step stays small
+/// (one network chunk) to get first bytes to the player quickly — cold
+/// starts on a phone were minutes of blank spinner with an 8 MiB opener.
+/// Steps double from here up to [`RANGE_STEP`].
+const INITIAL_RANGE_STEP: usize = 1024 * 1024;
+
+/// Chunks fetched from the network since process start (all requests).
+pub static FETCHED_CHUNKS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+/// Ciphertext bytes fetched from the network since process start. The UI
+/// polls this while buffering to show that data is actually flowing.
+pub static FETCHED_BYTES: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 /// Concurrent chunk fetches within one decrypt batch.
 const FETCH_CONCURRENCY: usize = 8;
 
@@ -214,8 +229,10 @@ impl Engine {
                     }
                 };
                 let mut pos = start;
+                let mut step = INITIAL_RANGE_STEP;
                 while pos <= end {
-                    let want = std::cmp::min(RANGE_STEP as u64, end - pos + 1) as usize;
+                    let want = std::cmp::min(step as u64, end - pos + 1) as usize;
+                    step = (step * 2).min(RANGE_STEP);
                     match stream.get_range(pos as usize, want) {
                         Ok(bytes) => {
                             if bytes.is_empty() {
@@ -306,6 +323,8 @@ async fn fetch_chunk_batch(
                     hex::encode(name.0)
                 ))
             })?;
+        FETCHED_CHUNKS.fetch_add(1, Ordering::Relaxed);
+        FETCHED_BYTES.fetch_add(chunk.content.len() as u64, Ordering::Relaxed);
         Ok::<_, self_encryption::Error>((idx, chunk.content))
     });
     let mut results: Vec<(usize, Bytes)> = futures::stream::iter(fetches)
