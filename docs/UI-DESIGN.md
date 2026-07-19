@@ -55,6 +55,9 @@ mono for XOR addresses, lowercase `watch-it` wordmark.
 - Desktop: full keyboard map (space, ←/→, f, m, s, numbers = percent-seek — mpv-style)
 - Mobile: gestures — swipe left edge = brightness, right edge = volume, horizontal =
   seek, double-tap sides = ±10s
+- TV (Android TV remote): select = play/pause, ←/→ = seek (hold to accelerate),
+  ↑/↓ = show controls / up-next, back = dismiss controls then exit player;
+  media keys (play/pause/FF/RW) mapped directly
 - "Up next" card in the last 30 seconds of an episode
 
 ### 6. Settings
@@ -67,12 +70,17 @@ mono for XOR addresses, lowercase `watch-it` wordmark.
 
 ## Layout adaptation
 
-| | Mobile (Android/iOS) | Desktop (Linux/Win/Mac) |
-|---|---|---|
-| Nav | bottom tab bar (Home · Library · Search · Settings) | slim left sidebar |
-| Grid | 3 posters wide | responsive, 6–10 wide |
-| Detail | vertical scroll | two-column hero |
-| Player | gesture-driven | keyboard + mouse hover |
+| | Mobile (Android/iOS) | Desktop (Linux/Win/Mac) | TV (Android TV, 10-foot) |
+|---|---|---|---|
+| Nav | bottom tab bar (Home · Library · Search · Settings) | slim left sidebar | left rail, collapsed to icons; D-pad only |
+| Grid | 3 posters wide | responsive, 6–10 wide | 5–6 wide, focused card scales + copper focus ring |
+| Detail | vertical scroll | two-column hero | full-bleed backdrop, focusable button row |
+| Player | gesture-driven | keyboard + mouse hover | remote-driven (see Player above) |
+| Input | touch | keyboard + mouse | D-pad focus traversal; every action reachable without a pointer |
+
+TV notes: larger base type scale (readable at 3 m), no hover-only affordances, text
+entry kept to add/import flows only (paste via network share or a shown-on-TV import
+address is preferred over typing XOR addresses with a remote).
 
 ## First deliverable
 
