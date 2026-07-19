@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 
@@ -92,7 +94,14 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: _lists.isEmpty ? _EmptyState(tokens: t) : _libraryView(t),
+      body: Column(
+        children: [
+          const NetworkStatusBar(),
+          Expanded(
+            child: _lists.isEmpty ? _EmptyState(tokens: t) : _libraryView(t),
+          ),
+        ],
+      ),
     );
   }
 
@@ -137,6 +146,83 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
         ],
       ],
+    );
+  }
+}
+
+/// Slim banner under the app bar showing the embedded Autonomi client's
+/// connection state and peer count, refreshed on a timer (fast while
+/// connecting, relaxed once ready — the poll is a localhost call).
+class NetworkStatusBar extends StatefulWidget {
+  const NetworkStatusBar({super.key});
+
+  @override
+  State<NetworkStatusBar> createState() => _NetworkStatusBarState();
+}
+
+class _NetworkStatusBarState extends State<NetworkStatusBar> {
+  ClientHealth? _health;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _poll();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _poll() async {
+    final health = await EmbeddedClient.health();
+    if (!mounted) return;
+    setState(() => _health = health);
+    if (health.state == 'unavailable') return; // no native library; stop
+    _timer = Timer(
+      Duration(seconds: health.state == 'ready' ? 15 : 3),
+      _poll,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = WiTokens.of(context);
+    final h = _health;
+    if (h == null || h.state == 'unavailable') return const SizedBox.shrink();
+    final (color, text) = switch (h.state) {
+      'ready' => (
+          const Color(0xff4caf50),
+          'Autonomi network: connected · ${h.peers} '
+              '${h.peers == 1 ? 'peer' : 'peers'}',
+        ),
+      'connecting' => (t.copper, 'Autonomi network: connecting…'),
+      _ => (const Color(0xffe57373), 'Autonomi network: error'),
+    };
+    return Container(
+      width: double.infinity,
+      color: t.ink2,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11.5, color: t.boneDim),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
