@@ -13,7 +13,7 @@ In `app/`: `flutter analyze`, `flutter test` (PATH needs `~/flutter/bin`; `sourc
 `flutter run -d linux` in `app/` — blocked until clang/ninja/libgtk-3-dev are apt-installed (Linux desktop toolchain incomplete; Android is fully working).
 
 ## Current Status
-Phase 0 in progress: scaffold + media list management done (v0.1.0-alpha.2 released). Remaining Phase 0: media_kit local playback, Autonomi fetch/seek spike, CI. Lists persist via shared_preferences (stand-in until drift/SQLite). Release signing: keystore ~/keystores/watchit-release.jks + password in ~/keystores/watchit-key.properties (copy to app/android/key.properties, gitignored). gh CLI authenticated as aautonomicc; publish APKs via `gh release create`.
+Phase 0 in progress: scaffold + media list management + detail screen/playback done (v0.1.0-alpha.3 released). Remaining Phase 0: media_kit local playback, Autonomi fetch/seek spike, CI. Lists persist via shared_preferences (stand-in until drift/SQLite). Release signing: keystore ~/keystores/watchit-release.jks + password in ~/keystores/watchit-key.properties (copy to app/android/key.properties, gitignored). gh CLI authenticated as aautonomicc; publish APKs via `gh release create`.
 
 ## Architecture Notes
 - Library = user-held **lists**; each entry is `{XOR public file address, file name}`. Multiple lists; import/export; later publish/subscribe lists on Autonomi
@@ -25,6 +25,7 @@ Phase 0 in progress: scaffold + media list management done (v0.1.0-alpha.2 relea
 - Repo: github.com/aautonomicc/Watch-It (MIT)
 
 ## Recent Changes
+- [2026-07-19] v0.1.0-alpha.3: seeded Night Of The Living Dead (1968) (XOR ac855e...0ea0) as built-in default movie; detail screen with bundled poster (app/assets/posters/notld_1968.jpg) + description + Play button. 17 tests pass; signed APK on GitHub Release. Note: first build was killed by a PC restart — rebuilt and published after
 - [2026-07-19] v0.1.0-alpha.2: Settings screen (gear on home) — create/rename/delete titled media lists, add/remove entries (file name + XOR address, 64-hex validated); persistence via shared_preferences; lists render on home. 9 tests pass; signed APK on GitHub Release (SHA-256 58be...dee8)
 - [2026-07-19] Proper GitHub Release created (gh now authenticated): APK attached to https://github.com/aautonomicc/Watch-It/releases/tag/v0.1.0-alpha.1 (SHA-256 8a9e...60d4); orphan `apk` branch workaround deleted locally and on origin
 - [2026-07-19] Phase 0 scaffold: Flutter app in app/ (android+linux), WiTokens ThemeExtension from BRAND.md, branded home screen, widget+token tests. Signed release APK built and verified (cert CN=Watch-It, SHA-256 7911...0a69); tag v0.1.0-alpha.1 pushed; APK copied to ~/watch-it-v0.1.0-alpha.1.apk
