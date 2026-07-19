@@ -39,7 +39,8 @@ class EmbeddedClient {
   static String? baseUrl() {
     if (_port > 0) return 'http://127.0.0.1:$_port';
     try {
-      final lib = DynamicLibrary.open('libwatchit_core.so');
+      final lib = _openLibrary();
+      if (lib == null) return null;
       final start = lib.lookupFunction<
           Int32 Function(Pointer<Utf8>, Pointer<Utf8>),
           int Function(Pointer<Utf8>, Pointer<Utf8>)>('watchit_core_start');
@@ -49,6 +50,24 @@ class EmbeddedClient {
       if (port <= 0) return null;
       _port = port;
       return 'http://127.0.0.1:$_port';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Load the native library. A plain name works on Android (and on Linux
+  /// when the loader path covers it, e.g. the AppImage's AppRun); desktop
+  /// builds also carry the .so in the bundle's lib/ dir next to the
+  /// executable, so fall back to that explicit path.
+  static DynamicLibrary? _openLibrary() {
+    try {
+      return DynamicLibrary.open('libwatchit_core.so');
+    } catch (_) {
+      if (!Platform.isLinux) return null;
+    }
+    try {
+      final exeDir = File(Platform.resolvedExecutable).parent.path;
+      return DynamicLibrary.open('$exeDir/lib/libwatchit_core.so');
     } catch (_) {
       return null;
     }

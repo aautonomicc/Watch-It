@@ -13,8 +13,18 @@ LINUXDEPLOY="${LINUXDEPLOY:-$HOME/tools/linuxdeploy-x86_64.AppImage}"
 VERSION="$(grep '^version:' "$APP_DIR/pubspec.yaml" | awk '{print $2}' | cut -d+ -f1)"
 BUNDLE="$APP_DIR/build/linux/x64/release/bundle"
 
+# Embedded Autonomi client: build the Rust cdylib for the host and drop it
+# into the Flutter bundle's lib/ dir so it ships inside the AppImage.
+# CFLAGS pins C deps to gnu17 — glibc 2.38+ headers otherwise emit
+# __isoc23_* symbol versions that fail to load on older distros (Mint 21).
+CARGO="${CARGO:-$HOME/.cargo/bin/cargo}"
+(cd "$REPO_ROOT/native/watchit_core" && CFLAGS="-std=gnu17" "$CARGO" build --release)
+CORE_LIB="$REPO_ROOT/native/watchit_core/target/release/libwatchit_core.so"
+[ -f "$CORE_LIB" ] || { echo "libwatchit_core.so missing after cargo build"; exit 1; }
+
 cd "$APP_DIR"
 flutter build linux --release
+cp "$CORE_LIB" "$BUNDLE/lib/"
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
