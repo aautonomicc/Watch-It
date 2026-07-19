@@ -155,6 +155,15 @@ void main() {
     });
   });
 
+  group('Byte label', () {
+    test('formats KB and MB for buffering progress', () {
+      expect(byteLabel(0), '0 KB');
+      expect(byteLabel(870 * 1024), '870 KB');
+      expect(byteLabel(12 * 1024 * 1024 + 400 * 1024), '12.4 MB');
+      expect(byteLabel(250 * 1024 * 1024), '250 MB');
+    });
+  });
+
   group('Settings flow', () {
     testWidgets('home has a settings button that opens Settings',
         (tester) async {
