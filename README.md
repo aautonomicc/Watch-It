@@ -1,22 +1,28 @@
 # Watch-It
 
-A beautiful, cross-platform media player app — one codebase, five platforms:
-**Android, iPhone (iOS), Linux, Windows, and Mac.**
+A beautiful, cross-platform media player for the **Autonomi network** — one codebase,
+five platforms: **Android, iPhone (iOS), Linux, Windows, and Mac.**
 
-Think the Plex / Emby / [Silo](https://github.com/Silo-Server/) client experience —
-poster-wall library, rich metadata, resume-watching — but as a lightweight open-source
-player you own, with no account, no telemetry, and no server required to get started.
+Think the Plex / Emby / [Silo](https://github.com/Silo-Server/) experience —
+poster-wall library, rich metadata, resume-watching — but **with no server to install**.
+Watch-It is client-only: your media library is one or more lists of publicly available
+files on the decentralized [Autonomi](https://github.com/WithAutonomi/ant-client)
+network, streamed on demand or downloaded for offline watching.
 
-## What it is
+## How it works
 
-- A **media player and library browser**, not a server. It plays:
-  1. **Local files** — point it at folders on your device; it scans, matches metadata,
-     and builds a poster-wall library.
-  2. **Jellyfin-compatible servers** — connect to Jellyfin, Silo, or Emby servers using
-     the open Jellyfin API, so Watch-It works as a polished universal client.
-  3. *(Proposed)* **Autonomi network content** — stream media from the decentralized
-     Autonomi network via an AntTP HTTP gateway. This would make Watch-It the first
-     media player with native decentralized-storage playback.
+1. **Lists of media.** You keep one or more lists of public media. Each entry is an
+   Autonomi **XOR public file address** plus a **file name**.
+2. **Metadata from the name.** From the file name (`Movie (2023).mkv`,
+   `Show S01E02.mkv`) Watch-It looks up the same public databases the media servers
+   use (TMDB) and fetches artwork, description, and category to organize and display
+   the collection as a poster-wall library.
+3. **Stream or download.** Hit play to stream straight from the network, or download
+   an item to the device for offline watching. Downloaded items play with the full
+   library experience, no connectivity needed.
+
+No server, no accounts, no telemetry. There is deliberately **no Plex/Emby/Jellyfin
+server compatibility** — Autonomi *is* the backend.
 
 ## Status
 
