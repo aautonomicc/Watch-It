@@ -62,7 +62,7 @@ mono for XOR addresses, lowercase `watch-it` wordmark.
 
 ### 6. Settings
 - Lists (manage, import/export)
-- Network (gateway config if applicable, bandwidth limit for downloads)
+- Network (embedded client status, bandwidth limit for downloads)
 - Downloads (storage location, storage used, clear)
 - Playback (hardware decode, default subtitle language, skip amounts)
 - Appearance (theme, poster size)

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
 import '../services/metadata.dart';
-import '../services/stream_settings.dart';
+import '../services/embedded_client.dart';
 import '../theme/tokens.dart';
 import 'player_screen.dart';
 
@@ -13,8 +13,7 @@ class DetailScreen extends StatelessWidget {
   final MediaEntry entry;
 
   Future<void> _play(BuildContext context) async {
-    final gateway = await StreamSettings.gatewayUrl();
-    final url = streamUrl(gateway, entry);
+    final url = streamUrl(EmbeddedClient.baseUrl(), entry);
     if (!context.mounted) return;
     if (url == null) {
       showDialog<void>(
@@ -23,11 +22,11 @@ class DetailScreen extends StatelessWidget {
           final t = WiTokens.of(context);
           return AlertDialog(
             backgroundColor: t.ink2,
-            title: Text('No gateway configured',
+            title: Text('Client unavailable',
                 style: TextStyle(color: t.bone, fontSize: 16)),
             content: Text(
-              'Streaming needs an AntTP gateway URL. Set one in '
-              'Settings → Streaming.',
+              'The built-in Autonomi client could not start on this '
+              'platform, so streaming is not available.',
               style: TextStyle(color: t.boneDim, fontSize: 13),
             ),
             actions: [
@@ -111,8 +110,9 @@ class DetailScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Streams from Autonomi via your gateway — first '
-                      'start can take a minute while chunks are fetched.',
+                      'Streams from Autonomi via the built-in client — '
+                      'first start can take a minute while it connects '
+                      'and fetches chunks.',
                       style: TextStyle(fontSize: 11, color: t.ash),
                     ),
                   ],
