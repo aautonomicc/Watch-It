@@ -19,50 +19,82 @@ per-platform player code.
 
 ## High-level structure
 
+Client-only. There is no server component anywhere in the design; the Autonomi network
+is the only remote source, accessed via the
+[ant-client](https://github.com/WithAutonomi/ant-client) stack.
+
 ```
-┌─────────────────────────────────────────────┐
-│                Flutter UI                    │
-│   (library, detail pages, player, settings)  │
-├─────────────────────────────────────────────┤
-│               App core (Dart)                │
-│  library index · watch state · settings      │
-│  metadata matcher · playback controller      │
-├──────────────┬──────────────┬───────────────┤
-│ Local source │ Jellyfin API │ Autonomi src  │
-│ (file scan)  │ (Silo/Emby/  │ (AntTP HTTP   │
-│              │  Jellyfin)   │  gateway)     │
-├──────────────┴──────────────┴───────────────┤
-│        media_kit / libmpv playback           │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│                Flutter UI                     │
+│  (library, detail pages, player, settings)    │
+├──────────────────────────────────────────────┤
+│               App core (Dart)                 │
+│  lists · metadata matcher · watch state       │
+│  download manager · playback controller       │
+├──────────────────────┬───────────────────────┤
+│   Autonomi access    │   Metadata fetcher     │
+│  (ant-client: fetch  │  (filename → TMDB →    │
+│   by XOR address,    │   artwork/description/ │
+│   stream + download) │   category, cached)    │
+├──────────────────────┴───────────────────────┤
+│         media_kit / libmpv playback           │
+└──────────────────────────────────────────────┘
 ```
 
-### Media sources — one plugin interface
+### Lists — the library model
 
-Every source implements the same interface: `listLibraries()`, `listItems()`,
-`getStreamUrl(item)`, `reportProgress(item, position)`. Sources:
+A **list** is the unit of library organization. Each entry:
 
-1. **LocalSource** — recursive folder scan; filename parsing (`Movie (2023).mkv`,
-   `Show/S01E02.mkv`); metadata lookup via TMDB API (user-supplied or shared key);
-   artwork cached locally. Index stored in SQLite (`drift` package).
-2. **JellyfinSource** — the open Jellyfin REST API (also spoken by Silo and largely by
-   Emby). Gets us server libraries, artwork, watch-state sync, and transcode fallback
-   (server decides direct-play vs transcode) essentially for free.
-3. **AutonomiSource** *(proposed, phase 3)* — plays `ant://<address>` content by
-   resolving through a local or public **AntTP** gateway (HTTP range requests →
-   seekable streaming). Library = user-saved addresses + optional published indexes.
+```
+{ address: <XOR public file address>, name: "The Movie (2023).mkv" }
+```
+
+- Users can hold multiple lists (e.g. "Movies", "Kids", "Docs") and add entries by
+  pasting an address + name.
+- Lists are plain data → import/export as files, and (later) publish/subscribe to
+  lists stored on Autonomi itself.
+- On add, the **metadata matcher** parses the file name (title/year, `SxxEyy`) and
+  queries TMDB for artwork, overview, and genre/category — exactly the pipeline
+  Plex/Emby/Jellyfin servers run, but on-device. Results cached in SQLite; entries
+  that don't match still appear with name-only cards.
+
+### Autonomi access
+
+Two candidate mechanisms (decide in Phase 0 spike):
+
+1. **Local HTTP gateway sidecar** — a small bundled binary (ant-client based) exposing
+   `GET /<address>` with **HTTP range support**. libmpv plays the URL directly and
+   gets seeking for free. Easy on desktop + Android; iOS background process rules make
+   it harder.
+2. **FFI into the Rust client** — link the autonomi client library and feed libmpv via
+   a custom stream callback. One less process, works on iOS, more integration work.
+
+Either way, chunk-level fetch means downloads are resumable and streaming needs range
+(or chunk-offset) access for seek. `ant` CLI download (ant-client 0.2.3) is the
+reference for correct fetch behavior.
+
+### Downloads / offline
+
+- **Download manager** in app core: queue, progress, pause/resume, per-item location
+  under app storage.
+- A downloaded item is the same library entry with a local path — full poster/detail/
+  resume experience offline. Stream vs downloaded is a playback-source detail, not a
+  different library.
 
 ### Playback
 
-- `media_kit` (libmpv) everywhere: direct play of anything local/HTTP.
-- Seekable network playback relies on HTTP range support (Jellyfin ✅, AntTP ✅).
-- Subtitles: embedded + sidecar files + Jellyfin subtitle streams.
-- Watch state: positions saved every ~10s to SQLite; pushed to Jellyfin when connected.
+- `media_kit` (libmpv) everywhere; plays local files (downloads) and the gateway URL.
+- Subtitles: embedded + sidecar; external subtitle files can be their own list entries
+  attached to a media entry (open question 3).
+- Watch state: positions saved every ~10s to SQLite.
 
 ### Data & state
 
-- **SQLite (drift)** — library index, watch history, resume points, settings.
+- **SQLite (drift)** — lists, metadata cache, watch history, resume points, download
+  index, settings.
 - **Riverpod** — app state management.
-- No accounts, no cloud. Optional future: sync watch-state via a file on Autonomi.
+- No accounts, no cloud. Optional future: sync lists + watch-state between devices via
+  Autonomi.
 
 ## Platform packaging
 
@@ -80,8 +112,9 @@ Every source implements the same interface: `listLibraries()`, `listItems()`,
 Watch-It/
 ├── app/                  # Flutter project
 │   ├── lib/
-│   │   ├── core/         # models, db, playback controller
-│   │   ├── sources/      # local / jellyfin / autonomi
+│   │   ├── core/         # models, db, playback controller, download manager
+│   │   ├── autonomi/     # network access (gateway client or FFI)
+│   │   ├── metadata/     # filename parser + TMDB fetcher
 │   │   ├── ui/           # screens & widgets
 │   │   └── main.dart
 │   └── ...platform dirs
@@ -91,8 +124,11 @@ Watch-It/
 
 ## Open questions
 
-1. TMDB API key strategy — bundled shared key vs bring-your-own (rate limits).
-2. Autonomi: bundle a local AntTP, or talk to a configurable gateway URL? (Bundling
-   ant/AntTP as a sidecar binary is easy on desktop, harder on iOS.)
-3. iOS release: worth the $99/yr + review friction in v1, or TestFlight-only until v2?
-4. Min Flutter/mpv versions and HDR/tone-mapping expectations per platform.
+1. **Gateway sidecar vs Rust FFI** for network access (see above) — spike in Phase 0.
+   The iOS answer probably decides it.
+2. TMDB API key strategy — bundled shared key vs bring-your-own (rate limits).
+3. Subtitles for streamed items: sidecar files as linked list entries, or embedded-only
+   in v1?
+4. List format: define a small JSON schema now so shared lists are forward-compatible.
+5. Streaming seek: verify range/offset fetch performance on real network content early
+   — this is the make-or-break UX question.
