@@ -7,7 +7,9 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use ant_core::data::{Client, ClientConfig, DataMap, Error as AntError};
 use bytes::Bytes;
@@ -37,11 +39,18 @@ const RANGE_STEP: usize = 8 * 1024 * 1024;
 /// Concurrent chunk fetches within one decrypt batch.
 const FETCH_CONCURRENCY: usize = 8;
 
+/// Hard ceiling on one `Client::connect` attempt (per socket config).
+/// The transport's own dial timeouts should finish well inside this; the
+/// ceiling exists so a wedged transport can never pin the app in
+/// "connecting" forever (the stuck state observed on Android).
+const CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(60);
+
 pub struct Engine {
     client: OnceCell<Client>,
     peers: Vec<SocketAddr>,
     root_maps: Mutex<HashMap<[u8; 32], DataMap>>,
     last_error: Mutex<Option<String>>,
+    attempts: AtomicU32,
 }
 
 impl Engine {
@@ -58,11 +67,18 @@ impl Engine {
             peers,
             root_maps: Mutex::new(HashMap::new()),
             last_error: Mutex::new(None),
+            attempts: AtomicU32::new(0),
         }
     }
 
     pub fn last_error(&self) -> Option<String> {
         self.last_error.lock().unwrap().clone()
+    }
+
+    /// Connect attempts started so far (both socket configs of one round
+    /// count as one attempt).
+    pub fn attempts(&self) -> u32 {
+        self.attempts.load(Ordering::SeqCst)
     }
 
     pub fn is_ready(&self) -> bool {
@@ -76,19 +92,23 @@ impl Engine {
         let result = self
             .client
             .get_or_try_init(|| async {
-                tracing::info!("connecting to Autonomi network ({} bootstrap peers)", self.peers.len());
+                let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                tracing::info!(
+                    "connecting to Autonomi network (attempt {attempt}, {} bootstrap peers)",
+                    self.peers.len()
+                );
                 // Public peers reject loopback-flavoured handshakes; try the
                 // CLI-default dual-stack socket first, fall back to IPv4-only
                 // for hosts/carriers with a broken v6 stack.
                 let mut config = ClientConfig::default();
                 config.allow_loopback = false;
                 config.ipv6 = true;
-                match Client::connect(&self.peers, config.clone()).await {
+                match connect_bounded(self.peers.clone(), config.clone()).await {
                     Ok(c) => Ok(c),
                     Err(e) => {
                         tracing::warn!("dual-stack connect failed ({e}); retrying IPv4-only");
                         config.ipv6 = false;
-                        Client::connect(&self.peers, config).await
+                        connect_bounded(self.peers.clone(), config).await
                     }
                 }
             })
@@ -222,6 +242,51 @@ impl Engine {
         });
         rx
     }
+}
+
+/// `Client::connect` with the three silent-failure modes converted into
+/// ordinary errors so the caller's retry/health machinery sees them:
+///
+/// * a wedged transport — bounded by [`CONNECT_ATTEMPT_TIMEOUT`];
+/// * a panic anywhere in the connect stack — run in its own task so the
+///   panic surfaces as a `JoinError` instead of killing the caller (a
+///   panicked warm-up task is invisible: no error recorded, health stuck
+///   on "connecting" forever);
+/// * saorsa-core treating "all bootstrap dials failed" as a successful
+///   start with zero peers — useless for streaming, so reported as an
+///   error to trigger a fresh round of dials.
+async fn connect_bounded(
+    peers: Vec<SocketAddr>,
+    config: ClientConfig,
+) -> Result<Client, ant_core::data::Error> {
+    use ant_core::data::Error;
+    let net_err = |m: String| Error::Network(m);
+
+    let mut task = tokio::spawn(async move { Client::connect(&peers, config).await });
+    let client = match tokio::time::timeout(CONNECT_ATTEMPT_TIMEOUT, &mut task).await {
+        Err(_) => {
+            task.abort();
+            return Err(net_err(format!(
+                "connect attempt timed out after {}s",
+                CONNECT_ATTEMPT_TIMEOUT.as_secs()
+            )));
+        }
+        Ok(Err(join)) if join.is_panic() => {
+            return Err(net_err(format!("connect attempt panicked: {join}")))
+        }
+        Ok(Err(join)) => return Err(net_err(format!("connect task failed: {join}"))),
+        Ok(Ok(Err(e))) => return Err(e),
+        Ok(Ok(Ok(c))) => c,
+    };
+
+    let peers_up = client.network().connected_peers().await.len();
+    if peers_up == 0 {
+        return Err(net_err(
+            "network stack started but 0 bootstrap peers reachable".to_string(),
+        ));
+    }
+    tracing::info!("connected to Autonomi network ({peers_up} bootstrap peers up)");
+    Ok(client)
 }
 
 /// Bridge self_encryption's synchronous batch-fetch callback to async

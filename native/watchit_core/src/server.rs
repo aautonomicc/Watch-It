@@ -32,10 +32,15 @@ async fn health(engine: &'static Engine) -> Response {
             "state": "ready",
             "peers": engine.connected_peer_count().await,
         })
-    } else if let Some(err) = engine.last_error() {
-        serde_json::json!({ "state": "error", "message": err })
     } else {
-        serde_json::json!({ "state": "connecting" })
+        // The engine retries forever in the background, so a recorded
+        // error is a *transient* condition of the connecting state, not a
+        // terminal one — report it as detail so the UI can show why.
+        serde_json::json!({
+            "state": "connecting",
+            "attempts": engine.attempts(),
+            "message": engine.last_error(),
+        })
     };
     ([(header::CONTENT_TYPE, "application/json")], body.to_string()).into_response()
 }

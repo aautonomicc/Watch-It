@@ -198,7 +198,14 @@ class _NetworkStatusBarState extends State<NetworkStatusBar> {
           'Autonomi network: connected · ${h.peers} '
               '${h.peers == 1 ? 'peer' : 'peers'}',
         ),
-      'connecting' => (t.copper, 'Autonomi network: connecting…'),
+      'connecting' => (
+          t.copper,
+          h.message == null
+              ? 'Autonomi network: connecting…'
+                  '${h.attempts > 1 ? ' (attempt ${h.attempts})' : ''}'
+              : 'Autonomi network: connecting (attempt ${h.attempts}) — '
+                  '${h.message}',
+        ),
       _ => (const Color(0xffe57373), 'Autonomi network: error'),
     };
     return Container(
