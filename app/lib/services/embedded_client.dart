@@ -71,6 +71,7 @@ class EmbeddedClient {
         peers: map['peers'] as int? ?? 0,
         attempts: map['attempts'] as int? ?? 0,
         message: map['message'] as String?,
+        fetchedBytes: map['fetched_bytes'] as int? ?? 0,
       );
     } catch (e) {
       return ClientHealth(state: 'error', message: '$e');
@@ -86,6 +87,7 @@ class ClientHealth {
     this.peers = 0,
     this.attempts = 0,
     this.message,
+    this.fetchedBytes = 0,
   });
 
   /// `connecting`, `ready`, `error`, or `unavailable` (no native library).
@@ -99,6 +101,10 @@ class ClientHealth {
   /// retries forever in the background, so this is detail, not a dead end.
   final String? message;
 
+  /// Network bytes fetched by the embedded client since app start. The
+  /// player polls this while buffering to show that data is flowing.
+  final int fetchedBytes;
+
   String get label => switch (state) {
         'ready' =>
           'Connected ($peers ${peers == 1 ? 'peer' : 'peers'})',
@@ -109,6 +115,13 @@ class ClientHealth {
         'unavailable' => 'Native client not available on this platform',
         _ => 'Error: ${message ?? 'unknown'}',
       };
+}
+
+/// Human-readable size for buffering progress, e.g. `870 KB` / `12.4 MB`.
+String byteLabel(int bytes) {
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).round()} KB';
+  final mb = bytes / (1024 * 1024);
+  return mb >= 100 ? '${mb.round()} MB' : '${mb.toStringAsFixed(1)} MB';
 }
 
 /// HTTP URL that streams [entry] from the embedded server at [base], or
