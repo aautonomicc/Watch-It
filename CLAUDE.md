@@ -25,6 +25,7 @@ Phase 0 in progress: scaffold + media list management + detail screen/playback d
 - Repo: github.com/aautonomicc/Watch-It (MIT)
 
 ## Recent Changes
+- [2026-07-19] Android launcher icon now matches fetchit's: adaptive icon (copper [>] chevron on ink #0a0a0a) copied from etchit-io/fetchit; legacy density PNGs rendered from same geometry (PIL script, not checked in). Ships with next release build
 - [2026-07-19] v0.1.0-alpha.3: seeded Night Of The Living Dead (1968) (XOR ac855e...0ea0) as built-in default movie; detail screen with bundled poster (app/assets/posters/notld_1968.jpg) + description + Play button. 17 tests pass; signed APK on GitHub Release. Note: first build was killed by a PC restart — rebuilt and published after
 - [2026-07-19] v0.1.0-alpha.2: Settings screen (gear on home) — create/rename/delete titled media lists, add/remove entries (file name + XOR address, 64-hex validated); persistence via shared_preferences; lists render on home. 9 tests pass; signed APK on GitHub Release (SHA-256 58be...dee8)
 - [2026-07-19] Proper GitHub Release created (gh now authenticated): APK attached to https://github.com/aautonomicc/Watch-It/releases/tag/v0.1.0-alpha.1 (SHA-256 8a9e...60d4); orphan `apk` branch workaround deleted locally and on origin
@@ -34,4 +35,3 @@ Phase 0 in progress: scaffold + media list management + detail screen/playback d
 - [2026-07-19] Added docs/BRAND.md: colours/fonts/type scale adopted from etchit-io/fetchit brand contract (copper #c9732b accent, dark/dim/light themes, `watch-it` wordmark); UI-DESIGN.md aligned (Inter dropped for system fonts)
 - [2026-07-19] Pushed to github.com/aautonomicc/Watch-It (main up to date with origin)
 - [2026-07-19] Pivot: removed Jellyfin/Silo/Emby server compatibility and local-folder-scan source; Autonomi (ant-client) is the sole media source. Lists of XOR addresses replace server libraries; stream + download retained. All docs rewritten.
-- [2026-07-19] Initial design docs: README, docs/VISION.md, docs/ARCHITECTURE.md, docs/UI-DESIGN.md, docs/ROADMAP.md. Framework decision: Flutter + media_kit.
