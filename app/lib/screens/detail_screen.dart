@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
+import '../services/app_settings.dart';
 import '../services/metadata.dart';
 import '../services/embedded_client.dart';
 import '../theme/tokens.dart';
@@ -41,9 +42,15 @@ class DetailScreen extends StatelessWidget {
       return;
     }
     final meta = metadataFor(entry);
+    final bufferSizeMb = await AppSettings.bufferSizeMb();
+    if (!context.mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => PlayerScreen(url: url, title: meta.title),
+        builder: (_) => PlayerScreen(
+          url: url,
+          title: meta.title,
+          bufferSizeMb: bufferSizeMb,
+        ),
       ),
     );
   }
