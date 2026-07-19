@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 
+import 'package:ffi/ffi.dart';
+import 'package:path_provider/path_provider.dart';
+
 import '../models/media_list.dart';
 
 /// Embedded Autonomi client (the native watchit_core Rust library).
@@ -12,6 +15,23 @@ import '../models/media_list.dart';
 /// external gateway and nothing for the user to configure.
 class EmbeddedClient {
   static int _port = 0;
+  static String? _dataDir;
+
+  /// Start the native library, first resolving the app's writable data
+  /// directory so ant-core has a `$HOME` to use. Android app processes
+  /// have no `$HOME`, and without one every connect attempt dies with a
+  /// `HomeDirNotFound` panic inside ant-core. Call once from main()
+  /// before anything else touches [baseUrl].
+  static Future<void> start() async {
+    if (_port > 0) return;
+    try {
+      _dataDir = (await getApplicationSupportDirectory()).path;
+    } catch (_) {
+      // path_provider unavailable (tests, bare desktop): the native side
+      // falls back to a temp-dir $HOME rather than panicking.
+    }
+    baseUrl();
+  }
 
   /// Base URL of the in-process streaming server, starting the native
   /// library on first use. Returns null where the library is unavailable
@@ -20,9 +40,12 @@ class EmbeddedClient {
     if (_port > 0) return 'http://127.0.0.1:$_port';
     try {
       final lib = DynamicLibrary.open('libwatchit_core.so');
-      final start = lib.lookupFunction<Int32 Function(Pointer<Void>),
-          int Function(Pointer<Void>)>('watchit_core_start');
-      final port = start(nullptr);
+      final start = lib.lookupFunction<
+          Int32 Function(Pointer<Utf8>, Pointer<Utf8>),
+          int Function(Pointer<Utf8>, Pointer<Utf8>)>('watchit_core_start');
+      final dirPtr = _dataDir?.toNativeUtf8() ?? nullptr;
+      final port = start(nullptr, dirPtr);
+      if (dirPtr != nullptr) malloc.free(dirPtr);
       if (port <= 0) return null;
       _port = port;
       return 'http://127.0.0.1:$_port';
