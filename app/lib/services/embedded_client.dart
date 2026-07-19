@@ -46,6 +46,7 @@ class EmbeddedClient {
       return ClientHealth(
         state: map['state'] as String? ?? 'unknown',
         peers: map['peers'] as int? ?? 0,
+        attempts: map['attempts'] as int? ?? 0,
         message: map['message'] as String?,
       );
     } catch (e) {
@@ -57,17 +58,31 @@ class EmbeddedClient {
 }
 
 class ClientHealth {
-  const ClientHealth({required this.state, this.peers = 0, this.message});
+  const ClientHealth({
+    required this.state,
+    this.peers = 0,
+    this.attempts = 0,
+    this.message,
+  });
 
   /// `connecting`, `ready`, `error`, or `unavailable` (no native library).
   final String state;
   final int peers;
+
+  /// Connect attempts started by the embedded client (while `connecting`).
+  final int attempts;
+
+  /// While `connecting`: the last attempt's failure, if any. The client
+  /// retries forever in the background, so this is detail, not a dead end.
   final String? message;
 
   String get label => switch (state) {
         'ready' =>
           'Connected ($peers ${peers == 1 ? 'peer' : 'peers'})',
-        'connecting' => 'Connecting to the network…',
+        'connecting' => message == null
+            ? 'Connecting to the network…'
+                '${attempts > 1 ? ' (attempt $attempts)' : ''}'
+            : 'Connecting (attempt $attempts) — last error: $message',
         'unavailable' => 'Native client not available on this platform',
         _ => 'Error: ${message ?? 'unknown'}',
       };

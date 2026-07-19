@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -19,12 +21,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<MediaList>? _lists;
   ClientHealth? _health;
   String? _version;
+  Timer? _healthTimer;
 
   @override
   void initState() {
     super.initState();
     _reload();
     _loadVersion();
+    _scheduleHealthPoll();
+  }
+
+  @override
+  void dispose() {
+    _healthTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Keep the status tile live: fast poll while connecting, relaxed once
+  /// ready (localhost call, so polling is cheap).
+  void _scheduleHealthPoll() {
+    _healthTimer = Timer(
+      Duration(seconds: _health?.state == 'ready' ? 15 : 3),
+      () async {
+        await _refreshHealth();
+        if (mounted && _health?.state != 'unavailable') _scheduleHealthPoll();
+      },
+    );
   }
 
   Future<void> _reload() async {

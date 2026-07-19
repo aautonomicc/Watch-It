@@ -19,6 +19,19 @@ static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 static ENGINE: OnceLock<Engine> = OnceLock::new();
 static PORT: AtomicI32 = AtomicI32::new(0);
 
+/// Route panic messages through tracing so they reach logcat on Android
+/// (a bare panic in a tokio task is otherwise swallowed silently).
+fn init_panic_hook() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            tracing::error!("panic: {info}");
+            prev(info);
+        }));
+    });
+}
+
 fn init_tracing() {
     #[cfg(target_os = "android")]
     {
@@ -57,6 +70,7 @@ pub unsafe extern "C" fn watchit_core_start(peers_csv: *const c_char) -> i32 {
         return existing;
     }
     init_tracing();
+    init_panic_hook();
 
     let peers = if peers_csv.is_null() {
         None
@@ -88,6 +102,7 @@ pub fn start(peers_override: Option<&str>) -> Result<i32, String> {
     if existing > 0 {
         return Ok(existing);
     }
+    init_panic_hook();
 
     // Multi-threaded runtime is required: ant-core's decrypt paths use
     // block_in_place.
@@ -112,9 +127,20 @@ pub fn start(peers_override: Option<&str>) -> Result<i32, String> {
 
     let app = server::router(engine);
     runtime.spawn(async move {
-        // Warm the network connection so the first play doesn't pay the
-        // full bootstrap latency.
-        tokio::spawn(async { let _ = engine.client().await; });
+        // Keep connecting until it sticks. A single warm-up attempt is not
+        // enough: nothing else retries until a playback request arrives, so
+        // one failed bootstrap left the app stuck on "connecting" forever.
+        tokio::spawn(async {
+            let mut delay = std::time::Duration::from_secs(2);
+            loop {
+                match engine.client().await {
+                    Ok(_) => break,
+                    Err(e) => tracing::warn!("connect failed, retrying in {delay:?}: {e}"),
+                }
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(std::time::Duration::from_secs(60));
+            }
+        });
         if let Err(e) = axum::serve(listener, app).await {
             tracing::error!("http server exited: {e}");
         }
