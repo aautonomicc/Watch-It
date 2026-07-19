@@ -141,7 +141,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Video(controller: _controller),
+            // The stock controls draw their own grey buffering spinner in
+            // the centre of the video; our branded overlay already covers
+            // buffering, so blank out the built-in one on all platforms.
+            MaterialVideoControlsTheme(
+              normal: kDefaultMaterialVideoControlsThemeData.copyWith(
+                bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
+              ),
+              fullscreen:
+                  kDefaultMaterialVideoControlsThemeDataFullscreen.copyWith(
+                bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
+              ),
+              child: MaterialDesktopVideoControlsTheme(
+                normal: kDefaultMaterialDesktopVideoControlsThemeData.copyWith(
+                  bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
+                ),
+                fullscreen:
+                    kDefaultMaterialDesktopVideoControlsThemeDataFullscreen
+                        .copyWith(
+                  bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
+                ),
+                child: Video(controller: _controller),
+              ),
+            ),
             if (_error != null)
               _errorOverlay(context)
             else if (_buffering)
