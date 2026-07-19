@@ -4,8 +4,8 @@
 Phase 0 is essentially done on Android: signed APK streams a real movie from the live
 Autonomi network via the embedded Rust client (`native/watchit_core`), with seek,
 buffering progress, configurable buffer size, and etchit-family branding (copper `[>]`
-icon + matching app-bar lockup). Outstanding from Phase 0: CI, and the Linux desktop
-build (blocked on toolchain install). Phase 1 is partially started.
+icon + matching app-bar lockup) and CI on every push. Outstanding from Phase 0: the
+Linux desktop build (blocked on toolchain install). Phase 1 is partially started.
 
 ## Phase 0 — Foundations (1–2 weeks)
 - [x] Flutter project scaffold in `app/` targeting Linux + Android first (dev machines)
@@ -16,7 +16,8 @@ build (blocked on toolchain install). Phase 1 is partially started.
 - [x] **Autonomi spike**: fetch a known public file by XOR address;
       test range/offset access → done: embedded Rust-FFI client (watchit_core),
       HTTP Range seek verified byte-exact against the live network
-- [ ] CI: `flutter analyze` + `flutter test` on push
+- [x] CI: `flutter analyze` + `flutter test` on push → GitHub Actions
+      (.github/workflows/ci.yml), pinned Flutter 3.44.6, runs on push to main + PRs
 - [x] Decide accent color / app icon → copper #c9732b accent; adaptive `[>]` chevron
       icon on ink, app-bar wordmark lockup matches (alpha.12); see BRAND.md
 
