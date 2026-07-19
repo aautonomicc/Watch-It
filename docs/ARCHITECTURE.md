@@ -4,7 +4,7 @@
 
 **Recommendation: Flutter + media_kit (libmpv).**
 
-| Option | All 5 platforms? | Player engine | Notes |
+| Option | All 6 platforms? | Player engine | Notes |
 |---|---|---|---|
 | **Flutter** | ✅ yes, first-class | `media_kit` wraps libmpv on all platforms | Single UI codebase, 120fps UI, proven media apps. **Recommended.** |
 | Kotlin Multiplatform | UI (Compose MP) still maturing on iOS/desktop | wrap ExoPlayer/AVPlayer/libmpv per platform | More per-platform work |
@@ -13,9 +13,23 @@
 | Qt/QML | ✅ | libmpv | Great engine story, slower UI dev, licensing friction |
 
 Why Flutter wins here: it is the only stack where *both* the UI and the playback engine
-(libmpv via `media_kit`) are first-class on all five targets, including Linux. libmpv
+(libmpv via `media_kit`) are first-class on all six targets, including Linux. libmpv
 gives us every codec/container, subtitle rendering, and hardware decode without
 per-platform player code.
+
+**Android TV rides on the Android build.** Android TV is Android, so the same Flutter
+APK covers it — no extra platform port. What it needs on top:
+
+- Manifest: a `LEANBACK_LAUNCHER` intent filter so the app appears on the TV home
+  screen, `android.software.leanback` + `android.hardware.touchscreen required=false`
+  so TV devices aren't filtered out.
+- **D-pad focus navigation** everywhere (Flutter's `FocusTraversalGroup` /
+  `Shortcuts`): the same plumbing as the desktop keyboard map, so it's shared work,
+  not TV-only work.
+- A 10-foot layout mode (see UI-DESIGN.md): larger type, focus-scaled poster cards,
+  no hover- or touch-only affordances.
+- Hardware decode matters more here (TV boxes have weak CPUs) — libmpv uses
+  MediaCodec on Android, same path as phones.
 
 ## High-level structure
 
@@ -101,6 +115,7 @@ reference for correct fetch behavior.
 | Platform | Artifact | Notes |
 |---|---|---|
 | Android | APK / AAB | targetSdk 34; Play Store optional, sideload-friendly |
+| Android TV | same APK / AAB | leanback launcher entry + TV banner asset; sideloads onto any TV box; Play Store TV listing optional |
 | iOS | IPA | needs Apple dev account; TestFlight first |
 | Linux | AppImage + Flatpak | AppImage matches existing workflow |
 | Windows | MSIX / portable zip | |

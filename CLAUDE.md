@@ -1,7 +1,7 @@
 # Watch-It
 
 ## Description
-Cross-platform media player (Android, iOS, Linux, Windows, macOS) for the Autonomi network. Client-only — no server side at all, and no Plex/Emby/Jellyfin server compatibility (stripped by design). Plex-style poster-wall UI.
+Cross-platform media player (Android, Android TV, iOS, Linux, Windows, macOS) for the Autonomi network. Client-only — no server side at all, and no Plex/Emby/Jellyfin server compatibility (stripped by design). Plex-style poster-wall UI.
 
 ## Tech Stack
 Flutter + media_kit (libmpv) planned; SQLite via drift; Riverpod; Autonomi access via WithAutonomi/ant-client (gateway sidecar or Rust FFI — Phase 0 spike decides). No code yet — design phase.
@@ -25,6 +25,7 @@ Design phase, docs rewritten for the client-only Autonomi model. Next step: Phas
 - Repo: github.com/aautonomicc/Watch-It (MIT)
 
 ## Recent Changes
+- [2026-07-19] Android TV added as sixth first-class platform (was in "Later"): same Android APK + leanback launcher entry, D-pad focus nav shared with desktop keyboard map, 10-foot layout mode; scheduled in Phase 4; tvOS stays in Later
 - [2026-07-19] Added docs/BRAND.md: colours/fonts/type scale adopted from etchit-io/fetchit brand contract (copper #c9732b accent, dark/dim/light themes, `watch-it` wordmark); UI-DESIGN.md aligned (Inter dropped for system fonts)
 - [2026-07-19] Pushed to github.com/aautonomicc/Watch-It (main up to date with origin)
 - [2026-07-19] Pivot: removed Jellyfin/Silo/Emby server compatibility and local-folder-scan source; Autonomi (ant-client) is the sole media source. Lists of XOR addresses replace server libraries; stream + download retained. All docs rewritten.

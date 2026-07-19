@@ -1,7 +1,7 @@
 # Watch-It
 
 A beautiful, cross-platform media player for the **Autonomi network** — one codebase,
-five platforms: **Android, iPhone (iOS), Linux, Windows, and Mac.**
+six platforms: **Android, Android TV, iPhone (iOS), Linux, Windows, and Mac.**
 
 Think the Plex / Emby / [Silo](https://github.com/Silo-Server/) experience —
 poster-wall library, rich metadata, resume-watching — but **with no server to install**.

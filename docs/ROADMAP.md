@@ -36,17 +36,19 @@ streams from the network → resume works after app restart. v0.1 release.
 - [ ] Shared-list format v1 documented; import a list from an Autonomi address
 - v0.3 release + demo video (poster-wall streaming from Autonomi is the headline)
 
-## Phase 4 — Polish & iOS
+## Phase 4 — Android TV, polish & iOS
+- [ ] Android TV: leanback launcher entry + TV banner, D-pad focus traversal across
+      all screens, 10-foot layout mode, remote player controls; test on a real TV box
 - [ ] iOS build + TestFlight (FFI path required if sidecar chosen elsewhere)
 - [ ] Chapter markers, playback speed, subtitle handling for streamed items
 - [ ] Light theme, poster size options, keyboard-map settings
 - [ ] Flatpak + notarized .dmg
-- v1.0: all five platforms
+- v1.0: all six platforms
 
 ## Later / ideas parking lot
 - Publish/subscribe community lists on Autonomi (curated "channels")
 - Watch-state + list sync between devices via Autonomi
-- Android TV / tvOS layouts (10-foot UI)
+- tvOS (Apple TV) layout — Android TV is now in Phase 4
 - Trakt scrobbling
 - Music & photos lists
 - Chromecast / AirPlay output

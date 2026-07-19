@@ -16,8 +16,9 @@ streaming service — with nothing to host and no server to install.
 
 ## Goals
 
-1. **One app, five platforms.** Android, iOS, Linux, Windows, macOS from a single
-   codebase. Same UI language everywhere, adapted to touch vs desktop.
+1. **One app, six platforms.** Android, Android TV, iOS, Linux, Windows, macOS from
+   a single codebase. Same UI language everywhere, adapted to touch vs desktop vs
+   the 10-foot TV experience.
 2. **Client-only. No server, ever.** The Autonomi network is the backend. Install the
    app, add a list, get a poster-wall library. No accounts, no configuration, nothing
    to host.
@@ -56,4 +57,6 @@ streaming service — with nothing to host and no server to install.
 - Library first: the app opens to your collection, not to menus.
 - Playback is sacred: fast start, reliable seek, remembers position always.
 - Desktop is not a blown-up phone app: keyboard shortcuts, resizing, hover.
+- TV is not a blown-up phone app either: everything reachable by D-pad, focus always
+  visible, no text entry beyond what a remote can bear.
 - Offline-first: downloads and all local state work with zero connectivity.
