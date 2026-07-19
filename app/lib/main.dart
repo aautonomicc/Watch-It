@@ -11,12 +11,14 @@ import 'services/library_store.dart';
 import 'services/metadata.dart';
 import 'theme/tokens.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   // Start the embedded Autonomi client early so the network bootstrap
   // (tens of seconds) overlaps with browsing instead of delaying playback.
-  EmbeddedClient.baseUrl();
+  // Awaited: it must receive the app data dir (ant-core's $HOME on
+  // Android) before any other code path can lazily start it without one.
+  await EmbeddedClient.start();
   runApp(const WatchItApp());
 }
 

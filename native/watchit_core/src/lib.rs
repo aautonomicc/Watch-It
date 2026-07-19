@@ -53,18 +53,51 @@ fn init_tracing() {
     }
 }
 
+/// ant-core resolves its cache/config paths through `$HOME` / `$XDG_*`
+/// and panics (an `unwrap` deep in its `config::data_dir`) when none are
+/// set — the normal state for an Android app process, where it killed
+/// every connect attempt with `HomeDirNotFound`. Point those variables at
+/// the app's own data dir before any ant-core code runs; the peer cache
+/// and adaptive-controller snapshots then persist there for free.
+fn ensure_dirs_env(data_dir: Option<&str>) {
+    match data_dir.filter(|d| !d.trim().is_empty()) {
+        Some(dir) => {
+            let _ = std::fs::create_dir_all(dir);
+            for var in ["HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME"] {
+                if std::env::var_os(var).is_none() {
+                    std::env::set_var(var, dir);
+                }
+            }
+        }
+        None => {
+            // No dir supplied: still guarantee $HOME exists so ant-core
+            // cannot panic; its caches just won't persist anywhere useful.
+            if std::env::var_os("HOME").is_none() {
+                std::env::set_var("HOME", std::env::temp_dir());
+            }
+        }
+    }
+}
+
 /// Start the embedded client + streaming server.
 ///
 /// `peers_csv` optionally overrides the built-in bootstrap peer list with a
 /// comma-separated `ip:port` list; pass NULL to use the defaults.
+/// `data_dir` is the app's writable data directory, used to give ant-core
+/// a `$HOME` on platforms without one (Android); pass NULL to leave the
+/// process environment alone (desktop).
 ///
 /// Returns the localhost port the server is listening on (>0), or a
 /// negative error code. Idempotent: repeat calls return the existing port.
 ///
 /// # Safety
-/// `peers_csv` must be NULL or a valid NUL-terminated C string.
+/// `peers_csv` and `data_dir` must each be NULL or a valid NUL-terminated
+/// C string.
 #[no_mangle]
-pub unsafe extern "C" fn watchit_core_start(peers_csv: *const c_char) -> i32 {
+pub unsafe extern "C" fn watchit_core_start(
+    peers_csv: *const c_char,
+    data_dir: *const c_char,
+) -> i32 {
     let existing = PORT.load(Ordering::SeqCst);
     if existing > 0 {
         return existing;
@@ -72,14 +105,18 @@ pub unsafe extern "C" fn watchit_core_start(peers_csv: *const c_char) -> i32 {
     init_tracing();
     init_panic_hook();
 
-    let peers = if peers_csv.is_null() {
-        None
-    } else {
-        match CStr::from_ptr(peers_csv).to_str() {
-            Ok(s) => Some(s.to_string()),
-            Err(_) => return -1,
+    let cstr_arg = |p: *const c_char| -> Result<Option<String>, ()> {
+        if p.is_null() {
+            Ok(None)
+        } else {
+            CStr::from_ptr(p).to_str().map(|s| Some(s.to_string())).map_err(|_| ())
         }
     };
+    let (peers, dir) = match (cstr_arg(peers_csv), cstr_arg(data_dir)) {
+        (Ok(p), Ok(d)) => (p, d),
+        _ => return -1,
+    };
+    ensure_dirs_env(dir.as_deref());
 
     match start(peers.as_deref()) {
         Ok(port) => port,
@@ -103,6 +140,7 @@ pub fn start(peers_override: Option<&str>) -> Result<i32, String> {
         return Ok(existing);
     }
     init_panic_hook();
+    ensure_dirs_env(None); // no-op when the FFI entry already set $HOME
 
     // Multi-threaded runtime is required: ant-core's decrypt paths use
     // block_in_place.
