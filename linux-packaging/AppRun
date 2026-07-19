@@ -1,0 +1,6 @@
+#!/bin/sh
+# media_kit dlopens libmpv.so.2 by name, so the bundled copy in usr/lib
+# must be on the loader path — rpath patching alone doesn't reach plugins.
+HERE="$(dirname "$(readlink -f "$0")")"
+export LD_LIBRARY_PATH="$HERE/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+exec "$HERE/usr/bin/watchit" "$@"

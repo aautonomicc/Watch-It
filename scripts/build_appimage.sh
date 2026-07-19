@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Build a Linux AppImage from the Flutter release bundle.
+# Requires: flutter, linuxdeploy-x86_64.AppImage on PATH or at ~/tools/,
+# and libmpv (libmpv.so.2) installed on the build host.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+APP_DIR="$REPO_ROOT/app"
+PKG_DIR="$REPO_ROOT/linux-packaging"
+OUT_DIR="$REPO_ROOT/dist"
+LINUXDEPLOY="${LINUXDEPLOY:-$HOME/tools/linuxdeploy-x86_64.AppImage}"
+
+VERSION="$(grep '^version:' "$APP_DIR/pubspec.yaml" | awk '{print $2}' | cut -d+ -f1)"
+BUNDLE="$APP_DIR/build/linux/x64/release/bundle"
+
+cd "$APP_DIR"
+flutter build linux --release
+
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+APPDIR="$STAGE/AppDir"
+
+# Keep the Flutter bundle layout intact under usr/bin — the runner resolves
+# data/ and lib/ relative to the executable.
+mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/lib"
+cp -r "$BUNDLE/." "$APPDIR/usr/bin/"
+
+# 192px launcher icon doubles as the AppImage icon.
+cp "$APP_DIR/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" "$STAGE/watchit.png"
+
+LIBMPV="$(/sbin/ldconfig -p | awk '/libmpv\.so\.2 .*x86-64/{print $NF; exit}')"
+[ -n "$LIBMPV" ] || { echo "libmpv.so.2 not found (apt install libmpv-dev)"; exit 1; }
+
+"$LINUXDEPLOY" --appimage-extract-and-run \
+  --appdir "$APPDIR" \
+  -e "$APPDIR/usr/bin/watchit" \
+  -l "$LIBMPV" \
+  -d "$PKG_DIR/watchit.desktop" \
+  -i "$STAGE/watchit.png" \
+  --custom-apprun "$PKG_DIR/AppRun" \
+  --output appimage
+
+mkdir -p "$OUT_DIR"
+mv Watch-It*.AppImage "$OUT_DIR/Watch-It-$VERSION-x86_64.AppImage" 2>/dev/null \
+  || mv watchit*.AppImage "$OUT_DIR/Watch-It-$VERSION-x86_64.AppImage"
+echo "Built $OUT_DIR/Watch-It-$VERSION-x86_64.AppImage"
