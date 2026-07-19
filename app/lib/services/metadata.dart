@@ -24,6 +24,14 @@ class MediaMetadata {
 
 /// XOR address of the built-in test movie seeded on first run.
 const kDefaultMovieAddress =
+    'cebd7965268b61d98907378670f13e55a2694064d0eed7ef4be9c19eaaf03988';
+
+/// File name of the built-in test movie as stored on the network.
+const kDefaultMovieName = 'Night_of_the_Living_Dead_(1968).webm';
+
+/// Stale address the default movie was seeded under up to v0.1.0-alpha.4;
+/// migrated to [kDefaultMovieAddress] by [LibraryStore.ensureDefaults].
+const kLegacyDefaultMovieAddress =
     'ac855e1e8b17cb4ba0884a4e7025bd5f51d95ed69e4fa15ca37290496a400ea0';
 
 const _notld = MediaMetadata(
