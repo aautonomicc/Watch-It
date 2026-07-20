@@ -33,7 +33,6 @@ struct _VideoOutput {
   gpointer texture_update_callback_context;
   FlTextureRegistrar* texture_registrar;
   gboolean destroyed;
-  gboolean hw_init_failed; /* WATCH-IT PATCH: deferred EGL init failed. */
 };
 
 G_DEFINE_TYPE(VideoOutput, video_output, G_TYPE_OBJECT)
@@ -119,51 +118,70 @@ static void video_output_init(VideoOutput* self) {
   self->texture_update_callback_context = NULL;
   self->texture_registrar = NULL;
   self->destroyed = FALSE;
-  self->hw_init_failed = FALSE;
   g_mutex_init(&self->mutex);
 }
 
-// WATCH-IT PATCH (media-kit/media-kit#1404): create the isolated EGL context
-// and mpv render context on first use, on a thread where Flutter's EGL
-// display/context are current. Since Flutter 3.38 that is only the raster
-// thread (FlTextureGL populate); on older embedders the platform thread also
-// qualifies and video_output_new calls this eagerly.
-gboolean video_output_ensure_hw_initialized(VideoOutput* self) {
-  if (self->destroyed) {
-    return FALSE;
+// WATCH-IT PATCH (media-kit/media-kit#1404): since Flutter 3.38 no EGL
+// context is current on the platform thread, so upstream's
+// eglGetCurrentDisplay() returned EGL_NO_DISPLAY and every Linux box silently
+// fell back to CPU mpv rendering. Flutter's context is not actually needed —
+// the mpv render context lives in an isolated (unshared) EGL context — but
+// Flutter's DISPLAY is: the EGLImage that shares mpv's frames with Flutter's
+// raster context is display-scoped. Derive that display the same way the
+// embedder itself does (fl_opengl_manager.cc): eglGetPlatformDisplayEXT on
+// the default GDK display returns the identical EGLDisplay handle for the
+// same (platform, native display) pair. Init stays eager on the platform
+// thread, like upstream: deferring it to the first FlTextureGL populate
+// deadlocks, because the Video widget only mounts the Texture once mpv
+// reports video dimensions, which mpv cannot do before the render context
+// exists.
+static EGLDisplay video_output_get_flutter_egl_display() {
+  EGLDisplay display = eglGetCurrentDisplay();
+  if (display != EGL_NO_DISPLAY) {
+    // Pre-3.38 embedders: Flutter's context is current right here.
+    return display;
   }
-  if (self->render_context != NULL) {
-    return self->egl_context != EGL_NO_CONTEXT;
+  GdkDisplay* gdk_display = gdk_display_get_default();
+  if (GDK_IS_WAYLAND_DISPLAY(gdk_display)) {
+    return eglGetPlatformDisplayEXT(
+        EGL_PLATFORM_WAYLAND_EXT,
+        gdk_wayland_display_get_wl_display(gdk_display), NULL);
   }
-  if (self->hw_init_failed) {
-    return FALSE;
+  if (GDK_IS_X11_DISPLAY(gdk_display)) {
+    return eglGetPlatformDisplayEXT(
+        EGL_PLATFORM_X11_EXT, gdk_x11_display_get_xdisplay(gdk_display), NULL);
   }
+  return EGL_NO_DISPLAY;
+}
+
+static gboolean video_output_init_hw(VideoOutput* self) {
   gboolean success = FALSE;
-  // Save the caller's EGL binding (Flutter's context on the raster thread).
-  EGLDisplay flutter_display = eglGetCurrentDisplay();
-  EGLContext flutter_context = eglGetCurrentContext();
-  EGLSurface flutter_draw = eglGetCurrentSurface(EGL_DRAW);
-  EGLSurface flutter_read = eglGetCurrentSurface(EGL_READ);
-  if (flutter_display == EGL_NO_DISPLAY || flutter_context == EGL_NO_CONTEXT) {
-    self->hw_init_failed = TRUE;
-    g_printerr(
-        "media_kit: VideoOutput: No EGL context current; H/W rendering "
-        "unavailable.\n");
+  // Save the caller's EGL binding: Flutter's context on pre-3.38 embedders,
+  // nothing (EGL_NO_CONTEXT) on the platform thread since 3.38.
+  EGLDisplay prev_display = eglGetCurrentDisplay();
+  EGLContext prev_context = eglGetCurrentContext();
+  EGLSurface prev_draw = eglGetCurrentSurface(EGL_DRAW);
+  EGLSurface prev_read = eglGetCurrentSurface(EGL_READ);
+
+  self->egl_display = video_output_get_flutter_egl_display();
+  if (self->egl_display == EGL_NO_DISPLAY) {
+    g_printerr("media_kit: VideoOutput: Could not obtain the EGL display.\n");
     return FALSE;
   }
-  // Flutter's display is required (not merely convenient): the EGLImage that
-  // shares mpv's texture with Flutter's context is display-scoped.
-  self->egl_display = flutter_display;
+  // No-op when Flutter already initialized this display (it did, unless the
+  // embedder is running its software renderer).
+  eglInitialize(self->egl_display, NULL, NULL);
 
   // Bind OpenGL ES API (Flutter uses OpenGL ES on Linux)
   eglBindAPI(EGL_OPENGL_ES_API);
 
-  // Reuse Flutter's EGL config for compatibility; fall back to a plain
-  // GLES2 RGBA8888 config.
+  // Reuse Flutter's EGL config when its context is current (pre-3.38); fall
+  // back to a plain GLES2 RGBA8888 config.
   EGLConfig config = NULL;
   EGLint config_id = 0;
   EGLint num_configs = 0;
-  if (eglQueryContext(self->egl_display, flutter_context, EGL_CONFIG_ID,
+  if (prev_context != EGL_NO_CONTEXT &&
+      eglQueryContext(self->egl_display, prev_context, EGL_CONFIG_ID,
                       &config_id)) {
     EGLint config_attribs[] = {EGL_CONFIG_ID, config_id, EGL_NONE};
     if (!(eglChooseConfig(self->egl_display, config_attribs, &config, 1,
@@ -255,9 +273,17 @@ gboolean video_output_ensure_hw_initialized(VideoOutput* self) {
             "current. Error: 0x%x\n",
             eglGetError());
       }
-      // Restore the caller's EGL binding.
-      eglMakeCurrent(flutter_display, flutter_draw, flutter_read,
-                     flutter_context);
+      // Restore the caller's EGL binding. When nothing was bound (the
+      // platform thread on Flutter >= 3.38), RELEASE our context instead —
+      // eglMakeCurrent(EGL_NO_DISPLAY, ...) is an error and would leave the
+      // isolated context current on this thread, making every later
+      // eglMakeCurrent from the raster thread fail with EGL_BAD_ACCESS.
+      if (prev_context != EGL_NO_CONTEXT) {
+        eglMakeCurrent(prev_display, prev_draw, prev_read, prev_context);
+      } else {
+        eglMakeCurrent(self->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE,
+                       EGL_NO_CONTEXT);
+      }
       if (!success) {
         eglDestroyContext(self->egl_display, self->egl_context);
         self->egl_context = EGL_NO_CONTEXT;
@@ -274,10 +300,6 @@ gboolean video_output_ensure_hw_initialized(VideoOutput* self) {
 
   if (!success) {
     self->egl_display = EGL_NO_DISPLAY;
-    self->hw_init_failed = TRUE;
-    g_printerr(
-        "media_kit: VideoOutput: H/W rendering initialization failed; video "
-        "output disabled for this player instance.\n");
   }
   return success;
 }
@@ -304,51 +326,16 @@ VideoOutput* video_output_new(FlTextureRegistrar* texture_registrar,
   // mpv_set_option_string(self->handle, "video-timing-offset", "0");
   gboolean hardware_acceleration_supported = FALSE;
   if (self->configuration.enable_hardware_acceleration) {
-    // WATCH-IT PATCH (media-kit/media-kit#1404): since Flutter 3.38 the EGL
-    // context is current only on the raster thread, so eglGetCurrentDisplay()
-    // here (platform thread) returns EGL_NO_DISPLAY and H/W rendering was
-    // always skipped (S/W fallback on every Linux machine). When no EGL
-    // context is current here, the isolated EGL context and the mpv render
-    // context are created lazily on the first FlTextureGL populate callback —
-    // that runs on the raster thread, where Flutter's EGL display/context are
-    // guaranteed current. See video_output_ensure_hw_initialized().
     self->texture_gl = texture_gl_new(self);
     if (fl_texture_registrar_register_texture(texture_registrar,
                                               FL_TEXTURE(self->texture_gl))) {
-      if (eglGetCurrentContext() != EGL_NO_CONTEXT) {
-        // EGL current on the platform thread (Flutter < 3.38 style):
-        // initialize eagerly so S/W fallback still works if it fails.
-        if (video_output_ensure_hw_initialized(self)) {
-          hardware_acceleration_supported = TRUE;
-        } else {
-          fl_texture_registrar_unregister_texture(texture_registrar,
-                                                  FL_TEXTURE(self->texture_gl));
-          g_object_unref(self->texture_gl);
-          self->texture_gl = NULL;
-        }
-      } else {
+      if (video_output_init_hw(self)) {
         hardware_acceleration_supported = TRUE;
-        g_print(
-            "media_kit: VideoOutput: H/W rendering (EGL init deferred to "
-            "raster thread).\n");
-        // Kick populates until the deferred init has run: mpv sends no
-        // update callbacks before its render context exists (and disables
-        // video for a file opened without one), while a single early mark can
-        // land before the Texture widget is mounted and populate nothing.
-        g_timeout_add(
-            50,
-            [](gpointer data) -> gboolean {
-              VideoOutput* self = (VideoOutput*)data;
-              if (self->destroyed || self->hw_init_failed ||
-                  self->render_context != NULL) {
-                g_object_unref(self);
-                return FALSE;
-              }
-              fl_texture_registrar_mark_texture_frame_available(
-                  self->texture_registrar, FL_TEXTURE(self->texture_gl));
-              return TRUE;
-            },
-            g_object_ref(self));
+      } else {
+        fl_texture_registrar_unregister_texture(texture_registrar,
+                                                FL_TEXTURE(self->texture_gl));
+        g_object_unref(self->texture_gl);
+        self->texture_gl = NULL;
       }
     } else {
       g_printerr("media_kit: VideoOutput: Failed to register texture.\n");
@@ -443,13 +430,6 @@ void video_output_set_size(VideoOutput* self, gint64 width, gint64 height) {
   if (self->texture_gl) {
     self->width = width;
     self->height = height;
-    // WATCH-IT PATCH: re-kick populate while the deferred EGL init hasn't run
-    // — the first kick from video_output_new can land before the Texture
-    // widget is mounted, in which case it populates nothing.
-    if (self->render_context == NULL && !self->destroyed) {
-      fl_texture_registrar_mark_texture_frame_available(
-          self->texture_registrar, FL_TEXTURE(self->texture_gl));
-    }
   }
   // S/W
   if (self->texture_sw) {
