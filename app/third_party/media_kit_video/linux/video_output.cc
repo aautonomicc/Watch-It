@@ -37,6 +37,8 @@ struct _VideoOutput {
 
 G_DEFINE_TYPE(VideoOutput, video_output, G_TYPE_OBJECT)
 
+static void video_output_release_foreign_gl_binding();
+
 static void video_output_dispose(GObject* object) {
   VideoOutput* self = VIDEO_OUTPUT(object);
   self->destroyed = TRUE;
@@ -50,7 +52,10 @@ static void video_output_dispose(GObject* object) {
   if (self->texture_gl) {
     fl_texture_registrar_unregister_texture(self->texture_registrar,
                                             FL_TEXTURE(self->texture_gl));
-    
+
+    // GDK's GLX binding would make the eglMakeCurrent below fail silently
+    // and mpv_render_context_free would run without our context current.
+    video_output_release_foreign_gl_binding();
     // Save Flutter's current context before cleanup
     EGLDisplay current_display = eglGetCurrentDisplay();
     EGLContext flutter_context = eglGetCurrentContext();
@@ -154,8 +159,24 @@ static EGLDisplay video_output_get_flutter_egl_display() {
   return EGL_NO_DISPLAY;
 }
 
+// The platform thread may hold a GL binding EGL cannot see: FlView presents
+// through a GDK GL context, which on X11 is GLX, and GDK leaves it current
+// after painting. eglGetCurrentContext() returns EGL_NO_CONTEXT then, but
+// Mesa refuses to bind an EGL context on a thread that already holds a GLX
+// binding — eglMakeCurrent fails with EGL_BAD_ACCESS (0x3002) and we'd fall
+// back to S/W rendering (the Mint alpha.19 report; xvfb never hit it because
+// GDK-GL is unavailable without DRI3). Release GDK's binding first; GDK
+// re-binds lazily on its next paint, so this is safe outside a paint cycle.
+static void video_output_release_foreign_gl_binding() {
+  if (eglGetCurrentContext() == EGL_NO_CONTEXT &&
+      gdk_gl_context_get_current() != NULL) {
+    gdk_gl_context_clear_current();
+  }
+}
+
 static gboolean video_output_init_hw(VideoOutput* self) {
   gboolean success = FALSE;
+  video_output_release_foreign_gl_binding();
   // Save the caller's EGL binding: Flutter's context on pre-3.38 embedders,
   // nothing (EGL_NO_CONTEXT) on the platform thread since 3.38.
   EGLDisplay prev_display = eglGetCurrentDisplay();
