@@ -1,7 +1,12 @@
+import 'dart:convert';
+
+import 'package:drift/drift.dart' show driftRuntimeOptions;
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:watchit/db/app_database.dart';
 import 'package:watchit/main.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/services/app_settings.dart';
@@ -13,8 +18,14 @@ const _addr =
     'a3f1c9e07b6d5a4f2e8c1b0d9f7a6e5c4b3a2d1e0f9c8b7a6d5e4f3c2b1a0d9e';
 
 void main() {
-  setUp(() {
+  // Each test gets its own in-memory database, so the multiple-instance
+  // race drift warns about cannot happen.
+  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
+
+  setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    await LibraryStore.useForTesting(
+        AppDatabase.forTesting(NativeDatabase.memory()));
   });
 
   group('MediaList model', () {
@@ -55,6 +66,50 @@ void main() {
 
     test('empty store loads as empty list', () async {
       expect(await LibraryStore.load(), isEmpty);
+    });
+
+    test('save preserves list and entry order', () async {
+      await LibraryStore.save([
+        for (var i = 0; i < 3; i++)
+          MediaList(
+            id: 'l$i',
+            title: 'List $i',
+            entries: [
+              for (var j = 0; j < 3; j++)
+                MediaEntry(name: 'e$i-$j.mkv', address: _addr),
+            ],
+          ),
+      ]);
+      final loaded = await LibraryStore.load();
+      expect(loaded.map((l) => l.title), ['List 0', 'List 1', 'List 2']);
+      expect(loaded[1].entries.map((e) => e.name),
+          ['e1-0.mkv', 'e1-1.mkv', 'e1-2.mkv']);
+    });
+  });
+
+  group('Legacy SharedPreferences import', () {
+    test('imports the pre-SQLite JSON blob once and removes it', () async {
+      SharedPreferences.setMockInitialValues({
+        'media_lists_v1': jsonEncode([
+          MediaList(
+            id: 'legacy',
+            title: 'From Prefs',
+            entries: const [MediaEntry(name: 'Old.mkv', address: _addr)],
+          ).toJson(),
+        ]),
+      });
+      final loaded = await LibraryStore.load();
+      expect(loaded.single.title, 'From Prefs');
+      expect(loaded.single.entries.single.name, 'Old.mkv');
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('media_lists_v1'), isNull);
+    });
+
+    test('corrupt blob is dropped without error', () async {
+      SharedPreferences.setMockInitialValues({'media_lists_v1': 'not-json'});
+      expect(await LibraryStore.load(), isEmpty);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('media_lists_v1'), isNull);
     });
   });
 
