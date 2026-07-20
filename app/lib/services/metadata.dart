@@ -23,16 +23,25 @@ class MediaMetadata {
 }
 
 /// XOR address of the built-in test movie seeded on first run.
+/// H.264 8-bit 1080p re-encode — plays with hardware decoding on phones and
+/// older desktops, unlike the AV1 10-bit original it replaces.
 const kDefaultMovieAddress =
-    'cebd7965268b61d98907378670f13e55a2694064d0eed7ef4be9c19eaaf03988';
+    '66cacd0604b01b2c2f1da1c1c3c05609d3b4cc448cff3b6cdd868e6b7eebcb13';
 
 /// File name of the built-in test movie as stored on the network.
-const kDefaultMovieName = 'Night_of_the_Living_Dead_(1968).webm';
+/// Follows the Plex/Jellyfin naming convention
+/// (`Title (Year) {imdb-ttXXXXXXX} - [quality].ext`) — see docs/NAMING.md.
+const kDefaultMovieName =
+    'Night of the Living Dead (1968) {imdb-tt0063350} - [1080p].mp4';
 
-/// Stale address the default movie was seeded under up to v0.1.0-alpha.4;
+/// Stale addresses the default movie was seeded under in older releases;
 /// migrated to [kDefaultMovieAddress] by [LibraryStore.ensureDefaults].
-const kLegacyDefaultMovieAddress =
-    'ac855e1e8b17cb4ba0884a4e7025bd5f51d95ed69e4fa15ca37290496a400ea0';
+/// In order: up to v0.1.0-alpha.4 (dead upload), and the AV1 10-bit webm
+/// used up to v0.1.0-alpha.15.
+const kLegacyDefaultMovieAddresses = [
+  'ac855e1e8b17cb4ba0884a4e7025bd5f51d95ed69e4fa15ca37290496a400ea0',
+  'cebd7965268b61d98907378670f13e55a2694064d0eed7ef4be9c19eaaf03988',
+];
 
 const _notld = MediaMetadata(
   title: 'Night of the Living Dead',
@@ -61,14 +70,23 @@ MediaMetadata metadataFor(MediaEntry entry) {
 }
 
 class ParsedName {
-  const ParsedName(this.title, this.year);
+  const ParsedName(this.title, this.year, {this.imdbId});
 
   final String title;
   final int? year;
+
+  /// IMDb id (`tt0063350`) from a Plex/Jellyfin id tag, if present.
+  /// Lets the TMDB matcher do an exact `/find` lookup instead of a
+  /// title/year search.
+  final String? imdbId;
 }
 
-/// Parse a release-style file name (`The.Movie.2024.1080p.mkv`) into a
-/// display title and year. Permissive: plain names pass through unchanged.
+/// Parse a media file name into a display title, year, and optional IMDb id.
+/// Handles the Plex/Jellyfin convention
+/// (`Title (Year) {imdb-ttXXXXXXX} - [1080p].mkv`, Jellyfin's
+/// `[imdbid-ttXXXXXXX]` variant included) as well as release-style names
+/// (`The.Movie.2024.1080p.mkv`). Permissive: plain names pass through
+/// unchanged.
 ParsedName parseMediaName(String name) {
   var s = name.trim();
   // Drop a media file extension, if present.
@@ -76,7 +94,16 @@ ParsedName parseMediaName(String name) {
       RegExp(r'\.(mkv|mp4|avi|mov|webm|m4v|mpg|mpeg|ts)$',
           caseSensitive: false),
       '');
+  // Plex `{imdb-tt...}` / Jellyfin `[imdbid-tt...]` database-id tag.
+  final idMatch = RegExp(r'[{\[]imdb(?:id)?[-=](tt\d+)[}\]]',
+          caseSensitive: false)
+      .firstMatch(s);
+  final imdbId = idMatch?.group(1);
+  // Strip all {...} and [...] tag blocks (ids, quality, edition), then any
+  // separator dash they leave dangling at the end.
+  s = s.replaceAll(RegExp(r'\{[^}]*\}|\[[^\]]*\]'), ' ');
   s = s.replaceAll(RegExp(r'[._]+'), ' ').trim();
+  s = s.replaceFirst(RegExp(r'[\s-]+$'), '');
 
   int? year;
   var title = s;
@@ -87,5 +114,5 @@ ParsedName parseMediaName(String name) {
     title = match.group(1)!.trim();
     year = int.parse(match.group(2)!);
   }
-  return ParsedName(title.isEmpty ? name : title, year);
+  return ParsedName(title.isEmpty ? name : title, year, imdbId: imdbId);
 }

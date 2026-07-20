@@ -74,32 +74,34 @@ void main() {
       expect(await LibraryStore.load(), isEmpty);
     });
 
-    test('rewrites the stale pre-alpha.5 default address in place', () async {
-      await LibraryStore.save([
-        const MediaList(
-          id: 'default-test-movies',
-          title: 'Test Movies',
-          entries: [
-            MediaEntry(
-              name: 'Night Of The Living Dead (1968)',
-              address: kLegacyDefaultMovieAddress,
-            ),
-          ],
-        ),
-      ]);
-      await LibraryStore.ensureDefaults();
-      final lists = await LibraryStore.load();
-      final seeded = lists.singleWhere((l) => l.title == 'Test Movies');
-      expect(seeded.entries.single.address, kDefaultMovieAddress);
-      expect(seeded.entries.single.name, kDefaultMovieName);
-      // Other lists/entries with the current address are not duplicated.
-      expect(
-        lists
-            .expand((l) => l.entries)
-            .where((e) => e.address == kDefaultMovieAddress),
-        hasLength(1),
-      );
-    });
+    for (final legacy in kLegacyDefaultMovieAddresses) {
+      test('rewrites stale default address $legacy in place', () async {
+        await LibraryStore.save([
+          MediaList(
+            id: 'default-test-movies',
+            title: 'Test Movies',
+            entries: [
+              MediaEntry(
+                name: 'Night Of The Living Dead (1968)',
+                address: legacy,
+              ),
+            ],
+          ),
+        ]);
+        await LibraryStore.ensureDefaults();
+        final lists = await LibraryStore.load();
+        final seeded = lists.singleWhere((l) => l.title == 'Test Movies');
+        expect(seeded.entries.single.address, kDefaultMovieAddress);
+        expect(seeded.entries.single.name, kDefaultMovieName);
+        // Other lists/entries with the current address are not duplicated.
+        expect(
+          lists
+              .expand((l) => l.entries)
+              .where((e) => e.address == kDefaultMovieAddress),
+          hasLength(1),
+        );
+      });
+    }
   });
 
   group('Metadata', () {
@@ -130,6 +132,26 @@ void main() {
       expect(parseMediaName('Show.S01E01.mkv').title, 'Show S01E01');
       expect(parseMediaName('Show.S01E01.mkv').year, isNull);
       expect(parseMediaName('plainname').title, 'plainname');
+      expect(parseMediaName('The.Movie.2024.1080p.mkv').imdbId, isNull);
+    });
+
+    test('parseMediaName handles Plex/Jellyfin naming with id tags', () {
+      const plex =
+          'Night of the Living Dead (1968) {imdb-tt0063350} - [1080p].mp4';
+      expect(parseMediaName(plex).title, 'Night of the Living Dead');
+      expect(parseMediaName(plex).year, 1968);
+      expect(parseMediaName(plex).imdbId, 'tt0063350');
+
+      const jellyfin = 'The Movie (2024) [imdbid-tt1234567] - [1080p].mkv';
+      expect(parseMediaName(jellyfin).title, 'The Movie');
+      expect(parseMediaName(jellyfin).year, 2024);
+      expect(parseMediaName(jellyfin).imdbId, 'tt1234567');
+
+      // Quality tag but no id tag.
+      const tagged = 'Some Film (1999) - [720p].mkv';
+      expect(parseMediaName(tagged).title, 'Some Film');
+      expect(parseMediaName(tagged).year, 1999);
+      expect(parseMediaName(tagged).imdbId, isNull);
     });
   });
 
