@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.1.0+16
+version: 0.1.0+17
 
 environment:
   sdk: ^3.12.2
@@ -41,6 +41,16 @@ dependencies:
   media_kit: ^1.2.6
   media_kit_video: ^2.0.1
   media_kit_libs_video: ^1.0.7
+
+# Vendored media_kit_video 2.0.1 with a Linux H/W-rendering fix: upstream
+# reads Flutter's EGL display via eglGetCurrentDisplay() on the platform
+# thread, which is EGL_NO_DISPLAY since Flutter 3.38 — every Linux machine
+# fell back to CPU rendering. Our copy derives the EGLDisplay from the GDK
+# native display instead (media-kit/media-kit#1404). Drop this override once
+# upstream ships the fix.
+dependency_overrides:
+  media_kit_video:
+    path: third_party/media_kit_video
 
 dev_dependencies:
   flutter_test:
