@@ -132,25 +132,6 @@ gboolean texture_gl_populate_texture(FlTextureGL* texture,
   TextureGL* self = TEXTURE_GL(texture);
   VideoOutput* video_output = self->video_output;
 
-  // WATCH-IT PATCH: EGL + mpv render init is deferred to this callback (the
-  // raster thread, where Flutter's EGL context is current) — see
-  // video_output_ensure_hw_initialized(). Until it succeeds, expose a dummy
-  // 1x1 texture.
-  if (!video_output_ensure_hw_initialized(video_output)) {
-    if (self->name == 0) {
-      glGenTextures(1, &self->name);
-      glBindTexture(GL_TEXTURE_2D, self->name);
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA,
-                   GL_UNSIGNED_BYTE, NULL);
-      glBindTexture(GL_TEXTURE_2D, 0);
-    }
-    *target = GL_TEXTURE_2D;
-    *name = self->name;
-    *width = 1;
-    *height = 1;
-    return TRUE;
-  }
-
   gint32 required_width = (guint32)video_output_get_width(video_output);
   gint32 required_height = (guint32)video_output_get_height(video_output);
   
