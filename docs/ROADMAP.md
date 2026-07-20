@@ -1,11 +1,13 @@
 # Roadmap
 
-**Status (2026-07-19):** v0.1.0-alpha.12 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)).
-Phase 0 is essentially done on Android: signed APK streams a real movie from the live
-Autonomi network via the embedded Rust client (`native/watchit_core`), with seek,
-buffering progress, configurable buffer size, and etchit-family branding (copper `[>]`
-icon + matching app-bar lockup) and CI on every push. Outstanding from Phase 0: the
-Linux desktop build (blocked on toolchain install). Phase 1 is partially started.
+**Status (2026-07-20):** v0.1.0-alpha.16 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
+— signed Android APK + Linux AppImage. Phase 0 is done: both platforms stream a real
+movie from the live Autonomi network via the embedded Rust client
+(`native/watchit_core`), with seek, buffering progress, configurable buffer size,
+etchit-family branding, and CI on every push. The seeded default movie is now an
+H.264 8-bit 1080p encode (hardware-decodable on phones and older desktops, replacing
+the AV1 10-bit original) named per the Plex/Jellyfin convention — see
+[NAMING.md](NAMING.md). Phase 1 is partially started.
 
 ## Phase 0 — Foundations (1–2 weeks)
 - [x] Flutter project scaffold in `app/` targeting Linux + Android first (dev machines)

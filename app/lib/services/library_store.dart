@@ -9,13 +9,15 @@ import 'metadata.dart';
 /// Phase 0 stand-in for the SQLite (drift) store planned in ARCHITECTURE.md.
 class LibraryStore {
   static const _key = 'media_lists_v1';
-  // v2: default movie re-uploaded under a new address; the v1 seed's
-  // address no longer resolves on the network.
-  static const _seededKey = 'defaults_seeded_v2';
+  // v2: default movie re-uploaded under a new address (v1 seed dead).
+  // v3: default replaced with the H.264 8-bit re-encode (Plex/Jellyfin
+  // file name) — the AV1 10-bit webm was unplayable on most phones and
+  // older desktops.
+  static const _seededKey = 'defaults_seeded_v3';
 
   /// One-time seed of the built-in test movie so fresh (and upgraded)
-  /// installs have something playable. Entries still pointing at the stale
-  /// pre-alpha.5 address are rewritten to the current one. Skipped when the
+  /// installs have something playable. Entries still pointing at a stale
+  /// default address are rewritten to the current one. Skipped when the
   /// user already has the address in a list; never re-added after the user
   /// deletes it.
   static Future<void> ensureDefaults() async {
@@ -23,8 +25,8 @@ class LibraryStore {
     if (prefs.getBool(_seededKey) ?? false) return;
     var lists = await load();
     var changed = false;
-    if (lists.any(
-        (l) => l.entries.any((e) => e.address == kLegacyDefaultMovieAddress))) {
+    if (lists.any((l) => l.entries
+        .any((e) => kLegacyDefaultMovieAddresses.contains(e.address)))) {
       lists = [
         for (final l in lists)
           MediaList(
@@ -32,7 +34,7 @@ class LibraryStore {
             title: l.title,
             entries: [
               for (final e in l.entries)
-                e.address == kLegacyDefaultMovieAddress
+                kLegacyDefaultMovieAddresses.contains(e.address)
                     ? const MediaEntry(
                         name: kDefaultMovieName,
                         address: kDefaultMovieAddress,
