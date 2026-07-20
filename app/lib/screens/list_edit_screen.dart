@@ -205,7 +205,7 @@ Future<MediaEntry?> _promptForEntry(BuildContext context) {
                   decoration: InputDecoration(
                     labelText: 'File name',
                     labelStyle: TextStyle(color: t.ash),
-                    hintText: 'The.Movie.2024.1080p.mkv',
+                    hintText: 'The Movie (2024) {imdb-tt1234567} - [1080p].mkv',
                     hintStyle: TextStyle(color: t.ash),
                   ),
                 ),

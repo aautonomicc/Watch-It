@@ -3,8 +3,9 @@
 class MediaEntry {
   const MediaEntry({required this.name, required this.address});
 
-  /// File name, e.g. `The.Movie.2024.1080p.mkv` — later fed to the
-  /// metadata matcher.
+  /// File name, preferably Plex/Jellyfin style
+  /// (`Title (Year) {imdb-ttXXXXXXX} - [1080p].mkv`); release-style names
+  /// (`The.Movie.2024.1080p.mkv`) also parse. Fed to the metadata matcher.
   final String name;
 
   /// XOR public file address on Autonomi (64 hex chars).
