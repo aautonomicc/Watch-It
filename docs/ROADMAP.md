@@ -28,9 +28,10 @@ of an Autonomi-hosted file by address. → **Met on Android** (streaming + seek 
 Linux playback pending the desktop toolchain.
 
 ## Phase 1 — Lists + metadata MVP
-- [ ] List model in SQLite; add-entry flow (paste XOR address + file name)
-      → add/edit/remove entries works today (Settings → media lists), but persists
-      via shared_preferences as a stand-in; SQLite (drift) migration still to do
+- [x] List model in SQLite; add-entry flow (paste XOR address + file name)
+      → add/edit/remove entries via Settings → media lists; lists persist in
+      SQLite (drift) with a one-time import of the shared_preferences blob
+      earlier alphas wrote
 - [ ] Filename → title/year/episode parser; TMDB artwork/description/category fetch,
       cached locally → stubbed only: seeded metadata for the default movie,
       no live TMDB matching yet

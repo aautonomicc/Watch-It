@@ -41,6 +41,8 @@ dependencies:
   media_kit: ^1.2.6
   media_kit_video: ^2.0.1
   media_kit_libs_video: ^1.0.7
+  drift: ^2.34.2
+  drift_flutter: ^0.3.1
 
 # Vendored media_kit_video 2.0.1 with a Linux H/W-rendering fix: upstream
 # reads Flutter's EGL display via eglGetCurrentDisplay() on the platform
@@ -62,6 +64,9 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  drift_dev: ^2.34.4
+  build_runner: ^2.15.1
+  sqlite3: ^3.5.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
