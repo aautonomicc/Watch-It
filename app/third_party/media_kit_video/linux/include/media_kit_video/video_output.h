@@ -88,15 +88,6 @@ void video_output_set_texture_update_callback(
  */
 void video_output_set_size(VideoOutput* self, gint64 width, gint64 height);
 
-/**
- * @brief WATCH-IT PATCH (media-kit/media-kit#1404): creates the isolated EGL
- * context + mpv render context on first use. Must be called on a thread with
- * Flutter's EGL context current — the raster thread (FlTextureGL populate),
- * or the platform thread on pre-3.38 embedders. Returns TRUE once H/W
- * rendering is initialized.
- */
-gboolean video_output_ensure_hw_initialized(VideoOutput* self);
-
 mpv_render_context* video_output_get_render_context(VideoOutput* self);
 
 GdkGLContext* video_output_get_gdk_gl_context(VideoOutput* self);
