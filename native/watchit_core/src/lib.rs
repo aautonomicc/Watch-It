@@ -5,6 +5,7 @@
 //! localhost HTTP server, and returns the bound port. The player then
 //! streams `http://127.0.0.1:{port}/xor/{address}` like any HTTP source.
 
+pub mod cache;
 pub mod engine;
 pub mod server;
 

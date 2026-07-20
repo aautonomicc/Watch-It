@@ -34,6 +34,8 @@ async fn health(engine: &'static Engine) -> Response {
             "peers": engine.connected_peer_count().await,
             "fetched_chunks": crate::engine::FETCHED_CHUNKS.load(Ordering::Relaxed),
             "fetched_bytes": crate::engine::FETCHED_BYTES.load(Ordering::Relaxed),
+            "cache_hit_chunks": crate::engine::CACHE_HIT_CHUNKS.load(Ordering::Relaxed),
+            "cache_bytes": crate::engine::cache_resident_bytes(),
         })
     } else {
         // The engine retries forever in the background, so a recorded
