@@ -8,15 +8,17 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use ant_core::data::{Client, ClientConfig, DataMap, Error as AntError};
 use bytes::Bytes;
 use futures::StreamExt;
 use tokio::runtime::Handle;
-use tokio::sync::{mpsc, OnceCell};
+use tokio::sync::{mpsc, watch, OnceCell};
 use xor_name::XorName;
+
+use crate::cache::{ChunkCache, Lookup};
 
 /// Production network bootstrap peers, mirrored from
 /// WithAutonomi/ant-client resources/bootstrap_peers.toml (rev 629b87f).
@@ -51,8 +53,34 @@ pub static FETCHED_CHUNKS: std::sync::atomic::AtomicU64 =
 pub static FETCHED_BYTES: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
+/// Chunk fetches answered from the RAM cache since process start.
+pub static CACHE_HIT_CHUNKS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 /// Concurrent chunk fetches within one decrypt batch.
 const FETCH_CONCURRENCY: usize = 8;
+
+/// Chunks the prefetcher keeps fetched ahead of the last byte served to
+/// the player. Network chunks are ≤4 MiB, so 16 ≈ 64 MiB ≈ a minute of
+/// typical 1080p (7–8 Mbps) — enough runway to ride out multi-second
+/// chunk-fetch stalls without holding much RAM (the cache in `cache.rs`
+/// is sized to hold this window plus recently played history).
+const PREFETCH_AHEAD_CHUNKS: usize = 16;
+
+/// Concurrent chunk fetches used by the prefetcher — kept below
+/// [`FETCH_CONCURRENCY`] so a foreground batch the player is blocked on
+/// is never starved of connections by background prefetch.
+const PREFETCH_CONCURRENCY: usize = 4;
+
+/// All chunk traffic (serving and prefetch) goes through this cache, so a
+/// chunk is downloaded at most once while resident and prefetched chunks
+/// are ready when the serving path asks for them.
+static CHUNK_CACHE: LazyLock<ChunkCache> = LazyLock::new(ChunkCache::new);
+
+/// Bytes currently resident in the chunk cache (for `/health`).
+pub fn cache_resident_bytes() -> usize {
+    CHUNK_CACHE.resident_bytes()
+}
 
 /// Hard ceiling on one `Client::connect` attempt (per socket config).
 /// The transport's own dial timeouts should finish well inside this; the
@@ -200,7 +228,9 @@ impl Engine {
 
     /// Stream an inclusive byte range as decrypted bytes, fetched in
     /// [`RANGE_STEP`] slices so seeks start playing quickly and memory
-    /// stays bounded.
+    /// stays bounded. A background prefetcher keeps
+    /// [`PREFETCH_AHEAD_CHUNKS`] chunks warm ahead of the served position
+    /// so one slow chunk batch stalls prefetch, not the player.
     pub fn stream_range(
         &'static self,
         root: DataMap,
@@ -216,6 +246,11 @@ impl Engine {
                     return;
                 }
             };
+            // The serving loop reports the last byte handed to the player;
+            // the prefetcher follows. Dropping the sender (loop returns for
+            // any reason) shuts the prefetcher down.
+            let (pos_tx, pos_rx) = watch::channel(start);
+            tokio::spawn(prefetch_ahead(client, chunk_offsets(&root), pos_rx, end));
             let handle = Handle::current();
             let blocking = tokio::task::spawn_blocking(move || {
                 let fetch = |batch: &[(usize, XorName)]| {
@@ -242,6 +277,7 @@ impl Engine {
                                 return;
                             }
                             pos += bytes.len() as u64;
+                            let _ = pos_tx.send(pos);
                             if tx.blocking_send(Ok(bytes)).is_err() {
                                 return; // player disconnected (normal on seek)
                             }
@@ -307,25 +343,16 @@ async fn connect_bounded(
 }
 
 /// Bridge self_encryption's synchronous batch-fetch callback to async
-/// `chunk_get`, fetching the batch concurrently.
+/// chunk fetches through the cache, fetching the batch concurrently.
 async fn fetch_chunk_batch(
     client: &Client,
     batch: &[(usize, XorName)],
 ) -> self_encryption::Result<Vec<(usize, Bytes)>> {
     let fetches = batch.iter().map(|&(idx, name)| async move {
-        let chunk = client
-            .chunk_get(&name.0)
+        let bytes = cached_chunk_get(client, name)
             .await
-            .map_err(|e| self_encryption::Error::Generic(format!("chunk fetch failed: {e}")))?
-            .ok_or_else(|| {
-                self_encryption::Error::Generic(format!(
-                    "chunk not found: {}",
-                    hex::encode(name.0)
-                ))
-            })?;
-        FETCHED_CHUNKS.fetch_add(1, Ordering::Relaxed);
-        FETCHED_BYTES.fetch_add(chunk.content.len() as u64, Ordering::Relaxed);
-        Ok::<_, self_encryption::Error>((idx, chunk.content))
+            .map_err(self_encryption::Error::Generic)?;
+        Ok::<_, self_encryption::Error>((idx, bytes))
     });
     let mut results: Vec<(usize, Bytes)> = futures::stream::iter(fetches)
         .buffer_unordered(FETCH_CONCURRENCY)
@@ -337,4 +364,130 @@ async fn fetch_chunk_batch(
     // batch, so restore input order.
     results.sort_by_key(|(idx, _)| *idx);
     Ok(results)
+}
+
+/// Releases a claimed fetch if the owning future is dropped before
+/// completion (task cancellation), so waiters never poll a dead claim.
+struct FetchClaim {
+    name: [u8; 32],
+    done: bool,
+}
+
+impl Drop for FetchClaim {
+    fn drop(&mut self) {
+        if !self.done {
+            CHUNK_CACHE.complete(self.name, None);
+        }
+    }
+}
+
+/// Chunk fetch through the process-wide cache. Single-flight: the first
+/// caller downloads, concurrent callers for the same chunk poll the cache
+/// until it lands (chunk downloads take hundreds of ms to seconds, so a
+/// 50 ms poll adds nothing measurable and avoids the lost-wakeup hazards
+/// of a notification handoff).
+async fn cached_chunk_get(client: &Client, name: XorName) -> Result<Bytes, String> {
+    loop {
+        match CHUNK_CACHE.lookup(&name.0) {
+            Lookup::Hit(bytes) => {
+                CACHE_HIT_CHUNKS.fetch_add(1, Ordering::Relaxed);
+                return Ok(bytes);
+            }
+            Lookup::InFlight => tokio::time::sleep(Duration::from_millis(50)).await,
+            Lookup::Fetch => {
+                let mut claim = FetchClaim { name: name.0, done: false };
+                let result = client.chunk_get(&name.0).await;
+                claim.done = true;
+                return match result {
+                    Ok(Some(chunk)) => {
+                        FETCHED_CHUNKS.fetch_add(1, Ordering::Relaxed);
+                        FETCHED_BYTES.fetch_add(chunk.content.len() as u64, Ordering::Relaxed);
+                        CHUNK_CACHE.complete(name.0, Some(chunk.content.clone()));
+                        Ok(chunk.content)
+                    }
+                    Ok(None) => {
+                        CHUNK_CACHE.complete(name.0, None);
+                        Err(format!("chunk not found: {}", hex::encode(name.0)))
+                    }
+                    Err(e) => {
+                        CHUNK_CACHE.complete(name.0, None);
+                        Err(format!("chunk fetch failed: {e}"))
+                    }
+                };
+            }
+        }
+    }
+}
+
+/// Chunks of a root data map as `(first plaintext byte, network address)`
+/// in file order — the map self_encryption's `get_range` uses to pick
+/// chunks, rebuilt here so the prefetcher can address them directly.
+fn chunk_offsets(root: &DataMap) -> Vec<(u64, XorName)> {
+    let mut infos: Vec<_> = root
+        .infos()
+        .iter()
+        .map(|i| (i.index, i.src_size as u64, i.dst_hash))
+        .collect();
+    infos.sort_by_key(|&(index, _, _)| index);
+    let mut offset = 0u64;
+    infos
+        .into_iter()
+        .map(|(_, src_size, name)| {
+            let start = offset;
+            offset += src_size;
+            (start, name)
+        })
+        .collect()
+}
+
+/// Keep [`PREFETCH_AHEAD_CHUNKS`] chunks warm ahead of the last byte the
+/// serving loop has handed to the player, so each serving step finds its
+/// chunks already in RAM instead of blocking the stream on the network.
+/// Exits when the serving side drops its position sender (stream done or
+/// player disconnected).
+async fn prefetch_ahead(
+    client: &'static Client,
+    chunks: Vec<(u64, XorName)>,
+    mut pos: watch::Receiver<u64>,
+    end: u64,
+) {
+    // Last chunk this request can ever need.
+    let Some(last) = chunks.iter().rposition(|&(start, _)| start <= end) else {
+        return;
+    };
+    loop {
+        let served = *pos.borrow_and_update();
+        let current = chunks
+            .partition_point(|&(start, _)| start <= served)
+            .saturating_sub(1);
+        let target = (current + PREFETCH_AHEAD_CHUNKS).min(last);
+        let wanted: Vec<XorName> = chunks[current..=target]
+            .iter()
+            .filter(|(_, name)| !CHUNK_CACHE.contains(&name.0))
+            .map(|&(_, name)| name)
+            .collect();
+        if wanted.is_empty() {
+            // Window is warm; sleep until playback advances. Err means the
+            // serving side is gone.
+            if pos.changed().await.is_err() {
+                return;
+            }
+            continue;
+        }
+        let results = futures::stream::iter(
+            wanted.into_iter().map(|name| cached_chunk_get(client, name)),
+        )
+        .buffer_unordered(PREFETCH_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await;
+        if let Some(Err(e)) = results.iter().find(|r| r.is_err()) {
+            // Back off instead of hammering a failing chunk; the serving
+            // path will surface the error if playback actually needs it.
+            tracing::debug!("prefetch fetch failed, backing off: {e}");
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+        if pos.has_changed().is_err() {
+            return;
+        }
+    }
 }
