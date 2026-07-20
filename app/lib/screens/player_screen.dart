@@ -38,9 +38,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late final VideoController _controller;
   StreamSubscription<bool>? _bufferingSub;
   StreamSubscription<String>? _errorSub;
+  StreamSubscription<Duration>? _positionSub;
   Timer? _healthTimer;
 
   bool _buffering = true;
+  bool _playbackStarted = false;
   String? _error;
   int _fetchedBytes = 0;
 
@@ -62,8 +64,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _bufferingSub = _player.stream.buffering.listen((b) {
       if (mounted) setState(() => _buffering = b);
     });
+    // mpv reports error-level log lines that are not fatal — e.g. a
+    // hardware decoder that fails to open ("could not open codec")
+    // right before it falls back to software and plays fine. Only treat
+    // an error as fatal while nothing has played yet; once frames are
+    // rendering, errors would show a "Playback failed" overlay on top
+    // of a working video.
     _errorSub = _player.stream.error.listen((e) {
-      if (mounted) setState(() => _error = e);
+      if (mounted && !_playbackStarted) setState(() => _error = e);
+    });
+    _positionSub = _player.stream.position.listen((pos) {
+      if (_playbackStarted || pos <= Duration.zero) return;
+      _playbackStarted = true;
+      // Playback is demonstrably working — drop any earlier error
+      // (a failed decoder attempt that mpv recovered from).
+      if (mounted) setState(() => _error = null);
     });
     _healthTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
       if (!_buffering || _error != null) return;
@@ -78,6 +93,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _healthTimer?.cancel();
     _bufferingSub?.cancel();
     _errorSub?.cancel();
+    _positionSub?.cancel();
     _player.dispose();
     super.dispose();
   }
