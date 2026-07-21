@@ -27,6 +27,10 @@ class LibraryStore {
   static Future<AppDatabase> _database() =>
       _opening ??= _open();
 
+  /// The app database, opened (and legacy-imported) on first use. Shared
+  /// with [MetadataService] for the metadata cache table.
+  static Future<AppDatabase> database() => _database();
+
   static Future<AppDatabase> _open() async {
     final db = _db ??= AppDatabase();
     await _importLegacyPrefs(db);

@@ -32,9 +32,11 @@ Linux playback pending the desktop toolchain.
       → add/edit/remove entries via Settings → media lists; lists persist in
       SQLite (drift) with a one-time import of the shared_preferences blob
       earlier alphas wrote
-- [ ] Filename → title/year/episode parser; TMDB artwork/description/category fetch,
-      cached locally → stubbed only: seeded metadata for the default movie,
-      no live TMDB matching yet
+- [x] Filename → title/year/episode parser; TMDB artwork/description/category fetch,
+      cached locally → done: parser handles Plex/Jellyfin + release-style names and
+      S01E02/1x02 episode markers; TMDB matching (exact /find by IMDb id, else
+      title/year search) cached in SQLite with poster files on disk; needs a
+      TMDB API key (Settings → Metadata, or --dart-define=TMDB_API_KEY)
 - [ ] Home (Continue Watching / Recently Added), Library grid, Detail page
       → home poster grid + network status bar and Detail page (artwork, description,
       Play) exist; Continue Watching / Recently Added rows not yet

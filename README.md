@@ -33,7 +33,10 @@ ships a signed APK and a Linux AppImage that connect to the live Autonomi networ
 with an embedded Rust client (no gateway, no sidecar) and stream a seeded demo movie
 by XOR address (H.264 1080p, hardware-decodable everywhere), with seeking, buffering
 progress, and a configurable stream buffer. Media lists can be managed in Settings.
-Live TMDB metadata matching, downloads, and resume state are next — see the roadmap.
+Live TMDB metadata matching works on-device: set a free TMDB API key in
+Settings → Metadata and entries get artwork, descriptions, and categories from
+their file names, cached locally. Downloads and resume state are next — see the
+roadmap.
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users

@@ -1,8 +1,11 @@
 # File naming convention
 
 Watch-It resolves artwork and descriptions from the **file name** of each list
-entry, so good names mean good metadata. Use the de-facto **Plex/Jellyfin
-convention** when naming files before uploading them to Autonomi:
+entry, so good names mean good metadata. Matching runs against TMDB and needs a
+free API key (Settings → Metadata; create one at themoviedb.org → Settings →
+API) — without one, cards show the parsed title only. Use the de-facto
+**Plex/Jellyfin convention** when naming files before uploading them to
+Autonomi:
 
 ```
 Title (Year) {imdb-ttXXXXXXX} - [quality].ext
@@ -33,6 +36,7 @@ resolve to a title, year, and (where tagged) IMDb id:
 | `The Movie (2024) [imdbid-tt1234567] - [1080p].mkv` (Jellyfin variant) | The Movie | 2024 | tt1234567 |
 | `Some Film (1999) - [720p].mkv` | Some Film | 1999 | — |
 | `The.Movie.2024.1080p.mkv` (release style) | The Movie | 2024 | — |
+| `Show S01E02.mkv` (also `Show.S01E02…`, `Show 1x02`) | Show *(season 1, episode 2)* | — | — |
 | `plainname.mp4` | plainname | — | — |
 
 Rules of thumb:
@@ -42,8 +46,9 @@ Rules of thumb:
   (Jellyfin style). Find the id in the movie's IMDb URL.
 - Anything else in `{…}` or `[…]` (quality, edition) is stripped from the
   display title.
-- TV episodes: `Show S01E02.mkv` style parses today; full episode metadata is a
-  later phase.
+- TV episodes: name files `Show S01E02.mkv` (or `Show 1x02.mkv`). The matcher
+  finds the show on TMDB and pulls the episode name and synopsis, the show
+  poster, and genres.
 
 ## Encoding note
 

@@ -161,7 +161,7 @@ void main() {
 
   group('Metadata', () {
     test('default movie resolves from the bundled catalog', () {
-      final meta = metadataFor(const MediaEntry(
+      final meta = fallbackMetadataFor(const MediaEntry(
         name: kDefaultMovieName,
         address: kDefaultMovieAddress,
       ));
@@ -172,7 +172,7 @@ void main() {
     });
 
     test('unknown address falls back to parsed file name', () {
-      final meta = metadataFor(
+      final meta = fallbackMetadataFor(
           const MediaEntry(name: 'The.Movie.2024.1080p.mkv', address: _addr));
       expect(meta.title, 'The Movie');
       expect(meta.year, 2024);
@@ -184,10 +184,49 @@ void main() {
       expect(parseMediaName('The.Movie.2024.1080p.mkv').year, 2024);
       expect(parseMediaName('Some Film (1999)').title, 'Some Film');
       expect(parseMediaName('Some Film (1999)').year, 1999);
-      expect(parseMediaName('Show.S01E01.mkv').title, 'Show S01E01');
-      expect(parseMediaName('Show.S01E01.mkv').year, isNull);
       expect(parseMediaName('plainname').title, 'plainname');
       expect(parseMediaName('The.Movie.2024.1080p.mkv').imdbId, isNull);
+      expect(parseMediaName('The.Movie.2024.1080p.mkv').isEpisode, isFalse);
+    });
+
+    test('parseMediaName extracts season/episode markers', () {
+      final sxxeyy = parseMediaName('Show.S01E01.mkv');
+      expect(sxxeyy.title, 'Show');
+      expect(sxxeyy.year, isNull);
+      expect(sxxeyy.season, 1);
+      expect(sxxeyy.episode, 1);
+      expect(sxxeyy.isEpisode, isTrue);
+
+      final full = parseMediaName(
+          'The Show (2019) S02E13 The Episode Name [1080p].mkv');
+      expect(full.title, 'The Show');
+      expect(full.year, 2019);
+      expect(full.season, 2);
+      expect(full.episode, 13);
+
+      final xStyle = parseMediaName('Show 2x05.mkv');
+      expect(xStyle.title, 'Show');
+      expect(xStyle.season, 2);
+      expect(xStyle.episode, 5);
+
+      // Resolutions must not read as episode markers.
+      final res = parseMediaName('The.Movie.2024.1920x1080.mkv');
+      expect(res.isEpisode, isFalse);
+      expect(res.title, 'The Movie');
+      expect(res.year, 2024);
+    });
+
+    test('lookupKey shares cache rows across renames of one film', () {
+      expect(
+        parseMediaName('The Movie (2024) - [1080p].mkv').lookupKey,
+        parseMediaName('The.Movie.2024.720p.mkv').lookupKey,
+      );
+      expect(
+        parseMediaName('A (2024) {imdb-tt1} - [1080p].mkv').lookupKey,
+        'imdb:tt1',
+      );
+      expect(parseMediaName('Show.S01E02.mkv').lookupKey,
+          'tv:show::s1:e2');
     });
 
     test('parseMediaName handles Plex/Jellyfin naming with id tags', () {
@@ -333,8 +372,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Weekend Queue'), findsOneWidget);
-      // Poster cards show the parsed display title, not the raw file name.
-      expect(find.text('Show S01E01'), findsOneWidget);
+      // Poster cards show the parsed display title, not the raw file name
+      // (episode markers are stripped into season/episode since alpha.23).
+      expect(find.text('Show'), findsOneWidget);
       expect(find.text('Your library is empty'), findsNothing);
     });
   });

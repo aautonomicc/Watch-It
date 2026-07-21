@@ -138,7 +138,10 @@ Watch-It/
 
 1. ~~Gateway sidecar vs Rust FFI~~ — **resolved**: embedded Rust FFI client with an
    in-process localhost server (see Autonomi access).
-2. TMDB API key strategy — bundled shared key vs bring-your-own (rate limits).
+2. ~~TMDB API key strategy~~ — **resolved (alpha.23)**: bring-your-own key entered in
+   Settings → Metadata (either the v3 API key or the v4 read access token), with a
+   `--dart-define=TMDB_API_KEY` hook for bundling a shared key into official builds
+   later if rate limits allow. Without a key, cards fall back to parsed file names.
 3. Subtitles for streamed items: sidecar files as linked list entries, or embedded-only
    in v1?
 4. List format: define a small JSON schema now so shared lists are forward-compatible.

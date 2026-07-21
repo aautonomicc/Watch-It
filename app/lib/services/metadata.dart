@@ -1,25 +1,37 @@
 import '../models/media_list.dart';
 
-/// Display metadata for a media entry: artwork, description, year.
+/// Display metadata for a media entry: artwork, description, year,
+/// category.
 ///
-/// Phase 0 stand-in for the on-device TMDB matcher (ARCHITECTURE.md):
-/// a small bundled catalog covers the default test movie; everything else
-/// falls back to a parsed file name with no artwork. Live TMDB matching
-/// needs an API key and lands with the SQLite cache.
+/// Three sources, best wins (see services/metadata_service.dart):
+/// live TMDB match cached in SQLite, the small bundled catalog covering
+/// the default test movie, and the parsed file name with no artwork.
 class MediaMetadata {
   const MediaMetadata({
     required this.title,
     this.year,
     this.overview,
+    this.category,
+    this.episodeLabel,
     this.posterAsset,
+    this.posterFilePath,
   });
 
   final String title;
   final int? year;
   final String? overview;
 
+  /// Genre names joined with ` · ` (e.g. `Horror · Thriller`), if matched.
+  final String? category;
+
+  /// For TV episodes: `S01E02 · Episode Name` (name when TMDB knows it).
+  final String? episodeLabel;
+
   /// Bundled asset path (e.g. `assets/posters/notld_1968.jpg`), if any.
   final String? posterAsset;
+
+  /// Locally cached artwork file downloaded from TMDB, if any.
+  final String? posterFilePath;
 }
 
 /// XOR address of the built-in test movie seeded on first run.
@@ -59,18 +71,27 @@ const _byAddress = <String, MediaMetadata>{
   kDefaultMovieAddress: _notld,
 };
 
-/// Look up metadata for [entry]. Always returns something displayable:
-/// catalog hit by address, else a parsed title/year with no artwork.
-MediaMetadata metadataFor(MediaEntry entry) {
+/// Offline fallback metadata for [entry]. Always returns something
+/// displayable: catalog hit by address, else a parsed title/year with no
+/// artwork. Screens go through `MetadataService.instance.metadataFor`,
+/// which upgrades this with the cached/live TMDB match.
+MediaMetadata fallbackMetadataFor(MediaEntry entry) {
   final addr = entry.address.toLowerCase().replaceFirst('0x', '');
   final hit = _byAddress[addr];
   if (hit != null) return hit;
   final parsed = parseMediaName(entry.name);
-  return MediaMetadata(title: parsed.title, year: parsed.year);
+  return MediaMetadata(
+    title: parsed.title,
+    year: parsed.year,
+    episodeLabel: parsed.isEpisode
+        ? 'S${parsed.season.toString().padLeft(2, '0')}'
+            'E${parsed.episode.toString().padLeft(2, '0')}'
+        : null,
+  );
 }
 
 class ParsedName {
-  const ParsedName(this.title, this.year, {this.imdbId});
+  const ParsedName(this.title, this.year, {this.imdbId, this.season, this.episode});
 
   final String title;
   final int? year;
@@ -79,14 +100,30 @@ class ParsedName {
   /// Lets the TMDB matcher do an exact `/find` lookup instead of a
   /// title/year search.
   final String? imdbId;
+
+  /// Season/episode from an `S01E02` or `1x02` marker; both set or both
+  /// null. When set, [title] is the show name (text before the marker).
+  final int? season;
+  final int? episode;
+
+  bool get isEpisode => season != null;
+
+  /// Cache key for this lookup: same key means the same TMDB query, so
+  /// renamed copies and duplicates share one cached match.
+  String get lookupKey {
+    final ep = isEpisode ? ':s$season:e$episode' : '';
+    if (imdbId != null) return 'imdb:$imdbId$ep';
+    return '${isEpisode ? 'tv' : 'movie'}'
+        ':${title.toLowerCase()}:${year ?? ''}$ep';
+  }
 }
 
-/// Parse a media file name into a display title, year, and optional IMDb id.
-/// Handles the Plex/Jellyfin convention
+/// Parse a media file name into a display title, year, optional IMDb id,
+/// and optional season/episode. Handles the Plex/Jellyfin convention
 /// (`Title (Year) {imdb-ttXXXXXXX} - [1080p].mkv`, Jellyfin's
-/// `[imdbid-ttXXXXXXX]` variant included) as well as release-style names
-/// (`The.Movie.2024.1080p.mkv`). Permissive: plain names pass through
-/// unchanged.
+/// `[imdbid-ttXXXXXXX]` variant included), release-style names
+/// (`The.Movie.2024.1080p.mkv`), and episode markers (`Show S01E02.mkv`,
+/// `Show 1x02.mkv`). Permissive: plain names pass through unchanged.
 ParsedName parseMediaName(String name) {
   var s = name.trim();
   // Drop a media file extension, if present.
@@ -103,7 +140,22 @@ ParsedName parseMediaName(String name) {
   // separator dash they leave dangling at the end.
   s = s.replaceAll(RegExp(r'\{[^}]*\}|\[[^\]]*\]'), ' ');
   s = s.replaceAll(RegExp(r'[._]+'), ' ').trim();
-  s = s.replaceFirst(RegExp(r'[\s-]+$'), '');
+
+  // Episode marker: `S01E02` / `s01 e02` / `1x02`. Everything before it is
+  // the show name; everything after (episode title, quality) is dropped —
+  // TMDB supplies the episode name. `\d{1,2}x` cannot match inside
+  // resolutions like 1920x1080 (no word boundary mid-number).
+  int? season, episode;
+  final epMatch = RegExp(r'\bS(\d{1,2})[ ._-]?E(\d{1,3})\b',
+              caseSensitive: false)
+          .firstMatch(s) ??
+      RegExp(r'\b(\d{1,2})x(\d{2,3})\b').firstMatch(s);
+  if (epMatch != null && s.substring(0, epMatch.start).trim().isNotEmpty) {
+    season = int.parse(epMatch.group(1)!);
+    episode = int.parse(epMatch.group(2)!);
+    s = s.substring(0, epMatch.start);
+  }
+  s = s.replaceFirst(RegExp(r'[\s-]+$'), '').trim();
 
   int? year;
   var title = s;
@@ -114,5 +166,6 @@ ParsedName parseMediaName(String name) {
     title = match.group(1)!.trim();
     year = int.parse(match.group(2)!);
   }
-  return ParsedName(title.isEmpty ? name : title, year, imdbId: imdbId);
+  return ParsedName(title.isEmpty ? name : title, year,
+      imdbId: imdbId, season: season, episode: episode);
 }
