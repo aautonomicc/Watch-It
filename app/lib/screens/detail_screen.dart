@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
-import '../services/metadata.dart';
+import '../services/metadata_service.dart';
 import '../services/embedded_client.dart';
 import '../theme/tokens.dart';
 import 'player_screen.dart';
@@ -41,7 +41,7 @@ class DetailScreen extends StatelessWidget {
       );
       return;
     }
-    final meta = metadataFor(entry);
+    final meta = MetadataService.instance.metadataFor(entry);
     final bufferSizeMb = await AppSettings.bufferSizeMb();
     if (!context.mounted) return;
     await Navigator.of(context).push(
@@ -57,8 +57,16 @@ class DetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Rebuild when the TMDB match for this entry lands in the cache.
+    return ListenableBuilder(
+      listenable: MetadataService.instance,
+      builder: (context, _) => _build(context),
+    );
+  }
+
+  Widget _build(BuildContext context) {
     final t = WiTokens.of(context);
-    final meta = metadataFor(entry);
+    final meta = MetadataService.instance.metadataFor(entry);
     return Scaffold(
       appBar: AppBar(
         backgroundColor: t.ink,
@@ -78,13 +86,12 @@ class DetailScreen extends StatelessWidget {
                 child: SizedBox(
                   width: 140,
                   height: 210,
-                  child: meta.posterAsset != null
-                      ? Image.asset(meta.posterAsset!, fit: BoxFit.cover)
-                      : Container(
-                          color: t.ink2,
-                          child: Icon(Icons.movie_outlined,
-                              color: t.ash, size: 48),
-                        ),
+                  child: posterImage(meta, fit: BoxFit.cover) ??
+                      Container(
+                        color: t.ink2,
+                        child: Icon(Icons.movie_outlined,
+                            color: t.ash, size: 48),
+                      ),
                 ),
               ),
               const SizedBox(width: 16),
@@ -100,10 +107,20 @@ class DetailScreen extends StatelessWidget {
                         color: t.bone,
                       ),
                     ),
+                    if (meta.episodeLabel != null) ...[
+                      const SizedBox(height: 4),
+                      Text(meta.episodeLabel!,
+                          style: TextStyle(fontSize: 13, color: t.boneDim)),
+                    ],
                     if (meta.year != null) ...[
                       const SizedBox(height: 4),
                       Text('${meta.year}',
                           style: TextStyle(fontSize: 13, color: t.ash)),
+                    ],
+                    if (meta.category != null) ...[
+                      const SizedBox(height: 4),
+                      Text(meta.category!,
+                          style: TextStyle(fontSize: 12, color: t.ash)),
                     ],
                     const SizedBox(height: 16),
                     FilledButton.icon(
@@ -135,9 +152,9 @@ class DetailScreen extends StatelessWidget {
             )
           else
             Text(
-              'No description — artwork and descriptions currently come '
-              'from a small bundled catalog (live TMDB matching is on the '
-              'roadmap).',
+              'No description yet — artwork and descriptions are matched '
+              'from TMDB by file name. Set a TMDB API key in Settings and '
+              'name files like the examples in the app\'s naming guide.',
               style: TextStyle(fontSize: 12.5, color: t.ash),
             ),
           const SizedBox(height: 24),

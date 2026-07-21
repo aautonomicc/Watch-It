@@ -7,6 +7,7 @@ import '../models/media_list.dart';
 import '../services/app_settings.dart';
 import '../services/library_store.dart';
 import '../services/embedded_client.dart';
+import '../services/metadata_service.dart';
 import '../theme/tokens.dart';
 import 'list_edit_screen.dart';
 
@@ -24,6 +25,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _version;
   Timer? _healthTimer;
   int _bufferSizeMb = AppSettings.defaultBufferSizeMb;
+  String _tmdbApiKey = '';
 
   @override
   void initState() {
@@ -55,11 +57,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final lists = await LibraryStore.load();
     final health = await EmbeddedClient.health();
     final bufferSizeMb = await AppSettings.bufferSizeMb();
+    final tmdbApiKey = await AppSettings.tmdbApiKey();
     if (mounted) {
       setState(() {
         _lists = lists;
         _health = health;
         _bufferSizeMb = bufferSizeMb;
+        _tmdbApiKey = tmdbApiKey;
       });
     }
   }
@@ -130,6 +134,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (picked == null) return;
     await AppSettings.setBufferSizeMb(picked);
     if (mounted) setState(() => _bufferSizeMb = picked);
+  }
+
+  Future<void> _editTmdbApiKey() async {
+    final entered = await promptForText(
+      context,
+      title: 'TMDB API key',
+      hint: 'API key or read access token (empty to disable)',
+      initial: _tmdbApiKey,
+    );
+    if (entered == null || entered.trim() == _tmdbApiKey) return;
+    await AppSettings.setTmdbApiKey(entered);
+    final key = await AppSettings.tmdbApiKey();
+    // Re-run matching with the new credential (also clears cached misses).
+    await MetadataService.instance.reset();
+    if (mounted) setState(() => _tmdbApiKey = key);
   }
 
   Future<void> _openList(MediaList list) async {
@@ -245,6 +264,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     'network but use more RAM (the same amount again is kept '
                     'behind the play position for instant rewind). Takes '
                     'effect the next time you press Play.',
+                    style: TextStyle(fontSize: 11.5, color: t.ash),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
+                  child: Text(
+                    'METADATA',
+                    style: TextStyle(
+                      fontSize: 11,
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.w700,
+                      color: t.ash,
+                    ),
+                  ),
+                ),
+                ListTile(
+                  leading: Icon(Icons.image_search_outlined, color: t.copper),
+                  title: Text('TMDB API key',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    _tmdbApiKey.isEmpty
+                        ? 'Not set — titles come from file names only'
+                        : 'Set (…${_tmdbApiKey.substring(_tmdbApiKey.length < 4 ? 0 : _tmdbApiKey.length - 4)})',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  trailing: Icon(Icons.chevron_right, color: t.ash),
+                  onTap: _editTmdbApiKey,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                  child: Text(
+                    'Artwork, descriptions, and categories are matched from '
+                    'TMDB using each entry\'s file name, then cached on this '
+                    'device. Create a free API key at themoviedb.org '
+                    '(Settings → API) and paste either the API key or the '
+                    'read access token here.',
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
                 ),
