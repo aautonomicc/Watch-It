@@ -22,8 +22,9 @@ CARGO="${CARGO:-$HOME/.cargo/bin/cargo}"
 CORE_LIB="$REPO_ROOT/native/watchit_core/target/release/libwatchit_core.so"
 [ -f "$CORE_LIB" ] || { echo "libwatchit_core.so missing after cargo build"; exit 1; }
 
+# Extra args (e.g. --dart-define=TMDB_API_KEY=…) pass through to flutter build.
 cd "$APP_DIR"
-flutter build linux --release
+flutter build linux --release "$@"
 cp "$CORE_LIB" "$BUNDLE/lib/"
 
 STAGE="$(mktemp -d)"
