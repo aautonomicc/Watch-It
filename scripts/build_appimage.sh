@@ -35,6 +35,14 @@ APPDIR="$STAGE/AppDir"
 mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/lib"
 cp -r "$BUNDLE/." "$APPDIR/usr/bin/"
 
+# package:sqlite3 (drift) dlopens libsqlite3.so by bare name (the
+# native-assets manifest maps to an unqualified name, and the executable's
+# RUNPATH doesn't apply to that dlopen), so the bundled copy must sit on
+# the AppRun loader path — boxes without a system sqlite3 crash otherwise.
+SQLITE_LIB="$BUNDLE/lib/libsqlite3.so"
+[ -f "$SQLITE_LIB" ] || { echo "libsqlite3.so missing from Flutter bundle"; exit 1; }
+cp "$SQLITE_LIB" "$APPDIR/usr/lib/"
+
 # 192px launcher icon doubles as the AppImage icon.
 cp "$APP_DIR/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" "$STAGE/watchit.png"
 
