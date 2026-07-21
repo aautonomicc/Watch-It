@@ -21,4 +21,30 @@ class AppSettings {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_bufferSizeKey, mb);
   }
+
+  static const _tmdbKeyKey = 'tmdb_api_key_v1';
+
+  /// Build-time default TMDB credential
+  /// (`flutter build --dart-define=TMDB_API_KEY=…`); empty in normal
+  /// builds — users bring their own key via Settings. Accepts either a
+  /// v3 API key or a v4 Read Access Token.
+  static const bundledTmdbApiKey = String.fromEnvironment('TMDB_API_KEY');
+
+  /// The user's TMDB credential, falling back to [bundledTmdbApiKey].
+  /// Empty string = metadata matching disabled.
+  static Future<String> tmdbApiKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = prefs.getString(_tmdbKeyKey)?.trim() ?? '';
+    return key.isNotEmpty ? key : bundledTmdbApiKey;
+  }
+
+  static Future<void> setTmdbApiKey(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    final trimmed = key.trim();
+    if (trimmed.isEmpty) {
+      await prefs.remove(_tmdbKeyKey);
+    } else {
+      await prefs.setString(_tmdbKeyKey, trimmed);
+    }
+  }
 }

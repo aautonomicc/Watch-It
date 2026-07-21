@@ -28,7 +28,33 @@ class MediaEntries extends Table {
   IntColumn get position => integer()();
 }
 
-@DriftDatabase(tables: [MediaLists, MediaEntries])
+/// Cached TMDB match for one parsed-file-name lookup, keyed by
+/// [ParsedName.lookupKey] (services/metadata.dart) so renamed copies of
+/// the same movie share a row. `found == false` records a confirmed
+/// TMDB miss so it is not retried on every launch (metadata_service.dart
+/// re-tries misses after a TTL).
+@DataClassName('MetadataCacheRow')
+class MetadataCache extends Table {
+  TextColumn get lookupKey => text()();
+  BoolColumn get found => boolean()();
+  TextColumn get title => text().nullable()();
+  IntColumn get year => integer().nullable()();
+  TextColumn get overview => text().nullable()();
+  TextColumn get category => text().nullable()();
+  TextColumn get episodeLabel => text().nullable()();
+
+  /// Artwork file name inside the app's posters dir (not a full path —
+  /// the app support dir can move between launches on mobile).
+  TextColumn get posterFile => text().nullable()();
+  TextColumn get mediaType => text().nullable()(); // 'movie' | 'tv'
+  IntColumn get tmdbId => integer().nullable()();
+  IntColumn get fetchedAt => integer()(); // epoch ms
+
+  @override
+  Set<Column> get primaryKey => {lookupKey};
+}
+
+@DriftDatabase(tables: [MediaLists, MediaEntries, MetadataCache])
 class AppDatabase extends _$AppDatabase {
   // Keep the database in the app support dir with the rest of the app
   // data — drift_flutter's default (documents dir) degrades to $HOME on
@@ -44,10 +70,13 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
+        onUpgrade: (m, from, to) async {
+          if (from < 2) await m.createTable(metadataCache); // alpha.23
+        },
         beforeOpen: (details) async {
           await customStatement('PRAGMA foreign_keys = ON');
         },

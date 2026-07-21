@@ -43,6 +43,7 @@ dependencies:
   media_kit_libs_video: ^1.0.7
   drift: ^2.34.2
   drift_flutter: ^0.3.1
+  http: ^1.2.0
 
 # Vendored media_kit_video 2.0.1 with a Linux H/W-rendering fix: upstream
 # reads Flutter's EGL display via eglGetCurrentDisplay() on the platform

@@ -8,7 +8,7 @@ import 'screens/detail_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/embedded_client.dart';
 import 'services/library_store.dart';
-import 'services/metadata.dart';
+import 'services/metadata_service.dart';
 import 'theme/tokens.dart';
 
 Future<void> main() async {
@@ -114,6 +114,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _libraryView(WiTokens t) {
+    // Poster cards upgrade in place as TMDB matches land in the cache.
+    return ListenableBuilder(
+      listenable: MetadataService.instance,
+      builder: (context, _) => _posterWall(t),
+    );
+  }
+
+  Widget _posterWall(WiTokens t) {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
@@ -256,7 +264,7 @@ class _PosterCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = tokens;
-    final meta = metadataFor(entry);
+    final meta = MetadataService.instance.metadataFor(entry);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(6),
@@ -270,13 +278,12 @@ class _PosterCard extends StatelessWidget {
               child: SizedBox(
                 width: 120,
                 height: 180,
-                child: meta.posterAsset != null
-                    ? Image.asset(meta.posterAsset!, fit: BoxFit.cover)
-                    : Container(
-                        color: t.ink2,
-                        child: Icon(Icons.movie_outlined,
-                            color: t.ash, size: 40),
-                      ),
+                child: posterImage(meta, fit: BoxFit.cover) ??
+                    Container(
+                      color: t.ink2,
+                      child:
+                          Icon(Icons.movie_outlined, color: t.ash, size: 40),
+                    ),
               ),
             ),
             const SizedBox(height: 6),
