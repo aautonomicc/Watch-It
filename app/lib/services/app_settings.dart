@@ -25,9 +25,9 @@ class AppSettings {
   static const _tmdbKeyKey = 'tmdb_api_key_v1';
 
   /// Build-time default TMDB credential
-  /// (`flutter build --dart-define=TMDB_API_KEY=…`); empty in normal
-  /// builds — users bring their own key via Settings. Accepts either a
-  /// v3 API key or a v4 Read Access Token.
+  /// (`flutter build --dart-define=TMDB_API_KEY=…`); release builds bundle
+  /// one so metadata works out of the box, and a key entered in Settings
+  /// overrides it. Accepts either a v3 API key or a v4 Read Access Token.
   static const bundledTmdbApiKey = String.fromEnvironment('TMDB_API_KEY');
 
   /// The user's TMDB credential, falling back to [bundledTmdbApiKey].
