@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
+import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/embedded_client.dart';
 import '../theme/tokens.dart';
+import '../widgets/detail_header.dart';
 import 'player_screen.dart';
 
-/// Movie detail: artwork, description, and playback.
+/// Movie/episode detail: big artwork with description and rating, and
+/// playback.
 class DetailScreen extends StatelessWidget {
   const DetailScreen({super.key, required this.entry});
 
@@ -78,71 +81,70 @@ class DetailScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: SizedBox(
-                  width: 140,
-                  height: 210,
-                  child: posterImage(meta, fit: BoxFit.cover) ??
-                      Container(
-                        color: t.ink2,
-                        child: Icon(Icons.movie_outlined,
-                            color: t.ash, size: 48),
-                      ),
+          DetailHeader(
+            poster: headerArtwork(
+              t,
+              posterImage(meta, fit: BoxFit.cover),
+              meta.episodeLabel != null
+                  ? Icons.live_tv_outlined
+                  : Icons.movie_outlined,
+            ),
+            info: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  meta.title,
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: t.bone,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      meta.title,
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: t.bone,
-                      ),
-                    ),
-                    if (meta.episodeLabel != null) ...[
-                      const SizedBox(height: 4),
-                      Text(meta.episodeLabel!,
-                          style: TextStyle(fontSize: 13, color: t.boneDim)),
-                    ],
-                    if (meta.year != null) ...[
-                      const SizedBox(height: 4),
-                      Text('${meta.year}',
-                          style: TextStyle(fontSize: 13, color: t.ash)),
-                    ],
-                    if (meta.category != null) ...[
-                      const SizedBox(height: 4),
-                      Text(meta.category!,
-                          style: TextStyle(fontSize: 12, color: t.ash)),
-                    ],
-                    const SizedBox(height: 16),
-                    FilledButton.icon(
-                      onPressed: () => _play(context),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: t.copper,
-                        foregroundColor: t.ink,
-                      ),
-                      icon: const Icon(Icons.play_arrow),
-                      label: const Text('Play'),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Streams from Autonomi via the built-in client — '
-                      'first start can take a minute while it connects '
-                      'and fetches chunks.',
-                      style: TextStyle(fontSize: 11, color: t.ash),
-                    ),
-                  ],
+                if (meta.episodeLabel != null) ...[
+                  const SizedBox(height: 4),
+                  Text(meta.episodeLabel!,
+                      style: TextStyle(fontSize: 13.5, color: t.boneDim)),
+                ],
+                if (meta.year != null) ...[
+                  const SizedBox(height: 4),
+                  Text('${meta.year}',
+                      style: TextStyle(fontSize: 13, color: t.ash)),
+                ],
+                if (meta.category != null) ...[
+                  const SizedBox(height: 4),
+                  Text(meta.category!,
+                      style: TextStyle(fontSize: 12, color: t.ash)),
+                ],
+                // Air date matters on episode pages; a movie's release
+                // date is already covered by the year line.
+                if (meta.episodeLabel != null && meta.airDate != null) ...[
+                  const SizedBox(height: 4),
+                  Text('Aired ${formatAirDate(meta.airDate!)}',
+                      style: TextStyle(fontSize: 12, color: t.ash)),
+                ],
+                if (meta.rating != null) ...[
+                  const SizedBox(height: 10),
+                  ratingLine(t, meta.rating!),
+                ],
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: () => _play(context),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: t.copper,
+                    foregroundColor: t.ink,
+                  ),
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('Play'),
                 ),
-              ),
-            ],
+                const SizedBox(height: 8),
+                Text(
+                  'Streams from Autonomi via the built-in client — '
+                  'first start can take a minute while it connects '
+                  'and fetches chunks.',
+                  style: TextStyle(fontSize: 11, color: t.ash),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 20),
           if (meta.overview != null)
@@ -158,15 +160,7 @@ class DetailScreen extends StatelessWidget {
               style: TextStyle(fontSize: 12.5, color: t.ash),
             ),
           const SizedBox(height: 24),
-          Text(
-            'XOR ADDRESS',
-            style: TextStyle(
-              fontSize: 10,
-              letterSpacing: 1.5,
-              fontWeight: FontWeight.w700,
-              color: t.ash,
-            ),
-          ),
+          sectionLabel(t, 'XOR ADDRESS'),
           const SizedBox(height: 6),
           SelectableText(
             entry.address,
@@ -178,15 +172,7 @@ class DetailScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          Text(
-            'FILE NAME',
-            style: TextStyle(
-              fontSize: 10,
-              letterSpacing: 1.5,
-              fontWeight: FontWeight.w700,
-              color: t.ash,
-            ),
-          ),
+          sectionLabel(t, 'FILE NAME'),
           const SizedBox(height: 6),
           Text(entry.name,
               style: TextStyle(fontSize: 12.5, color: t.boneDim)),

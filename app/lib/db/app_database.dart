@@ -53,6 +53,21 @@ class MetadataCache extends Table {
   IntColumn get tmdbId => integer().nullable()();
   IntColumn get fetchedAt => integer()(); // epoch ms
 
+  /// TMDB community score out of 10; null when unrated.
+  RealColumn get rating => real().nullable()();
+
+  /// Show/season synopses for episode rows ([overview] holds the
+  /// episode's own synopsis there).
+  TextColumn get showOverview => text().nullable()();
+  TextColumn get seasonOverview => text().nullable()();
+
+  /// Episode air date (`2008-01-20`); the release date for movies.
+  TextColumn get airDate => text().nullable()();
+
+  /// Episode screenshot / show poster file names in the posters dir.
+  TextColumn get stillFile => text().nullable()();
+  TextColumn get showPosterFile => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {lookupKey};
 }
@@ -73,7 +88,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -82,6 +97,13 @@ class AppDatabase extends _$AppDatabase {
           if (from < 3) {
             // alpha.25: per-list home-screen visibility toggle.
             await m.addColumn(mediaLists, mediaLists.enabled);
+          }
+          if (from >= 2 && from < 4) {
+            // alpha.27: ratings, show/season synopses, air dates, episode
+            // screenshots. It is only a cache — drop and refetch so
+            // existing rows gain the new fields.
+            await m.deleteTable(metadataCache.actualTableName);
+            await m.createTable(metadataCache);
           }
         },
         beforeOpen: (details) async {
