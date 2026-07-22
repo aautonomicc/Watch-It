@@ -49,8 +49,9 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     if (mounted) setState(() => _lists = lists);
   }
 
-  /// Import a list from a text file: first line is the list name, every
-  /// following line one `<xor address> <file name>` entry.
+  /// Import lists from a text file: either a single list (first line is
+  /// the list name) or several lists separated by `ListName="..."`
+  /// markers; every other line is one `<xor address> <file name>` entry.
   Future<void> _importList() async {
     final t = WiTokens.of(context);
     final source = await showDialog<String>(
@@ -97,6 +98,15 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       return;
     }
     if (file == null) return;
+    try {
+      if (await file.length() > kMaxListFileBytes) {
+        _showError('"${file.name}" is too large to be a media list.');
+        return;
+      }
+    } catch (_) {
+      // Some pickers cannot report a size up front; readAsString below
+      // is the real gate then.
+    }
     final String content;
     try {
       content = await file.readAsString();
@@ -141,22 +151,122 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       return;
     }
     final lists = List<MediaList>.of(_lists ?? []);
-    lists.add(MediaList(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
-      title: parsed.title,
-      entries: parsed.entries,
-    ));
+    var idBase = DateTime.now().microsecondsSinceEpoch;
+    final importedTitles = <String>[];
+    var merged = 0, added = 0, duplicates = 0, listsSkipped = 0;
+    for (final list in parsed.lists) {
+      final i = lists.indexWhere(
+          (l) => l.title.toLowerCase() == list.title.toLowerCase());
+      if (i < 0) {
+        lists.add(MediaList(
+          id: '${idBase++}',
+          title: list.title,
+          entries: list.entries,
+        ));
+        importedTitles.add(list.title);
+        added += list.entries.length;
+        continue;
+      }
+      if (!mounted) return;
+      final action = await _resolveNameClash(list.title);
+      if (action == 'merge') {
+        final existing = lists[i];
+        final have = existing.entries.map((e) => e.address).toSet();
+        final fresh =
+            list.entries.where((e) => have.add(e.address)).toList();
+        duplicates += list.entries.length - fresh.length;
+        lists[i] = existing
+            .copyWith(entries: [...existing.entries, ...fresh]);
+        added += fresh.length;
+        merged++;
+      } else if (action == 'new') {
+        final title = _uniqueTitle(list.title, lists);
+        lists.add(MediaList(
+          id: '${idBase++}',
+          title: title,
+          entries: list.entries,
+        ));
+        importedTitles.add(title);
+        added += list.entries.length;
+      } else {
+        listsSkipped++;
+      }
+    }
+    if (importedTitles.isEmpty && merged == 0) {
+      _showError('Nothing imported.');
+      return;
+    }
     await LibraryStore.save(lists);
     if (!mounted) return;
     setState(() => _lists = lists);
-    final n = parsed.entries.length;
-    final skipped = parsed.skippedLines.length;
+    var what = importedTitles.length == 1 && merged == 0
+        ? 'Imported "${importedTitles.single}"'
+        : [
+            if (importedTitles.isNotEmpty)
+              'Imported ${importedTitles.length} '
+                  '${importedTitles.length == 1 ? 'list' : 'lists'}',
+            if (merged > 0)
+              'merged into $merged existing '
+                  '${merged == 1 ? 'list' : 'lists'}',
+          ].join(', ');
+    what = what[0].toUpperCase() + what.substring(1);
+    final notes = [
+      if (duplicates > 0)
+        '$duplicates duplicate ${duplicates == 1 ? 'entry' : 'entries'} '
+            'skipped',
+      if (listsSkipped > 0)
+        '$listsSkipped ${listsSkipped == 1 ? 'list' : 'lists'} skipped',
+      if (parsed.skippedLines.isNotEmpty)
+        '${parsed.skippedLines.length} invalid '
+            '${parsed.skippedLines.length == 1 ? 'line' : 'lines'} skipped',
+    ].join(', ');
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Imported "${parsed.title}" — '
-          '$n ${n == 1 ? 'entry' : 'entries'}'
-          '${skipped > 0 ? ' ($skipped invalid '
-              '${skipped == 1 ? 'line' : 'lines'} skipped)' : ''}'),
+      content: Text('$what — $added '
+          '${added == 1 ? 'entry' : 'entries'}'
+          '${notes.isEmpty ? '' : ' ($notes)'}'),
     ));
+  }
+
+  /// Ask what to do with an imported list whose name already exists:
+  /// returns 'merge', 'new', or null to skip it.
+  Future<String?> _resolveNameClash(String title) {
+    final t = WiTokens.of(context);
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text('"$title" already exists',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        content: Text(
+          'Merge the imported entries into the existing list (duplicates '
+          'are skipped), or create a new list with a numbered name?',
+          style: TextStyle(color: t.boneDim, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(null),
+            child: Text('Skip', style: TextStyle(color: t.ash)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop('new'),
+            child: Text('Create new', style: TextStyle(color: t.bone)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop('merge'),
+            child: Text('Merge', style: TextStyle(color: t.copper)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// First of `title (2)`, `title (3)`, … not already taken in [lists].
+  String _uniqueTitle(String title, List<MediaList> lists) {
+    final taken = lists.map((l) => l.title.toLowerCase()).toSet();
+    for (var n = 2;; n++) {
+      final candidate = '$title ($n)';
+      if (!taken.contains(candidate.toLowerCase())) return candidate;
+    }
   }
 
   void _showError(String message) {
