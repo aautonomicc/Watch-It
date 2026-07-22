@@ -155,7 +155,11 @@ class MetadataService extends ChangeNotifier {
           final bytes = await client.fetchPoster(match.posterPath!);
           final dir = await _postersDirProvider();
           await dir.create(recursive: true);
-          posterFile = '${match.mediaType}_${match.tmdbId}.jpg';
+          // Episode matches carry season artwork — one file per season,
+          // so a show-level match keeps its own show poster.
+          posterFile = match.season == null
+              ? '${match.mediaType}_${match.tmdbId}.jpg'
+              : '${match.mediaType}_${match.tmdbId}_s${match.season}.jpg';
           final f = File('${dir.path}/$posterFile');
           await f.writeAsBytes(bytes, flush: true);
           posterFilePath = f.path;

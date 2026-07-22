@@ -21,6 +21,10 @@ class LibraryStore {
   // older desktops.
   static const _seededKey = 'defaults_seeded_v3';
 
+  /// Id of the seeded default list ("Movies"; "Test Movies" before
+  /// alpha.26 — [ensureDefaults] renames it in place).
+  static const _defaultListId = 'default-test-movies';
+
   static AppDatabase? _db;
   static Future<AppDatabase>? _opening;
 
@@ -77,9 +81,20 @@ class LibraryStore {
   /// deletes it.
   static Future<void> ensureDefaults() async {
     final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool(_seededKey) ?? false) return;
     var lists = await load();
     var changed = false;
+    // Pre-alpha.26 installs seeded the list as "Test Movies"; rename it
+    // in place. A user rename to anything else is left alone.
+    final stale = lists.indexWhere(
+        (l) => l.id == _defaultListId && l.title == 'Test Movies');
+    if (stale != -1) {
+      lists[stale] = lists[stale].copyWith(title: 'Movies');
+      changed = true;
+    }
+    if (prefs.getBool(_seededKey) ?? false) {
+      if (changed) await save(lists);
+      return;
+    }
     if (lists.any((l) => l.entries
         .any((e) => kLegacyDefaultMovieAddresses.contains(e.address)))) {
       lists = [
@@ -101,8 +116,8 @@ class LibraryStore {
     if (!lists.any(
         (l) => l.entries.any((e) => e.address == kDefaultMovieAddress))) {
       lists.add(const MediaList(
-        id: 'default-test-movies',
-        title: 'Test Movies',
+        id: _defaultListId,
+        title: 'Movies',
         entries: [
           MediaEntry(
             name: kDefaultMovieName,

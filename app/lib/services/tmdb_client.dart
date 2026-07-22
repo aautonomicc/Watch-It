@@ -27,6 +27,7 @@ class TmdbMatch {
     this.overview,
     this.category,
     this.episodeLabel,
+    this.season,
     this.posterPath,
   });
 
@@ -37,6 +38,11 @@ class TmdbMatch {
   final String? overview;
   final String? category;
   final String? episodeLabel;
+
+  /// Season number when this match is for a TV episode; [posterPath] is
+  /// then the season's artwork (falling back to the show poster), so the
+  /// cached poster file must be keyed per season.
+  final int? season;
 
   /// TMDB poster path (`/abc.jpg`) — fetch via [TmdbClient.fetchPoster].
   final String? posterPath;
@@ -149,18 +155,29 @@ class TmdbClient {
     final d = await _get('/tv/$id', const {});
     String? episodeLabel;
     String? overview = _nonEmpty(d['overview']);
+    String? posterPath = _nonEmpty(d['poster_path']);
     if (season != null && episode != null) {
       final se = 'S${_pad(season)}E${_pad(episode)}';
       episodeLabel = se;
       try {
-        final ep = await _get('/tv/$id/season/$season/episode/$episode',
-            const {});
-        final name = _nonEmpty(ep['name']);
+        // The season payload carries the season poster (used for the
+        // home wall's grouped season card) plus every episode's
+        // name/overview — one request covers both.
+        final s = await _get('/tv/$id/season/$season', const {});
+        posterPath = _nonEmpty(s['poster_path']) ?? posterPath;
+        Map<String, dynamic>? ep;
+        for (final e in s['episodes'] as List<dynamic>? ?? const []) {
+          if ((e as Map<String, dynamic>)['episode_number'] == episode) {
+            ep = e;
+            break;
+          }
+        }
+        final name = ep == null ? null : _nonEmpty(ep['name']);
         if (name != null) episodeLabel = '$se · $name';
         // Episode synopsis beats the show blurb on a detail page.
-        overview = _nonEmpty(ep['overview']) ?? overview;
+        if (ep != null) overview = _nonEmpty(ep['overview']) ?? overview;
       } on TmdbException catch (e) {
-        // Unknown episode number: keep the show-level metadata.
+        // Unknown season number: keep the show-level metadata.
         if (e.statusCode != 404) rethrow;
       }
     }
@@ -172,7 +189,8 @@ class TmdbClient {
       overview: overview,
       category: _genres(d),
       episodeLabel: episodeLabel,
-      posterPath: _nonEmpty(d['poster_path']),
+      season: episode != null ? season : null,
+      posterPath: posterPath,
     );
   }
 

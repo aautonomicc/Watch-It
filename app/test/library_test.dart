@@ -170,9 +170,36 @@ void main() {
     test('seeds the built-in test movie once', () async {
       await LibraryStore.ensureDefaults();
       final lists = await LibraryStore.load();
-      final seeded = lists.singleWhere((l) => l.title == 'Test Movies');
+      final seeded = lists.singleWhere((l) => l.title == 'Movies');
       expect(seeded.entries.single.address, kDefaultMovieAddress);
       expect(seeded.entries.single.name, kDefaultMovieName);
+    });
+
+    test('renames the pre-alpha.26 "Test Movies" list to "Movies"', () async {
+      // Already-seeded install: the flag is set, the old title persists.
+      SharedPreferences.setMockInitialValues({'defaults_seeded_v3': true});
+      await LibraryStore.save([
+        MediaList(
+          id: 'default-test-movies',
+          title: 'Test Movies',
+          entries: const [
+            MediaEntry(name: kDefaultMovieName, address: kDefaultMovieAddress),
+          ],
+        ),
+      ]);
+      await LibraryStore.ensureDefaults();
+      final lists = await LibraryStore.load();
+      expect(lists.single.title, 'Movies');
+      expect(lists.single.entries.single.address, kDefaultMovieAddress);
+    });
+
+    test('a user-renamed default list keeps its name', () async {
+      SharedPreferences.setMockInitialValues({'defaults_seeded_v3': true});
+      await LibraryStore.save([
+        const MediaList(id: 'default-test-movies', title: 'My Flicks'),
+      ]);
+      await LibraryStore.ensureDefaults();
+      expect((await LibraryStore.load()).single.title, 'My Flicks');
     });
 
     test('does not re-seed after the user deletes it', () async {
@@ -198,7 +225,8 @@ void main() {
         ]);
         await LibraryStore.ensureDefaults();
         final lists = await LibraryStore.load();
-        final seeded = lists.singleWhere((l) => l.title == 'Test Movies');
+        // The rename migration also applies on the same pass.
+        final seeded = lists.singleWhere((l) => l.title == 'Movies');
         expect(seeded.entries.single.address, kDefaultMovieAddress);
         expect(seeded.entries.single.name, kDefaultMovieName);
         // Other lists/entries with the current address are not duplicated.
@@ -413,7 +441,7 @@ void main() {
       expect(find.text('Movie.mkv'), findsOneWidget);
 
       // Persisted: store now holds the list with its entry (alongside the
-      // seeded Test Movies list).
+      // seeded Movies list).
       final lists = await LibraryStore.load();
       final mine = lists.singleWhere((l) => l.title == 'My Films');
       expect(mine.entries.single.name, 'Movie.mkv');
@@ -444,7 +472,7 @@ void main() {
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
       // Seeded default list is on the wall.
-      expect(find.text('Test Movies'), findsOneWidget);
+      expect(find.text('Movies'), findsOneWidget);
 
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
@@ -460,7 +488,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.pageBack();
       await tester.pumpAndSettle();
-      expect(find.text('Test Movies'), findsNothing);
+      expect(find.text('Movies'), findsNothing);
       expect(find.text('All your lists are hidden'), findsOneWidget);
     });
 
@@ -499,10 +527,10 @@ void main() {
       await tester.pumpAndSettle();
 
       // Confirmation dialog, then the list is gone from page and store.
-      expect(find.textContaining('Delete "Test Movies"'), findsOneWidget);
+      expect(find.textContaining('Delete "Movies"'), findsOneWidget);
       await tester.tap(find.text('Delete'));
       await tester.pumpAndSettle();
-      expect(find.text('Test Movies'), findsNothing);
+      expect(find.text('Movies'), findsNothing);
       expect(await LibraryStore.load(), isEmpty);
     });
 
@@ -524,6 +552,49 @@ void main() {
 
       expect(find.text('Renamed Movies'), findsOneWidget);
       expect((await LibraryStore.load()).single.title, 'Renamed Movies');
+    });
+  });
+
+  group('Season grouping on home', () {
+    testWidgets('episodes fold into a season card that opens the episodes',
+        (tester) async {
+      SharedPreferences.setMockInitialValues({'defaults_seeded_v3': true});
+      await LibraryStore.save([
+        MediaList(
+          id: 's',
+          title: 'Series',
+          entries: const [
+            MediaEntry(name: 'Show.S01E02.mkv', address: _addr),
+            MediaEntry(name: 'Show.S01E01.mkv', address: _addr),
+            MediaEntry(name: 'The.Movie.2024.mkv', address: _addr),
+          ],
+        ),
+      ]);
+      await tester.pumpWidget(const WatchItApp());
+      await tester.pumpAndSettle();
+
+      // One season card + one movie card — not three cards.
+      expect(find.text('Show'), findsOneWidget);
+      expect(find.text('Season 1 · 2 ep'), findsOneWidget);
+      expect(find.text('The Movie (2024)'), findsOneWidget);
+
+      await tester.tap(find.text('Season 1 · 2 ep'));
+      await tester.pumpAndSettle();
+
+      // Season screen: header + episodes sorted by number, each showing
+      // its name (fallback without TMDB) and SxxEyy marker.
+      expect(find.text('Show — Season 1'), findsOneWidget);
+      expect(find.text('2 episodes'), findsOneWidget);
+      expect(find.text('S01E01'), findsOneWidget);
+      expect(find.text('S01E02'), findsOneWidget);
+      expect(find.text('Episode 1'), findsOneWidget);
+      expect(find.text('Episode 2'), findsOneWidget);
+
+      // Tapping an episode opens the regular detail screen.
+      await tester.tap(find.text('Episode 1'));
+      await tester.pumpAndSettle();
+      expect(find.text('Show.S01E01.mkv'), findsOneWidget);
+      expect(find.text('FILE NAME'), findsOneWidget);
     });
   });
 
