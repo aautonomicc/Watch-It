@@ -78,8 +78,18 @@ http.Response _tmdbApi(http.Request req) {
       ],
       'poster_path': '/show7.jpg',
     };
-  } else if (path == '/3/tv/7/season/1/episode/2') {
-    body = {'name': 'The Second One', 'overview': 'Episode two happens.'};
+  } else if (path == '/3/tv/7/season/1') {
+    body = {
+      'poster_path': '/show7_s1.jpg',
+      'episodes': [
+        {'episode_number': 1, 'name': 'The First One', 'overview': ''},
+        {
+          'episode_number': 2,
+          'name': 'The Second One',
+          'overview': 'Episode two happens.',
+        },
+      ],
+    };
   }
   if (body == null) {
     return http.Response('{"status_message":"not found"}', 404);
@@ -158,13 +168,25 @@ void main() {
       expect(match.episodeLabel, 'S01E02 · The Second One');
       expect(match.overview, 'Episode two happens.');
       expect(match.category, 'Comedy');
+      // Season artwork beats the show poster for episode matches.
+      expect(match.season, 1);
+      expect(match.posterPath, '/show7_s1.jpg');
     });
 
-    test('unknown episode number keeps show-level metadata', () async {
+    test('unknown season number keeps show-level metadata', () async {
       final client = TmdbClient(apiKey: 'k3y', client: _mockTmdb(requests));
       final match = await client.lookup(parseMediaName('Show.S09E09.mkv'));
       expect(match!.episodeLabel, 'S09E09');
       expect(match.overview, 'A show.');
+      expect(match.posterPath, '/show7.jpg');
+    });
+
+    test('unknown episode in a known season keeps season artwork', () async {
+      final client = TmdbClient(apiKey: 'k3y', client: _mockTmdb(requests));
+      final match = await client.lookup(parseMediaName('Show.S01E09.mkv'));
+      expect(match!.episodeLabel, 'S01E09');
+      expect(match.overview, 'A show.');
+      expect(match.posterPath, '/show7_s1.jpg');
     });
 
     test('no TMDB result returns null (movie and tv both miss)', () async {
@@ -216,6 +238,17 @@ void main() {
       expect(resolved.category, 'Drama');
       expect(resolved.posterFilePath, isNotNull);
       expect(File(resolved.posterFilePath!).readAsBytesSync(), _posterBytes);
+    });
+
+    test('episode posters are cached per season, not per show', () async {
+      const ep = MediaEntry(name: 'Show.S01E02.mkv', address: addr);
+      final svc = service();
+      svc.metadataFor(ep);
+      await svc.whenIdle();
+      final meta = svc.metadataFor(ep);
+      expect(meta.episodeLabel, 'S01E02 · The Second One');
+      expect(meta.posterFilePath, endsWith('tv_7_s1.jpg'),
+          reason: 'a show-level match must not share the season poster file');
     });
 
     test('second session serves from SQLite with no network', () async {
