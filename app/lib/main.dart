@@ -5,8 +5,8 @@ import 'package:media_kit/media_kit.dart';
 
 import 'models/media_list.dart';
 import 'screens/detail_screen.dart';
-import 'screens/season_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/show_screen.dart';
 import 'services/embedded_client.dart';
 import 'services/library_store.dart';
 import 'services/metadata_service.dart';
@@ -73,9 +73,15 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _openSeason(HomeSeason group) async {
+  /// A series card opens the show's page: big artwork + synopsis with
+  /// every season of the show found in the list as tiles.
+  Future<void> _openShow(List<MediaEntry> entries, HomeSeason group) async {
+    final seasons = showSeasons(entries, group.show);
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => SeasonScreen(group: group)),
+      MaterialPageRoute(
+        builder: (_) =>
+            ShowScreen(seasons: seasons.isEmpty ? [group] : seasons),
+      ),
     );
   }
 
@@ -181,7 +187,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     HomeSeason() && final group => _SeasonCard(
                         group: group,
                         tokens: t,
-                        onTap: () => _openSeason(group),
+                        onTap: () => _openShow(list.entries, group),
                       ),
                   },
                 );

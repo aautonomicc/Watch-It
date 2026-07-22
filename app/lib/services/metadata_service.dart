@@ -116,18 +116,26 @@ class MetadataService extends ChangeNotifier {
       }
       throw const _CachedMiss();
     }
-    String? posterFilePath;
-    if (row.posterFile != null) {
-      final f = File('${(await _postersDirProvider()).path}/${row.posterFile}');
-      if (f.existsSync()) posterFilePath = f.path;
+    final postersDir = (await _postersDirProvider()).path;
+    String? existingFile(String? name) {
+      if (name == null) return null;
+      final f = File('$postersDir/$name');
+      return f.existsSync() ? f.path : null;
     }
+
     return MediaMetadata(
       title: row.title ?? '',
       year: row.year,
       overview: row.overview,
       category: row.category,
       episodeLabel: row.episodeLabel,
-      posterFilePath: posterFilePath,
+      posterFilePath: existingFile(row.posterFile),
+      rating: row.rating,
+      showOverview: row.showOverview,
+      seasonOverview: row.seasonOverview,
+      airDate: row.airDate,
+      stillFilePath: existingFile(row.stillFile),
+      showPosterFilePath: existingFile(row.showPosterFile),
     );
   }
 
@@ -148,26 +156,45 @@ class MetadataService extends ChangeNotifier {
             );
         return null;
       }
-      String? posterFile;
-      String? posterFilePath;
-      if (match.posterPath != null) {
+      final dir = await _postersDirProvider();
+      // Download one CDN image into the posters dir, skipping files that
+      // are already on disk (episodes of one season share the season
+      // poster and the show poster). Artwork is decoration — a failed
+      // fetch keeps the textual match without it.
+      Future<(String, String)?> saveImage(String? cdnPath, String file,
+          Future<List<int>> Function(String) fetch) async {
+        if (cdnPath == null) return null;
         try {
-          final bytes = await client.fetchPoster(match.posterPath!);
-          final dir = await _postersDirProvider();
-          await dir.create(recursive: true);
-          // Episode matches carry season artwork — one file per season,
-          // so a show-level match keeps its own show poster.
-          posterFile = match.season == null
-              ? '${match.mediaType}_${match.tmdbId}.jpg'
-              : '${match.mediaType}_${match.tmdbId}_s${match.season}.jpg';
-          final f = File('${dir.path}/$posterFile');
-          await f.writeAsBytes(bytes, flush: true);
-          posterFilePath = f.path;
+          final f = File('${dir.path}/$file');
+          if (!f.existsSync()) {
+            final bytes = await fetch(cdnPath);
+            await dir.create(recursive: true);
+            await f.writeAsBytes(bytes, flush: true);
+          }
+          return (file, f.path);
         } on TmdbException catch (e) {
-          // Artwork is decoration — keep the textual match without it.
-          debugPrint('metadata: poster fetch failed for "$fileName": $e');
+          debugPrint('metadata: image fetch failed for "$fileName": $e');
+          return null;
         }
       }
+
+      // Episode matches carry season artwork — one file per season, so a
+      // show-level match keeps its own show poster.
+      final id = '${match.mediaType}_${match.tmdbId}';
+      final poster = await saveImage(
+          match.posterPath,
+          match.season == null ? '$id.jpg' : '${id}_s${match.season}.jpg',
+          client.fetchPoster);
+      final showPoster = match.season == null
+          ? null
+          : await saveImage(match.showPosterPath, '$id.jpg',
+              client.fetchPoster);
+      final still = match.season == null
+          ? null
+          : await saveImage(
+              match.stillPath,
+              '${id}_s${match.season}e${match.episode}_still.jpg',
+              client.fetchStill);
       await db.into(db.metadataCache).insertOnConflictUpdate(
             MetadataCacheCompanion.insert(
               lookupKey: key,
@@ -177,10 +204,16 @@ class MetadataService extends ChangeNotifier {
               overview: Value(match.overview),
               category: Value(match.category),
               episodeLabel: Value(match.episodeLabel),
-              posterFile: Value(posterFile),
+              posterFile: Value(poster?.$1),
               mediaType: Value(match.mediaType),
               tmdbId: Value(match.tmdbId),
               fetchedAt: DateTime.now().millisecondsSinceEpoch,
+              rating: Value(match.rating),
+              showOverview: Value(match.showOverview),
+              seasonOverview: Value(match.seasonOverview),
+              airDate: Value(match.airDate),
+              stillFile: Value(still?.$1),
+              showPosterFile: Value(showPoster?.$1),
             ),
           );
       return MediaMetadata(
@@ -189,7 +222,13 @@ class MetadataService extends ChangeNotifier {
         overview: match.overview,
         category: match.category,
         episodeLabel: match.episodeLabel,
-        posterFilePath: posterFilePath,
+        posterFilePath: poster?.$2,
+        rating: match.rating,
+        showOverview: match.showOverview,
+        seasonOverview: match.seasonOverview,
+        airDate: match.airDate,
+        stillFilePath: still?.$2,
+        showPosterFilePath: showPoster?.$2,
       );
     } finally {
       // Only close clients we created — injected ones belong to the test.
@@ -212,4 +251,19 @@ Widget? posterImage(MediaMetadata meta, {BoxFit? fit}) {
   }
   if (meta.posterAsset != null) return Image.asset(meta.posterAsset!, fit: fit);
   return null;
+}
+
+/// Show-level poster for an episode's [meta] (its [posterImage] is the
+/// season artwork); falls back to the season/regular artwork.
+Widget? showPosterImage(MediaMetadata meta, {BoxFit? fit}) {
+  if (meta.showPosterFilePath != null) {
+    return Image.file(File(meta.showPosterFilePath!), fit: fit);
+  }
+  return posterImage(meta, fit: fit);
+}
+
+/// Cached episode screenshot, or `null` when TMDB has none.
+Widget? stillImage(MediaMetadata meta, {BoxFit? fit}) {
+  if (meta.stillFilePath == null) return null;
+  return Image.file(File(meta.stillFilePath!), fit: fit);
 }

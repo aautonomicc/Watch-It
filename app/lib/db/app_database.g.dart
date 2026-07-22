@@ -792,6 +792,70 @@ class $MetadataCacheTable extends MetadataCache
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _ratingMeta = const VerificationMeta('rating');
+  @override
+  late final GeneratedColumn<double> rating = GeneratedColumn<double>(
+    'rating',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _showOverviewMeta = const VerificationMeta(
+    'showOverview',
+  );
+  @override
+  late final GeneratedColumn<String> showOverview = GeneratedColumn<String>(
+    'show_overview',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _seasonOverviewMeta = const VerificationMeta(
+    'seasonOverview',
+  );
+  @override
+  late final GeneratedColumn<String> seasonOverview = GeneratedColumn<String>(
+    'season_overview',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _airDateMeta = const VerificationMeta(
+    'airDate',
+  );
+  @override
+  late final GeneratedColumn<String> airDate = GeneratedColumn<String>(
+    'air_date',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _stillFileMeta = const VerificationMeta(
+    'stillFile',
+  );
+  @override
+  late final GeneratedColumn<String> stillFile = GeneratedColumn<String>(
+    'still_file',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _showPosterFileMeta = const VerificationMeta(
+    'showPosterFile',
+  );
+  @override
+  late final GeneratedColumn<String> showPosterFile = GeneratedColumn<String>(
+    'show_poster_file',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     lookupKey,
@@ -805,6 +869,12 @@ class $MetadataCacheTable extends MetadataCache
     mediaType,
     tmdbId,
     fetchedAt,
+    rating,
+    showOverview,
+    seasonOverview,
+    airDate,
+    stillFile,
+    showPosterFile,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -893,6 +963,51 @@ class $MetadataCacheTable extends MetadataCache
     } else if (isInserting) {
       context.missing(_fetchedAtMeta);
     }
+    if (data.containsKey('rating')) {
+      context.handle(
+        _ratingMeta,
+        rating.isAcceptableOrUnknown(data['rating']!, _ratingMeta),
+      );
+    }
+    if (data.containsKey('show_overview')) {
+      context.handle(
+        _showOverviewMeta,
+        showOverview.isAcceptableOrUnknown(
+          data['show_overview']!,
+          _showOverviewMeta,
+        ),
+      );
+    }
+    if (data.containsKey('season_overview')) {
+      context.handle(
+        _seasonOverviewMeta,
+        seasonOverview.isAcceptableOrUnknown(
+          data['season_overview']!,
+          _seasonOverviewMeta,
+        ),
+      );
+    }
+    if (data.containsKey('air_date')) {
+      context.handle(
+        _airDateMeta,
+        airDate.isAcceptableOrUnknown(data['air_date']!, _airDateMeta),
+      );
+    }
+    if (data.containsKey('still_file')) {
+      context.handle(
+        _stillFileMeta,
+        stillFile.isAcceptableOrUnknown(data['still_file']!, _stillFileMeta),
+      );
+    }
+    if (data.containsKey('show_poster_file')) {
+      context.handle(
+        _showPosterFileMeta,
+        showPosterFile.isAcceptableOrUnknown(
+          data['show_poster_file']!,
+          _showPosterFileMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -946,6 +1061,30 @@ class $MetadataCacheTable extends MetadataCache
         DriftSqlType.int,
         data['${effectivePrefix}fetched_at'],
       )!,
+      rating: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}rating'],
+      ),
+      showOverview: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}show_overview'],
+      ),
+      seasonOverview: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}season_overview'],
+      ),
+      airDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}air_date'],
+      ),
+      stillFile: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}still_file'],
+      ),
+      showPosterFile: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}show_poster_file'],
+      ),
     );
   }
 
@@ -971,6 +1110,21 @@ class MetadataCacheRow extends DataClass
   final String? mediaType;
   final int? tmdbId;
   final int fetchedAt;
+
+  /// TMDB community score out of 10; null when unrated.
+  final double? rating;
+
+  /// Show/season synopses for episode rows ([overview] holds the
+  /// episode's own synopsis there).
+  final String? showOverview;
+  final String? seasonOverview;
+
+  /// Episode air date (`2008-01-20`); the release date for movies.
+  final String? airDate;
+
+  /// Episode screenshot / show poster file names in the posters dir.
+  final String? stillFile;
+  final String? showPosterFile;
   const MetadataCacheRow({
     required this.lookupKey,
     required this.found,
@@ -983,6 +1137,12 @@ class MetadataCacheRow extends DataClass
     this.mediaType,
     this.tmdbId,
     required this.fetchedAt,
+    this.rating,
+    this.showOverview,
+    this.seasonOverview,
+    this.airDate,
+    this.stillFile,
+    this.showPosterFile,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1014,6 +1174,24 @@ class MetadataCacheRow extends DataClass
       map['tmdb_id'] = Variable<int>(tmdbId);
     }
     map['fetched_at'] = Variable<int>(fetchedAt);
+    if (!nullToAbsent || rating != null) {
+      map['rating'] = Variable<double>(rating);
+    }
+    if (!nullToAbsent || showOverview != null) {
+      map['show_overview'] = Variable<String>(showOverview);
+    }
+    if (!nullToAbsent || seasonOverview != null) {
+      map['season_overview'] = Variable<String>(seasonOverview);
+    }
+    if (!nullToAbsent || airDate != null) {
+      map['air_date'] = Variable<String>(airDate);
+    }
+    if (!nullToAbsent || stillFile != null) {
+      map['still_file'] = Variable<String>(stillFile);
+    }
+    if (!nullToAbsent || showPosterFile != null) {
+      map['show_poster_file'] = Variable<String>(showPosterFile);
+    }
     return map;
   }
 
@@ -1044,6 +1222,24 @@ class MetadataCacheRow extends DataClass
           ? const Value.absent()
           : Value(tmdbId),
       fetchedAt: Value(fetchedAt),
+      rating: rating == null && nullToAbsent
+          ? const Value.absent()
+          : Value(rating),
+      showOverview: showOverview == null && nullToAbsent
+          ? const Value.absent()
+          : Value(showOverview),
+      seasonOverview: seasonOverview == null && nullToAbsent
+          ? const Value.absent()
+          : Value(seasonOverview),
+      airDate: airDate == null && nullToAbsent
+          ? const Value.absent()
+          : Value(airDate),
+      stillFile: stillFile == null && nullToAbsent
+          ? const Value.absent()
+          : Value(stillFile),
+      showPosterFile: showPosterFile == null && nullToAbsent
+          ? const Value.absent()
+          : Value(showPosterFile),
     );
   }
 
@@ -1064,6 +1260,12 @@ class MetadataCacheRow extends DataClass
       mediaType: serializer.fromJson<String?>(json['mediaType']),
       tmdbId: serializer.fromJson<int?>(json['tmdbId']),
       fetchedAt: serializer.fromJson<int>(json['fetchedAt']),
+      rating: serializer.fromJson<double?>(json['rating']),
+      showOverview: serializer.fromJson<String?>(json['showOverview']),
+      seasonOverview: serializer.fromJson<String?>(json['seasonOverview']),
+      airDate: serializer.fromJson<String?>(json['airDate']),
+      stillFile: serializer.fromJson<String?>(json['stillFile']),
+      showPosterFile: serializer.fromJson<String?>(json['showPosterFile']),
     );
   }
   @override
@@ -1081,6 +1283,12 @@ class MetadataCacheRow extends DataClass
       'mediaType': serializer.toJson<String?>(mediaType),
       'tmdbId': serializer.toJson<int?>(tmdbId),
       'fetchedAt': serializer.toJson<int>(fetchedAt),
+      'rating': serializer.toJson<double?>(rating),
+      'showOverview': serializer.toJson<String?>(showOverview),
+      'seasonOverview': serializer.toJson<String?>(seasonOverview),
+      'airDate': serializer.toJson<String?>(airDate),
+      'stillFile': serializer.toJson<String?>(stillFile),
+      'showPosterFile': serializer.toJson<String?>(showPosterFile),
     };
   }
 
@@ -1096,6 +1304,12 @@ class MetadataCacheRow extends DataClass
     Value<String?> mediaType = const Value.absent(),
     Value<int?> tmdbId = const Value.absent(),
     int? fetchedAt,
+    Value<double?> rating = const Value.absent(),
+    Value<String?> showOverview = const Value.absent(),
+    Value<String?> seasonOverview = const Value.absent(),
+    Value<String?> airDate = const Value.absent(),
+    Value<String?> stillFile = const Value.absent(),
+    Value<String?> showPosterFile = const Value.absent(),
   }) => MetadataCacheRow(
     lookupKey: lookupKey ?? this.lookupKey,
     found: found ?? this.found,
@@ -1108,6 +1322,16 @@ class MetadataCacheRow extends DataClass
     mediaType: mediaType.present ? mediaType.value : this.mediaType,
     tmdbId: tmdbId.present ? tmdbId.value : this.tmdbId,
     fetchedAt: fetchedAt ?? this.fetchedAt,
+    rating: rating.present ? rating.value : this.rating,
+    showOverview: showOverview.present ? showOverview.value : this.showOverview,
+    seasonOverview: seasonOverview.present
+        ? seasonOverview.value
+        : this.seasonOverview,
+    airDate: airDate.present ? airDate.value : this.airDate,
+    stillFile: stillFile.present ? stillFile.value : this.stillFile,
+    showPosterFile: showPosterFile.present
+        ? showPosterFile.value
+        : this.showPosterFile,
   );
   MetadataCacheRow copyWithCompanion(MetadataCacheCompanion data) {
     return MetadataCacheRow(
@@ -1126,6 +1350,18 @@ class MetadataCacheRow extends DataClass
       mediaType: data.mediaType.present ? data.mediaType.value : this.mediaType,
       tmdbId: data.tmdbId.present ? data.tmdbId.value : this.tmdbId,
       fetchedAt: data.fetchedAt.present ? data.fetchedAt.value : this.fetchedAt,
+      rating: data.rating.present ? data.rating.value : this.rating,
+      showOverview: data.showOverview.present
+          ? data.showOverview.value
+          : this.showOverview,
+      seasonOverview: data.seasonOverview.present
+          ? data.seasonOverview.value
+          : this.seasonOverview,
+      airDate: data.airDate.present ? data.airDate.value : this.airDate,
+      stillFile: data.stillFile.present ? data.stillFile.value : this.stillFile,
+      showPosterFile: data.showPosterFile.present
+          ? data.showPosterFile.value
+          : this.showPosterFile,
     );
   }
 
@@ -1142,7 +1378,13 @@ class MetadataCacheRow extends DataClass
           ..write('posterFile: $posterFile, ')
           ..write('mediaType: $mediaType, ')
           ..write('tmdbId: $tmdbId, ')
-          ..write('fetchedAt: $fetchedAt')
+          ..write('fetchedAt: $fetchedAt, ')
+          ..write('rating: $rating, ')
+          ..write('showOverview: $showOverview, ')
+          ..write('seasonOverview: $seasonOverview, ')
+          ..write('airDate: $airDate, ')
+          ..write('stillFile: $stillFile, ')
+          ..write('showPosterFile: $showPosterFile')
           ..write(')'))
         .toString();
   }
@@ -1160,6 +1402,12 @@ class MetadataCacheRow extends DataClass
     mediaType,
     tmdbId,
     fetchedAt,
+    rating,
+    showOverview,
+    seasonOverview,
+    airDate,
+    stillFile,
+    showPosterFile,
   );
   @override
   bool operator ==(Object other) =>
@@ -1175,7 +1423,13 @@ class MetadataCacheRow extends DataClass
           other.posterFile == this.posterFile &&
           other.mediaType == this.mediaType &&
           other.tmdbId == this.tmdbId &&
-          other.fetchedAt == this.fetchedAt);
+          other.fetchedAt == this.fetchedAt &&
+          other.rating == this.rating &&
+          other.showOverview == this.showOverview &&
+          other.seasonOverview == this.seasonOverview &&
+          other.airDate == this.airDate &&
+          other.stillFile == this.stillFile &&
+          other.showPosterFile == this.showPosterFile);
 }
 
 class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
@@ -1190,6 +1444,12 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
   final Value<String?> mediaType;
   final Value<int?> tmdbId;
   final Value<int> fetchedAt;
+  final Value<double?> rating;
+  final Value<String?> showOverview;
+  final Value<String?> seasonOverview;
+  final Value<String?> airDate;
+  final Value<String?> stillFile;
+  final Value<String?> showPosterFile;
   final Value<int> rowid;
   const MetadataCacheCompanion({
     this.lookupKey = const Value.absent(),
@@ -1203,6 +1463,12 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
     this.mediaType = const Value.absent(),
     this.tmdbId = const Value.absent(),
     this.fetchedAt = const Value.absent(),
+    this.rating = const Value.absent(),
+    this.showOverview = const Value.absent(),
+    this.seasonOverview = const Value.absent(),
+    this.airDate = const Value.absent(),
+    this.stillFile = const Value.absent(),
+    this.showPosterFile = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   MetadataCacheCompanion.insert({
@@ -1217,6 +1483,12 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
     this.mediaType = const Value.absent(),
     this.tmdbId = const Value.absent(),
     required int fetchedAt,
+    this.rating = const Value.absent(),
+    this.showOverview = const Value.absent(),
+    this.seasonOverview = const Value.absent(),
+    this.airDate = const Value.absent(),
+    this.stillFile = const Value.absent(),
+    this.showPosterFile = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : lookupKey = Value(lookupKey),
        found = Value(found),
@@ -1233,6 +1505,12 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
     Expression<String>? mediaType,
     Expression<int>? tmdbId,
     Expression<int>? fetchedAt,
+    Expression<double>? rating,
+    Expression<String>? showOverview,
+    Expression<String>? seasonOverview,
+    Expression<String>? airDate,
+    Expression<String>? stillFile,
+    Expression<String>? showPosterFile,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1247,6 +1525,12 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
       if (mediaType != null) 'media_type': mediaType,
       if (tmdbId != null) 'tmdb_id': tmdbId,
       if (fetchedAt != null) 'fetched_at': fetchedAt,
+      if (rating != null) 'rating': rating,
+      if (showOverview != null) 'show_overview': showOverview,
+      if (seasonOverview != null) 'season_overview': seasonOverview,
+      if (airDate != null) 'air_date': airDate,
+      if (stillFile != null) 'still_file': stillFile,
+      if (showPosterFile != null) 'show_poster_file': showPosterFile,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1263,6 +1547,12 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
     Value<String?>? mediaType,
     Value<int?>? tmdbId,
     Value<int>? fetchedAt,
+    Value<double?>? rating,
+    Value<String?>? showOverview,
+    Value<String?>? seasonOverview,
+    Value<String?>? airDate,
+    Value<String?>? stillFile,
+    Value<String?>? showPosterFile,
     Value<int>? rowid,
   }) {
     return MetadataCacheCompanion(
@@ -1277,6 +1567,12 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
       mediaType: mediaType ?? this.mediaType,
       tmdbId: tmdbId ?? this.tmdbId,
       fetchedAt: fetchedAt ?? this.fetchedAt,
+      rating: rating ?? this.rating,
+      showOverview: showOverview ?? this.showOverview,
+      seasonOverview: seasonOverview ?? this.seasonOverview,
+      airDate: airDate ?? this.airDate,
+      stillFile: stillFile ?? this.stillFile,
+      showPosterFile: showPosterFile ?? this.showPosterFile,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1317,6 +1613,24 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
     if (fetchedAt.present) {
       map['fetched_at'] = Variable<int>(fetchedAt.value);
     }
+    if (rating.present) {
+      map['rating'] = Variable<double>(rating.value);
+    }
+    if (showOverview.present) {
+      map['show_overview'] = Variable<String>(showOverview.value);
+    }
+    if (seasonOverview.present) {
+      map['season_overview'] = Variable<String>(seasonOverview.value);
+    }
+    if (airDate.present) {
+      map['air_date'] = Variable<String>(airDate.value);
+    }
+    if (stillFile.present) {
+      map['still_file'] = Variable<String>(stillFile.value);
+    }
+    if (showPosterFile.present) {
+      map['show_poster_file'] = Variable<String>(showPosterFile.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1337,6 +1651,12 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
           ..write('mediaType: $mediaType, ')
           ..write('tmdbId: $tmdbId, ')
           ..write('fetchedAt: $fetchedAt, ')
+          ..write('rating: $rating, ')
+          ..write('showOverview: $showOverview, ')
+          ..write('seasonOverview: $seasonOverview, ')
+          ..write('airDate: $airDate, ')
+          ..write('stillFile: $stillFile, ')
+          ..write('showPosterFile: $showPosterFile, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1976,6 +2296,12 @@ typedef $$MetadataCacheTableCreateCompanionBuilder =
       Value<String?> mediaType,
       Value<int?> tmdbId,
       required int fetchedAt,
+      Value<double?> rating,
+      Value<String?> showOverview,
+      Value<String?> seasonOverview,
+      Value<String?> airDate,
+      Value<String?> stillFile,
+      Value<String?> showPosterFile,
       Value<int> rowid,
     });
 typedef $$MetadataCacheTableUpdateCompanionBuilder =
@@ -1991,6 +2317,12 @@ typedef $$MetadataCacheTableUpdateCompanionBuilder =
       Value<String?> mediaType,
       Value<int?> tmdbId,
       Value<int> fetchedAt,
+      Value<double?> rating,
+      Value<String?> showOverview,
+      Value<String?> seasonOverview,
+      Value<String?> airDate,
+      Value<String?> stillFile,
+      Value<String?> showPosterFile,
       Value<int> rowid,
     });
 
@@ -2055,6 +2387,36 @@ class $$MetadataCacheTableFilterComposer
 
   ColumnFilters<int> get fetchedAt => $composableBuilder(
     column: $table.fetchedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get rating => $composableBuilder(
+    column: $table.rating,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get showOverview => $composableBuilder(
+    column: $table.showOverview,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get seasonOverview => $composableBuilder(
+    column: $table.seasonOverview,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get airDate => $composableBuilder(
+    column: $table.airDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get stillFile => $composableBuilder(
+    column: $table.stillFile,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get showPosterFile => $composableBuilder(
+    column: $table.showPosterFile,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -2122,6 +2484,36 @@ class $$MetadataCacheTableOrderingComposer
     column: $table.fetchedAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<double> get rating => $composableBuilder(
+    column: $table.rating,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get showOverview => $composableBuilder(
+    column: $table.showOverview,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get seasonOverview => $composableBuilder(
+    column: $table.seasonOverview,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get airDate => $composableBuilder(
+    column: $table.airDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get stillFile => $composableBuilder(
+    column: $table.stillFile,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get showPosterFile => $composableBuilder(
+    column: $table.showPosterFile,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$MetadataCacheTableAnnotationComposer
@@ -2169,6 +2561,30 @@ class $$MetadataCacheTableAnnotationComposer
 
   GeneratedColumn<int> get fetchedAt =>
       $composableBuilder(column: $table.fetchedAt, builder: (column) => column);
+
+  GeneratedColumn<double> get rating =>
+      $composableBuilder(column: $table.rating, builder: (column) => column);
+
+  GeneratedColumn<String> get showOverview => $composableBuilder(
+    column: $table.showOverview,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get seasonOverview => $composableBuilder(
+    column: $table.seasonOverview,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get airDate =>
+      $composableBuilder(column: $table.airDate, builder: (column) => column);
+
+  GeneratedColumn<String> get stillFile =>
+      $composableBuilder(column: $table.stillFile, builder: (column) => column);
+
+  GeneratedColumn<String> get showPosterFile => $composableBuilder(
+    column: $table.showPosterFile,
+    builder: (column) => column,
+  );
 }
 
 class $$MetadataCacheTableTableManager
@@ -2217,6 +2633,12 @@ class $$MetadataCacheTableTableManager
                 Value<String?> mediaType = const Value.absent(),
                 Value<int?> tmdbId = const Value.absent(),
                 Value<int> fetchedAt = const Value.absent(),
+                Value<double?> rating = const Value.absent(),
+                Value<String?> showOverview = const Value.absent(),
+                Value<String?> seasonOverview = const Value.absent(),
+                Value<String?> airDate = const Value.absent(),
+                Value<String?> stillFile = const Value.absent(),
+                Value<String?> showPosterFile = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MetadataCacheCompanion(
                 lookupKey: lookupKey,
@@ -2230,6 +2652,12 @@ class $$MetadataCacheTableTableManager
                 mediaType: mediaType,
                 tmdbId: tmdbId,
                 fetchedAt: fetchedAt,
+                rating: rating,
+                showOverview: showOverview,
+                seasonOverview: seasonOverview,
+                airDate: airDate,
+                stillFile: stillFile,
+                showPosterFile: showPosterFile,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -2245,6 +2673,12 @@ class $$MetadataCacheTableTableManager
                 Value<String?> mediaType = const Value.absent(),
                 Value<int?> tmdbId = const Value.absent(),
                 required int fetchedAt,
+                Value<double?> rating = const Value.absent(),
+                Value<String?> showOverview = const Value.absent(),
+                Value<String?> seasonOverview = const Value.absent(),
+                Value<String?> airDate = const Value.absent(),
+                Value<String?> stillFile = const Value.absent(),
+                Value<String?> showPosterFile = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MetadataCacheCompanion.insert(
                 lookupKey: lookupKey,
@@ -2258,6 +2692,12 @@ class $$MetadataCacheTableTableManager
                 mediaType: mediaType,
                 tmdbId: tmdbId,
                 fetchedAt: fetchedAt,
+                rating: rating,
+                showOverview: showOverview,
+                seasonOverview: seasonOverview,
+                airDate: airDate,
+                stillFile: stillFile,
+                showPosterFile: showPosterFile,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

@@ -74,6 +74,29 @@ void main() {
     });
   });
 
+  group('showSeasons', () {
+    test('collects one show\'s seasons sorted by number', () {
+      final entries = [
+        _e('Show.S02E01.mkv'),
+        _e('A Movie (2020).mkv'),
+        _e('Show.S01E01.mkv'),
+        _e('Other Show S01E01.mkv'),
+        _e('Show.S01E02.mkv'),
+      ];
+      final seasons = showSeasons(entries, 'Show');
+      expect(seasons.map((s) => s.season), [1, 2]);
+      expect(seasons.first.episodes, hasLength(2));
+    });
+
+    test('matches the show name case-insensitively', () {
+      expect(showSeasons([_e('Show.S01E01.mkv')], 'SHOW'), hasLength(1));
+    });
+
+    test('unknown show yields no seasons', () {
+      expect(showSeasons([_e('Show.S01E01.mkv')], 'Other'), isEmpty);
+    });
+  });
+
   group('episodeNameFromLabel', () {
     test('extracts the TMDB episode name', () {
       expect(episodeNameFromLabel('S01E02 · The Second One'),

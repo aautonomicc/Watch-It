@@ -39,6 +39,7 @@ http.Response _tmdbApi(http.Request req) {
         {'name': 'Thriller'},
       ],
       'poster_path': '/notld.jpg',
+      'vote_average': 7.5,
     };
   } else if (path == '/3/search/movie') {
     final query = req.url.queryParameters['query'];
@@ -58,6 +59,7 @@ http.Response _tmdbApi(http.Request req) {
         {'name': 'Drama'}
       ],
       'poster_path': '/movie42.jpg',
+      'vote_average': 6.8,
     };
   } else if (path == '/3/search/tv') {
     final query = req.url.queryParameters['query'];
@@ -77,16 +79,20 @@ http.Response _tmdbApi(http.Request req) {
         {'name': 'Comedy'}
       ],
       'poster_path': '/show7.jpg',
+      'vote_average': 8.3,
     };
   } else if (path == '/3/tv/7/season/1') {
     body = {
       'poster_path': '/show7_s1.jpg',
+      'overview': 'Season one happens.',
       'episodes': [
         {'episode_number': 1, 'name': 'The First One', 'overview': ''},
         {
           'episode_number': 2,
           'name': 'The Second One',
           'overview': 'Episode two happens.',
+          'air_date': '2019-01-17',
+          'still_path': '/e2_still.jpg',
         },
       ],
     };
@@ -144,6 +150,7 @@ void main() {
       expect(match.year, 1968);
       expect(match.category, 'Horror · Thriller');
       expect(match.posterPath, '/notld.jpg');
+      expect(match.rating, 7.5);
       // v3 hex key travels as the api_key query parameter.
       expect(requests.first.url.queryParameters['api_key'], 'k3y');
       expect(requests.first.headers.containsKey('Authorization'), isFalse);
@@ -170,7 +177,15 @@ void main() {
       expect(match.category, 'Comedy');
       // Season artwork beats the show poster for episode matches.
       expect(match.season, 1);
+      expect(match.episode, 2);
       expect(match.posterPath, '/show7_s1.jpg');
+      // Show/season/episode extras for the show and season pages.
+      expect(match.rating, 8.3);
+      expect(match.showOverview, 'A show.');
+      expect(match.seasonOverview, 'Season one happens.');
+      expect(match.airDate, '2019-01-17');
+      expect(match.stillPath, '/e2_still.jpg');
+      expect(match.showPosterPath, '/show7.jpg');
     });
 
     test('unknown season number keeps show-level metadata', () async {
@@ -217,6 +232,18 @@ void main() {
     });
   });
 
+  group('formatAirDate', () {
+    test('formats ISO dates for display', () {
+      expect(formatAirDate('2019-01-17'), '17 Jan 2019');
+      expect(formatAirDate('2008-12-01'), '1 Dec 2008');
+    });
+
+    test('passes non-ISO strings through unchanged', () {
+      expect(formatAirDate('2019'), '2019');
+      expect(formatAirDate('2019-13-01'), '2019-13-01');
+    });
+  });
+
   group('MetadataService', () {
     const entry = MediaEntry(name: 'The.Movie.2024.1080p.mkv', address: addr);
 
@@ -236,6 +263,7 @@ void main() {
       expect(resolved.year, 2024);
       expect(resolved.overview, 'A movie.');
       expect(resolved.category, 'Drama');
+      expect(resolved.rating, 6.8);
       expect(resolved.posterFilePath, isNotNull);
       expect(File(resolved.posterFilePath!).readAsBytesSync(), _posterBytes);
     });
@@ -249,6 +277,30 @@ void main() {
       expect(meta.episodeLabel, 'S01E02 · The Second One');
       expect(meta.posterFilePath, endsWith('tv_7_s1.jpg'),
           reason: 'a show-level match must not share the season poster file');
+    });
+
+    test('episode extras (still, air date, synopses) survive the cache',
+        () async {
+      const ep = MediaEntry(name: 'Show.S01E02.mkv', address: addr);
+      final svc = service();
+      svc.metadataFor(ep);
+      await svc.whenIdle();
+
+      // Fresh instance = fresh in-memory state, same database — the
+      // second read exercises the SQLite row, not the TMDB response.
+      final svc2 = service();
+      svc2.metadataFor(ep);
+      await svc2.whenIdle();
+      final meta = svc2.metadataFor(ep);
+      expect(meta.rating, 8.3);
+      expect(meta.showOverview, 'A show.');
+      expect(meta.seasonOverview, 'Season one happens.');
+      expect(meta.airDate, '2019-01-17');
+      expect(meta.overview, 'Episode two happens.');
+      expect(meta.stillFilePath, endsWith('tv_7_s1e2_still.jpg'));
+      expect(meta.showPosterFilePath, endsWith('tv_7.jpg'),
+          reason: 'show page needs the show poster, not the season one');
+      expect(File(meta.stillFilePath!).readAsBytesSync(), _posterBytes);
     });
 
     test('second session serves from SQLite with no network', () async {
