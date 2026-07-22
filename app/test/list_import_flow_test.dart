@@ -15,6 +15,8 @@ const _addrA =
     '66cacd06ae5b02aeb0b4b8a463885bd7ec392b1b4291c1eda75253e831c1bcbb';
 const _addrB =
     '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+const _addrC =
+    'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
 
 /// Serves a fixed in-memory file to `openFile()`; null = picker cancelled.
 class _FakeFileSelector extends FileSelectorPlatform
@@ -99,6 +101,81 @@ void main() {
       expect(find.textContaining('No "<xor address> <file name>" entries'),
           findsOneWidget);
       expect((await LibraryStore.load()).length, before);
+    });
+
+    testWidgets('a multi-list ListName= file imports every list',
+        (tester) async {
+      FileSelectorPlatform.instance = _FakeFileSelector(XFile.fromData(
+        utf8.encode('ListName="TV Series"\n'
+            '$_addrA Show S01E01.mkv\n'
+            '$_addrB Show S01E02.mkv\n'
+            'ListName="Movies Pack"\n'
+            '$_addrC A Movie (2024).mkv\n'),
+        name: 'combined.list',
+      ));
+      await openMediaLists(tester);
+      await importLocal(tester);
+
+      expect(find.textContaining('Imported 2 lists'), findsOneWidget);
+      final lists = await LibraryStore.load();
+      expect(lists.firstWhere((l) => l.title == 'TV Series').entries,
+          hasLength(2));
+      expect(lists.firstWhere((l) => l.title == 'Movies Pack').entries,
+          hasLength(1));
+    });
+  });
+
+  group('Import when the list name already exists', () {
+    Future<void> importTwice(WidgetTester tester,
+        {required String secondAction}) async {
+      FileSelectorPlatform.instance = _FakeFileSelector(XFile.fromData(
+        utf8.encode('Clash Movies\n'
+            '$_addrA First Movie.mkv\n'
+            '$_addrB Second Movie.mkv\n'),
+        name: 'first.list',
+      ));
+      await openMediaLists(tester);
+      await importLocal(tester);
+      // Same list name again: one duplicate entry, one new one.
+      FileSelectorPlatform.instance = _FakeFileSelector(XFile.fromData(
+        utf8.encode('Clash Movies\n'
+            '$_addrB Second Movie.mkv\n'
+            '$_addrC Third Movie.mkv\n'),
+        name: 'second.list',
+      ));
+      await importLocal(tester);
+      expect(find.textContaining('"Clash Movies" already exists'),
+          findsOneWidget);
+      await tester.tap(find.text(secondAction));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('Merge appends only the new entries', (tester) async {
+      await importTwice(tester, secondAction: 'Merge');
+      final list = (await LibraryStore.load())
+          .firstWhere((l) => l.title == 'Clash Movies');
+      expect(list.entries, hasLength(3));
+      expect(list.entries.map((e) => e.address),
+          [_addrA, _addrB, _addrC]);
+    });
+
+    testWidgets('Create new makes a numbered copy', (tester) async {
+      await importTwice(tester, secondAction: 'Create new');
+      final lists = await LibraryStore.load();
+      expect(lists.firstWhere((l) => l.title == 'Clash Movies').entries,
+          hasLength(2));
+      final copy =
+          lists.firstWhere((l) => l.title == 'Clash Movies (2)');
+      expect(copy.entries.map((e) => e.address), [_addrB, _addrC]);
+    });
+
+    testWidgets('Skip leaves the existing list untouched', (tester) async {
+      await importTwice(tester, secondAction: 'Skip');
+      final lists = await LibraryStore.load();
+      expect(lists.where((l) => l.title.startsWith('Clash Movies')),
+          hasLength(1));
+      expect(lists.firstWhere((l) => l.title == 'Clash Movies').entries,
+          hasLength(2));
     });
   });
 }

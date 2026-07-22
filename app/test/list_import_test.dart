@@ -7,21 +7,25 @@ const _addrA =
     '66cacd06ae5b02aeb0b4b8a463885bd7ec392b1b4291c1eda75253e831c1bcbb';
 const _addrB =
     '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+const _addrC =
+    'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
 
 void main() {
-  group('parseMediaListFile', () {
+  group('parseMediaListFile (single list)', () {
     test('parses name line plus entries', () {
       final parsed = parseMediaListFile(
         'My Movies\n'
         '$_addrA Some Movie (2024) [1080p].mkv\n'
         '$_addrB Another Movie (1999).mp4\n',
       );
-      expect(parsed.title, 'My Movies');
-      expect(parsed.entries, hasLength(2));
-      expect(parsed.entries[0].name, 'Some Movie (2024) [1080p].mkv');
-      expect(parsed.entries[0].address, _addrA);
-      expect(parsed.entries[1].name, 'Another Movie (1999).mp4');
+      final list = parsed.lists.single;
+      expect(list.title, 'My Movies');
+      expect(list.entries, hasLength(2));
+      expect(list.entries[0].name, 'Some Movie (2024) [1080p].mkv');
+      expect(list.entries[0].address, _addrA);
+      expect(list.entries[1].name, 'Another Movie (1999).mp4');
       expect(parsed.skippedLines, isEmpty);
+      expect(parsed.entryCount, 2);
     });
 
     test('handles CRLF, blank lines, surrounding whitespace and 0x prefix',
@@ -32,10 +36,11 @@ void main() {
         '  0x${_addrA.toUpperCase()}   Spaced Out (2020).mkv  \r\n'
         '\r\n',
       );
-      expect(parsed.title, 'Weekend Watchlist');
-      expect(parsed.entries, hasLength(1));
-      expect(parsed.entries.single.address, _addrA);
-      expect(parsed.entries.single.name, 'Spaced Out (2020).mkv');
+      final list = parsed.lists.single;
+      expect(list.title, 'Weekend Watchlist');
+      expect(list.entries, hasLength(1));
+      expect(list.entries.single.address, _addrA);
+      expect(list.entries.single.name, 'Spaced Out (2020).mkv');
     });
 
     test('skips malformed lines and reports their line numbers', () {
@@ -45,8 +50,9 @@ void main() {
         '$_addrA Good Movie.mkv\n'
         '$_addrB\n', // address without a file name
       );
-      expect(parsed.entries, hasLength(1));
-      expect(parsed.entries.single.name, 'Good Movie.mkv');
+      final list = parsed.lists.single;
+      expect(list.entries, hasLength(1));
+      expect(list.entries.single.name, 'Good Movie.mkv');
       expect(parsed.skippedLines, [2, 4]);
     });
 
@@ -64,10 +70,100 @@ void main() {
       );
     });
 
+    test('rejects a file whose first line is a bare address', () {
+      expect(() => parseMediaListFile('$_addrA\n$_addrB Movie.mkv\n'),
+          throwsA(isA<ListImportException>()));
+    });
+
     test('rejects a file with a name but no valid entries', () {
       expect(() => parseMediaListFile('Just A Name\nnot an entry\n'),
           throwsA(isA<ListImportException>()));
     });
+  });
+
+  group('parseMediaListFile (multi-list ListName= markers)', () {
+    test('splits lists on ListName= markers, quotes optional', () {
+      final parsed = parseMediaListFile(
+        'ListName="TV Series"\n'
+        '$_addrA Some Show S01E01.mkv\n'
+        '$_addrB Some Show S01E02.mkv\n'
+        'ListName=Movies\n'
+        '$_addrC Some Movie (2024).mkv\n',
+      );
+      expect(parsed.lists, hasLength(2));
+      expect(parsed.lists[0].title, 'TV Series');
+      expect(parsed.lists[0].entries, hasLength(2));
+      expect(parsed.lists[1].title, 'Movies');
+      expect(parsed.lists[1].entries.single.address, _addrC);
+      expect(parsed.skippedLines, isEmpty);
+      expect(parsed.entryCount, 3);
+    });
+
+    test('marker keyword is case-insensitive and tolerates spacing', () {
+      final parsed = parseMediaListFile(
+        '  listname = "Late Night"  \n'
+        '$_addrA A Movie.mkv\n',
+      );
+      expect(parsed.lists.single.title, 'Late Night');
+    });
+
+    test('a legacy header file can append marker sections', () {
+      final parsed = parseMediaListFile(
+        'My Movies\n'
+        '$_addrA First.mkv\n'
+        'ListName="TV Series"\n'
+        '$_addrB Pilot.mkv\n',
+      );
+      expect(parsed.lists, hasLength(2));
+      expect(parsed.lists[0].title, 'My Movies');
+      expect(parsed.lists[1].title, 'TV Series');
+    });
+
+    test('repeated list names in one file are folded together', () {
+      final parsed = parseMediaListFile(
+        'ListName="Movies"\n'
+        '$_addrA First.mkv\n'
+        'ListName="TV Series"\n'
+        '$_addrB Pilot.mkv\n'
+        'ListName="movies"\n'
+        '$_addrC Second.mkv\n',
+      );
+      expect(parsed.lists, hasLength(2));
+      expect(parsed.lists[0].title, 'Movies');
+      expect(parsed.lists[0].entries, hasLength(2));
+      expect(parsed.lists[0].entries[1].address, _addrC);
+    });
+
+    test('a marker with an empty name is skipped and reported', () {
+      final parsed = parseMediaListFile(
+        'ListName="Movies"\n'
+        '$_addrA First.mkv\n'
+        'ListName=""\n'
+        '$_addrB Second.mkv\n',
+      );
+      expect(parsed.lists.single.entries, hasLength(2));
+      expect(parsed.skippedLines, [3]);
+    });
+
+    test('sections without valid entries are dropped', () {
+      final parsed = parseMediaListFile(
+        'ListName="Empty"\n'
+        'ListName="Movies"\n'
+        '$_addrA First.mkv\n',
+      );
+      expect(parsed.lists.single.title, 'Movies');
+    });
+
+    test('rejects a marker file with no valid entries at all', () {
+      expect(
+        () => parseMediaListFile('ListName="Empty"\nnot an entry\n'),
+        throwsA(isA<ListImportException>()),
+      );
+    });
+  });
+
+  test('list-file cap is 10MB', () {
+    expect(kMaxListFileBytes, 10 * 1024 * 1024);
   });
 
   group('fetchListFromNetwork', () {
@@ -81,10 +177,10 @@ void main() {
         if (req.uri.path == '/xor/$_addrA') {
           req.response.write('List From Net\n$_addrB A Movie.mkv\n');
         } else if (req.uri.path == '/xor/$_addrB') {
-          // Oversized response, no Content-Length up front.
+          // Oversized (>10MB) response, no Content-Length up front.
           req.response.bufferOutput = false;
           final chunk = List<int>.filled(1024 * 1024, 0x61);
-          for (var i = 0; i < 5; i++) {
+          for (var i = 0; i < 12; i++) {
             req.response.add(chunk);
             try {
               await req.response.flush();
@@ -106,8 +202,8 @@ void main() {
     test('downloads and returns the list text', () async {
       final text = await fetchListFromNetwork('0x$_addrA', base: base);
       final parsed = parseMediaListFile(text);
-      expect(parsed.title, 'List From Net');
-      expect(parsed.entries.single.address, _addrB);
+      expect(parsed.lists.single.title, 'List From Net');
+      expect(parsed.lists.single.entries.single.address, _addrB);
     });
 
     test('rejects an invalid address without touching the network', () {
