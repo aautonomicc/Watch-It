@@ -1,0 +1,104 @@
+import 'dart:convert';
+
+import 'package:drift/drift.dart' show driftRuntimeOptions;
+import 'package:drift/native.dart';
+import 'package:file_selector_platform_interface/file_selector_platform_interface.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:plugin_platform_interface/plugin_platform_interface.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'package:watchit/db/app_database.dart';
+import 'package:watchit/main.dart';
+import 'package:watchit/services/library_store.dart';
+
+const _addrA =
+    '66cacd06ae5b02aeb0b4b8a463885bd7ec392b1b4291c1eda75253e831c1bcbb';
+const _addrB =
+    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+/// Serves a fixed in-memory file to `openFile()`; null = picker cancelled.
+class _FakeFileSelector extends FileSelectorPlatform
+    with MockPlatformInterfaceMixin {
+  _FakeFileSelector(this.file);
+  final XFile? file;
+
+  @override
+  Future<XFile?> openFile({
+    List<XTypeGroup>? acceptedTypeGroups,
+    String? initialDirectory,
+    String? confirmButtonText,
+  }) async =>
+      file;
+}
+
+void main() {
+  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
+
+  setUp(() async {
+    SharedPreferences.setMockInitialValues({});
+    await LibraryStore.useForTesting(
+        AppDatabase.forTesting(NativeDatabase.memory()));
+  });
+
+  Future<void> openMediaLists(WidgetTester tester) async {
+    await tester.pumpWidget(const WatchItApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Media Lists'));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> importLocal(WidgetTester tester) async {
+    await tester.tap(find.byTooltip('Import list from file'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Local file'));
+    await tester.pumpAndSettle();
+  }
+
+  group('Import list from local file', () {
+    testWidgets('imports a well-formed list file', (tester) async {
+      FileSelectorPlatform.instance = _FakeFileSelector(XFile.fromData(
+        utf8.encode('Imported Movies\n'
+            '$_addrA First Movie (2024).mkv\n'
+            'garbage line\n'
+            '$_addrB Second Movie (1999).mp4\n'),
+        name: 'movies.list',
+      ));
+      await openMediaLists(tester);
+      await importLocal(tester);
+
+      expect(find.textContaining('Imported "Imported Movies"'),
+          findsOneWidget);
+      expect(find.textContaining('1 invalid line skipped'), findsOneWidget);
+      final imported = (await LibraryStore.load())
+          .firstWhere((l) => l.title == 'Imported Movies');
+      expect(imported.entries, hasLength(2));
+      expect(imported.entries[0].name, 'First Movie (2024).mkv');
+      expect(imported.entries[0].address, _addrA);
+      expect(imported.entries[1].address, _addrB);
+    });
+
+    testWidgets('cancelling the picker changes nothing', (tester) async {
+      FileSelectorPlatform.instance = _FakeFileSelector(null);
+      await openMediaLists(tester);
+      final before = (await LibraryStore.load()).length;
+      await importLocal(tester);
+      expect((await LibraryStore.load()).length, before);
+    });
+
+    testWidgets('a file with no valid entries shows an error and adds '
+        'no list', (tester) async {
+      FileSelectorPlatform.instance = _FakeFileSelector(XFile.fromData(
+        utf8.encode('Only A Name\nnot an entry at all\n'),
+        name: 'bad.list',
+      ));
+      await openMediaLists(tester);
+      final before = (await LibraryStore.load()).length;
+      await importLocal(tester);
+      expect(find.textContaining('No "<xor address> <file name>" entries'),
+          findsOneWidget);
+      expect((await LibraryStore.load()).length, before);
+    });
+  });
+}
