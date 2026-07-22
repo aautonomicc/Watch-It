@@ -24,22 +24,34 @@ class MediaList {
     required this.id,
     required this.title,
     this.entries = const [],
+    this.enabled = true,
   });
 
   final String id;
   final String title;
   final List<MediaEntry> entries;
 
-  MediaList copyWith({String? title, List<MediaEntry>? entries}) => MediaList(
+  /// Disabled lists stay in the library but are hidden from the home
+  /// screen (toggled in Settings → Media Lists).
+  final bool enabled;
+
+  MediaList copyWith({
+    String? title,
+    List<MediaEntry>? entries,
+    bool? enabled,
+  }) =>
+      MediaList(
         id: id,
         title: title ?? this.title,
         entries: entries ?? this.entries,
+        enabled: enabled ?? this.enabled,
       );
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'title': title,
         'entries': entries.map((e) => e.toJson()).toList(),
+        'enabled': enabled,
       };
 
   factory MediaList.fromJson(Map<String, dynamic> json) => MediaList(
@@ -48,6 +60,7 @@ class MediaList {
         entries: (json['entries'] as List<dynamic>? ?? [])
             .map((e) => MediaEntry.fromJson(e as Map<String, dynamic>))
             .toList(),
+        enabled: json['enabled'] as bool? ?? true,
       );
 }
 

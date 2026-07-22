@@ -9,9 +9,9 @@ import '../services/library_store.dart';
 import '../services/embedded_client.dart';
 import '../services/metadata_service.dart';
 import '../theme/tokens.dart';
-import 'list_edit_screen.dart';
+import 'media_lists_screen.dart';
 
-/// Settings: manage media lists (create, open for editing, delete).
+/// Settings: library, streaming, metadata, and about sections.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -25,7 +25,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _version;
   Timer? _healthTimer;
   int _bufferSizeMb = AppSettings.defaultBufferSizeMb;
-  String _tmdbApiKey = '';
+  TmdbKeySource _tmdbKeySource = TmdbKeySource.none;
 
   @override
   void initState() {
@@ -57,13 +57,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final lists = await LibraryStore.load();
     final health = await EmbeddedClient.health();
     final bufferSizeMb = await AppSettings.bufferSizeMb();
-    final tmdbApiKey = await AppSettings.tmdbApiKey();
+    final tmdbKeySource = await AppSettings.tmdbKeySource();
     if (mounted) {
       setState(() {
         _lists = lists;
         _health = health;
         _bufferSizeMb = bufferSizeMb;
-        _tmdbApiKey = tmdbApiKey;
+        _tmdbKeySource = tmdbKeySource;
       });
     }
   }
@@ -82,22 +82,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _refreshHealth() async {
     final health = await EmbeddedClient.health();
     if (mounted) setState(() => _health = health);
-  }
-
-  Future<void> _createList() async {
-    final title = await promptForText(
-      context,
-      title: 'New media list',
-      hint: 'List title',
-    );
-    if (title == null || title.trim().isEmpty) return;
-    final lists = List<MediaList>.of(_lists ?? []);
-    lists.add(MediaList(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
-      title: title.trim(),
-    ));
-    await LibraryStore.save(lists);
-    if (mounted) setState(() => _lists = lists);
   }
 
   Future<void> _pickBufferSize() async {
@@ -136,24 +120,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() => _bufferSizeMb = picked);
   }
 
+  /// The key in use is never prefilled or displayed — only where it came
+  /// from — so the bundled key can't be copied out of the app.
   Future<void> _editTmdbApiKey() async {
     final entered = await promptForText(
       context,
       title: 'TMDB API key',
-      hint: 'API key or read access token (empty to disable)',
-      initial: _tmdbApiKey,
+      hint: _tmdbKeySource == TmdbKeySource.user
+          ? 'New key (leave empty to remove yours)'
+          : 'API key or read access token',
     );
-    if (entered == null || entered.trim() == _tmdbApiKey) return;
+    if (entered == null) return;
+    // An empty save only means something when a user key exists to remove.
+    if (entered.trim().isEmpty && _tmdbKeySource != TmdbKeySource.user) {
+      return;
+    }
     await AppSettings.setTmdbApiKey(entered);
-    final key = await AppSettings.tmdbApiKey();
     // Re-run matching with the new credential (also clears cached misses).
     await MetadataService.instance.reset();
-    if (mounted) setState(() => _tmdbApiKey = key);
+    final source = await AppSettings.tmdbKeySource();
+    if (mounted) setState(() => _tmdbKeySource = source);
   }
 
-  Future<void> _openList(MediaList list) async {
+  Future<void> _openMediaLists() async {
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ListEditScreen(listId: list.id)),
+      MaterialPageRoute(builder: (_) => const MediaListsScreen()),
     );
     await _reload();
   }
@@ -168,13 +159,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         elevation: 0,
         title: Text('Settings', style: TextStyle(color: t.bone, fontSize: 18)),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _createList,
-        backgroundColor: t.copper,
-        foregroundColor: t.ink,
-        icon: const Icon(Icons.add),
-        label: const Text('New list'),
-      ),
       body: lists == null
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -182,7 +166,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
                   child: Text(
-                    'MEDIA LISTS',
+                    'LIBRARY',
                     style: TextStyle(
                       fontSize: 11,
                       letterSpacing: 1.5,
@@ -191,28 +175,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
-                if (lists.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Text(
-                      'No lists yet. Create one to start adding media.',
-                      style: TextStyle(fontSize: 13, color: t.boneDim),
-                    ),
+                ListTile(
+                  leading: Icon(Icons.video_library_outlined, color: t.copper),
+                  title: Text('Media Lists',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    lists.isEmpty
+                        ? 'No lists yet'
+                        : '${lists.length} '
+                            '${lists.length == 1 ? 'list' : 'lists'} · '
+                            '${lists.where((l) => l.enabled).length} shown '
+                            'on home',
+                    style: TextStyle(color: t.ash, fontSize: 12),
                   ),
-                for (final list in lists)
-                  ListTile(
-                    leading: Icon(Icons.video_library_outlined,
-                        color: t.copper),
-                    title: Text(list.title,
-                        style: TextStyle(color: t.bone, fontSize: 15)),
-                    subtitle: Text(
-                      '${list.entries.length} '
-                      '${list.entries.length == 1 ? 'entry' : 'entries'}',
-                      style: TextStyle(color: t.ash, fontSize: 12),
-                    ),
-                    trailing: Icon(Icons.chevron_right, color: t.ash),
-                    onTap: () => _openList(list),
-                  ),
+                  trailing: Icon(Icons.chevron_right, color: t.ash),
+                  onTap: _openMediaLists,
+                ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
                   child: Text(
@@ -284,9 +262,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: Text('TMDB API key',
                       style: TextStyle(color: t.bone, fontSize: 15)),
                   subtitle: Text(
-                    _tmdbApiKey.isEmpty
-                        ? 'Not set — titles come from file names only'
-                        : 'Set (…${_tmdbApiKey.substring(_tmdbApiKey.length < 4 ? 0 : _tmdbApiKey.length - 4)})',
+                    switch (_tmdbKeySource) {
+                      TmdbKeySource.user => 'Using your key',
+                      TmdbKeySource.bundled => 'Using the built-in key',
+                      TmdbKeySource.none =>
+                        'Not set — titles come from file names only',
+                    },
                     style: TextStyle(color: t.ash, fontSize: 12),
                   ),
                   trailing: Icon(Icons.chevron_right, color: t.ash),
@@ -297,9 +278,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: Text(
                     'Artwork, descriptions, and categories are matched from '
                     'TMDB using each entry\'s file name, then cached on this '
-                    'device. Create a free API key at themoviedb.org '
-                    '(Settings → API) and paste either the API key or the '
-                    'read access token here.',
+                    'device. To use your own key, create a free one at '
+                    'themoviedb.org (Settings → API) and paste either the '
+                    'API key or the read access token here — it overrides '
+                    'the built-in key and is never displayed.',
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
                 ),
