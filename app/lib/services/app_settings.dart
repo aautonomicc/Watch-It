@@ -38,6 +38,17 @@ class AppSettings {
     return key.isNotEmpty ? key : bundledTmdbApiKey;
   }
 
+  /// Where the credential returned by [tmdbApiKey] comes from. The
+  /// settings UI shows this instead of the key itself, so the bundled
+  /// key can't be copied out of the app.
+  static Future<TmdbKeySource> tmdbKeySource() async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = prefs.getString(_tmdbKeyKey)?.trim() ?? '';
+    if (key.isNotEmpty) return TmdbKeySource.user;
+    if (bundledTmdbApiKey.isNotEmpty) return TmdbKeySource.bundled;
+    return TmdbKeySource.none;
+  }
+
   static Future<void> setTmdbApiKey(String key) async {
     final prefs = await SharedPreferences.getInstance();
     final trimmed = key.trim();
@@ -48,3 +59,6 @@ class AppSettings {
     }
   }
 }
+
+/// Origin of the effective TMDB credential.
+enum TmdbKeySource { user, bundled, none }

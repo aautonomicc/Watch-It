@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
+import 'package:sqlite3/sqlite3.dart' show sqlite3;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -42,6 +44,13 @@ void main() {
       expect(restored.entries.single.address, _addr);
     });
 
+    test('JSON round-trip preserves the enabled flag', () {
+      final hidden = MediaList(id: '2', title: 'Hidden', enabled: false);
+      expect(MediaList.fromJson(hidden.toJson()).enabled, isFalse);
+      // Pre-alpha.25 blobs have no flag: default to shown.
+      expect(MediaList.fromJson({'id': '3', 'title': 'Old'}).enabled, isTrue);
+    });
+
     test('XOR address validation', () {
       expect(looksLikeXorAddress(_addr), isTrue);
       expect(looksLikeXorAddress('0x$_addr'), isTrue);
@@ -64,6 +73,16 @@ void main() {
       expect(loaded.single.entries.single.address, _addr);
     });
 
+    test('save then load preserves the enabled flag', () async {
+      await LibraryStore.save([
+        MediaList(id: 'on', title: 'Shown'),
+        MediaList(id: 'off', title: 'Hidden', enabled: false),
+      ]);
+      final loaded = await LibraryStore.load();
+      expect(loaded.singleWhere((l) => l.id == 'on').enabled, isTrue);
+      expect(loaded.singleWhere((l) => l.id == 'off').enabled, isFalse);
+    });
+
     test('empty store loads as empty list', () async {
       expect(await LibraryStore.load(), isEmpty);
     });
@@ -84,6 +103,40 @@ void main() {
       expect(loaded.map((l) => l.title), ['List 0', 'List 1', 'List 2']);
       expect(loaded[1].entries.map((e) => e.name),
           ['e1-0.mkv', 'e1-1.mkv', 'e1-2.mkv']);
+    });
+  });
+
+  group('Schema migration', () {
+    test('v2 database gains the enabled column on upgrade', () async {
+      final dir = await Directory.systemTemp.createTemp('watchit-migration');
+      addTearDown(() => dir.delete(recursive: true));
+      final file = File('${dir.path}/watchit.sqlite');
+
+      // Hand-build the alpha.22–24 (schema v2) shape of the lists tables.
+      final raw = sqlite3.open(file.path);
+      raw.execute('''
+        CREATE TABLE media_lists (
+          id TEXT NOT NULL, title TEXT NOT NULL, position INTEGER NOT NULL,
+          PRIMARY KEY (id));
+        CREATE TABLE media_entries (
+          entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          list_id TEXT NOT NULL REFERENCES media_lists (id) ON DELETE CASCADE,
+          name TEXT NOT NULL, address TEXT NOT NULL,
+          position INTEGER NOT NULL);
+        INSERT INTO media_lists VALUES ('l1', 'Old List', 0);
+        INSERT INTO media_entries (list_id, name, address, position)
+          VALUES ('l1', 'Old.mkv', '$_addr', 0);
+        PRAGMA user_version = 2;
+      ''');
+      raw.close();
+
+      await LibraryStore.useForTesting(
+          AppDatabase.forTesting(NativeDatabase(file)));
+      final lists = await LibraryStore.load();
+      expect(lists.single.title, 'Old List');
+      expect(lists.single.entries.single.name, 'Old.mkv');
+      // Migrated lists default to shown on home.
+      expect(lists.single.enabled, isTrue);
     });
   });
 
@@ -290,8 +343,11 @@ void main() {
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
 
-      expect(find.text('MEDIA LISTS'), findsOneWidget);
-      expect(find.text('New list'), findsOneWidget);
+      // Library section: a single tile that opens the Media Lists page
+      // (list management moved there in alpha.25).
+      expect(find.text('LIBRARY'), findsOneWidget);
+      expect(find.text('Media Lists'), findsOneWidget);
+      expect(find.text('New list'), findsNothing);
 
       // Streaming section: buffer size tile showing the current value.
       await tester.scrollUntilVisible(find.text('Buffer size'), 100);
@@ -328,6 +384,10 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+
+      // Lists are managed on their own page now.
+      await tester.tap(find.text('Media Lists'));
       await tester.pumpAndSettle();
 
       // Create list with a title.
@@ -376,6 +436,116 @@ void main() {
       // (episode markers are stripped into season/episode since alpha.23).
       expect(find.text('Show'), findsOneWidget);
       expect(find.text('Your library is empty'), findsNothing);
+    });
+  });
+
+  group('Media Lists page', () {
+    testWidgets('unchecking a list hides it from home', (tester) async {
+      await tester.pumpWidget(const WatchItApp());
+      await tester.pumpAndSettle();
+      // Seeded default list is on the wall.
+      expect(find.text('Test Movies'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Media Lists'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(Checkbox));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('hidden from home'), findsOneWidget);
+      expect((await LibraryStore.load()).single.enabled, isFalse);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('Test Movies'), findsNothing);
+      expect(find.text('All your lists are hidden'), findsOneWidget);
+    });
+
+    testWidgets('disabled list stays off the home wall', (tester) async {
+      await LibraryStore.save([
+        MediaList(
+          id: 'on',
+          title: 'Shown List',
+          entries: const [MediaEntry(name: 'A.mkv', address: _addr)],
+        ),
+        MediaList(
+          id: 'off',
+          title: 'Hidden List',
+          enabled: false,
+          entries: const [MediaEntry(name: 'B.mkv', address: _addr)],
+        ),
+      ]);
+      await tester.pumpWidget(const WatchItApp());
+      await tester.pumpAndSettle();
+
+      expect(find.text('Shown List'), findsOneWidget);
+      expect(find.text('Hidden List'), findsNothing);
+    });
+
+    testWidgets('delete a list from its 3-dot menu', (tester) async {
+      await tester.pumpWidget(const WatchItApp());
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Media Lists'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('List options'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+
+      // Confirmation dialog, then the list is gone from page and store.
+      expect(find.textContaining('Delete "Test Movies"'), findsOneWidget);
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+      expect(find.text('Test Movies'), findsNothing);
+      expect(await LibraryStore.load(), isEmpty);
+    });
+
+    testWidgets('rename a list from its 3-dot menu', (tester) async {
+      await tester.pumpWidget(const WatchItApp());
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Media Lists'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('List options'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Rename'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'Renamed Movies');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Renamed Movies'), findsOneWidget);
+      expect((await LibraryStore.load()).single.title, 'Renamed Movies');
+    });
+  });
+
+  group('TMDB key privacy', () {
+    testWidgets('key in use is never shown or prefilled', (tester) async {
+      await AppSettings.setTmdbApiKey('supersecret9876');
+      await tester.pumpWidget(const WatchItApp());
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+
+      await tester.scrollUntilVisible(find.text('TMDB API key'), 100);
+      expect(find.text('Using your key'), findsOneWidget);
+      // No fragment of the key anywhere on the page.
+      expect(find.textContaining('9876'), findsNothing);
+      expect(find.textContaining('supersecret'), findsNothing);
+
+      // The edit dialog starts empty instead of prefilling the key.
+      await tester.tap(find.text('TMDB API key'));
+      await tester.pumpAndSettle();
+      final field = tester.widget<TextField>(find.byType(TextField));
+      expect(field.controller?.text ?? '', isEmpty);
     });
   });
 }

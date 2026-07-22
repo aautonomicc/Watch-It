@@ -84,9 +84,7 @@ class LibraryStore {
         .any((e) => kLegacyDefaultMovieAddresses.contains(e.address)))) {
       lists = [
         for (final l in lists)
-          MediaList(
-            id: l.id,
-            title: l.title,
+          l.copyWith(
             entries: [
               for (final e in l.entries)
                 kLegacyDefaultMovieAddresses.contains(e.address)
@@ -138,6 +136,7 @@ class LibraryStore {
           id: row.id,
           title: row.title,
           entries: entriesByList[row.id] ?? const [],
+          enabled: row.enabled,
         ),
     ];
   }
@@ -157,6 +156,7 @@ class LibraryStore {
               id: list.id,
               title: list.title,
               position: listPos,
+              enabled: Value(list.enabled),
             ));
         for (final (entryPos, entry) in list.entries.indexed) {
           await db.into(db.mediaEntries).insert(MediaEntriesCompanion.insert(

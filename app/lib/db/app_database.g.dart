@@ -38,8 +38,23 @@ class $MediaListsTable extends MediaLists
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _enabledMeta = const VerificationMeta(
+    'enabled',
+  );
   @override
-  List<GeneratedColumn> get $columns => [id, title, position];
+  late final GeneratedColumn<bool> enabled = GeneratedColumn<bool>(
+    'enabled',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("enabled" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, title, position, enabled];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -73,6 +88,12 @@ class $MediaListsTable extends MediaLists
     } else if (isInserting) {
       context.missing(_positionMeta);
     }
+    if (data.containsKey('enabled')) {
+      context.handle(
+        _enabledMeta,
+        enabled.isAcceptableOrUnknown(data['enabled']!, _enabledMeta),
+      );
+    }
     return context;
   }
 
@@ -94,6 +115,10 @@ class $MediaListsTable extends MediaLists
         DriftSqlType.int,
         data['${effectivePrefix}position'],
       )!,
+      enabled: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}enabled'],
+      )!,
     );
   }
 
@@ -107,10 +132,14 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
   final String id;
   final String title;
   final int position;
+
+  /// Disabled lists are hidden from the home screen but kept intact.
+  final bool enabled;
   const MediaListRow({
     required this.id,
     required this.title,
     required this.position,
+    required this.enabled,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -118,6 +147,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     map['id'] = Variable<String>(id);
     map['title'] = Variable<String>(title);
     map['position'] = Variable<int>(position);
+    map['enabled'] = Variable<bool>(enabled);
     return map;
   }
 
@@ -126,6 +156,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       id: Value(id),
       title: Value(title),
       position: Value(position),
+      enabled: Value(enabled),
     );
   }
 
@@ -138,6 +169,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       id: serializer.fromJson<String>(json['id']),
       title: serializer.fromJson<String>(json['title']),
       position: serializer.fromJson<int>(json['position']),
+      enabled: serializer.fromJson<bool>(json['enabled']),
     );
   }
   @override
@@ -147,20 +179,27 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       'id': serializer.toJson<String>(id),
       'title': serializer.toJson<String>(title),
       'position': serializer.toJson<int>(position),
+      'enabled': serializer.toJson<bool>(enabled),
     };
   }
 
-  MediaListRow copyWith({String? id, String? title, int? position}) =>
-      MediaListRow(
-        id: id ?? this.id,
-        title: title ?? this.title,
-        position: position ?? this.position,
-      );
+  MediaListRow copyWith({
+    String? id,
+    String? title,
+    int? position,
+    bool? enabled,
+  }) => MediaListRow(
+    id: id ?? this.id,
+    title: title ?? this.title,
+    position: position ?? this.position,
+    enabled: enabled ?? this.enabled,
+  );
   MediaListRow copyWithCompanion(MediaListsCompanion data) {
     return MediaListRow(
       id: data.id.present ? data.id.value : this.id,
       title: data.title.present ? data.title.value : this.title,
       position: data.position.present ? data.position.value : this.position,
+      enabled: data.enabled.present ? data.enabled.value : this.enabled,
     );
   }
 
@@ -169,37 +208,42 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     return (StringBuffer('MediaListRow(')
           ..write('id: $id, ')
           ..write('title: $title, ')
-          ..write('position: $position')
+          ..write('position: $position, ')
+          ..write('enabled: $enabled')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, title, position);
+  int get hashCode => Object.hash(id, title, position, enabled);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is MediaListRow &&
           other.id == this.id &&
           other.title == this.title &&
-          other.position == this.position);
+          other.position == this.position &&
+          other.enabled == this.enabled);
 }
 
 class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
   final Value<String> id;
   final Value<String> title;
   final Value<int> position;
+  final Value<bool> enabled;
   final Value<int> rowid;
   const MediaListsCompanion({
     this.id = const Value.absent(),
     this.title = const Value.absent(),
     this.position = const Value.absent(),
+    this.enabled = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   MediaListsCompanion.insert({
     required String id,
     required String title,
     required int position,
+    this.enabled = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        title = Value(title),
@@ -208,12 +252,14 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     Expression<String>? id,
     Expression<String>? title,
     Expression<int>? position,
+    Expression<bool>? enabled,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (title != null) 'title': title,
       if (position != null) 'position': position,
+      if (enabled != null) 'enabled': enabled,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -222,12 +268,14 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     Value<String>? id,
     Value<String>? title,
     Value<int>? position,
+    Value<bool>? enabled,
     Value<int>? rowid,
   }) {
     return MediaListsCompanion(
       id: id ?? this.id,
       title: title ?? this.title,
       position: position ?? this.position,
+      enabled: enabled ?? this.enabled,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -244,6 +292,9 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     if (position.present) {
       map['position'] = Variable<int>(position.value);
     }
+    if (enabled.present) {
+      map['enabled'] = Variable<bool>(enabled.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -256,6 +307,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
           ..write('id: $id, ')
           ..write('title: $title, ')
           ..write('position: $position, ')
+          ..write('enabled: $enabled, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1323,6 +1375,7 @@ typedef $$MediaListsTableCreateCompanionBuilder =
       required String id,
       required String title,
       required int position,
+      Value<bool> enabled,
       Value<int> rowid,
     });
 typedef $$MediaListsTableUpdateCompanionBuilder =
@@ -1330,6 +1383,7 @@ typedef $$MediaListsTableUpdateCompanionBuilder =
       Value<String> id,
       Value<String> title,
       Value<int> position,
+      Value<bool> enabled,
       Value<int> rowid,
     });
 
@@ -1377,6 +1431,11 @@ class $$MediaListsTableFilterComposer
 
   ColumnFilters<int> get position => $composableBuilder(
     column: $table.position,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get enabled => $composableBuilder(
+    column: $table.enabled,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -1429,6 +1488,11 @@ class $$MediaListsTableOrderingComposer
     column: $table.position,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get enabled => $composableBuilder(
+    column: $table.enabled,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$MediaListsTableAnnotationComposer
@@ -1448,6 +1512,9 @@ class $$MediaListsTableAnnotationComposer
 
   GeneratedColumn<int> get position =>
       $composableBuilder(column: $table.position, builder: (column) => column);
+
+  GeneratedColumn<bool> get enabled =>
+      $composableBuilder(column: $table.enabled, builder: (column) => column);
 
   Expression<T> mediaEntriesRefs<T extends Object>(
     Expression<T> Function($$MediaEntriesTableAnnotationComposer a) f,
@@ -1506,11 +1573,13 @@ class $$MediaListsTableTableManager
                 Value<String> id = const Value.absent(),
                 Value<String> title = const Value.absent(),
                 Value<int> position = const Value.absent(),
+                Value<bool> enabled = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MediaListsCompanion(
                 id: id,
                 title: title,
                 position: position,
+                enabled: enabled,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -1518,11 +1587,13 @@ class $$MediaListsTableTableManager
                 required String id,
                 required String title,
                 required int position,
+                Value<bool> enabled = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MediaListsCompanion.insert(
                 id: id,
                 title: title,
                 position: position,
+                enabled: enabled,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
