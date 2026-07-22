@@ -5,10 +5,12 @@ import 'package:media_kit/media_kit.dart';
 
 import 'models/media_list.dart';
 import 'screens/detail_screen.dart';
+import 'screens/season_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/embedded_client.dart';
 import 'services/library_store.dart';
 import 'services/metadata_service.dart';
+import 'services/season_grouping.dart';
 import 'theme/tokens.dart';
 
 Future<void> main() async {
@@ -68,6 +70,12 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _openEntry(MediaEntry entry) async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => DetailScreen(entry: entry)),
+    );
+  }
+
+  Future<void> _openSeason(HomeSeason group) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => SeasonScreen(group: group)),
     );
   }
 
@@ -155,17 +163,29 @@ class _HomeScreenState extends State<HomeScreen> {
           else
             SizedBox(
               height: 232,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: list.entries.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 12),
-                itemBuilder: (context, i) => _PosterCard(
-                  entry: list.entries[i],
-                  tokens: t,
-                  onTap: () => _openEntry(list.entries[i]),
-                ),
-              ),
+              child: Builder(builder: (context) {
+                // Episodes of one show+season fold into a single card
+                // that opens the season's episode list.
+                final items = groupSeasons(list.entries);
+                return ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: items.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 12),
+                  itemBuilder: (context, i) => switch (items[i]) {
+                    HomeEntry(:final entry) => _PosterCard(
+                        entry: entry,
+                        tokens: t,
+                        onTap: () => _openEntry(entry),
+                      ),
+                    HomeSeason() && final group => _SeasonCard(
+                        group: group,
+                        tokens: t,
+                        onTap: () => _openSeason(group),
+                      ),
+                  },
+                );
+              }),
             ),
         ],
       ],
@@ -299,6 +319,66 @@ class _PosterCard extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 11.5, color: t.boneDim),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A whole season folded into one wall card: season artwork with the show
+/// name and season number underneath. Tap opens the episode list.
+class _SeasonCard extends StatelessWidget {
+  const _SeasonCard({
+    required this.group,
+    required this.tokens,
+    required this.onTap,
+  });
+
+  final HomeSeason group;
+  final WiTokens tokens;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = tokens;
+    // Any episode's match carries the show title and season artwork.
+    final meta = MetadataService.instance.metadataFor(group.episodes.first);
+    final count = group.episodes.length;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        width: 120,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox(
+                width: 120,
+                height: 180,
+                child: posterImage(meta, fit: BoxFit.cover) ??
+                    Container(
+                      color: t.ink2,
+                      child:
+                          Icon(Icons.live_tv_outlined, color: t.ash, size: 40),
+                    ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              meta.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11.5, color: t.boneDim),
+            ),
+            Text(
+              'Season ${group.season} · $count ep',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10.5, color: t.ash),
             ),
           ],
         ),

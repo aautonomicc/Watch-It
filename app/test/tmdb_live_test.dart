@@ -56,8 +56,11 @@ void main() {
       expect(match.title, 'Breaking Bad');
       expect(match.year, 2008);
       expect(match.episodeLabel, startsWith('S01E02'));
-      // Episode synopsis should have replaced the show blurb.
+      // Episode synopsis should have replaced the show blurb, and the
+      // match should carry the season's artwork.
       expect(match.overview, isNotEmpty);
+      expect(match.season, 1);
+      expect(match.posterPath, isNotNull);
     });
 
     test('nonsense title is a miss, not an error', () async {
