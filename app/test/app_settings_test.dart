@@ -31,4 +31,21 @@ void main() {
       }
     });
   });
+
+  group('AppSettings TMDB key source', () {
+    // Tests run without --dart-define, so the bundled key is empty and
+    // TmdbKeySource.bundled cannot occur here.
+    test('none when nothing is set', () async {
+      expect(await AppSettings.tmdbKeySource(), TmdbKeySource.none);
+    });
+
+    test('user once a key is stored, none again after clearing', () async {
+      await AppSettings.setTmdbApiKey('my-key');
+      expect(await AppSettings.tmdbKeySource(), TmdbKeySource.user);
+      expect(await AppSettings.tmdbApiKey(), 'my-key');
+
+      await AppSettings.setTmdbApiKey('');
+      expect(await AppSettings.tmdbKeySource(), TmdbKeySource.none);
+    });
+  });
 }

@@ -12,6 +12,9 @@ class MediaLists extends Table {
   TextColumn get title => text()();
   IntColumn get position => integer()();
 
+  /// Disabled lists are hidden from the home screen but kept intact.
+  BoolColumn get enabled => boolean().withDefault(const Constant(true))();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -70,12 +73,16 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onUpgrade: (m, from, to) async {
           if (from < 2) await m.createTable(metadataCache); // alpha.23
+          if (from < 3) {
+            // alpha.25: per-list home-screen visibility toggle.
+            await m.addColumn(mediaLists, mediaLists.enabled);
+          }
         },
         beforeOpen: (details) async {
           await customStatement('PRAGMA foreign_keys = ON');

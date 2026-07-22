@@ -74,6 +74,11 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
+    // Lists unchecked in Settings → Media Lists stay out of the wall.
+    final visible = [
+      for (final l in _lists)
+        if (l.enabled) l,
+    ];
     return Scaffold(
       appBar: AppBar(
         backgroundColor: t.ink,
@@ -106,26 +111,28 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           const NetworkStatusBar(),
           Expanded(
-            child: _lists.isEmpty ? _EmptyState(tokens: t) : _libraryView(t),
+            child: visible.isEmpty
+                ? _EmptyState(tokens: t, allHidden: _lists.isNotEmpty)
+                : _libraryView(t, visible),
           ),
         ],
       ),
     );
   }
 
-  Widget _libraryView(WiTokens t) {
+  Widget _libraryView(WiTokens t, List<MediaList> lists) {
     // Poster cards upgrade in place as TMDB matches land in the cache.
     return ListenableBuilder(
       listenable: MetadataService.instance,
-      builder: (context, _) => _posterWall(t),
+      builder: (context, _) => _posterWall(t, lists),
     );
   }
 
-  Widget _posterWall(WiTokens t) {
+  Widget _posterWall(WiTokens t, List<MediaList> lists) {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
-        for (final list in _lists) ...[
+        for (final list in lists) ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Text(
@@ -301,9 +308,12 @@ class _PosterCard extends StatelessWidget {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.tokens});
+  const _EmptyState({required this.tokens, this.allHidden = false});
 
   final WiTokens tokens;
+
+  /// Lists exist but every one is unchecked in Settings → Media Lists.
+  final bool allHidden;
 
   @override
   Widget build(BuildContext context) {
@@ -315,7 +325,7 @@ class _EmptyState extends StatelessWidget {
           Icon(Icons.play_circle_outline, size: 64, color: t.copper),
           const SizedBox(height: 16),
           Text(
-            'Your library is empty',
+            allHidden ? 'All your lists are hidden' : 'Your library is empty',
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w600,
@@ -324,7 +334,9 @@ class _EmptyState extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Create a media list in Settings to get started.',
+            allHidden
+                ? 'Enable a list in Settings → Media Lists to show it here.'
+                : 'Create a media list in Settings to get started.',
             style: TextStyle(fontSize: 12, color: t.ash),
           ),
         ],
