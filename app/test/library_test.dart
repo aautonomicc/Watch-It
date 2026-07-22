@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:drift/drift.dart' show driftRuntimeOptions;
+import 'package:drift/drift.dart' show driftRuntimeOptions, Value;
 import 'package:drift/native.dart';
 import 'package:sqlite3/sqlite3.dart' show sqlite3;
 import 'package:flutter/material.dart';
@@ -137,6 +137,56 @@ void main() {
       expect(lists.single.entries.single.name, 'Old.mkv');
       // Migrated lists default to shown on home.
       expect(lists.single.enabled, isTrue);
+    });
+
+    test('v3 metadata cache is dropped on upgrade and gains new columns',
+        () async {
+      final dir = await Directory.systemTemp.createTemp('watchit-migration');
+      addTearDown(() => dir.delete(recursive: true));
+      final file = File('${dir.path}/watchit.sqlite');
+
+      // Hand-build the alpha.25/26 (schema v3) shape of the cache table
+      // with one stale row that lacks the alpha.27 fields.
+      final raw = sqlite3.open(file.path);
+      raw.execute('''
+        CREATE TABLE media_lists (
+          id TEXT NOT NULL, title TEXT NOT NULL, position INTEGER NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (id));
+        CREATE TABLE media_entries (
+          entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          list_id TEXT NOT NULL REFERENCES media_lists (id) ON DELETE CASCADE,
+          name TEXT NOT NULL, address TEXT NOT NULL,
+          position INTEGER NOT NULL);
+        CREATE TABLE metadata_cache (
+          lookup_key TEXT NOT NULL, found INTEGER NOT NULL,
+          title TEXT, year INTEGER, overview TEXT, category TEXT,
+          episode_label TEXT, poster_file TEXT, media_type TEXT,
+          tmdb_id INTEGER, fetched_at INTEGER NOT NULL,
+          PRIMARY KEY (lookup_key));
+        INSERT INTO metadata_cache (lookup_key, found, title, fetched_at)
+          VALUES ('movie:old:2020', 1, 'Old Match', 0);
+        PRAGMA user_version = 3;
+      ''');
+      raw.close();
+
+      await LibraryStore.useForTesting(
+          AppDatabase.forTesting(NativeDatabase(file)));
+      final db = await LibraryStore.database();
+      // Stale rows are gone (they will refetch with the new fields)...
+      expect(await db.select(db.metadataCache).get(), isEmpty);
+      // ...and the recreated table accepts the alpha.27 columns.
+      await db.into(db.metadataCache).insert(MetadataCacheCompanion.insert(
+            lookupKey: 'movie:new:2024',
+            found: true,
+            rating: const Value(7.5),
+            airDate: const Value('2024-06-01'),
+            stillFile: const Value('x.jpg'),
+            showOverview: const Value('s'),
+            seasonOverview: const Value('se'),
+            showPosterFile: const Value('p.jpg'),
+            fetchedAt: 1,
+          ));
+      expect((await db.select(db.metadataCache).get()).single.rating, 7.5);
     });
   });
 
@@ -581,17 +631,26 @@ void main() {
       await tester.tap(find.text('Season 1 · 2 ep'));
       await tester.pumpAndSettle();
 
+      // Show page: big artwork header + the show's seasons as tiles.
+      expect(find.text('SEASONS'), findsOneWidget);
+      await tester.ensureVisible(find.text('Season 1'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Season 1'));
+      await tester.pumpAndSettle();
+
       // Season screen: header + episodes sorted by number, each showing
-      // its name (fallback without TMDB) and SxxEyy marker.
+      // its SxxEyy marker and name (fallback without TMDB).
       expect(find.text('Show — Season 1'), findsOneWidget);
-      expect(find.text('2 episodes'), findsOneWidget);
-      expect(find.text('S01E01'), findsOneWidget);
-      expect(find.text('S01E02'), findsOneWidget);
-      expect(find.text('Episode 1'), findsOneWidget);
-      expect(find.text('Episode 2'), findsOneWidget);
+      expect(find.textContaining('2 episodes'), findsOneWidget);
+      expect(find.textContaining('S01E01'), findsOneWidget);
+      expect(find.textContaining('S01E02'), findsOneWidget);
+      expect(find.textContaining('Episode 1'), findsOneWidget);
+      expect(find.textContaining('Episode 2'), findsOneWidget);
 
       // Tapping an episode opens the regular detail screen.
-      await tester.tap(find.text('Episode 1'));
+      await tester.ensureVisible(find.textContaining('Episode 1'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('Episode 1'));
       await tester.pumpAndSettle();
       expect(find.text('Show.S01E01.mkv'), findsOneWidget);
       expect(find.text('FILE NAME'), findsOneWidget);

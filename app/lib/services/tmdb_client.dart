@@ -28,7 +28,14 @@ class TmdbMatch {
     this.category,
     this.episodeLabel,
     this.season,
+    this.episode,
     this.posterPath,
+    this.rating,
+    this.showOverview,
+    this.seasonOverview,
+    this.airDate,
+    this.stillPath,
+    this.showPosterPath,
   });
 
   final String mediaType; // 'movie' | 'tv'
@@ -43,9 +50,31 @@ class TmdbMatch {
   /// then the season's artwork (falling back to the show poster), so the
   /// cached poster file must be keyed per season.
   final int? season;
+  final int? episode;
 
   /// TMDB poster path (`/abc.jpg`) — fetch via [TmdbClient.fetchPoster].
   final String? posterPath;
+
+  /// TMDB community score out of 10 (movie or show level); `null` when
+  /// unrated (TMDB reports 0 for those).
+  final double? rating;
+
+  /// Show-level synopsis for episode matches, where [overview] is the
+  /// episode's own synopsis.
+  final String? showOverview;
+
+  /// Season-level synopsis for episode matches, when TMDB has one.
+  final String? seasonOverview;
+
+  /// Episode air date (`2008-01-20`), for episode matches.
+  final String? airDate;
+
+  /// Episode screenshot path — fetch via [TmdbClient.fetchStill].
+  final String? stillPath;
+
+  /// Show poster for episode matches, where [posterPath] is the season's
+  /// artwork.
+  final String? showPosterPath;
 }
 
 /// Thin TMDB v3 API client: exact `/find` lookup by IMDb id when the file
@@ -60,8 +89,11 @@ class TmdbClient {
 
   static const _apiBase = 'api.themoviedb.org';
 
-  /// w342 is plenty for a 120–140px poster card at 2–3x DPR.
+  /// w342 is plenty for a 120–240px poster card at 2–3x DPR.
   static const posterBase = 'https://image.tmdb.org/t/p/w342';
+
+  /// 16:9 episode screenshots; w300 covers a ~170px tile at 2x DPR.
+  static const stillBase = 'https://image.tmdb.org/t/p/w300';
 
   /// TMDB issues two credential kinds from the same settings page: a v3
   /// API key (32 hex chars, `api_key` query param) and a v4 Read Access
@@ -148,23 +180,31 @@ class TmdbClient {
       overview: _nonEmpty(d['overview']),
       category: _genres(d),
       posterPath: _nonEmpty(d['poster_path']),
+      rating: _ratingOf(d),
+      airDate: _nonEmpty(d['release_date']),
     );
   }
 
   Future<TmdbMatch> _tvDetails(int id, int? season, int? episode) async {
     final d = await _get('/tv/$id', const {});
     String? episodeLabel;
-    String? overview = _nonEmpty(d['overview']);
-    String? posterPath = _nonEmpty(d['poster_path']);
+    final showOverview = _nonEmpty(d['overview']);
+    String? overview = showOverview;
+    String? seasonOverview;
+    String? airDate;
+    String? stillPath;
+    final showPosterPath = _nonEmpty(d['poster_path']);
+    String? posterPath = showPosterPath;
     if (season != null && episode != null) {
       final se = 'S${_pad(season)}E${_pad(episode)}';
       episodeLabel = se;
       try {
-        // The season payload carries the season poster (used for the
-        // home wall's grouped season card) plus every episode's
-        // name/overview — one request covers both.
+        // The season payload carries the season poster + synopsis (show
+        // and season pages) plus every episode's name/overview/air date/
+        // screenshot — one request covers all of it.
         final s = await _get('/tv/$id/season/$season', const {});
         posterPath = _nonEmpty(s['poster_path']) ?? posterPath;
+        seasonOverview = _nonEmpty(s['overview']);
         Map<String, dynamic>? ep;
         for (final e in s['episodes'] as List<dynamic>? ?? const []) {
           if ((e as Map<String, dynamic>)['episode_number'] == episode) {
@@ -175,7 +215,11 @@ class TmdbClient {
         final name = ep == null ? null : _nonEmpty(ep['name']);
         if (name != null) episodeLabel = '$se · $name';
         // Episode synopsis beats the show blurb on a detail page.
-        if (ep != null) overview = _nonEmpty(ep['overview']) ?? overview;
+        if (ep != null) {
+          overview = _nonEmpty(ep['overview']) ?? overview;
+          airDate = _nonEmpty(ep['air_date']);
+          stillPath = _nonEmpty(ep['still_path']);
+        }
       } on TmdbException catch (e) {
         // Unknown season number: keep the show-level metadata.
         if (e.statusCode != 404) rethrow;
@@ -190,22 +234,36 @@ class TmdbClient {
       category: _genres(d),
       episodeLabel: episodeLabel,
       season: episode != null ? season : null,
+      episode: episode,
       posterPath: posterPath,
+      rating: _ratingOf(d),
+      showOverview: showOverview,
+      seasonOverview: seasonOverview,
+      airDate: airDate,
+      stillPath: stillPath,
+      showPosterPath: showPosterPath,
     );
   }
 
   /// Download poster bytes from the TMDB image CDN (no auth needed).
-  Future<List<int>> fetchPoster(String posterPath) async {
+  Future<List<int>> fetchPoster(String posterPath) =>
+      _fetchImage(posterBase, posterPath);
+
+  /// Download an episode screenshot from the TMDB image CDN.
+  Future<List<int>> fetchStill(String stillPath) =>
+      _fetchImage(stillBase, stillPath);
+
+  Future<List<int>> _fetchImage(String base, String path) async {
     final http.Response resp;
     try {
       resp = await _http
-          .get(Uri.parse('$posterBase$posterPath'))
+          .get(Uri.parse('$base$path'))
           .timeout(const Duration(seconds: 30));
     } catch (e) {
       throw TmdbException('$e');
     }
     if (resp.statusCode != 200) {
-      throw TmdbException('poster fetch failed', statusCode: resp.statusCode);
+      throw TmdbException('image fetch failed', statusCode: resp.statusCode);
     }
     return resp.bodyBytes;
   }
@@ -219,6 +277,14 @@ class TmdbClient {
         .take(3)
         .toList();
     return names.isEmpty ? null : names.join(' · ');
+  }
+
+  /// TMDB reports `vote_average: 0` for unrated titles — treat as no
+  /// rating rather than a zero score.
+  static double? _ratingOf(Map<String, dynamic> details) {
+    final v = details['vote_average'];
+    if (v is! num || v <= 0) return null;
+    return v.toDouble();
   }
 
   static int? _yearOf(Object? date) {

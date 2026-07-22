@@ -15,6 +15,12 @@ class MediaMetadata {
     this.episodeLabel,
     this.posterAsset,
     this.posterFilePath,
+    this.rating,
+    this.showOverview,
+    this.seasonOverview,
+    this.airDate,
+    this.stillFilePath,
+    this.showPosterFilePath,
   });
 
   final String title;
@@ -31,7 +37,26 @@ class MediaMetadata {
   final String? posterAsset;
 
   /// Locally cached artwork file downloaded from TMDB, if any.
+  /// Season artwork for episode entries.
   final String? posterFilePath;
+
+  /// TMDB community score out of 10; null when unrated/unmatched.
+  final double? rating;
+
+  /// Show/season synopses for episode entries ([overview] is then the
+  /// episode's own synopsis).
+  final String? showOverview;
+  final String? seasonOverview;
+
+  /// Episode air date / movie release date (`2008-01-20`), if known.
+  final String? airDate;
+
+  /// Cached episode screenshot file, if any (episode entries only).
+  final String? stillFilePath;
+
+  /// Cached show poster file for episode entries ([posterFilePath] is
+  /// then the season's artwork).
+  final String? showPosterFilePath;
 }
 
 /// XOR address of the built-in test movie seeded on first run.
@@ -88,6 +113,18 @@ MediaMetadata fallbackMetadataFor(MediaEntry entry) {
             'E${parsed.episode.toString().padLeft(2, '0')}'
         : null,
   );
+}
+
+/// `2008-01-20` → `20 Jan 2008` for display; anything that is not an
+/// ISO date passes through unchanged.
+String formatAirDate(String date) {
+  final m = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(date);
+  if (m == null) return date;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  final month = int.parse(m.group(2)!);
+  if (month < 1 || month > 12) return date;
+  return '${int.parse(m.group(3)!)} ${months[month - 1]} ${m.group(1)}';
 }
 
 class ParsedName {

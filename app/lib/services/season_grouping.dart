@@ -76,6 +76,19 @@ List<HomeItem> groupSeasons(List<MediaEntry> entries) {
   return items.cast<HomeItem>();
 }
 
+/// All of one show's seasons present in [entries], sorted by season
+/// number — the season tiles on the show page. [show] matches
+/// case-insensitively against the show name parsed from file names.
+List<HomeSeason> showSeasons(List<MediaEntry> entries, String show) {
+  final key = show.toLowerCase();
+  final seasons = [
+    for (final item in groupSeasons(entries))
+      if (item is HomeSeason && item.show.toLowerCase() == key) item
+  ];
+  seasons.sort((a, b) => a.season.compareTo(b.season));
+  return seasons;
+}
+
 /// Episode name from a `S01E02 · Name` label, or `null` when TMDB has not
 /// supplied one (label is the bare marker, or missing).
 String? episodeNameFromLabel(String? episodeLabel) {
