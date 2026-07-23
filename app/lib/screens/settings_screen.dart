@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show exit;
 
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -8,6 +9,7 @@ import '../services/app_settings.dart';
 import '../services/library_store.dart';
 import '../services/embedded_client.dart';
 import '../services/metadata_service.dart';
+import '../services/storage_usage.dart';
 import '../theme/tokens.dart';
 import 'media_lists_screen.dart';
 
@@ -26,12 +28,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Timer? _healthTimer;
   int _bufferSizeMb = AppSettings.defaultBufferSizeMb;
   TmdbKeySource _tmdbKeySource = TmdbKeySource.none;
+  int? _dataSizeBytes;
+  bool _dataSizeKnown = false;
 
   @override
   void initState() {
     super.initState();
     _reload();
     _loadVersion();
+    _loadDataSize();
     _scheduleHealthPoll();
   }
 
@@ -140,6 +145,83 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await MetadataService.instance.reset();
     final source = await AppSettings.tmdbKeySource();
     if (mounted) setState(() => _tmdbKeySource = source);
+  }
+
+  Future<void> _loadDataSize() async {
+    final size = await appDataSizeBytes();
+    if (mounted) {
+      setState(() {
+        _dataSizeBytes = size;
+        _dataSizeKnown = true;
+      });
+    }
+  }
+
+  /// Factory reset behind a two-step confirmation: the first dialog says
+  /// what gets deleted, the second spells out that lists are unrecoverable
+  /// unless exported. The app closes afterwards — open database handles
+  /// (ours and the embedded client's) still point at the deleted files.
+  Future<void> _clearAllData() async {
+    final t = WiTokens.of(context);
+    final first = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text('Clear all data?',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        content: Text(
+          'This resets watch-it to factory defaults, deleting everything '
+          'stored on this device:\n\n'
+          '•  all media lists and their entries\n'
+          '•  all settings, including a TMDB key you entered\n'
+          '•  cached artwork and descriptions\n'
+          '•  prefetched data maps and network state\n\n'
+          'Media on Autonomi is not affected — only this device\'s data.',
+          style: TextStyle(color: t.boneDim, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel', style: TextStyle(color: t.ash)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Continue', style: TextStyle(color: t.rust)),
+          ),
+        ],
+      ),
+    );
+    if (first != true || !mounted) return;
+    final second = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text('Are you sure?',
+            style: TextStyle(color: t.rust, fontSize: 16)),
+        content: Text(
+          'Your media lists exist only on this device — they are not '
+          'stored on the network. Unless you exported them to a file, '
+          'there is no way to get them back after this.\n\n'
+          'watch-it will close when the reset finishes; open it again to '
+          'start fresh.',
+          style: TextStyle(color: t.boneDim, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Keep my data', style: TextStyle(color: t.copper)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child:
+                Text('Delete everything', style: TextStyle(color: t.rust)),
+          ),
+        ],
+      ),
+    );
+    if (second != true) return;
+    await factoryReset();
+    exit(0);
   }
 
   Future<void> _openMediaLists() async {
@@ -324,6 +406,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _version ?? 'Unknown',
                     style: TextStyle(color: t.ash, fontSize: 12),
                   ),
+                ),
+                ListTile(
+                  leading: Icon(Icons.sd_storage_outlined, color: t.copper),
+                  title: Text('Size on disk',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    !_dataSizeKnown
+                        ? 'Measuring…'
+                        : _dataSizeBytes == null
+                            ? 'Unknown on this platform'
+                            : '${formatBytes(_dataSizeBytes!)} — lists, '
+                                'artwork, metadata, data maps and network '
+                                'state',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  trailing: Icon(Icons.refresh, color: t.ash, size: 18),
+                  onTap: _loadDataSize,
+                ),
+                ListTile(
+                  leading: Icon(Icons.delete_forever_outlined, color: t.rust),
+                  title: Text('Clear all data',
+                      style: TextStyle(color: t.rust, fontSize: 15)),
+                  subtitle: Text(
+                    'Reset watch-it to factory defaults',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  onTap: _clearAllData,
                 ),
                 const SizedBox(height: 80),
               ],
