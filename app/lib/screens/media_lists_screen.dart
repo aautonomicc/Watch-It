@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
+import '../services/datamap_prefetch.dart';
 import '../services/library_store.dart';
 import '../services/list_import.dart';
 import '../theme/tokens.dart';
@@ -13,7 +15,11 @@ import 'settings_screen.dart' show promptForText;
 /// Manage media lists: create, show/hide on the home screen, open for
 /// editing, rename, delete.
 class MediaListsScreen extends StatefulWidget {
-  const MediaListsScreen({super.key});
+  const MediaListsScreen({super.key, this.prefetchBase});
+
+  /// Embedded-server URL override for the post-import data-map prefetch
+  /// (tests); null means the real embedded client.
+  final String? prefetchBase;
 
   @override
   State<MediaListsScreen> createState() => _MediaListsScreenState();
@@ -153,6 +159,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     final lists = List<MediaList>.of(_lists ?? []);
     var idBase = DateTime.now().microsecondsSinceEpoch;
     final importedTitles = <String>[];
+    final importedEntries = <MediaEntry>[];
     var merged = 0, added = 0, duplicates = 0, listsSkipped = 0;
     for (final list in parsed.lists) {
       final i = lists.indexWhere(
@@ -164,6 +171,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           entries: list.entries,
         ));
         importedTitles.add(list.title);
+        importedEntries.addAll(list.entries);
         added += list.entries.length;
         continue;
       }
@@ -177,6 +185,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         duplicates += list.entries.length - fresh.length;
         lists[i] = existing
             .copyWith(entries: [...existing.entries, ...fresh]);
+        importedEntries.addAll(fresh);
         added += fresh.length;
         merged++;
       } else if (action == 'new') {
@@ -187,6 +196,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           entries: list.entries,
         ));
         importedTitles.add(title);
+        importedEntries.addAll(list.entries);
         added += list.entries.length;
       } else {
         listsSkipped++;
@@ -225,6 +235,70 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           '${added == 1 ? 'entry' : 'entries'}'
           '${notes.isEmpty ? '' : ' ($notes)'}'),
     ));
+    await _offerPrefetch(importedEntries);
+  }
+
+  /// Offer to resolve the data maps of the just-imported entries so their
+  /// first play starts fast. Declining costs nothing lasting: the embedded
+  /// client saves each map the first time a title plays anyway.
+  Future<void> _offerPrefetch(List<MediaEntry> entries) async {
+    if (entries.isEmpty || !mounted) return;
+    final prefetcher = DataMapPrefetcher(base: widget.prefetchBase);
+    if (!prefetcher.available) return;
+    final t = WiTokens.of(context);
+    final n = entries.length;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text('Prefetch data maps?',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        content: Text(
+          'Download the small data-map index for each of the $n imported '
+          '${n == 1 ? 'file' : 'files'} now, so playback starts faster the '
+          'first time you play them. If you skip this, each map is saved '
+          'automatically the first time a title plays.',
+          style: TextStyle(color: t.boneDim, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Skip', style: TextStyle(color: t.ash)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Prefetch', style: TextStyle(color: t.copper)),
+          ),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+
+    final progress = ValueNotifier<(int, int, String)>((0, n, ''));
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _PrefetchProgressDialog(
+        progress: progress,
+        onCancel: prefetcher.cancel,
+      ),
+    ));
+    final result = await prefetcher.run(
+      entries,
+      onProgress: (current, total, name) =>
+          progress.value = (current, total, name),
+    );
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop();
+    final summary = result.cancelled
+        ? 'Prefetch cancelled — ${result.done} of $n data '
+            '${result.done == 1 ? 'map' : 'maps'} saved'
+        : 'Prefetched ${result.done} data '
+            '${result.done == 1 ? 'map' : 'maps'}'
+            '${result.failed > 0 ? ' (${result.failed} failed — those '
+                'resolve on first play instead)' : ''}';
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(summary)));
   }
 
   /// Ask what to do with an imported list whose name already exists:
@@ -434,6 +508,72 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
                   ),
               ],
             ),
+    );
+  }
+}
+
+/// Modal shown while data maps prefetch: spinner with `File X of N` and
+/// the name of the file being fetched underneath, plus a Cancel action
+/// (stops after aborting the in-flight file).
+class _PrefetchProgressDialog extends StatelessWidget {
+  const _PrefetchProgressDialog({
+    required this.progress,
+    required this.onCancel,
+  });
+
+  /// `(current 1-based, total, file name)`.
+  final ValueListenable<(int, int, String)> progress;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = WiTokens.of(context);
+    return Dialog(
+      backgroundColor: t.ink2,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 28, 24, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: t.copper),
+            const SizedBox(height: 18),
+            ValueListenableBuilder<(int, int, String)>(
+              valueListenable: progress,
+              builder: (context, value, _) {
+                final (current, total, name) = value;
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'File $current of $total',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: t.bone,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11.5, color: t.ash),
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: onCancel,
+                child: Text('Cancel', style: TextStyle(color: t.ash)),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -30,6 +30,23 @@ class HomeSeason extends HomeItem {
   final List<MediaEntry> episodes;
 }
 
+/// All of one show's seasons folded into a single wall card (the home
+/// screen shows one tile per show, not per season).
+class HomeShow extends HomeItem {
+  const HomeShow({required this.show, required this.seasons});
+
+  /// Show name parsed from the file names (display fallback, as on
+  /// [HomeSeason]).
+  final String show;
+
+  /// The show's seasons present in the list, sorted by season number;
+  /// never empty.
+  final List<HomeSeason> seasons;
+
+  int get episodeCount =>
+      seasons.fold(0, (sum, s) => sum + s.episodes.length);
+}
+
 class _SeasonBuilder {
   _SeasonBuilder(this.show, this.season, this.slot);
 
@@ -72,6 +89,36 @@ List<HomeItem> groupSeasons(List<MediaEntry> entries) {
       season: b.season,
       episodes: [for (final (_, e) in b.episodes) e],
     );
+  }
+  return items.cast<HomeItem>();
+}
+
+/// Fold [groupSeasons]' per-season groups further, so every season of one
+/// show shares a single [HomeShow] card — the home wall shows the show's
+/// main poster once however many seasons the list holds. The card sits
+/// where the show's first episode appeared; seasons sort by number.
+List<HomeItem> groupShows(List<MediaEntry> entries) {
+  final items = <HomeItem?>[];
+  final slotByShow = <String, int>{};
+  final seasonsByShow = <String, List<HomeSeason>>{};
+  for (final item in groupSeasons(entries)) {
+    if (item is! HomeSeason) {
+      items.add(item);
+      continue;
+    }
+    final key = item.show.toLowerCase();
+    final seasons = seasonsByShow.putIfAbsent(key, () {
+      slotByShow[key] = items.length;
+      items.add(null); // reserve the slot; filled in below
+      return [];
+    });
+    seasons.add(item);
+  }
+  for (final entry in slotByShow.entries) {
+    final seasons = seasonsByShow[entry.key]!
+      ..sort((a, b) => a.season.compareTo(b.season));
+    items[entry.value] =
+        HomeShow(show: seasons.first.show, seasons: seasons);
   }
   return items.cast<HomeItem>();
 }

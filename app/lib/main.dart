@@ -75,12 +75,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// A series card opens the show's page: big artwork + synopsis with
   /// every season of the show found in the list as tiles.
-  Future<void> _openShow(List<MediaEntry> entries, HomeSeason group) async {
-    final seasons = showSeasons(entries, group.show);
+  Future<void> _openShow(HomeShow group) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) =>
-            ShowScreen(seasons: seasons.isEmpty ? [group] : seasons),
+        builder: (_) => ShowScreen(seasons: group.seasons),
       ),
     );
   }
@@ -170,9 +168,9 @@ class _HomeScreenState extends State<HomeScreen> {
             SizedBox(
               height: 232,
               child: Builder(builder: (context) {
-                // Episodes of one show+season fold into a single card
-                // that opens the season's episode list.
-                final items = groupSeasons(list.entries);
+                // All episodes of one show — every season — fold into a
+                // single card that opens the show's page.
+                final items = groupShows(list.entries);
                 return ListView.separated(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -184,11 +182,13 @@ class _HomeScreenState extends State<HomeScreen> {
                         tokens: t,
                         onTap: () => _openEntry(entry),
                       ),
-                    HomeSeason() && final group => _SeasonCard(
+                    HomeShow() && final group => _ShowCard(
                         group: group,
                         tokens: t,
-                        onTap: () => _openShow(list.entries, group),
+                        onTap: () => _openShow(group),
                       ),
+                    // groupShows never yields bare seasons.
+                    HomeSeason() => const SizedBox.shrink(),
                   },
                 );
               }),
@@ -333,25 +333,28 @@ class _PosterCard extends StatelessWidget {
   }
 }
 
-/// A whole season folded into one wall card: season artwork with the show
-/// name and season number underneath. Tap opens the episode list.
-class _SeasonCard extends StatelessWidget {
-  const _SeasonCard({
+/// A whole show folded into one wall card: the show's main poster with
+/// its name and season/episode counts underneath. Tap opens the show
+/// page, which lists the seasons.
+class _ShowCard extends StatelessWidget {
+  const _ShowCard({
     required this.group,
     required this.tokens,
     required this.onTap,
   });
 
-  final HomeSeason group;
+  final HomeShow group;
   final WiTokens tokens;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final t = tokens;
-    // Any episode's match carries the show title and season artwork.
-    final meta = MetadataService.instance.metadataFor(group.episodes.first);
-    final count = group.episodes.length;
+    // Any episode's match carries the show title and show artwork.
+    final meta = MetadataService.instance
+        .metadataFor(group.seasons.first.episodes.first);
+    final seasons = group.seasons.length;
+    final count = group.episodeCount;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(6),
@@ -365,7 +368,7 @@ class _SeasonCard extends StatelessWidget {
               child: SizedBox(
                 width: 120,
                 height: 180,
-                child: posterImage(meta, fit: BoxFit.cover) ??
+                child: showPosterImage(meta, fit: BoxFit.cover) ??
                     Container(
                       color: t.ink2,
                       child:
@@ -381,7 +384,9 @@ class _SeasonCard extends StatelessWidget {
               style: TextStyle(fontSize: 11.5, color: t.boneDim),
             ),
             Text(
-              'Season ${group.season} · $count ep',
+              seasons == 1
+                  ? 'Season ${group.seasons.single.season} · $count ep'
+                  : '$seasons seasons · $count ep',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 10.5, color: t.ash),
