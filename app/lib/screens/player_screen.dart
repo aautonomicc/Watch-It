@@ -4,8 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../models/media_list.dart';
 import '../services/app_settings.dart';
 import '../services/embedded_client.dart';
+import '../services/metadata.dart';
+import '../services/metadata_service.dart';
+import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 
 /// Full-screen video playback of an HTTP stream via media_kit (libmpv).
@@ -15,16 +19,35 @@ import '../theme/tokens.dart';
 /// overlays live progress from the embedded client — bytes fetched so
 /// far — instead of a bare spinner, and surfaces mpv errors that would
 /// otherwise leave the spinner running forever.
+///
+/// Playback progress is saved as a resume point every few seconds (and
+/// on leaving); reaching the end marks the file watched and, for series
+/// with a known next episode, offers "Up next" with a short auto-play
+/// countdown.
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({
     super.key,
     required this.url,
     required this.title,
+    required this.entry,
+    this.resumeFrom = Duration.zero,
+    this.nextFor,
     this.bufferSizeMb = AppSettings.defaultBufferSizeMb,
   });
 
   final String url;
   final String title;
+
+  /// The library entry being played — keys the resume point.
+  final MediaEntry entry;
+
+  /// Start playback here instead of the beginning (Resume button).
+  final Duration resumeFrom;
+
+  /// Resolves the episode after [entry] within its show (null for movies
+  /// and final episodes) — enables the end-of-episode "Up next" flow,
+  /// including across auto-advanced episodes.
+  final MediaEntry? Function(MediaEntry entry)? nextFor;
 
   /// mpv demuxer cache cap (Settings → Streaming → Buffer size).
   final int bufferSizeMb;
@@ -39,16 +62,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription<bool>? _bufferingSub;
   StreamSubscription<String>? _errorSub;
   StreamSubscription<Duration>? _positionSub;
+  StreamSubscription<bool>? _completedSub;
   Timer? _healthTimer;
+  Timer? _countdownTimer;
 
   bool _buffering = true;
   bool _playbackStarted = false;
   String? _error;
   int _fetchedBytes = 0;
 
+  /// What is playing right now — advances past [widget.entry] when the
+  /// user rolls into the next episode.
+  late MediaEntry _entry;
+  late String _title;
+
+  Duration _position = Duration.zero;
+  DateTime _lastSave = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// End reached for [_entry] (watched state already recorded).
+  bool _completed = false;
+
+  /// The episode offered by the "Up next" overlay, when one exists.
+  MediaEntry? _upNext;
+  int _countdown = 0;
+
   @override
   void initState() {
     super.initState();
+    _entry = widget.entry;
+    _title = widget.title;
     _player = Player(
       configuration: PlayerConfiguration(
         bufferSize: widget.bufferSizeMb * 1024 * 1024,
@@ -73,27 +115,109 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _errorSub = _player.stream.error.listen((e) {
       if (mounted && !_playbackStarted) setState(() => _error = e);
     });
-    _positionSub = _player.stream.position.listen((pos) {
-      if (_playbackStarted || pos <= Duration.zero) return;
-      _playbackStarted = true;
-      // Playback is demonstrably working — drop any earlier error
-      // (a failed decoder attempt that mpv recovered from).
-      if (mounted) setState(() => _error = null);
+    _positionSub = _player.stream.position.listen(_onPosition);
+    _completedSub = _player.stream.completed.listen((done) {
+      if (done) _onCompleted();
     });
     _healthTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
       if (!_buffering || _error != null) return;
       final health = await EmbeddedClient.health();
       if (mounted) setState(() => _fetchedBytes = health.fetchedBytes);
     });
-    _player.open(Media(widget.url));
+    _player.open(Media(
+      widget.url,
+      start: widget.resumeFrom > Duration.zero ? widget.resumeFrom : null,
+    ));
+  }
+
+  void _onPosition(Duration pos) {
+    if (pos <= Duration.zero) return;
+    _position = pos;
+    if (!_playbackStarted) {
+      _playbackStarted = true;
+      // Playback is demonstrably working — drop any earlier error
+      // (a failed decoder attempt that mpv recovered from).
+      if (mounted) setState(() => _error = null);
+    }
+    // Throttled resume-point save; the final position is saved in
+    // dispose so quitting mid-playback loses at most nothing.
+    final now = DateTime.now();
+    if (now.difference(_lastSave) >= const Duration(seconds: 5)) {
+      _lastSave = now;
+      _saveProgress();
+    }
+  }
+
+  void _saveProgress() {
+    // Nothing to save before the first frame (a start-and-quit during
+    // buffering must not wipe an existing resume point), and nothing
+    // after the end was recorded as watched.
+    if (!_playbackStarted || _completed || _position <= Duration.zero) return;
+    unawaited(WatchStateStore.instance.record(
+      _entry,
+      position: _position,
+      duration: _player.state.duration,
+    ));
+  }
+
+  void _onCompleted() {
+    if (!_playbackStarted || _completed) return;
+    _completed = true;
+    unawaited(WatchStateStore.instance
+        .markCompleted(_entry, duration: _player.state.duration));
+    final next = widget.nextFor?.call(_entry);
+    if (next == null || !mounted) return;
+    setState(() {
+      _upNext = next;
+      _countdown = 10;
+    });
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      if (_countdown <= 1) {
+        _playNext();
+      } else {
+        setState(() => _countdown--);
+      }
+    });
+  }
+
+  /// Roll straight into the next episode inside this player.
+  void _playNext() {
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
+    final next = _upNext;
+    if (next == null) return;
+    final url = streamUrl(EmbeddedClient.baseUrl(), next);
+    if (url == null) return;
+    final meta = MetadataService.instance.metadataFor(next);
+    setState(() {
+      _entry = next;
+      _title = playerTitle(meta);
+      _upNext = null;
+      _completed = false;
+      _playbackStarted = false;
+      _buffering = true;
+      _error = null;
+      _position = Duration.zero;
+    });
+    _player.open(Media(url));
+  }
+
+  void _dismissUpNext() {
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
+    setState(() => _upNext = null);
   }
 
   @override
   void dispose() {
+    _saveProgress();
     _healthTimer?.cancel();
+    _countdownTimer?.cancel();
     _bufferingSub?.cancel();
     _errorSub?.cancel();
     _positionSub?.cancel();
+    _completedSub?.cancel();
     _player.dispose();
     super.dispose();
   }
@@ -157,6 +281,76 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
+  /// Bottom "Up next" banner shown when an episode ends: the next
+  /// episode's name with an auto-play countdown, Play now, and dismiss.
+  Widget _upNextOverlay(BuildContext context, MediaEntry next) {
+    final t = WiTokens.of(context);
+    final meta = MetadataService.instance.metadataFor(next);
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Container(
+        margin: const EdgeInsets.all(24),
+        padding: const EdgeInsets.fromLTRB(20, 14, 12, 14),
+        decoration: BoxDecoration(
+          color: t.ink2.withValues(alpha: 0.95),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'UP NEXT',
+                    style: TextStyle(
+                      fontSize: 10,
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.w700,
+                      color: t.copper,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    playerTitle(meta),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: t.bone,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Playing in $_countdown s',
+                    style: TextStyle(fontSize: 11.5, color: t.boneDim),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+            FilledButton(
+              onPressed: _playNext,
+              style: FilledButton.styleFrom(
+                backgroundColor: t.copper,
+                foregroundColor: t.ink,
+              ),
+              child: const Text('Play now'),
+            ),
+            IconButton(
+              tooltip: 'Dismiss',
+              onPressed: _dismissUpNext,
+              icon: Icon(Icons.close, color: t.boneDim, size: 20),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -164,7 +358,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: Text(widget.title, style: const TextStyle(fontSize: 15)),
+        title: Text(_title, style: const TextStyle(fontSize: 15)),
       ),
       body: SafeArea(
         child: Stack(
@@ -210,9 +404,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
               _errorOverlay(context)
             else if (_buffering)
               _bufferingOverlay(context),
+            if (_upNext != null) _upNextOverlay(context, _upNext!),
           ],
         ),
       ),
     );
   }
 }
+
+/// Player/app-bar title for [meta]: `Show · S01E02 · Name` for episodes,
+/// the plain title otherwise.
+String playerTitle(MediaMetadata meta) => meta.episodeLabel == null
+    ? meta.title
+    : '${meta.title} · ${meta.episodeLabel}';

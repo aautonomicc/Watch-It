@@ -29,6 +29,32 @@ class MediaEntries extends Table {
   TextColumn get name => text()();
   TextColumn get address => text()();
   IntColumn get position => integer()();
+
+  /// When the entry first entered the library (epoch ms) — feeds the
+  /// home screen's Recently Added row. 0 for rows that predate the
+  /// column (their add time is unknown, so the row skips them).
+  IntColumn get addedAt => integer().withDefault(const Constant(0))();
+}
+
+/// Playback progress for one file, keyed by its XOR address (content
+/// addressing means the same file is the same everywhere it appears).
+/// Local-only — no accounts, no telemetry (docs/ARCHITECTURE.md).
+@DataClassName('WatchStateRow')
+class WatchStates extends Table {
+  /// Normalized XOR address (lowercase, no 0x prefix).
+  TextColumn get address => text()();
+  IntColumn get positionMs => integer()();
+
+  /// 0 while the player has not reported a duration yet.
+  IntColumn get durationMs => integer()();
+
+  /// Played to (near) the end — drops out of Continue Watching and, for
+  /// episodes, promotes the show's next episode instead.
+  BoolColumn get completed => boolean().withDefault(const Constant(false))();
+  IntColumn get updatedAt => integer()(); // epoch ms
+
+  @override
+  Set<Column> get primaryKey => {address};
 }
 
 /// Cached TMDB match for one parsed-file-name lookup, keyed by
@@ -72,7 +98,7 @@ class MetadataCache extends Table {
   Set<Column> get primaryKey => {lookupKey};
 }
 
-@DriftDatabase(tables: [MediaLists, MediaEntries, MetadataCache])
+@DriftDatabase(tables: [MediaLists, MediaEntries, MetadataCache, WatchStates])
 class AppDatabase extends _$AppDatabase {
   // Keep the database in the app support dir with the rest of the app
   // data — drift_flutter's default (documents dir) degrades to $HOME on
@@ -88,7 +114,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -104,6 +130,11 @@ class AppDatabase extends _$AppDatabase {
             // existing rows gain the new fields.
             await m.deleteTable(metadataCache.actualTableName);
             await m.createTable(metadataCache);
+          }
+          if (from < 5) {
+            // alpha.29: resume points + Recently Added.
+            await m.createTable(watchStates);
+            await m.addColumn(mediaEntries, mediaEntries.addedAt);
           }
         },
         beforeOpen: (details) async {

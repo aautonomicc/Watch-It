@@ -5,15 +5,19 @@ import 'package:flutter/material.dart';
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
 import '../services/datamap_prefetch.dart';
+import '../services/home_rows.dart';
+import '../services/library_store.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/embedded_client.dart';
+import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
 import 'player_screen.dart';
 
 /// Movie/episode detail: big artwork with description and rating, and
-/// playback.
+/// playback — resuming from the stored watch position when one exists,
+/// with a jump to the show's next episode for series.
 class DetailScreen extends StatefulWidget {
   const DetailScreen({super.key, required this.entry});
 
@@ -26,6 +30,10 @@ class DetailScreen extends StatefulWidget {
 class _DetailScreenState extends State<DetailScreen> {
   MediaEntry get entry => widget.entry;
 
+  WatchState? _state;
+  MediaEntry? _next;
+  List<MediaList> _lists = const [];
+
   @override
   void initState() {
     super.initState();
@@ -34,9 +42,23 @@ class _DetailScreenState extends State<DetailScreen> {
     // time the user presses Play the file starts as fast as possible.
     // Once per address per session; a no-op when already stored.
     unawaited(DataMapPrefetcher.warm(entry));
+    unawaited(_loadState());
   }
 
-  Future<void> _play(BuildContext context) async {
+  /// Load the entry's resume point and, for episodes, the show's next
+  /// episode (needs the library to know the sibling files).
+  Future<void> _loadState() async {
+    final lists = await LibraryStore.load();
+    final state = await WatchStateStore.instance.stateFor(entry);
+    if (!mounted) return;
+    setState(() {
+      _lists = lists;
+      _state = state;
+      _next = nextEpisode(lists, entry);
+    });
+  }
+
+  Future<void> _play(BuildContext context, {bool fromStart = false}) async {
     final url = streamUrl(EmbeddedClient.baseUrl(), entry);
     if (!context.mounted) return;
     if (url == null) {
@@ -66,16 +88,26 @@ class _DetailScreenState extends State<DetailScreen> {
     }
     final meta = MetadataService.instance.metadataFor(entry);
     final bufferSizeMb = await AppSettings.bufferSizeMb();
+    final state = _state;
+    final resumeFrom = !fromStart && state != null && state.resumable
+        ? Duration(milliseconds: state.positionMs)
+        : Duration.zero;
+    final lists = _lists;
     if (!context.mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
           url: url,
-          title: meta.title,
+          title: playerTitle(meta),
+          entry: entry,
+          resumeFrom: resumeFrom,
+          nextFor: (e) => nextEpisode(lists, e),
           bufferSizeMb: bufferSizeMb,
         ),
       ),
     );
+    // Refresh the Resume button with the position playback stopped at.
+    await _loadState();
   }
 
   @override
@@ -146,15 +178,56 @@ class _DetailScreenState extends State<DetailScreen> {
                   const SizedBox(height: 10),
                   ratingLine(t, meta.rating!),
                 ],
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: () => _play(context),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: t.copper,
-                    foregroundColor: t.ink,
+                if (_state?.completed ?? false) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.check_circle_outline,
+                          color: t.copper, size: 16),
+                      const SizedBox(width: 5),
+                      Text('Watched',
+                          style: TextStyle(fontSize: 12.5, color: t.boneDim)),
+                    ],
                   ),
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Text('Play'),
+                ],
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    FilledButton.icon(
+                      onPressed: () => _play(context),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: t.copper,
+                        foregroundColor: t.ink,
+                      ),
+                      icon: const Icon(Icons.play_arrow),
+                      label: Text(_state?.resumable ?? false
+                          ? 'Resume · ${positionLabel(_state!.positionMs)}'
+                          : 'Play'),
+                    ),
+                    if (_state?.resumable ?? false)
+                      TextButton(
+                        onPressed: () => _play(context, fromStart: true),
+                        child: Text('Start over',
+                            style: TextStyle(color: t.boneDim)),
+                      ),
+                    if (_next != null)
+                      OutlinedButton.icon(
+                        onPressed: () => Navigator.of(context).pushReplacement(
+                          MaterialPageRoute(
+                              builder: (_) => DetailScreen(entry: _next!)),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: t.bone,
+                          side: BorderSide(color: t.ash),
+                        ),
+                        icon: const Icon(Icons.skip_next, size: 18),
+                        label: const Text('Next episode'),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 8),
                 Text(

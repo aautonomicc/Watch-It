@@ -378,6 +378,18 @@ class $MediaEntriesTable extends MediaEntries
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _addedAtMeta = const VerificationMeta(
+    'addedAt',
+  );
+  @override
+  late final GeneratedColumn<int> addedAt = GeneratedColumn<int>(
+    'added_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     entryId,
@@ -385,6 +397,7 @@ class $MediaEntriesTable extends MediaEntries
     name,
     address,
     position,
+    addedAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -436,6 +449,12 @@ class $MediaEntriesTable extends MediaEntries
     } else if (isInserting) {
       context.missing(_positionMeta);
     }
+    if (data.containsKey('added_at')) {
+      context.handle(
+        _addedAtMeta,
+        addedAt.isAcceptableOrUnknown(data['added_at']!, _addedAtMeta),
+      );
+    }
     return context;
   }
 
@@ -465,6 +484,10 @@ class $MediaEntriesTable extends MediaEntries
         DriftSqlType.int,
         data['${effectivePrefix}position'],
       )!,
+      addedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}added_at'],
+      )!,
     );
   }
 
@@ -480,12 +503,18 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
   final String name;
   final String address;
   final int position;
+
+  /// When the entry first entered the library (epoch ms) — feeds the
+  /// home screen's Recently Added row. 0 for rows that predate the
+  /// column (their add time is unknown, so the row skips them).
+  final int addedAt;
   const MediaEntryRow({
     required this.entryId,
     required this.listId,
     required this.name,
     required this.address,
     required this.position,
+    required this.addedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -495,6 +524,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
     map['name'] = Variable<String>(name);
     map['address'] = Variable<String>(address);
     map['position'] = Variable<int>(position);
+    map['added_at'] = Variable<int>(addedAt);
     return map;
   }
 
@@ -505,6 +535,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
       name: Value(name),
       address: Value(address),
       position: Value(position),
+      addedAt: Value(addedAt),
     );
   }
 
@@ -519,6 +550,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
       name: serializer.fromJson<String>(json['name']),
       address: serializer.fromJson<String>(json['address']),
       position: serializer.fromJson<int>(json['position']),
+      addedAt: serializer.fromJson<int>(json['addedAt']),
     );
   }
   @override
@@ -530,6 +562,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
       'name': serializer.toJson<String>(name),
       'address': serializer.toJson<String>(address),
       'position': serializer.toJson<int>(position),
+      'addedAt': serializer.toJson<int>(addedAt),
     };
   }
 
@@ -539,12 +572,14 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
     String? name,
     String? address,
     int? position,
+    int? addedAt,
   }) => MediaEntryRow(
     entryId: entryId ?? this.entryId,
     listId: listId ?? this.listId,
     name: name ?? this.name,
     address: address ?? this.address,
     position: position ?? this.position,
+    addedAt: addedAt ?? this.addedAt,
   );
   MediaEntryRow copyWithCompanion(MediaEntriesCompanion data) {
     return MediaEntryRow(
@@ -553,6 +588,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
       name: data.name.present ? data.name.value : this.name,
       address: data.address.present ? data.address.value : this.address,
       position: data.position.present ? data.position.value : this.position,
+      addedAt: data.addedAt.present ? data.addedAt.value : this.addedAt,
     );
   }
 
@@ -563,13 +599,15 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
           ..write('listId: $listId, ')
           ..write('name: $name, ')
           ..write('address: $address, ')
-          ..write('position: $position')
+          ..write('position: $position, ')
+          ..write('addedAt: $addedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(entryId, listId, name, address, position);
+  int get hashCode =>
+      Object.hash(entryId, listId, name, address, position, addedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -578,7 +616,8 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
           other.listId == this.listId &&
           other.name == this.name &&
           other.address == this.address &&
-          other.position == this.position);
+          other.position == this.position &&
+          other.addedAt == this.addedAt);
 }
 
 class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
@@ -587,12 +626,14 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
   final Value<String> name;
   final Value<String> address;
   final Value<int> position;
+  final Value<int> addedAt;
   const MediaEntriesCompanion({
     this.entryId = const Value.absent(),
     this.listId = const Value.absent(),
     this.name = const Value.absent(),
     this.address = const Value.absent(),
     this.position = const Value.absent(),
+    this.addedAt = const Value.absent(),
   });
   MediaEntriesCompanion.insert({
     this.entryId = const Value.absent(),
@@ -600,6 +641,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     required String name,
     required String address,
     required int position,
+    this.addedAt = const Value.absent(),
   }) : listId = Value(listId),
        name = Value(name),
        address = Value(address),
@@ -610,6 +652,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     Expression<String>? name,
     Expression<String>? address,
     Expression<int>? position,
+    Expression<int>? addedAt,
   }) {
     return RawValuesInsertable({
       if (entryId != null) 'entry_id': entryId,
@@ -617,6 +660,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
       if (name != null) 'name': name,
       if (address != null) 'address': address,
       if (position != null) 'position': position,
+      if (addedAt != null) 'added_at': addedAt,
     });
   }
 
@@ -626,6 +670,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     Value<String>? name,
     Value<String>? address,
     Value<int>? position,
+    Value<int>? addedAt,
   }) {
     return MediaEntriesCompanion(
       entryId: entryId ?? this.entryId,
@@ -633,6 +678,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
       name: name ?? this.name,
       address: address ?? this.address,
       position: position ?? this.position,
+      addedAt: addedAt ?? this.addedAt,
     );
   }
 
@@ -654,6 +700,9 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     if (position.present) {
       map['position'] = Variable<int>(position.value);
     }
+    if (addedAt.present) {
+      map['added_at'] = Variable<int>(addedAt.value);
+    }
     return map;
   }
 
@@ -664,7 +713,8 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
           ..write('listId: $listId, ')
           ..write('name: $name, ')
           ..write('address: $address, ')
-          ..write('position: $position')
+          ..write('position: $position, ')
+          ..write('addedAt: $addedAt')
           ..write(')'))
         .toString();
   }
@@ -1663,12 +1713,392 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
   }
 }
 
+class $WatchStatesTable extends WatchStates
+    with TableInfo<$WatchStatesTable, WatchStateRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $WatchStatesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _addressMeta = const VerificationMeta(
+    'address',
+  );
+  @override
+  late final GeneratedColumn<String> address = GeneratedColumn<String>(
+    'address',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _positionMsMeta = const VerificationMeta(
+    'positionMs',
+  );
+  @override
+  late final GeneratedColumn<int> positionMs = GeneratedColumn<int>(
+    'position_ms',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _durationMsMeta = const VerificationMeta(
+    'durationMs',
+  );
+  @override
+  late final GeneratedColumn<int> durationMs = GeneratedColumn<int>(
+    'duration_ms',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _completedMeta = const VerificationMeta(
+    'completed',
+  );
+  @override
+  late final GeneratedColumn<bool> completed = GeneratedColumn<bool>(
+    'completed',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("completed" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    address,
+    positionMs,
+    durationMs,
+    completed,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'watch_states';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<WatchStateRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('address')) {
+      context.handle(
+        _addressMeta,
+        address.isAcceptableOrUnknown(data['address']!, _addressMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_addressMeta);
+    }
+    if (data.containsKey('position_ms')) {
+      context.handle(
+        _positionMsMeta,
+        positionMs.isAcceptableOrUnknown(data['position_ms']!, _positionMsMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_positionMsMeta);
+    }
+    if (data.containsKey('duration_ms')) {
+      context.handle(
+        _durationMsMeta,
+        durationMs.isAcceptableOrUnknown(data['duration_ms']!, _durationMsMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_durationMsMeta);
+    }
+    if (data.containsKey('completed')) {
+      context.handle(
+        _completedMeta,
+        completed.isAcceptableOrUnknown(data['completed']!, _completedMeta),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {address};
+  @override
+  WatchStateRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return WatchStateRow(
+      address: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}address'],
+      )!,
+      positionMs: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}position_ms'],
+      )!,
+      durationMs: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}duration_ms'],
+      )!,
+      completed: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}completed'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $WatchStatesTable createAlias(String alias) {
+    return $WatchStatesTable(attachedDatabase, alias);
+  }
+}
+
+class WatchStateRow extends DataClass implements Insertable<WatchStateRow> {
+  /// Normalized XOR address (lowercase, no 0x prefix).
+  final String address;
+  final int positionMs;
+
+  /// 0 while the player has not reported a duration yet.
+  final int durationMs;
+
+  /// Played to (near) the end — drops out of Continue Watching and, for
+  /// episodes, promotes the show's next episode instead.
+  final bool completed;
+  final int updatedAt;
+  const WatchStateRow({
+    required this.address,
+    required this.positionMs,
+    required this.durationMs,
+    required this.completed,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['address'] = Variable<String>(address);
+    map['position_ms'] = Variable<int>(positionMs);
+    map['duration_ms'] = Variable<int>(durationMs);
+    map['completed'] = Variable<bool>(completed);
+    map['updated_at'] = Variable<int>(updatedAt);
+    return map;
+  }
+
+  WatchStatesCompanion toCompanion(bool nullToAbsent) {
+    return WatchStatesCompanion(
+      address: Value(address),
+      positionMs: Value(positionMs),
+      durationMs: Value(durationMs),
+      completed: Value(completed),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory WatchStateRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return WatchStateRow(
+      address: serializer.fromJson<String>(json['address']),
+      positionMs: serializer.fromJson<int>(json['positionMs']),
+      durationMs: serializer.fromJson<int>(json['durationMs']),
+      completed: serializer.fromJson<bool>(json['completed']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'address': serializer.toJson<String>(address),
+      'positionMs': serializer.toJson<int>(positionMs),
+      'durationMs': serializer.toJson<int>(durationMs),
+      'completed': serializer.toJson<bool>(completed),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+    };
+  }
+
+  WatchStateRow copyWith({
+    String? address,
+    int? positionMs,
+    int? durationMs,
+    bool? completed,
+    int? updatedAt,
+  }) => WatchStateRow(
+    address: address ?? this.address,
+    positionMs: positionMs ?? this.positionMs,
+    durationMs: durationMs ?? this.durationMs,
+    completed: completed ?? this.completed,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  WatchStateRow copyWithCompanion(WatchStatesCompanion data) {
+    return WatchStateRow(
+      address: data.address.present ? data.address.value : this.address,
+      positionMs: data.positionMs.present
+          ? data.positionMs.value
+          : this.positionMs,
+      durationMs: data.durationMs.present
+          ? data.durationMs.value
+          : this.durationMs,
+      completed: data.completed.present ? data.completed.value : this.completed,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('WatchStateRow(')
+          ..write('address: $address, ')
+          ..write('positionMs: $positionMs, ')
+          ..write('durationMs: $durationMs, ')
+          ..write('completed: $completed, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(address, positionMs, durationMs, completed, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is WatchStateRow &&
+          other.address == this.address &&
+          other.positionMs == this.positionMs &&
+          other.durationMs == this.durationMs &&
+          other.completed == this.completed &&
+          other.updatedAt == this.updatedAt);
+}
+
+class WatchStatesCompanion extends UpdateCompanion<WatchStateRow> {
+  final Value<String> address;
+  final Value<int> positionMs;
+  final Value<int> durationMs;
+  final Value<bool> completed;
+  final Value<int> updatedAt;
+  final Value<int> rowid;
+  const WatchStatesCompanion({
+    this.address = const Value.absent(),
+    this.positionMs = const Value.absent(),
+    this.durationMs = const Value.absent(),
+    this.completed = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  WatchStatesCompanion.insert({
+    required String address,
+    required int positionMs,
+    required int durationMs,
+    this.completed = const Value.absent(),
+    required int updatedAt,
+    this.rowid = const Value.absent(),
+  }) : address = Value(address),
+       positionMs = Value(positionMs),
+       durationMs = Value(durationMs),
+       updatedAt = Value(updatedAt);
+  static Insertable<WatchStateRow> custom({
+    Expression<String>? address,
+    Expression<int>? positionMs,
+    Expression<int>? durationMs,
+    Expression<bool>? completed,
+    Expression<int>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (address != null) 'address': address,
+      if (positionMs != null) 'position_ms': positionMs,
+      if (durationMs != null) 'duration_ms': durationMs,
+      if (completed != null) 'completed': completed,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  WatchStatesCompanion copyWith({
+    Value<String>? address,
+    Value<int>? positionMs,
+    Value<int>? durationMs,
+    Value<bool>? completed,
+    Value<int>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return WatchStatesCompanion(
+      address: address ?? this.address,
+      positionMs: positionMs ?? this.positionMs,
+      durationMs: durationMs ?? this.durationMs,
+      completed: completed ?? this.completed,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (address.present) {
+      map['address'] = Variable<String>(address.value);
+    }
+    if (positionMs.present) {
+      map['position_ms'] = Variable<int>(positionMs.value);
+    }
+    if (durationMs.present) {
+      map['duration_ms'] = Variable<int>(durationMs.value);
+    }
+    if (completed.present) {
+      map['completed'] = Variable<bool>(completed.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('WatchStatesCompanion(')
+          ..write('address: $address, ')
+          ..write('positionMs: $positionMs, ')
+          ..write('durationMs: $durationMs, ')
+          ..write('completed: $completed, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $MediaListsTable mediaLists = $MediaListsTable(this);
   late final $MediaEntriesTable mediaEntries = $MediaEntriesTable(this);
   late final $MetadataCacheTable metadataCache = $MetadataCacheTable(this);
+  late final $WatchStatesTable watchStates = $WatchStatesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1677,6 +2107,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     mediaLists,
     mediaEntries,
     metadataCache,
+    watchStates,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -1979,6 +2410,7 @@ typedef $$MediaEntriesTableCreateCompanionBuilder =
       required String name,
       required String address,
       required int position,
+      Value<int> addedAt,
     });
 typedef $$MediaEntriesTableUpdateCompanionBuilder =
     MediaEntriesCompanion Function({
@@ -1987,6 +2419,7 @@ typedef $$MediaEntriesTableUpdateCompanionBuilder =
       Value<String> name,
       Value<String> address,
       Value<int> position,
+      Value<int> addedAt,
     });
 
 final class $$MediaEntriesTableReferences
@@ -2037,6 +2470,11 @@ class $$MediaEntriesTableFilterComposer
 
   ColumnFilters<int> get position => $composableBuilder(
     column: $table.position,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get addedAt => $composableBuilder(
+    column: $table.addedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2093,6 +2531,11 @@ class $$MediaEntriesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get addedAt => $composableBuilder(
+    column: $table.addedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$MediaListsTableOrderingComposer get listId {
     final $$MediaListsTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -2137,6 +2580,9 @@ class $$MediaEntriesTableAnnotationComposer
 
   GeneratedColumn<int> get position =>
       $composableBuilder(column: $table.position, builder: (column) => column);
+
+  GeneratedColumn<int> get addedAt =>
+      $composableBuilder(column: $table.addedAt, builder: (column) => column);
 
   $$MediaListsTableAnnotationComposer get listId {
     final $$MediaListsTableAnnotationComposer composer = $composerBuilder(
@@ -2195,12 +2641,14 @@ class $$MediaEntriesTableTableManager
                 Value<String> name = const Value.absent(),
                 Value<String> address = const Value.absent(),
                 Value<int> position = const Value.absent(),
+                Value<int> addedAt = const Value.absent(),
               }) => MediaEntriesCompanion(
                 entryId: entryId,
                 listId: listId,
                 name: name,
                 address: address,
                 position: position,
+                addedAt: addedAt,
               ),
           createCompanionCallback:
               ({
@@ -2209,12 +2657,14 @@ class $$MediaEntriesTableTableManager
                 required String name,
                 required String address,
                 required int position,
+                Value<int> addedAt = const Value.absent(),
               }) => MediaEntriesCompanion.insert(
                 entryId: entryId,
                 listId: listId,
                 name: name,
                 address: address,
                 position: position,
+                addedAt: addedAt,
               ),
           withReferenceMapper: (p0) => p0
               .map(
@@ -2725,6 +3175,210 @@ typedef $$MetadataCacheTableProcessedTableManager =
       MetadataCacheRow,
       PrefetchHooks Function()
     >;
+typedef $$WatchStatesTableCreateCompanionBuilder =
+    WatchStatesCompanion Function({
+      required String address,
+      required int positionMs,
+      required int durationMs,
+      Value<bool> completed,
+      required int updatedAt,
+      Value<int> rowid,
+    });
+typedef $$WatchStatesTableUpdateCompanionBuilder =
+    WatchStatesCompanion Function({
+      Value<String> address,
+      Value<int> positionMs,
+      Value<int> durationMs,
+      Value<bool> completed,
+      Value<int> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$WatchStatesTableFilterComposer
+    extends Composer<_$AppDatabase, $WatchStatesTable> {
+  $$WatchStatesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get address => $composableBuilder(
+    column: $table.address,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get positionMs => $composableBuilder(
+    column: $table.positionMs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get durationMs => $composableBuilder(
+    column: $table.durationMs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get completed => $composableBuilder(
+    column: $table.completed,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$WatchStatesTableOrderingComposer
+    extends Composer<_$AppDatabase, $WatchStatesTable> {
+  $$WatchStatesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get address => $composableBuilder(
+    column: $table.address,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get positionMs => $composableBuilder(
+    column: $table.positionMs,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get durationMs => $composableBuilder(
+    column: $table.durationMs,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get completed => $composableBuilder(
+    column: $table.completed,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$WatchStatesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $WatchStatesTable> {
+  $$WatchStatesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get address =>
+      $composableBuilder(column: $table.address, builder: (column) => column);
+
+  GeneratedColumn<int> get positionMs => $composableBuilder(
+    column: $table.positionMs,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get durationMs => $composableBuilder(
+    column: $table.durationMs,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get completed =>
+      $composableBuilder(column: $table.completed, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$WatchStatesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $WatchStatesTable,
+          WatchStateRow,
+          $$WatchStatesTableFilterComposer,
+          $$WatchStatesTableOrderingComposer,
+          $$WatchStatesTableAnnotationComposer,
+          $$WatchStatesTableCreateCompanionBuilder,
+          $$WatchStatesTableUpdateCompanionBuilder,
+          (
+            WatchStateRow,
+            BaseReferences<_$AppDatabase, $WatchStatesTable, WatchStateRow>,
+          ),
+          WatchStateRow,
+          PrefetchHooks Function()
+        > {
+  $$WatchStatesTableTableManager(_$AppDatabase db, $WatchStatesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$WatchStatesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$WatchStatesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$WatchStatesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> address = const Value.absent(),
+                Value<int> positionMs = const Value.absent(),
+                Value<int> durationMs = const Value.absent(),
+                Value<bool> completed = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => WatchStatesCompanion(
+                address: address,
+                positionMs: positionMs,
+                durationMs: durationMs,
+                completed: completed,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String address,
+                required int positionMs,
+                required int durationMs,
+                Value<bool> completed = const Value.absent(),
+                required int updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => WatchStatesCompanion.insert(
+                address: address,
+                positionMs: positionMs,
+                durationMs: durationMs,
+                completed: completed,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$WatchStatesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $WatchStatesTable,
+      WatchStateRow,
+      $$WatchStatesTableFilterComposer,
+      $$WatchStatesTableOrderingComposer,
+      $$WatchStatesTableAnnotationComposer,
+      $$WatchStatesTableCreateCompanionBuilder,
+      $$WatchStatesTableUpdateCompanionBuilder,
+      (
+        WatchStateRow,
+        BaseReferences<_$AppDatabase, $WatchStatesTable, WatchStateRow>,
+      ),
+      WatchStateRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -2735,4 +3389,6 @@ class $AppDatabaseManager {
       $$MediaEntriesTableTableManager(_db, _db.mediaEntries);
   $$MetadataCacheTableTableManager get metadataCache =>
       $$MetadataCacheTableTableManager(_db, _db.metadataCache);
+  $$WatchStatesTableTableManager get watchStates =>
+      $$WatchStatesTableTableManager(_db, _db.watchStates);
 }

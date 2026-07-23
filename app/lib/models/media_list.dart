@@ -1,7 +1,7 @@
 /// Library model: a user-held list of media entries, each entry a
 /// `{XOR public file address, file name}` pair (see docs/ARCHITECTURE.md).
 class MediaEntry {
-  const MediaEntry({required this.name, required this.address});
+  const MediaEntry({required this.name, required this.address, this.addedAt});
 
   /// File name, preferably Plex/Jellyfin style
   /// (`Title (Year) {imdb-ttXXXXXXX} - [1080p].mkv`); release-style names
@@ -11,11 +11,22 @@ class MediaEntry {
   /// XOR public file address on Autonomi (64 hex chars).
   final String address;
 
-  Map<String, dynamic> toJson() => {'name': name, 'address': address};
+  /// When the entry entered the library (epoch ms). Null while unsaved
+  /// ([LibraryStore.save] stamps the current time); 0 for entries that
+  /// predate the column (add time unknown — excluded from the Recently
+  /// Added row).
+  final int? addedAt;
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'address': address,
+        if (addedAt != null) 'addedAt': addedAt,
+      };
 
   factory MediaEntry.fromJson(Map<String, dynamic> json) => MediaEntry(
         name: json['name'] as String? ?? '',
         address: json['address'] as String? ?? '',
+        addedAt: json['addedAt'] as int?,
       );
 }
 
