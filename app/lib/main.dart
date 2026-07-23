@@ -8,9 +8,12 @@ import 'screens/detail_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/show_screen.dart';
 import 'services/embedded_client.dart';
+import 'services/home_rows.dart';
 import 'services/library_store.dart';
+import 'services/metadata.dart';
 import 'services/metadata_service.dart';
 import 'services/season_grouping.dart';
+import 'services/watch_state.dart';
 import 'theme/tokens.dart';
 import 'widgets/prefetch_dialog.dart';
 
@@ -51,17 +54,39 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<MediaList> _lists = [];
+  List<ContinueItem> _continue = const [];
+  List<HomeItem> _recent = const [];
 
   @override
   void initState() {
     super.initState();
+    // Watch states change while a player is open on top of this screen —
+    // refresh the Continue Watching row as they land.
+    WatchStateStore.instance.addListener(_reloadRows);
     _reload();
+  }
+
+  @override
+  void dispose() {
+    WatchStateStore.instance.removeListener(_reloadRows);
+    super.dispose();
   }
 
   Future<void> _reload() async {
     await LibraryStore.ensureDefaults();
     final lists = await LibraryStore.load();
-    if (mounted) setState(() => _lists = lists);
+    final continueRow = await continueWatching(lists);
+    if (!mounted) return;
+    setState(() {
+      _lists = lists;
+      _continue = continueRow;
+      _recent = recentlyAdded(lists);
+    });
+  }
+
+  Future<void> _reloadRows() async {
+    final continueRow = await continueWatching(_lists);
+    if (mounted) setState(() => _continue = continueRow);
   }
 
   Future<void> _openSettings() async {
@@ -144,22 +169,76 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _sectionTitle(WiTokens t, String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+          color: t.bone,
+        ),
+      ),
+    );
+  }
+
+  /// One horizontal shelf of wall items (a list's cards, or the Recently
+  /// Added row). All episodes of one show — every season — fold into a
+  /// single card that opens the show's page.
+  Widget _itemsRow(WiTokens t, List<HomeItem> items) {
+    return SizedBox(
+      height: 232,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: items.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 12),
+        itemBuilder: (context, i) => switch (items[i]) {
+          HomeEntry(:final entry) => _PosterCard(
+              entry: entry,
+              tokens: t,
+              onTap: () => _openEntry(entry),
+            ),
+          HomeShow() && final group => _ShowCard(
+              group: group,
+              tokens: t,
+              onTap: () => _openShow(group),
+            ),
+          // groupShows never yields bare seasons.
+          HomeSeason() => const SizedBox.shrink(),
+        },
+      ),
+    );
+  }
+
   Widget _posterWall(WiTokens t, List<MediaList> lists) {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
-        for (final list in lists) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Text(
-              list.title,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: t.bone,
+        if (_continue.isNotEmpty) ...[
+          _sectionTitle(t, 'Continue Watching'),
+          SizedBox(
+            height: 232,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: _continue.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 12),
+              itemBuilder: (context, i) => _ContinueCard(
+                item: _continue[i],
+                tokens: t,
+                onTap: () => _openEntry(_continue[i].entry),
               ),
             ),
           ),
+        ],
+        if (_recent.isNotEmpty) ...[
+          _sectionTitle(t, 'Recently Added'),
+          _itemsRow(t, _recent),
+        ],
+        for (final list in lists) ...[
+          _sectionTitle(t, list.title),
           if (list.entries.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -169,34 +248,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             )
           else
-            SizedBox(
-              height: 232,
-              child: Builder(builder: (context) {
-                // All episodes of one show — every season — fold into a
-                // single card that opens the show's page.
-                final items = groupShows(list.entries);
-                return ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: items.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 12),
-                  itemBuilder: (context, i) => switch (items[i]) {
-                    HomeEntry(:final entry) => _PosterCard(
-                        entry: entry,
-                        tokens: t,
-                        onTap: () => _openEntry(entry),
-                      ),
-                    HomeShow() && final group => _ShowCard(
-                        group: group,
-                        tokens: t,
-                        onTap: () => _openShow(group),
-                      ),
-                    // groupShows never yields bare seasons.
-                    HomeSeason() => const SizedBox.shrink(),
-                  },
-                );
-              }),
-            ),
+            _itemsRow(t, groupShows(list.entries)),
         ],
       ],
     );
@@ -330,6 +382,102 @@ class _PosterCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 11.5, color: t.boneDim),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Continue Watching card: the poster with a progress bar along its
+/// bottom edge for a partially watched file, or a "Next up" tag for the
+/// episode after a finished one. Tap opens the detail page (which offers
+/// Resume / Play).
+class _ContinueCard extends StatelessWidget {
+  const _ContinueCard({
+    required this.item,
+    required this.tokens,
+    required this.onTap,
+  });
+
+  final ContinueItem item;
+  final WiTokens tokens;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = tokens;
+    final entry = item.entry;
+    final meta = MetadataService.instance.metadataFor(entry);
+    final parsed = parseMediaName(entry.name);
+    final marker = parsed.isEpisode
+        ? 'S${parsed.season.toString().padLeft(2, '0')}'
+            'E${parsed.episode.toString().padLeft(2, '0')}'
+        : null;
+    final state = item.state;
+    final progress = state != null && state.resumable ? state.progress : null;
+    final subtitle = [
+      if (item.isNextUp) 'Next up',
+      ?marker,
+      if (!item.isNextUp)
+        state?.remainingLabel ?? (progress != null ? 'In progress' : null),
+    ].nonNulls.join(' · ');
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        width: 120,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox(
+                width: 120,
+                height: 180,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    posterImage(meta, fit: BoxFit.cover) ??
+                        Container(
+                          color: t.ink2,
+                          child: Icon(
+                              marker != null
+                                  ? Icons.live_tv_outlined
+                                  : Icons.movie_outlined,
+                              color: t.ash,
+                              size: 40),
+                        ),
+                    if (progress != null && progress > 0)
+                      Align(
+                        alignment: Alignment.bottomCenter,
+                        child: SizedBox(
+                          height: 4,
+                          child: LinearProgressIndicator(
+                            value: progress,
+                            backgroundColor: Colors.black45,
+                            color: t.copper,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              meta.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11.5, color: t.boneDim),
+            ),
+            if (subtitle.isNotEmpty)
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 10.5, color: t.ash),
+              ),
           ],
         ),
       ),

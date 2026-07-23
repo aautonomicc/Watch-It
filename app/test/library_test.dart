@@ -87,6 +87,40 @@ void main() {
       expect(await LibraryStore.load(), isEmpty);
     });
 
+    test('save stamps addedAt on new entries and preserves it after', () async {
+      final before = DateTime.now().millisecondsSinceEpoch;
+      await LibraryStore.save([
+        MediaList(
+          id: 'l',
+          title: 'L',
+          entries: const [MediaEntry(name: 'New.mkv', address: _addr)],
+        ),
+      ]);
+      final stamped = (await LibraryStore.load()).single.entries.single;
+      expect(stamped.addedAt, isNotNull);
+      expect(stamped.addedAt, greaterThanOrEqualTo(before));
+
+      // A later save (any list edit) keeps the original stamp.
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      await LibraryStore.save(await LibraryStore.load());
+      final reloaded = (await LibraryStore.load()).single.entries.single;
+      expect(reloaded.addedAt, stamped.addedAt);
+    });
+
+    test('addedAt 0 (pre-column rows) survives the save round-trip', () async {
+      await LibraryStore.save([
+        MediaList(
+          id: 'l',
+          title: 'L',
+          entries: const [
+            MediaEntry(name: 'Legacy.mkv', address: _addr, addedAt: 0),
+          ],
+        ),
+      ]);
+      final loaded = (await LibraryStore.load()).single.entries.single;
+      expect(loaded.addedAt, 0);
+    });
+
     test('save preserves list and entry order', () async {
       await LibraryStore.save([
         for (var i = 0; i < 3; i++)
@@ -187,6 +221,47 @@ void main() {
             fetchedAt: 1,
           ));
       expect((await db.select(db.metadataCache).get()).single.rating, 7.5);
+    });
+
+    test('v4 database gains watch states and addedAt on upgrade', () async {
+      final dir = await Directory.systemTemp.createTemp('watchit-migration');
+      addTearDown(() => dir.delete(recursive: true));
+      final file = File('${dir.path}/watchit.sqlite');
+
+      // Hand-build the alpha.27/28 (schema v4) shape: no watch_states
+      // table, no added_at column.
+      final raw = sqlite3.open(file.path);
+      raw.execute('''
+        CREATE TABLE media_lists (
+          id TEXT NOT NULL, title TEXT NOT NULL, position INTEGER NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (id));
+        CREATE TABLE media_entries (
+          entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          list_id TEXT NOT NULL REFERENCES media_lists (id) ON DELETE CASCADE,
+          name TEXT NOT NULL, address TEXT NOT NULL,
+          position INTEGER NOT NULL);
+        CREATE TABLE metadata_cache (
+          lookup_key TEXT NOT NULL, found INTEGER NOT NULL,
+          title TEXT, year INTEGER, overview TEXT, category TEXT,
+          episode_label TEXT, poster_file TEXT, media_type TEXT,
+          tmdb_id INTEGER, fetched_at INTEGER NOT NULL, rating REAL,
+          show_overview TEXT, season_overview TEXT, air_date TEXT,
+          still_file TEXT, show_poster_file TEXT, PRIMARY KEY (lookup_key));
+        INSERT INTO media_lists VALUES ('l1', 'Old List', 0, 1);
+        INSERT INTO media_entries (list_id, name, address, position)
+          VALUES ('l1', 'Old.mkv', '$_addr', 0);
+        PRAGMA user_version = 4;
+      ''');
+      raw.close();
+
+      await LibraryStore.useForTesting(
+          AppDatabase.forTesting(NativeDatabase(file)));
+      // Existing entries load with an unknown (0) add time.
+      final lists = await LibraryStore.load();
+      expect(lists.single.entries.single.addedAt, 0);
+      // The new watch_states table is queryable and empty.
+      final db = await LibraryStore.database();
+      expect(await db.select(db.watchStates).get(), isEmpty);
     });
   });
 
@@ -512,7 +587,9 @@ void main() {
       expect(find.text('Weekend Queue'), findsOneWidget);
       // Poster cards show the parsed display title, not the raw file name
       // (episode markers are stripped into season/episode since alpha.23).
-      expect(find.text('Show'), findsOneWidget);
+      // The freshly saved entry appears twice: once in the Recently Added
+      // row and once on its list's wall row.
+      expect(find.text('Show'), findsNWidgets(2));
       expect(find.text('Your library is empty'), findsNothing);
     });
   });
@@ -623,8 +700,11 @@ void main() {
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
 
-      // One season card + one movie card — not three cards.
-      expect(find.text('Show'), findsOneWidget);
+      // One season card + one movie card — not three cards. The entries
+      // share one XOR address here, so the Recently Added row dedupes
+      // them into a single extra show card ('Show' appears twice, the
+      // full season/movie cards only on the list's wall row).
+      expect(find.text('Show'), findsNWidgets(2));
       expect(find.text('Season 1 · 2 ep'), findsOneWidget);
       expect(find.text('The Movie (2024)'), findsOneWidget);
 
