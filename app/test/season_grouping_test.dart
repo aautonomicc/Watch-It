@@ -74,6 +74,50 @@ void main() {
     });
   });
 
+  group('groupShows', () {
+    test('all seasons of one show fold into a single card', () {
+      final items = groupShows([
+        _e('Show.S02E01.mkv'),
+        _e('Show.S01E01.mkv'),
+        _e('Show.S01E02.mkv'),
+      ]);
+      final show = items.single as HomeShow;
+      expect(show.show, 'Show');
+      expect(show.seasons.map((s) => s.season), [1, 2]);
+      expect(show.episodeCount, 3);
+    });
+
+    test('movies stay single cards; the show card sits at its first '
+        'episode', () {
+      final items = groupShows([
+        _e('A Movie (2020).mkv'),
+        _e('Show.S02E01.mkv'),
+        _e('B Movie (2021).mkv'),
+        _e('Show.S01E01.mkv'),
+      ]);
+      expect(items, hasLength(3));
+      expect((items[0] as HomeEntry).entry.name, 'A Movie (2020).mkv');
+      final show = items[1] as HomeShow;
+      expect(show.seasons.map((s) => s.season), [1, 2]);
+      expect((items[2] as HomeEntry).entry.name, 'B Movie (2021).mkv');
+    });
+
+    test('different shows stay separate cards', () {
+      final items = groupShows([
+        _e('Show.S01E01.mkv'),
+        _e('Other Show S01E01.mkv'),
+      ]);
+      expect(items.whereType<HomeShow>().map((s) => s.show),
+          ['Show', 'Other Show']);
+    });
+
+    test('a single-season show still forms a show card', () {
+      final items = groupShows([_e('Show.S03E07.mkv')]);
+      final show = items.single as HomeShow;
+      expect(show.seasons.single.season, 3);
+    });
+  });
+
   group('showSeasons', () {
     test('collects one show\'s seasons sorted by number', () {
       final entries = [
