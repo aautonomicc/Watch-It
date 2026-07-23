@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
+import '../services/datamap_prefetch.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/embedded_client.dart';
@@ -11,10 +14,27 @@ import 'player_screen.dart';
 
 /// Movie/episode detail: big artwork with description and rating, and
 /// playback.
-class DetailScreen extends StatelessWidget {
+class DetailScreen extends StatefulWidget {
   const DetailScreen({super.key, required this.entry});
 
   final MediaEntry entry;
+
+  @override
+  State<DetailScreen> createState() => _DetailScreenState();
+}
+
+class _DetailScreenState extends State<DetailScreen> {
+  MediaEntry get entry => widget.entry;
+
+  @override
+  void initState() {
+    super.initState();
+    // Warm the entry's data map in the background the moment its page
+    // opens: resolving it is most of the pre-first-byte wait, so by the
+    // time the user presses Play the file starts as fast as possible.
+    // Once per address per session; a no-op when already stored.
+    unawaited(DataMapPrefetcher.warm(entry));
+  }
 
   Future<void> _play(BuildContext context) async {
     final url = streamUrl(EmbeddedClient.baseUrl(), entry);

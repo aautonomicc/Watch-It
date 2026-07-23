@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../models/media_list.dart';
 import 'embedded_client.dart';
 
@@ -33,6 +35,34 @@ class PrefetchResult {
 
 class DataMapPrefetcher {
   DataMapPrefetcher({String? base}) : _base = base ?? EmbeddedClient.baseUrl();
+
+  /// Addresses already warmed (or being warmed) this session by [warm].
+  static final Set<String> _warmed = {};
+
+  /// Fire-and-forget resolve of one entry's data map, called when the
+  /// entry's detail page opens: by the time the user presses Play the map
+  /// is resolved (or resolving — the embedded client single-flights the
+  /// underlying chunk fetches), so playback starts as fast as possible.
+  /// Each address is attempted once per session; failures are silent
+  /// because playback resolves the map itself anyway.
+  static Future<bool> warm(MediaEntry entry, {String? base}) async {
+    final addr = entry.address.toLowerCase().replaceFirst('0x', '');
+    if (!_warmed.add(addr)) return false;
+    final prefetcher = DataMapPrefetcher(base: base);
+    if (!prefetcher.available) {
+      _warmed.remove(addr);
+      return false;
+    }
+    final ok = await prefetcher._resolve(entry);
+    prefetcher._client.close(force: true);
+    // Transient failure (still connecting, network hiccup): allow a later
+    // page open to try again.
+    if (!ok) _warmed.remove(addr);
+    return ok;
+  }
+
+  @visibleForTesting
+  static void resetWarmedForTesting() => _warmed.clear();
 
   final String? _base;
   final HttpClient _client = HttpClient();

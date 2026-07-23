@@ -12,6 +12,7 @@ import 'services/library_store.dart';
 import 'services/metadata_service.dart';
 import 'services/season_grouping.dart';
 import 'theme/tokens.dart';
+import 'widgets/prefetch_dialog.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,6 +33,9 @@ class WatchItApp extends StatelessWidget {
     return MaterialApp(
       title: 'watch-it',
       debugShowCheckedModeBanner: false,
+      // App-wide messenger so a background data-map prefetch can report
+      // its outcome whatever screen is on top when it finishes.
+      scaffoldMessengerKey: wiMessengerKey,
       theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
       home: const HomeScreen(),
     );
