@@ -7,6 +7,7 @@
 
 pub mod cache;
 pub mod engine;
+pub mod mapstore;
 pub mod server;
 
 use std::ffi::CStr;
@@ -119,7 +120,7 @@ pub unsafe extern "C" fn watchit_core_start(
     };
     ensure_dirs_env(dir.as_deref());
 
-    match start(peers.as_deref()) {
+    match start(peers.as_deref(), dir.as_deref()) {
         Ok(port) => port,
         Err(e) => {
             tracing::error!("watchit_core_start failed: {e}");
@@ -135,7 +136,9 @@ pub extern "C" fn watchit_core_port() -> i32 {
 }
 
 /// Rust-side start, shared by the FFI entry point and the dev server.
-pub fn start(peers_override: Option<&str>) -> Result<i32, String> {
+/// `data_dir` (the app's writable directory) hosts the persistent
+/// root-map cache; pass None to run without one (devserver/tests).
+pub fn start(peers_override: Option<&str>, data_dir: Option<&str>) -> Result<i32, String> {
     let existing = PORT.load(Ordering::SeqCst);
     if existing > 0 {
         return Ok(existing);
@@ -152,7 +155,7 @@ pub fn start(peers_override: Option<&str>) -> Result<i32, String> {
             .build()
             .expect("tokio runtime")
     });
-    let engine = ENGINE.get_or_init(|| Engine::new(peers_override));
+    let engine = ENGINE.get_or_init(|| Engine::new(peers_override, data_dir));
 
     let listener = runtime.block_on(async {
         tokio::net::TcpListener::bind(("127.0.0.1", 0))

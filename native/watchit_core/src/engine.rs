@@ -19,6 +19,7 @@ use tokio::sync::{mpsc, watch, OnceCell};
 use xor_name::XorName;
 
 use crate::cache::{ChunkCache, Lookup};
+use crate::mapstore::MapStore;
 
 /// Production network bootstrap peers, mirrored from
 /// WithAutonomi/ant-client resources/bootstrap_peers.toml (rev 629b87f).
@@ -92,12 +93,15 @@ pub struct Engine {
     client: OnceCell<Client>,
     peers: Vec<SocketAddr>,
     root_maps: Mutex<HashMap<[u8; 32], DataMap>>,
+    /// On-disk root-map cache; `None` when no data dir is available
+    /// (devserver/tests) — resolution then stays memory-only as before.
+    map_store: Option<MapStore>,
     last_error: Mutex<Option<String>>,
     attempts: AtomicU32,
 }
 
 impl Engine {
-    pub fn new(peers_override: Option<&str>) -> Self {
+    pub fn new(peers_override: Option<&str>, data_dir: Option<&str>) -> Self {
         let sources: Vec<String> = match peers_override {
             Some(csv) if !csv.trim().is_empty() => {
                 csv.split(',').map(|s| s.trim().to_string()).collect()
@@ -105,13 +109,34 @@ impl Engine {
             _ => DEFAULT_PEERS.iter().map(|s| s.to_string()).collect(),
         };
         let peers = sources.iter().filter_map(|s| s.parse().ok()).collect();
+        let map_store = data_dir
+            .filter(|d| !d.trim().is_empty())
+            .and_then(|d| match MapStore::open_in_dir(std::path::Path::new(d)) {
+                Ok(store) => {
+                    tracing::info!(
+                        "root-map store open ({} cached maps)",
+                        store.len()
+                    );
+                    Some(store)
+                }
+                Err(e) => {
+                    tracing::warn!("root-map store unavailable: {e}");
+                    None
+                }
+            });
         Self {
             client: OnceCell::new(),
             peers,
             root_maps: Mutex::new(HashMap::new()),
+            map_store,
             last_error: Mutex::new(None),
             attempts: AtomicU32::new(0),
         }
+    }
+
+    /// Root maps persisted on disk (for `/health`).
+    pub fn stored_maps(&self) -> usize {
+        self.map_store.as_ref().map_or(0, MapStore::len)
     }
 
     pub fn last_error(&self) -> Option<String> {
@@ -176,10 +201,17 @@ impl Engine {
         }
     }
 
-    /// Root (non-child) data map for a public file address, cached.
+    /// Root (non-child) data map for a public file address, cached in
+    /// memory and on disk. Data maps are content-addressed and immutable,
+    /// so a disk hit is valid forever — later plays of a title (across app
+    /// restarts) skip the network resolution entirely.
     pub async fn root_map(&'static self, addr: [u8; 32]) -> Result<DataMap, String> {
         if let Some(dm) = self.root_maps.lock().unwrap().get(&addr) {
             return Ok(dm.clone());
+        }
+        if let Some(dm) = self.map_store.as_ref().and_then(|s| s.get(&addr)) {
+            self.root_maps.lock().unwrap().insert(addr, dm.clone());
+            return Ok(dm);
         }
         let client = self.client().await?;
         let dm = client
@@ -201,6 +233,9 @@ impl Engine {
             dm
         };
         self.root_maps.lock().unwrap().insert(addr, root.clone());
+        if let Some(store) = &self.map_store {
+            store.put(&addr, &root);
+        }
         Ok(root)
     }
 

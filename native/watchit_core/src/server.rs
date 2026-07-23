@@ -19,6 +19,10 @@ pub fn router(engine: &'static Engine) -> Router {
     Router::new()
         .route("/health", get(move || health(engine)))
         .route(
+            "/resolve/{addr}",
+            get(move |path: Path<String>| resolve_map(engine, path)),
+        )
+        .route(
             "/xor/{addr}",
             get(move |method: Method, path: Path<String>, headers: HeaderMap| {
                 serve_xor(engine, method, path, headers)
@@ -36,6 +40,7 @@ async fn health(engine: &'static Engine) -> Response {
             "fetched_bytes": crate::engine::FETCHED_BYTES.load(Ordering::Relaxed),
             "cache_hit_chunks": crate::engine::CACHE_HIT_CHUNKS.load(Ordering::Relaxed),
             "cache_bytes": crate::engine::cache_resident_bytes(),
+            "stored_maps": engine.stored_maps(),
         })
     } else {
         // The engine retries forever in the background, so a recorded
@@ -48,6 +53,30 @@ async fn health(engine: &'static Engine) -> Response {
         })
     };
     ([(header::CONTENT_TYPE, "application/json")], body.to_string()).into_response()
+}
+
+/// Resolve (and persist) the root data map for an address without
+/// streaming any content — the prefetch path. Second-ever play of the
+/// title then skips resolution entirely, even across app restarts.
+async fn resolve_map(engine: &'static Engine, Path(addr_hex): Path<String>) -> Response {
+    let mut addr = [0u8; 32];
+    if hex::decode_to_slice(addr_hex.trim(), &mut addr).is_err() {
+        return (StatusCode::BAD_REQUEST, "address must be 64 hex chars").into_response();
+    }
+    match engine.root_map(addr).await {
+        Ok(root) => {
+            let body = serde_json::json!({
+                "size": root.original_file_size() as u64,
+                "chunks": root.len(),
+            });
+            ([(header::CONTENT_TYPE, "application/json")], body.to_string())
+                .into_response()
+        }
+        Err(e) => {
+            tracing::warn!("resolve {addr_hex}: {e}");
+            (StatusCode::BAD_GATEWAY, e).into_response()
+        }
+    }
 }
 
 async fn serve_xor(
