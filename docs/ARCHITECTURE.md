@@ -83,6 +83,18 @@ and gets seeking for free — while staying a single self-contained app with no
 sidecar process and nothing for users to set up. Bootstrap peers are compiled in
 (overridable via FFI). `GET /health` reports connection state to the Settings UI.
 
+Two layers of caching keep streaming fast:
+
+- **Chunk LRU cache + keep-ahead prefetch** — all chunk traffic goes through a
+  byte-bounded in-memory LRU (256 MiB desktop / 128 MiB Android); while serving,
+  a prefetcher keeps ~64 MiB ahead of the playhead warm.
+- **Root data-map persistence** — resolved root data maps are content-addressed
+  and immutable, so they are stored in SQLite (`root_maps.sqlite`) forever: a
+  title's map is fetched from the network at most once per device (cold ~30s for
+  a 5GB file, ~7ms from disk afterwards, across app restarts). `GET /resolve/{addr}`
+  resolves and persists a map without streaming it — used by prefetch-on-import
+  and by warming a title when its detail page opens.
+
 ### Downloads / offline
 
 - **Download manager** in app core: queue, progress, pause/resume, per-item location
@@ -118,18 +130,23 @@ sidecar process and nothing for users to set up. Bootstrap peers are compiled in
 | Windows | MSIX / portable zip | |
 | macOS | .dmg | notarization needed for distribution |
 
-## Repo layout (planned)
+## Repo layout
 
 ```
 Watch-It/
-├── app/                  # Flutter project
+├── app/                       # Flutter project
 │   ├── lib/
-│   │   ├── core/         # models, db, playback controller, download manager
-│   │   ├── autonomi/     # network access (dart:ffi into watchit_core)
-│   │   ├── metadata/     # filename parser + TMDB fetcher
-│   │   ├── ui/           # screens & widgets
+│   │   ├── db/                # drift database (lists, metadata cache)
+│   │   ├── services/          # embedded client FFI, library store, metadata
+│   │   │                      #   matcher, TMDB client, import, prefetch
+│   │   ├── screens/           # home wall, show/season/detail, player,
+│   │   │                      #   media lists, settings
+│   │   ├── widgets/           # shared UI (detail header, …)
 │   │   └── main.dart
+│   ├── third_party/           # vendored media_kit_video (Linux H/W patch)
 │   └── ...platform dirs
+├── native/watchit_core/       # embedded Rust client (ant-core, axum, caches)
+├── scripts/                   # release_build.sh, build_appimage.sh
 ├── docs/
 └── README.md
 ```
@@ -138,12 +155,18 @@ Watch-It/
 
 1. ~~Gateway sidecar vs Rust FFI~~ — **resolved**: embedded Rust FFI client with an
    in-process localhost server (see Autonomi access).
-2. ~~TMDB API key strategy~~ — **resolved (alpha.23)**: bring-your-own key entered in
-   Settings → Metadata (either the v3 API key or the v4 read access token), with a
-   `--dart-define=TMDB_API_KEY` hook for bundling a shared key into official builds
-   later if rate limits allow. Without a key, cards fall back to parsed file names.
+2. ~~TMDB API key strategy~~ — **resolved (alpha.24)**: official builds bundle a
+   shared key via `--dart-define=TMDB_API_KEY`, so metadata works out of the box;
+   a user key entered in Settings → Metadata (v3 API key or v4 read access token)
+   overrides it. Without any key, cards fall back to parsed file names.
 3. Subtitles for streamed items: sidecar files as linked list entries, or embedded-only
    in v1?
-4. List format: define a small JSON schema now so shared lists are forward-compatible.
-5. Streaming seek: verify range/offset fetch performance on real network content early
-   — this is the make-or-break UX question.
+4. ~~List format~~ — **resolved (alpha.25)**: plain text, not JSON — optional
+   `ListName="..."` section markers, then one `<xor-address> <file name>` per line;
+   bad lines skipped and reported, 10MB file cap. Import from a local file or from
+   an Autonomi address; the same format will serve export.
+5. ~~Streaming seek~~ — **resolved**: range/offset fetch verified byte-exact against
+   the live network; with the chunk cache, keep-ahead prefetch, and persisted root
+   maps, seek and warm starts are fast. Remaining UX cost is the cold first
+   resolve of a new title (~20–30s), mitigated by prefetch-on-import and
+   tile-open warm-up.
