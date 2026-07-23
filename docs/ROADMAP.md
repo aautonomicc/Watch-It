@@ -1,18 +1,24 @@
 # Roadmap
 
-**Status (2026-07-20):** v0.1.0-alpha.16 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
-— signed Android APK + Linux AppImage. Phase 0 is done: both platforms stream a real
-movie from the live Autonomi network via the embedded Rust client
-(`native/watchit_core`), with seek, buffering progress, configurable buffer size,
-etchit-family branding, and CI on every push. The seeded default movie is now an
-H.264 8-bit 1080p encode (hardware-decodable on phones and older desktops, replacing
-the AV1 10-bit original) named per the Plex/Jellyfin convention — see
-[NAMING.md](NAMING.md). Phase 1 is partially started.
+**Status (2026-07-23):** v0.1.0-alpha.28 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
+— signed Android APK + Linux AppImage on every release. Phase 0 is done and Phase 1
+is mostly done: both platforms stream from the live Autonomi network via the embedded
+Rust client (`native/watchit_core`) with byte-exact seek, a chunk LRU cache with
+keep-ahead prefetch, and resolved root data maps persisted in SQLite (any title's
+map is fetched from the network at most once per device — cold ~30s, then ~7ms
+across restarts). The library is a full poster-wall experience: TMDB metadata from
+file names (key bundled in official builds since alpha.24; BYO key overrides),
+show-level grouping on the home wall, big-artwork Show → Season → Detail pages with
+ratings, air dates, and episode screenshots, list import from file or Autonomi
+address with prefetch-on-import, and a Media Lists management page. Still open in
+Phase 1: Continue Watching / Recently Added rows and resume points. The seeded
+default movie is an H.264 8-bit 1080p encode named per the Plex/Jellyfin
+convention — see [NAMING.md](NAMING.md).
 
 ## Phase 0 — Foundations (1–2 weeks)
 - [x] Flutter project scaffold in `app/` targeting Linux + Android first (dev machines)
-      → Android fully working; Linux desktop blocked on toolchain
-      (clang/ninja/libgtk-3-dev not yet installed)
+      → both fully working; Linux ships as AppImage with a vendored
+      media_kit_video H/W-rendering patch (alpha.18/.20)
 - [x] media_kit playing with basic controls → done on Android, streaming from the
       network; player controls lifted clear of the nav bar, thicker seek bar (alpha.11)
 - [x] **Autonomi spike**: fetch a known public file by XOR address;
@@ -24,37 +30,49 @@ the AV1 10-bit original) named per the Plex/Jellyfin convention — see
       icon on ink, app-bar wordmark lockup matches (alpha.12); see BRAND.md
 
 **Exit criteria:** play a video file on Linux and Android, and prove seekable playback
-of an Autonomi-hosted file by address. → **Met on Android** (streaming + seek proven);
-Linux playback pending the desktop toolchain.
+of an Autonomi-hosted file by address. → **Met on both platforms.**
 
 ## Phase 1 — Lists + metadata MVP
 - [x] List model in SQLite; add-entry flow (paste XOR address + file name)
-      → add/edit/remove entries via Settings → media lists; lists persist in
-      SQLite (drift) with a one-time import of the shared_preferences blob
-      earlier alphas wrote
+      → add/edit/remove entries via the Media Lists page (create, show/hide,
+      rename/delete lists); lists persist in SQLite (drift) with a one-time
+      import of the shared_preferences blob earlier alphas wrote
 - [x] Filename → title/year/episode parser; TMDB artwork/description/category fetch,
       cached locally → done: parser handles Plex/Jellyfin + release-style names and
       S01E02/1x02 episode markers; TMDB matching (exact /find by IMDb id, else
-      title/year search) cached in SQLite with poster files on disk; needs a
-      TMDB API key (Settings → Metadata, or --dart-define=TMDB_API_KEY)
+      title/year search) cached in SQLite with poster files on disk; official
+      builds bundle a key since alpha.24, a user key in Settings → Metadata
+      overrides it
 - [ ] Home (Continue Watching / Recently Added), Library grid, Detail page
-      → home poster grid + network status bar and Detail page (artwork, description,
-      Play) exist; Continue Watching / Recently Added rows not yet
-- [x] Stream playback from Autonomi via the Phase-0 mechanism → done (alpha.4–.10):
-      embedded client, buffering overlay with live MB counter, error surfacing,
-      configurable buffer size
+      → home poster wall with show-level grouping (all seasons of a show under
+      one tile) + network status bar; big-artwork ShowScreen → SeasonScreen
+      (episode tiles with TMDB screenshots, air dates, synopses) → DetailScreen
+      with ratings (alpha.26–.28); Continue Watching / Recently Added rows not yet
+- [x] Stream playback from Autonomi via the Phase-0 mechanism → done, plus a
+      chunk LRU cache with keep-ahead prefetch (~64 MiB warm during playback)
+      and root data maps persisted in SQLite — network resolve at most once per
+      title per device, `/resolve` endpoint + prefetch-on-import with a
+      hideable/resumable progress dialog, tile-open map warm-up (alpha.28)
 - [ ] Resume points + watched state
-- [ ] Packaging: AppImage (Linux) + APK (Android)
-      → signed APK on GitHub Releases since alpha.1; AppImage pending Linux build
+- [x] Packaging: AppImage (Linux) + APK (Android)
+      → signed APK + AppImage on every GitHub Release; built by
+      scripts/release_build.sh as a systemd user unit
 
 **Exit criteria:** paste addresses → poster wall with real artwork → press play →
 streams from the network → resume works after app restart. v0.1 release.
+→ **All met except resume**; Continue Watching + resume points are the remaining
+Phase 1 work.
 
 ## Phase 2 — Downloads & offline
 - [ ] Download manager: queue, progress, pause/resume, storage settings
 - [ ] Offline library: downloaded items fully browsable/playable with no connectivity
 - [ ] Card badges for stream/downloading/downloaded state
-- [ ] List import/export as files
+- [x] List **import** as files — pulled forward, shipped in alpha.25: local file
+      picker or download from Autonomi by XOR address; multi-list files via
+      `ListName="..."` sections; merge / create-new / skip on name clash; 10MB cap
+- [ ] List **export** as files
+- [x] Storage controls — pulled forward, shipped in alpha.28: Size on disk +
+      double-confirmed Clear all data (factory reset) in Settings → About
 - v0.2 release (Linux + Android)
 
 ## Phase 3 — All desktop platforms
