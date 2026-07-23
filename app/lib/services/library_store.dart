@@ -64,6 +64,15 @@ class LibraryStore {
     await prefs.remove(_legacyKey);
   }
 
+  /// Close the database (used by the factory reset just before the app
+  /// data directory is wiped and the app exits).
+  static Future<void> close() async {
+    final db = _db;
+    _db = null;
+    _opening = null;
+    await db?.close();
+  }
+
   /// Point the store at a test database (typically
   /// `AppDatabase.forTesting(NativeDatabase.memory())`). Closes any
   /// previously injected database.

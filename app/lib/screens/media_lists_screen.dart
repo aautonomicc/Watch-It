@@ -1,14 +1,15 @@
 import 'dart:async';
 
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
 import '../services/datamap_prefetch.dart';
 import '../services/library_store.dart';
 import '../services/list_import.dart';
+import '../services/prefetch_manager.dart';
 import '../theme/tokens.dart';
+import '../widgets/prefetch_dialog.dart';
 import 'list_edit_screen.dart';
 import 'settings_screen.dart' show promptForText;
 
@@ -273,32 +274,63 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       ),
     );
     if (go != true || !mounted) return;
+    await startPrefetchWithProgress(context, entries,
+        base: widget.prefetchBase);
+  }
 
-    final progress = ValueNotifier<(int, int, String)>((0, n, ''));
-    unawaited(showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => _PrefetchProgressDialog(
-        progress: progress,
-        onCancel: prefetcher.cancel,
-      ),
-    ));
-    final result = await prefetcher.run(
-      entries,
-      onProgress: (current, total, name) =>
-          progress.value = (current, total, name),
-    );
+  /// App-bar action: prefetch the data maps of every entry in every list.
+  /// Maps already stored resolve from disk in milliseconds, so this both
+  /// resumes a cancelled prefetch and picks up files added since — only
+  /// the missing maps cost network time. Reopens the progress dialog when
+  /// a run is already going.
+  Future<void> _prefetchAll() async {
+    if (PrefetchManager.instance.running) {
+      await watchPrefetch(context);
+      return;
+    }
+    final entries = [
+      for (final list in _lists ?? <MediaList>[]) ...list.entries,
+    ];
+    if (entries.isEmpty) {
+      _showError('No entries to prefetch — your lists are empty.');
+      return;
+    }
+    final prefetcher = DataMapPrefetcher(base: widget.prefetchBase);
+    if (!prefetcher.available) {
+      _showError('The built-in Autonomi client is not available.');
+      return;
+    }
     if (!mounted) return;
-    Navigator.of(context, rootNavigator: true).pop();
-    final summary = result.cancelled
-        ? 'Prefetch cancelled — ${result.done} of $n data '
-            '${result.done == 1 ? 'map' : 'maps'} saved'
-        : 'Prefetched ${result.done} data '
-            '${result.done == 1 ? 'map' : 'maps'}'
-            '${result.failed > 0 ? ' (${result.failed} failed — those '
-                'resolve on first play instead)' : ''}';
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(summary)));
+    final t = WiTokens.of(context);
+    final n = entries.length;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text('Prefetch data maps?',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        content: Text(
+          'Download the small data-map index for each of the $n '
+          '${n == 1 ? 'file' : 'files'} in your lists, so first plays '
+          'start faster. Files already prefetched are skipped almost '
+          'instantly — running this again resumes a cancelled prefetch.',
+          style: TextStyle(color: t.boneDim, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel', style: TextStyle(color: t.ash)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Prefetch', style: TextStyle(color: t.copper)),
+          ),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    await startPrefetchWithProgress(context, entries,
+        base: widget.prefetchBase);
   }
 
   /// Ask what to do with an imported list whose name already exists:
@@ -426,6 +458,11 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
             Text('Media Lists', style: TextStyle(color: t.bone, fontSize: 18)),
         actions: [
           IconButton(
+            tooltip: 'Prefetch data maps',
+            icon: Icon(Icons.downloading_outlined, color: t.bone),
+            onPressed: _prefetchAll,
+          ),
+          IconButton(
             tooltip: 'Import list from file',
             icon: Icon(Icons.download_outlined, color: t.bone),
             onPressed: _importList,
@@ -508,72 +545,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
                   ),
               ],
             ),
-    );
-  }
-}
-
-/// Modal shown while data maps prefetch: spinner with `File X of N` and
-/// the name of the file being fetched underneath, plus a Cancel action
-/// (stops after aborting the in-flight file).
-class _PrefetchProgressDialog extends StatelessWidget {
-  const _PrefetchProgressDialog({
-    required this.progress,
-    required this.onCancel,
-  });
-
-  /// `(current 1-based, total, file name)`.
-  final ValueListenable<(int, int, String)> progress;
-  final VoidCallback onCancel;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = WiTokens.of(context);
-    return Dialog(
-      backgroundColor: t.ink2,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 28, 24, 12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(color: t.copper),
-            const SizedBox(height: 18),
-            ValueListenableBuilder<(int, int, String)>(
-              valueListenable: progress,
-              builder: (context, value, _) {
-                final (current, total, name) = value;
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'File $current of $total',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: t.bone,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11.5, color: t.ash),
-                    ),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: onCancel,
-                child: Text('Cancel', style: TextStyle(color: t.ash)),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
