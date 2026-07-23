@@ -149,10 +149,14 @@ class LibraryStore {
           ..orderBy([(t) => OrderingTerm.asc(t.position)]))
         .get();
     final entriesByList = <String, List<MediaEntry>>{};
+    // addedAt loads verbatim — 0 (pre-column row, add time unknown) must
+    // survive the round-trip, not get stamped as new on the next save.
     for (final row in entryRows) {
-      entriesByList
-          .putIfAbsent(row.listId, () => [])
-          .add(MediaEntry(name: row.name, address: row.address));
+      entriesByList.putIfAbsent(row.listId, () => []).add(MediaEntry(
+            name: row.name,
+            address: row.address,
+            addedAt: row.addedAt,
+          ));
     }
     return [
       for (final row in listRows)
@@ -170,8 +174,11 @@ class LibraryStore {
     await _write(db, lists);
   }
 
-  /// Full-replace write, mirroring the store's whole-library API.
+  /// Full-replace write, mirroring the store's whole-library API. Entries
+  /// without an add time (created by the UI/import this session) are
+  /// stamped now; loaded entries carry theirs through unchanged.
   static Future<void> _write(AppDatabase db, List<MediaList> lists) {
+    final now = DateTime.now().millisecondsSinceEpoch;
     return db.transaction(() async {
       await db.delete(db.mediaEntries).go();
       await db.delete(db.mediaLists).go();
@@ -188,6 +195,7 @@ class LibraryStore {
                 name: entry.name,
                 address: entry.address,
                 position: entryPos,
+                addedAt: Value(entry.addedAt ?? now),
               ));
         }
       }
