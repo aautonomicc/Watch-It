@@ -106,6 +106,11 @@ class DownloadManager extends ChangeNotifier {
   /// paused when playback ends.
   final Set<String> _pausedForPlayback = {};
 
+  /// The current batch: every task queued or downloading since the queue
+  /// was last idle. Members that finish stay counted (that is what makes
+  /// an `x of y` meter possible); an idle queue closes the batch.
+  final Set<String> _batch = {};
+
   static String normalize(String address) =>
       address.toLowerCase().replaceFirst('0x', '');
 
@@ -115,6 +120,54 @@ class DownloadManager extends ChangeNotifier {
   int get activeCount => _tasks.values.where((t) => t.active).length;
   int get doneCount =>
       _tasks.values.where((t) => t.status == DownloadStatus.done).length;
+
+  /// Aggregate for the home top-bar meter: finished/total counts over
+  /// the current batch plus its mean per-file progress (done = 1, size
+  /// unknown = 0). Null while nothing is queued or downloading — the
+  /// meter shows only for a working queue, not a paused or drained one.
+  ({int done, int total, double progress})? get batchProgress {
+    var done = 0, total = 0;
+    var sum = 0.0;
+    var anyActive = false;
+    for (final addr in _batch) {
+      final task = _tasks[addr];
+      if (task == null) continue;
+      total++;
+      if (task.active) anyActive = true;
+      if (task.status == DownloadStatus.done) {
+        done++;
+        sum += 1.0;
+      } else {
+        sum += task.progress ?? 0.0;
+      }
+    }
+    if (!anyActive || total == 0) return null;
+    return (done: done, total: total, progress: (sum / total).clamp(0.0, 1.0));
+  }
+
+  /// Grow [_batch] with whatever is active now; clear it once the queue
+  /// goes idle (nothing queued or downloading) so the next enqueue
+  /// starts a fresh `x of y` count.
+  void _trackBatch() {
+    var anyActive = false;
+    for (final task in _tasks.values) {
+      if (task.active) {
+        anyActive = true;
+        _batch.add(task.address);
+      }
+    }
+    if (!anyActive) _batch.clear();
+  }
+
+  /// Test-only: place [task] straight into the in-memory queue (no
+  /// persistence, no pump) so widget tests can stage active states that
+  /// would otherwise race a real transfer.
+  @visibleForTesting
+  void debugStageTask(DownloadTask task) {
+    _tasks[task.address] = task;
+    _trackBatch();
+    notifyListeners();
+  }
 
   /// Local file path for a finished download of [entry], or null when it
   /// is not downloaded (or the file has since vanished from disk).
@@ -149,6 +202,7 @@ class DownloadManager extends ChangeNotifier {
         error: row.error,
       );
     }
+    _trackBatch();
     notifyListeners();
     _pump();
   }
@@ -216,6 +270,8 @@ class DownloadManager extends ChangeNotifier {
     final task = _tasks.remove(addr);
     if (task == null) return;
     _pausedForPlayback.remove(addr);
+    _batch.remove(addr);
+    _trackBatch();
     if (_activeAddress == addr) _activeClient?.close(force: true);
     try {
       await File(task.filePath).delete();
@@ -531,6 +587,7 @@ class DownloadManager extends ChangeNotifier {
   /// Apply [task] to the in-memory queue, notify, and persist.
   void _update(DownloadTask task) {
     _tasks[task.address] = task;
+    _trackBatch();
     notifyListeners();
     unawaited(_persist(task));
   }

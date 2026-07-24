@@ -329,6 +329,78 @@ void main() {
         payload.length);
   });
 
+  test('batchProgress counts a batch through to drain', () async {
+    gateAfter = 16 * 1024;
+    final manager = DownloadManager(base: base, directory: dir);
+    expect(manager.batchProgress, isNull);
+
+    await manager.enqueue(entry('A.mkv', _addrA));
+    await manager.enqueue(entry('B.mkv', _addrB));
+    await waitFor(() =>
+        manager.taskFor(_addrA)?.status == DownloadStatus.downloading);
+    // Let the transfer actually reach the server's gate before swapping
+    // completers below — `downloading` is set before the request leaves.
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    var batch = manager.batchProgress!;
+    expect(batch.done, 0);
+    expect(batch.total, 2);
+    expect(batch.progress, lessThan(1.0));
+
+    // First file finishes (the second gates on a fresh completer): the
+    // finished one keeps counting while the second runs.
+    final releaseA = gateRelease;
+    gateRelease = Completer<void>();
+    releaseA.complete();
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.done);
+    await waitFor(() => manager.batchProgress?.done == 1);
+    batch = manager.batchProgress!;
+    expect(batch.total, 2);
+    expect(batch.progress, greaterThanOrEqualTo(0.5));
+
+    // Queue drains: the batch closes and the meter goes away.
+    gateRelease.complete();
+    await waitFor(
+        () => manager.taskFor(_addrB)?.status == DownloadStatus.done);
+    expect(manager.batchProgress, isNull);
+  });
+
+  test('batchProgress hides for a fully paused queue, restarts fresh',
+      () async {
+    gateAfter = 16 * 1024;
+    final manager = DownloadManager(base: base, directory: dir);
+    await manager.enqueue(entry('A.mkv', _addrA));
+    await waitFor(() =>
+        manager.taskFor(_addrA)?.status == DownloadStatus.downloading);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    await manager.pause(_addrA);
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.paused);
+    expect(manager.batchProgress, isNull);
+
+    // Re-gate past the resume offset so the meter is observable while
+    // the resumed transfer is under way.
+    gateAfter = 32 * 1024;
+    await manager.resume(_addrA);
+    await waitFor(() => manager.batchProgress != null);
+    expect(manager.batchProgress!.total, 1);
+    gateRelease.complete();
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.done);
+    expect(manager.batchProgress, isNull);
+  });
+
+  test('removing the only active download closes the batch', () async {
+    gateAfter = 16 * 1024;
+    final manager = DownloadManager(base: base, directory: dir);
+    await manager.enqueue(entry('A.mkv', _addrA));
+    await waitFor(() =>
+        manager.taskFor(_addrA)?.status == DownloadStatus.downloading);
+    expect(manager.batchProgress, isNotNull);
+    await manager.remove(_addrA);
+    expect(manager.batchProgress, isNull);
+  });
+
   test('size labels', () {
     DownloadTask t(int done, int total) => DownloadTask(
           address: _addrA,
