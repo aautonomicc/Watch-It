@@ -28,7 +28,7 @@ server compatibility** — Autonomi *is* the backend.
 
 ## Status
 
-**Working alpha on Android and Linux** — [v0.1.0-alpha.28](https://github.com/aautonomicc/Watch-It/releases)
+**Working alpha on Android and Linux** — [v0.1.0-alpha.29](https://github.com/aautonomicc/Watch-It/releases)
 ships a signed APK and a Linux AppImage that connect to the live Autonomi network
 with an embedded Rust client (no gateway, no sidecar) and stream by XOR address
 with byte-exact seeking, a chunk cache with keep-ahead prefetch, and persisted
@@ -37,8 +37,11 @@ on every later open). TMDB metadata works out of the box: entries get artwork,
 descriptions, ratings, and categories from their file names, with shows grouped
 into big-artwork Show → Season → Episode pages. Media lists can be created and
 managed in-app and imported from a local file or straight from an Autonomi
-address, with optional prefetch of all data maps on import. Downloads for
-offline watching and resume state are next — see the roadmap.
+address, with optional prefetch of all data maps on import. Playback position
+is remembered per title: the home screen opens with Continue Watching and
+Recently Added rows, detail pages offer Resume / Start over with a Watched
+badge, and finishing an episode auto-plays the next one via an Up-next
+overlay. Downloads for offline watching are next — see the roadmap.
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users

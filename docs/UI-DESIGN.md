@@ -82,14 +82,15 @@ TV notes: larger base type scale (readable at 3 m), no hover-only affordances, t
 entry kept to add/import flows only (paste via network share or a shown-on-TV import
 address is preferred over typing XOR addresses with a remote).
 
-## Built so far (alpha.28)
+## Built so far (alpha.29)
 
-The home poster wall (with show-level grouping), big-artwork Show → Season →
-Detail pages (TMDB ratings, air dates, episode screenshots), the player with
-buffering overlay, the Media Lists management page (create/hide/rename/delete,
-import from file or Autonomi address with prefetch), and Settings (network
-status, metadata key, size on disk + factory reset) are all live on Android and
-Linux. Still to come from this document: Continue Watching / Recently Added /
-Next Up rows, filter/sort + fast-scroller on the grid, download badges and
-flows, watched-progress bars, the full desktop keyboard map, mobile gestures,
-and the TV layout.
+The home poster wall (with show-level grouping and Continue Watching /
+Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,
+air dates, episode screenshots, Resume / Start over, Watched badge, Next
+episode), the player with buffering overlay, resume-from-saved-position and
+the end-of-episode Up-next auto-play card, the Media Lists management page
+(create/hide/rename/delete, import from file or Autonomi address with
+prefetch), and Settings (network status, metadata key, size on disk + factory
+reset) are all live on Android and Linux. Still to come from this document:
+filter/sort + fast-scroller on the grid, download badges and flows, the full
+desktop keyboard map, mobile gestures, and the TV layout.

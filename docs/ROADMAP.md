@@ -1,8 +1,8 @@
 # Roadmap
 
-**Status (2026-07-23):** v0.1.0-alpha.28 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
-— signed Android APK + Linux AppImage on every release. Phase 0 is done and Phase 1
-is mostly done: both platforms stream from the live Autonomi network via the embedded
+**Status (2026-07-24):** v0.1.0-alpha.29 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
+— signed Android APK + Linux AppImage on every release. Phase 0 and Phase 1 are
+done: both platforms stream from the live Autonomi network via the embedded
 Rust client (`native/watchit_core`) with byte-exact seek, a chunk LRU cache with
 keep-ahead prefetch, and resolved root data maps persisted in SQLite (any title's
 map is fetched from the network at most once per device — cold ~30s, then ~7ms
@@ -10,8 +10,10 @@ across restarts). The library is a full poster-wall experience: TMDB metadata fr
 file names (key bundled in official builds since alpha.24; BYO key overrides),
 show-level grouping on the home wall, big-artwork Show → Season → Detail pages with
 ratings, air dates, and episode screenshots, list import from file or Autonomi
-address with prefetch-on-import, and a Media Lists management page. Still open in
-Phase 1: Continue Watching / Recently Added rows and resume points. The seeded
+address with prefetch-on-import, and a Media Lists management page. Since
+alpha.29 watch state is remembered per title: Continue Watching and Recently
+Added rows on home, Resume / Start over + Watched badge on detail pages, and
+end-of-episode Up-next auto-play. The seeded
 default movie is an H.264 8-bit 1080p encode named per the Plex/Jellyfin
 convention — see [NAMING.md](NAMING.md).
 
@@ -43,25 +45,30 @@ of an Autonomi-hosted file by address. → **Met on both platforms.**
       title/year search) cached in SQLite with poster files on disk; official
       builds bundle a key since alpha.24, a user key in Settings → Metadata
       overrides it
-- [ ] Home (Continue Watching / Recently Added), Library grid, Detail page
+- [x] Home (Continue Watching / Recently Added), Library grid, Detail page
       → home poster wall with show-level grouping (all seasons of a show under
       one tile) + network status bar; big-artwork ShowScreen → SeasonScreen
       (episode tiles with TMDB screenshots, air dates, synopses) → DetailScreen
-      with ratings (alpha.26–.28); Continue Watching / Recently Added rows not yet
+      with ratings (alpha.26–.28); Continue Watching row (progress bar,
+      remaining time, next-up episode after a finished one) + Recently Added
+      row (episodes folded into show cards) shipped in alpha.29
 - [x] Stream playback from Autonomi via the Phase-0 mechanism → done, plus a
       chunk LRU cache with keep-ahead prefetch (~64 MiB warm during playback)
       and root data maps persisted in SQLite — network resolve at most once per
       title per device, `/resolve` endpoint + prefetch-on-import with a
       hideable/resumable progress dialog, tile-open map warm-up (alpha.28)
-- [ ] Resume points + watched state
+- [x] Resume points + watched state → shipped in alpha.29: position saved
+      every few seconds during playback and on player exit (≥95% = watched);
+      DetailScreen gets Resume / Start over + a Watched badge + Next episode;
+      PlayerScreen resumes from the saved point and ends episodes with an
+      Up-next auto-play overlay that chains across episodes
 - [x] Packaging: AppImage (Linux) + APK (Android)
       → signed APK + AppImage on every GitHub Release; built by
       scripts/release_build.sh as a systemd user unit
 
 **Exit criteria:** paste addresses → poster wall with real artwork → press play →
 streams from the network → resume works after app restart. v0.1 release.
-→ **All met except resume**; Continue Watching + resume points are the remaining
-Phase 1 work.
+→ **All met** as of alpha.29; Phase 1 is feature-complete.
 
 ## Phase 2 — Downloads & offline
 - [ ] Download manager: queue, progress, pause/resume, storage settings
