@@ -225,6 +225,14 @@ class DownloadManager extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Remove several downloads at once — the queue rows and their files
+  /// on disk both go (Settings → Downloads multi-select and Delete all).
+  Future<void> removeMany(Iterable<String> addresses) async {
+    for (final address in addresses.toList()) {
+      await remove(address);
+    }
+  }
+
   /// Pause every queued/running download. True when anything was paused.
   Future<bool> pauseAll() async {
     await ensureLoaded();

@@ -1,4 +1,5 @@
 import '../models/media_list.dart';
+import 'download_manager.dart';
 import 'metadata.dart';
 import 'season_grouping.dart';
 import 'watch_state.dart';
@@ -100,6 +101,27 @@ Future<List<ContinueItem>> continueWatching(
     items.add(item);
   }
   return items;
+}
+
+/// The home screen's Downloads row: everything fully downloaded, in
+/// library order — movies as single cards, a show's downloaded episodes
+/// folded into one show card (like the wall). Empty when nothing is
+/// downloaded. [isDownloaded] is injectable for tests; the default asks
+/// the download manager.
+List<HomeItem> downloadedItems(
+  List<MediaList> lists, {
+  bool Function(MediaEntry entry)? isDownloaded,
+}) {
+  final check = isDownloaded ??
+      (e) =>
+          DownloadManager.instance.taskFor(e.address)?.status ==
+          DownloadStatus.done;
+  final seen = <String>{};
+  final entries = [
+    for (final e in _visibleEntries(lists))
+      if (seen.add(_normalize(e.address)) && check(e)) e,
+  ];
+  return groupShows(entries);
 }
 
 /// The home screen's Recently Added row: newest library additions first,

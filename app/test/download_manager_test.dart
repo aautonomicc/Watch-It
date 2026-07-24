@@ -221,6 +221,22 @@ void main() {
     expect(reloaded.tasks, isEmpty);
   });
 
+  test('removeMany deletes every given download, files included', () async {
+    final manager = DownloadManager(base: base, directory: dir);
+    await manager.enqueue(entry('A.mkv', _addrA));
+    await manager.enqueue(entry('B.mkv', _addrB));
+    await waitFor(() =>
+        manager.taskFor(_addrA)?.status == DownloadStatus.done &&
+        manager.taskFor(_addrB)?.status == DownloadStatus.done);
+    final paths = [for (final t in manager.tasks) t.filePath];
+    await manager.removeMany([for (final t in manager.tasks) t.address]);
+    expect(manager.tasks, isEmpty);
+    for (final path in paths) {
+      expect(File(path).existsSync(), isFalse);
+    }
+    expect(await db.select(db.downloads).get(), isEmpty);
+  });
+
   test('pauseAllForPlayback spares manual pauses on resume', () async {
     gateAfter = 16 * 1024;
     final manager = DownloadManager(base: base, directory: dir);

@@ -139,6 +139,52 @@ void main() {
     });
   });
 
+  group('downloadedItems', () {
+    test('only downloaded entries appear, in library order', () {
+      final lists = _library([
+        _e('Movie.2020.mkv', 1),
+        _e('Other.2021.mkv', 2),
+        _e('Third.2022.mkv', 3),
+      ]);
+      final row = downloadedItems(lists,
+          isDownloaded: (e) => e.address != _addr(2));
+      expect(
+        [for (final item in row) (item as HomeEntry).entry.address],
+        [_addr(1), _addr(3)],
+      );
+    });
+
+    test('a show\'s downloaded episodes fold into one show card', () {
+      final lists = _library([
+        _e('Show.S01E01.mkv', 1),
+        _e('Show.S01E02.mkv', 2),
+        _e('Show.S02E01.mkv', 3),
+        _e('Movie.2020.mkv', 4),
+      ]);
+      final row = downloadedItems(lists,
+          isDownloaded: (e) => e.address != _addr(2));
+      expect(row, hasLength(2));
+      expect(row.first, isA<HomeShow>());
+      expect((row.first as HomeShow).episodeCount, 2);
+      expect((row.last as HomeEntry).entry.address, _addr(4));
+    });
+
+    test('empty when nothing is downloaded; hidden lists excluded', () {
+      final lists = _library([_e('Movie.2020.mkv', 1)]);
+      expect(downloadedItems(lists, isDownloaded: (_) => false), isEmpty);
+      final hidden = _library([_e('Movie.2020.mkv', 1)], enabled: false);
+      expect(downloadedItems(hidden, isDownloaded: (_) => true), isEmpty);
+    });
+
+    test('duplicate addresses across lists appear once', () {
+      final lists = [
+        MediaList(id: 'l1', title: 'A', entries: [_e('Movie.2020.mkv', 1)]),
+        MediaList(id: 'l2', title: 'B', entries: [_e('Movie.2020.mkv', 1)]),
+      ];
+      expect(downloadedItems(lists, isDownloaded: (_) => true), hasLength(1));
+    });
+  });
+
   group('recentlyAdded', () {
     test('newest first, unknown add times excluded', () {
       final lists = _library([

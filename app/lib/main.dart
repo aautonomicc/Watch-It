@@ -223,6 +223,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _posterWall(WiTokens t, List<MediaList> lists) {
+    // Computed here (not in _reload) so the row appears, updates, and
+    // vanishes live as downloads finish or are removed — this builder
+    // already re-runs on every DownloadManager notification.
+    final downloads = downloadedItems(lists);
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
@@ -242,6 +246,10 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
+        ],
+        if (downloads.isNotEmpty) ...[
+          _sectionTitle(t, 'Downloads'),
+          _itemsRow(t, downloads),
         ],
         if (_recent.isNotEmpty) ...[
           _sectionTitle(t, 'Recently Added'),
