@@ -21,6 +21,9 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   String? _downloadDir;
   PauseDownloadsOnPlay _pauseOnPlay = PauseDownloadsOnPlay.ask;
 
+  /// Addresses ticked for deletion via the per-item checkboxes.
+  final Set<String> _selected = {};
+
   /// Custom folders are desktop-only; Android keeps downloads app-private
   /// so no storage permissions are ever needed.
   bool get _canPickFolder =>
@@ -119,6 +122,47 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     if (confirmed == true) await DownloadManager.instance.remove(task.address);
   }
 
+  /// Delete the ticked downloads, or every download when [all].
+  Future<void> _confirmDeleteMany({required bool all}) async {
+    final manager = DownloadManager.instance;
+    final addresses =
+        all ? [for (final task in manager.tasks) task.address] : _selected.toList();
+    if (addresses.isEmpty) return;
+    final t = WiTokens.of(context);
+    final count = addresses.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text(
+          all
+              ? 'Delete all downloads?'
+              : 'Delete $count ${count == 1 ? 'download' : 'downloads'}?',
+          style: TextStyle(color: t.bone, fontSize: 16),
+        ),
+        content: Text(
+          'The ${count == 1 ? 'file is' : 'files are'} deleted from this '
+          'device. Everything stays on Autonomi — you can download or '
+          'stream it again any time.',
+          style: TextStyle(color: t.boneDim, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel', style: TextStyle(color: t.ash)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Delete', style: TextStyle(color: t.rust)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await manager.removeMany(addresses);
+    if (mounted) setState(_selected.clear);
+  }
+
   Widget _sectionLabel(WiTokens t, String text) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
         child: Text(
@@ -144,9 +188,19 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     final resumable = task.status == DownloadStatus.paused ||
         task.status == DownloadStatus.error;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+      padding: const EdgeInsets.fromLTRB(6, 8, 8, 8),
       child: Row(
         children: [
+          Checkbox(
+            value: _selected.contains(task.address),
+            activeColor: t.copper,
+            checkColor: t.ink,
+            side: BorderSide(color: t.ash),
+            visualDensity: VisualDensity.compact,
+            onChanged: (checked) => setState(() => checked == true
+                ? _selected.add(task.address)
+                : _selected.remove(task.address)),
+          ),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -229,6 +283,9 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
         listenable: manager,
         builder: (context, _) {
           final tasks = manager.tasks;
+          // Drop selections whose task has since left the queue.
+          _selected.removeWhere(
+              (addr) => !tasks.any((task) => task.address == addr));
           final anyActive = manager.hasActive;
           final anyPaused = tasks.any((task) =>
               task.status == DownloadStatus.paused ||
@@ -246,31 +303,47 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                   ),
                 )
               else ...[
-                if (anyActive || anyPaused)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      children: [
-                        if (anyActive)
-                          TextButton.icon(
-                            onPressed: manager.pauseAll,
-                            icon: Icon(Icons.pause, size: 16, color: t.boneDim),
-                            label: Text('Pause all',
-                                style: TextStyle(
-                                    color: t.boneDim, fontSize: 12.5)),
-                          ),
-                        if (anyPaused)
-                          TextButton.icon(
-                            onPressed: manager.resumeAll,
-                            icon: Icon(Icons.play_arrow,
-                                size: 16, color: t.copper),
-                            label: Text('Resume all',
-                                style: TextStyle(
-                                    color: t.copper, fontSize: 12.5)),
-                          ),
-                      ],
-                    ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Wrap(
+                    spacing: 4,
+                    children: [
+                      if (anyActive)
+                        TextButton.icon(
+                          onPressed: manager.pauseAll,
+                          icon: Icon(Icons.pause, size: 16, color: t.boneDim),
+                          label: Text('Pause all',
+                              style: TextStyle(
+                                  color: t.boneDim, fontSize: 12.5)),
+                        ),
+                      if (anyPaused)
+                        TextButton.icon(
+                          onPressed: manager.resumeAll,
+                          icon: Icon(Icons.play_arrow,
+                              size: 16, color: t.copper),
+                          label: Text('Resume all',
+                              style: TextStyle(
+                                  color: t.copper, fontSize: 12.5)),
+                        ),
+                      if (_selected.isNotEmpty)
+                        TextButton.icon(
+                          onPressed: () => _confirmDeleteMany(all: false),
+                          icon: Icon(Icons.delete_outline,
+                              size: 16, color: t.rust),
+                          label: Text('Delete selected (${_selected.length})',
+                              style:
+                                  TextStyle(color: t.rust, fontSize: 12.5)),
+                        ),
+                      TextButton.icon(
+                        onPressed: () => _confirmDeleteMany(all: true),
+                        icon: Icon(Icons.delete_sweep_outlined,
+                            size: 16, color: t.rust),
+                        label: Text('Delete all',
+                            style: TextStyle(color: t.rust, fontSize: 12.5)),
+                      ),
+                    ],
                   ),
+                ),
                 for (final task in tasks) _taskTile(t, task),
               ],
               _sectionLabel(t, 'STORAGE'),
