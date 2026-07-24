@@ -28,7 +28,7 @@ server compatibility** — Autonomi *is* the backend.
 
 ## Status
 
-**Working alpha on Android and Linux** — [v0.1.0-alpha.29](https://github.com/aautonomicc/Watch-It/releases)
+**Working alpha on Android and Linux** — [v0.1.0-alpha.31](https://github.com/aautonomicc/Watch-It/releases)
 ships a signed APK and a Linux AppImage that connect to the live Autonomi network
 with an embedded Rust client (no gateway, no sidecar) and stream by XOR address
 with byte-exact seeking, a chunk cache with keep-ahead prefetch, and persisted
@@ -41,7 +41,14 @@ address, with optional prefetch of all data maps on import. Playback position
 is remembered per title: the home screen opens with Continue Watching and
 Recently Added rows, detail pages offer Resume / Start over with a Watched
 badge, and finishing an episode auto-plays the next one via an Up-next
-overlay. Downloads for offline watching are next — see the roadmap.
+overlay. Downloads for offline watching shipped in alpha.30/.31: a download
+queue with pause/resume that survives restarts and auto-pauses when the
+connection drops, download badges on every card (check = downloaded,
+progress ring = downloading, count on show/season cards), and offline-aware
+playback — browsing always works offline, downloaded titles play locally
+with the full library experience, and stream-only titles are gated with a
+hint until the network returns. Lists can be exported (and imported) as
+plain-text files.
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users
