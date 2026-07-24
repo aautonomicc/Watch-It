@@ -18,6 +18,7 @@ import 'services/season_grouping.dart';
 import 'services/watch_state.dart';
 import 'theme/tokens.dart';
 import 'widgets/download_badge.dart';
+import 'widgets/downloads_indicator.dart';
 import 'widgets/prefetch_dialog.dart';
 
 Future<void> main() async {
@@ -149,6 +150,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         actions: [
+          const DownloadsIndicator(),
           IconButton(
             tooltip: 'Settings',
             icon: Icon(Icons.settings_outlined, color: t.boneDim),
