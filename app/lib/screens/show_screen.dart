@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../services/download_manager.dart';
 import '../services/metadata_service.dart';
 import '../services/season_grouping.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
+import '../widgets/download_badge.dart';
 import 'season_screen.dart';
 
 /// One show: big show artwork with description and rating, then the
@@ -18,9 +20,11 @@ class ShowScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Rebuild as TMDB matches for the episodes land in the cache.
+    // Rebuild as TMDB matches for the episodes land in the cache and as
+    // downloads change the season tiles' badges.
     return ListenableBuilder(
-      listenable: MetadataService.instance,
+      listenable: Listenable.merge(
+          [MetadataService.instance, DownloadManager.instance]),
       builder: (context, _) => _build(context),
     );
   }
@@ -116,6 +120,7 @@ class _SeasonTile extends StatelessWidget {
     // The episode match carries the season's artwork.
     final meta = MetadataService.instance.metadataFor(group.episodes.first);
     final count = group.episodes.length;
+    final badge = groupDownloadBadge(t, group.episodes);
     return InkWell(
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => SeasonScreen(group: group)),
@@ -131,12 +136,18 @@ class _SeasonTile extends StatelessWidget {
               child: SizedBox(
                 width: 120,
                 height: 180,
-                child: posterImage(meta, fit: BoxFit.cover) ??
-                    Container(
-                      color: t.ink2,
-                      child:
-                          Icon(Icons.live_tv_outlined, color: t.ash, size: 40),
-                    ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    posterImage(meta, fit: BoxFit.cover) ??
+                        Container(
+                          color: t.ink2,
+                          child: Icon(Icons.live_tv_outlined,
+                              color: t.ash, size: 40),
+                        ),
+                    ?badge,
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 6),

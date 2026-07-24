@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:watchit/models/media_list.dart';
 import 'package:watchit/services/list_import.dart';
 
 const _addrA =
@@ -164,6 +165,50 @@ void main() {
 
   test('list-file cap is 10MB', () {
     expect(kMaxListFileBytes, 10 * 1024 * 1024);
+  });
+
+  group('serializeMediaList (export)', () {
+    MediaList list(String title, List<(String, String)> entries) => MediaList(
+          id: 'x',
+          title: title,
+          entries: [
+            for (final (addr, name) in entries)
+              MediaEntry(address: addr, name: name),
+          ],
+        );
+
+    test('writes the marker form import reads', () {
+      final text = serializeMediaList(list('Movies', [
+        (_addrA, 'Movie.2020.mkv'),
+        (_addrB, 'Other Movie (2021).mp4'),
+      ]));
+      expect(text, 'ListName="Movies"\n'
+          '$_addrA Movie.2020.mkv\n'
+          '$_addrB Other Movie (2021).mp4\n');
+    });
+
+    test('round-trips through parseMediaListFile', () {
+      final text = serializeMediaList(list('My Shows', [
+        (_addrA, 'Show.S01E01.mkv'),
+        (_addrB, 'Show.S01E02.mkv'),
+      ]));
+      final parsed = parseMediaListFile(text);
+      expect(parsed.skippedLines, isEmpty);
+      expect(parsed.lists, hasLength(1));
+      expect(parsed.lists.single.title, 'My Shows');
+      expect(parsed.lists.single.entries.map((e) => e.name),
+          ['Show.S01E01.mkv', 'Show.S01E02.mkv']);
+      expect(parsed.lists.single.entries.map((e) => e.address),
+          [_addrA, _addrB]);
+    });
+
+    test('concatenated exports re-import as a multi-list file', () {
+      final text = serializeMediaList(list('A', [(_addrA, 'a.mkv')])) +
+          serializeMediaList(list('B', [(_addrB, 'b.mkv'), (_addrC, 'c.mkv')]));
+      final parsed = parseMediaListFile(text);
+      expect(parsed.lists.map((l) => l.title), ['A', 'B']);
+      expect(parsed.lists[1].entries, hasLength(2));
+    });
   });
 
   group('fetchListFromNetwork', () {
