@@ -98,7 +98,35 @@ class MetadataCache extends Table {
   Set<Column> get primaryKey => {lookupKey};
 }
 
-@DriftDatabase(tables: [MediaLists, MediaEntries, MetadataCache, WatchStates])
+/// One managed download, keyed by the file's XOR address (the same file
+/// is the same everywhere it appears, so one copy serves every list).
+@DataClassName('DownloadRow')
+class Downloads extends Table {
+  /// Normalized XOR address (lowercase, no 0x prefix).
+  TextColumn get address => text()();
+
+  /// File name at enqueue time (shown in the downloads queue).
+  TextColumn get name => text()();
+
+  /// Absolute path of the (possibly partial) file on disk.
+  TextColumn get filePath => text()();
+
+  /// 0 until the size is known (from /resolve or the response headers).
+  IntColumn get totalBytes => integer().withDefault(const Constant(0))();
+  IntColumn get downloadedBytes => integer().withDefault(const Constant(0))();
+
+  /// `queued` | `downloading` | `paused` | `done` | `error`.
+  TextColumn get status => text()();
+  TextColumn get error => text().nullable()();
+  IntColumn get createdAt => integer()(); // epoch ms
+  IntColumn get updatedAt => integer()(); // epoch ms
+
+  @override
+  Set<Column> get primaryKey => {address};
+}
+
+@DriftDatabase(
+    tables: [MediaLists, MediaEntries, MetadataCache, WatchStates, Downloads])
 class AppDatabase extends _$AppDatabase {
   // Keep the database in the app support dir with the rest of the app
   // data — drift_flutter's default (documents dir) degrades to $HOME on
@@ -114,7 +142,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -135,6 +163,10 @@ class AppDatabase extends _$AppDatabase {
             // alpha.29: resume points + Recently Added.
             await m.createTable(watchStates);
             await m.addColumn(mediaEntries, mediaEntries.addedAt);
+          }
+          if (from < 6) {
+            // alpha.30: download manager.
+            await m.createTable(downloads);
           }
         },
         beforeOpen: (details) async {

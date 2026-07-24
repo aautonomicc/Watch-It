@@ -30,8 +30,10 @@ class PlayerScreen extends StatefulWidget {
     required this.url,
     required this.title,
     required this.entry,
+    this.isLocal = false,
     this.resumeFrom = Duration.zero,
     this.nextFor,
+    this.sourceFor,
     this.bufferSizeMb = AppSettings.defaultBufferSizeMb,
   });
 
@@ -41,6 +43,10 @@ class PlayerScreen extends StatefulWidget {
   /// The library entry being played — keys the resume point.
   final MediaEntry entry;
 
+  /// [url] is a downloaded file on this device rather than a network
+  /// stream — the buffering overlay skips the network-progress copy.
+  final bool isLocal;
+
   /// Start playback here instead of the beginning (Resume button).
   final Duration resumeFrom;
 
@@ -48,6 +54,10 @@ class PlayerScreen extends StatefulWidget {
   /// and final episodes) — enables the end-of-episode "Up next" flow,
   /// including across auto-advanced episodes.
   final MediaEntry? Function(MediaEntry entry)? nextFor;
+
+  /// Resolves the playback source for a chained next episode (downloaded
+  /// file or network stream). Falls back to streaming when null.
+  final ({String url, bool local})? Function(MediaEntry entry)? sourceFor;
 
   /// mpv demuxer cache cap (Settings → Streaming → Buffer size).
   final int bufferSizeMb;
@@ -75,6 +85,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// user rolls into the next episode.
   late MediaEntry _entry;
   late String _title;
+  late bool _isLocal;
 
   Duration _position = Duration.zero;
   DateTime _lastSave = DateTime.fromMillisecondsSinceEpoch(0);
@@ -91,6 +102,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.initState();
     _entry = widget.entry;
     _title = widget.title;
+    _isLocal = widget.isLocal;
     _player = Player(
       configuration: PlayerConfiguration(
         bufferSize: widget.bufferSizeMb * 1024 * 1024,
@@ -120,7 +132,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (done) _onCompleted();
     });
     _healthTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
-      if (!_buffering || _error != null) return;
+      if (_isLocal || !_buffering || _error != null) return;
       final health = await EmbeddedClient.health();
       if (mounted) setState(() => _fetchedBytes = health.fetchedBytes);
     });
@@ -181,18 +193,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
-  /// Roll straight into the next episode inside this player.
+  /// Roll straight into the next episode inside this player. The
+  /// pause-downloads decision made for the first episode carries over —
+  /// chaining never re-prompts.
   void _playNext() {
     _countdownTimer?.cancel();
     _countdownTimer = null;
     final next = _upNext;
     if (next == null) return;
-    final url = streamUrl(EmbeddedClient.baseUrl(), next);
-    if (url == null) return;
+    final fallback = streamUrl(EmbeddedClient.baseUrl(), next);
+    final source = widget.sourceFor?.call(next) ??
+        (fallback == null ? null : (url: fallback, local: false));
+    if (source == null) return;
     final meta = MetadataService.instance.metadataFor(next);
     setState(() {
       _entry = next;
       _title = playerTitle(meta);
+      _isLocal = source.local;
       _upNext = null;
       _completed = false;
       _playbackStarted = false;
@@ -200,7 +217,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _error = null;
       _position = Duration.zero;
     });
-    _player.open(Media(url));
+    _player.open(Media(source.url));
   }
 
   void _dismissUpNext() {
@@ -224,6 +241,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Widget _bufferingOverlay(BuildContext context) {
     final t = WiTokens.of(context);
+    if (_isLocal) {
+      // Local files open near-instantly — no network progress to narrate.
+      return Container(
+        color: Colors.black54,
+        alignment: Alignment.center,
+        child: CircularProgressIndicator(color: t.copper),
+      );
+    }
     return Container(
       color: Colors.black54,
       alignment: Alignment.center,
