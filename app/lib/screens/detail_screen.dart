@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
 import '../services/datamap_prefetch.dart';
+import '../services/download_manager.dart';
 import '../services/home_rows.dart';
 import '../services/library_store.dart';
 import '../services/metadata.dart';
@@ -13,6 +14,7 @@ import '../services/embedded_client.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
+import '../widgets/prefetch_dialog.dart' show wiMessengerKey;
 import 'player_screen.dart';
 
 /// Movie/episode detail: big artwork with description and rating, and
@@ -42,6 +44,7 @@ class _DetailScreenState extends State<DetailScreen> {
     // time the user presses Play the file starts as fast as possible.
     // Once per address per session; a no-op when already stored.
     unawaited(DataMapPrefetcher.warm(entry));
+    unawaited(DownloadManager.instance.ensureLoaded());
     unawaited(_loadState());
   }
 
@@ -58,10 +61,93 @@ class _DetailScreenState extends State<DetailScreen> {
     });
   }
 
+  /// Playback source for [e]: the downloaded file when one is complete
+  /// on disk, else the embedded client's stream URL. Also used for
+  /// episodes chained by the player's Up-next flow.
+  ({String url, bool local})? _sourceFor(MediaEntry e) {
+    final local = DownloadManager.instance.localPathIfDone(e);
+    if (local != null) return (url: local, local: true);
+    final url = streamUrl(EmbeddedClient.baseUrl(), e);
+    return url == null ? null : (url: url, local: false);
+  }
+
+  /// Apply the pause-downloads-on-playback preference before streaming
+  /// starts. Returns true when downloads were paused for this playback
+  /// (the caller resumes them when the player closes). "Remember my
+  /// choice" on the prompt writes the preference for next time.
+  Future<bool> _maybePauseDownloads(BuildContext context) async {
+    final pref = await AppSettings.pauseDownloadsOnPlay();
+    switch (pref) {
+      case PauseDownloadsOnPlay.always:
+        return DownloadManager.instance.pauseAllForPlayback();
+      case PauseDownloadsOnPlay.never:
+        return false;
+      case PauseDownloadsOnPlay.ask:
+        break;
+    }
+    if (!context.mounted) return false;
+    final t = WiTokens.of(context);
+    var remember = false;
+    final pause = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: t.ink2,
+          title: Text('Pause downloads while playing?',
+              style: TextStyle(color: t.bone, fontSize: 16)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Streaming and downloading share the network connection. '
+                'Pausing downloads gives playback the full bandwidth; '
+                'they resume automatically when the player closes.',
+                style: TextStyle(color: t.boneDim, fontSize: 13),
+              ),
+              const SizedBox(height: 8),
+              CheckboxListTile(
+                value: remember,
+                onChanged: (v) =>
+                    setDialogState(() => remember = v ?? false),
+                controlAffinity: ListTileControlAffinity.leading,
+                contentPadding: EdgeInsets.zero,
+                activeColor: t.copper,
+                title: Text('Remember my choice',
+                    style: TextStyle(color: t.boneDim, fontSize: 13)),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text('Keep downloading',
+                  style: TextStyle(color: t.ash)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text('Pause downloads',
+                  style: TextStyle(color: t.copper)),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (pause == null) return false; // dismissed — leave downloads running
+    if (remember) {
+      await AppSettings.setPauseDownloadsOnPlay(pause
+          ? PauseDownloadsOnPlay.always
+          : PauseDownloadsOnPlay.never);
+    }
+    if (!pause) return false;
+    return DownloadManager.instance.pauseAllForPlayback();
+  }
+
   Future<void> _play(BuildContext context, {bool fromStart = false}) async {
-    final url = streamUrl(EmbeddedClient.baseUrl(), entry);
+    final source = _sourceFor(entry);
+    final url = source?.url;
     if (!context.mounted) return;
-    if (url == null) {
+    if (source == null || url == null) {
       showDialog<void>(
         context: context,
         builder: (context) {
@@ -86,6 +172,12 @@ class _DetailScreenState extends State<DetailScreen> {
       );
       return;
     }
+    // A downloaded file plays locally and competes with nothing; only
+    // streamed playback may pause active downloads (per the preference).
+    var pausedForPlayback = false;
+    if (!source.local && DownloadManager.instance.hasActive) {
+      pausedForPlayback = await _maybePauseDownloads(context);
+    }
     final meta = MetadataService.instance.metadataFor(entry);
     final bufferSizeMb = await AppSettings.bufferSizeMb();
     final state = _state;
@@ -100,21 +192,74 @@ class _DetailScreenState extends State<DetailScreen> {
           url: url,
           title: playerTitle(meta),
           entry: entry,
+          isLocal: source.local,
           resumeFrom: resumeFrom,
           nextFor: (e) => nextEpisode(lists, e),
+          sourceFor: _sourceFor,
           bufferSizeMb: bufferSizeMb,
         ),
       ),
     );
+    if (pausedForPlayback) {
+      final resumed = await DownloadManager.instance.resumeAfterPlayback();
+      if (resumed) {
+        wiMessengerKey.currentState?.showSnackBar(
+            const SnackBar(content: Text('Downloads resumed')));
+      }
+    }
     // Refresh the Resume button with the position playback stopped at.
     await _loadState();
   }
 
+  /// Download button action by state: start, pause, resume/retry, or
+  /// (when done) offer to remove the downloaded file.
+  Future<void> _onDownloadPressed(DownloadTask? task) async {
+    final manager = DownloadManager.instance;
+    switch (task?.status) {
+      case null:
+        await manager.enqueue(entry);
+      case DownloadStatus.queued || DownloadStatus.downloading:
+        await manager.pause(entry.address);
+      case DownloadStatus.paused || DownloadStatus.error:
+        await manager.resume(entry.address);
+      case DownloadStatus.done:
+        if (!mounted) return;
+        final t = WiTokens.of(context);
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: t.ink2,
+            title: Text('Remove download?',
+                style: TextStyle(color: t.bone, fontSize: 16)),
+            content: Text(
+              'The downloaded file is deleted from this device and '
+              'playback goes back to streaming. The file stays on '
+              'Autonomi.',
+              style: TextStyle(color: t.boneDim, fontSize: 13),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text('Cancel', style: TextStyle(color: t.ash)),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text('Remove', style: TextStyle(color: t.rust)),
+              ),
+            ],
+          ),
+        );
+        if (confirmed == true) await manager.remove(entry.address);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Rebuild when the TMDB match for this entry lands in the cache.
+    // Rebuild when the TMDB match for this entry lands in the cache or
+    // this entry's download changes state.
     return ListenableBuilder(
-      listenable: MetadataService.instance,
+      listenable: Listenable.merge(
+          [MetadataService.instance, DownloadManager.instance]),
       builder: (context, _) => _build(context),
     );
   }
@@ -122,6 +267,21 @@ class _DetailScreenState extends State<DetailScreen> {
   Widget _build(BuildContext context) {
     final t = WiTokens.of(context);
     final meta = MetadataService.instance.metadataFor(entry);
+    final task = DownloadManager.instance.taskFor(entry.address);
+    final downloaded = task?.status == DownloadStatus.done;
+    final (downloadIcon, downloadLabel) = switch (task?.status) {
+      null => (Icons.download_outlined, 'Download'),
+      DownloadStatus.queued => (Icons.pause, 'Queued'),
+      DownloadStatus.downloading => (
+          Icons.pause,
+          task!.progress != null
+              ? 'Downloading ${(task.progress! * 100).round()}%'
+              : 'Downloading'
+        ),
+      DownloadStatus.paused => (Icons.play_arrow, 'Resume download'),
+      DownloadStatus.error => (Icons.refresh, 'Retry download'),
+      DownloadStatus.done => (Icons.download_done, 'Downloaded'),
+    };
     return Scaffold(
       appBar: AppBar(
         backgroundColor: t.ink,
@@ -214,6 +374,16 @@ class _DetailScreenState extends State<DetailScreen> {
                         child: Text('Start over',
                             style: TextStyle(color: t.boneDim)),
                       ),
+                    OutlinedButton.icon(
+                      onPressed: () => _onDownloadPressed(task),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: downloaded ? t.copper : t.bone,
+                        side: BorderSide(
+                            color: downloaded ? t.copper : t.ash),
+                      ),
+                      icon: Icon(downloadIcon, size: 18),
+                      label: Text(downloadLabel),
+                    ),
                     if (_next != null)
                       OutlinedButton.icon(
                         onPressed: () => Navigator.of(context).pushReplacement(
@@ -229,11 +399,39 @@ class _DetailScreenState extends State<DetailScreen> {
                       ),
                   ],
                 ),
+                if (task != null && !downloaded) ...[
+                  const SizedBox(height: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(2),
+                    child: SizedBox(
+                      height: 4,
+                      child: LinearProgressIndicator(
+                        value: task.progress,
+                        backgroundColor: t.ink2,
+                        color: t.copper,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    task.status == DownloadStatus.error
+                        ? 'Download failed — ${task.error ?? 'unknown error'}'
+                        : downloadSizeLabel(task),
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: task.status == DownloadStatus.error
+                            ? t.rust
+                            : t.boneDim),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Text(
-                  'Streams from Autonomi via the built-in client — '
-                  'first start can take a minute while it connects '
-                  'and fetches chunks.',
+                  downloaded
+                      ? 'Downloaded — plays from this device, no network '
+                          'needed.'
+                      : 'Streams from Autonomi via the built-in client — '
+                          'first start can take a minute while it connects '
+                          'and fetches chunks.',
                   style: TextStyle(fontSize: 11, color: t.ash),
                 ),
               ],

@@ -2092,6 +2092,578 @@ class WatchStatesCompanion extends UpdateCompanion<WatchStateRow> {
   }
 }
 
+class $DownloadsTable extends Downloads
+    with TableInfo<$DownloadsTable, DownloadRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $DownloadsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _addressMeta = const VerificationMeta(
+    'address',
+  );
+  @override
+  late final GeneratedColumn<String> address = GeneratedColumn<String>(
+    'address',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _filePathMeta = const VerificationMeta(
+    'filePath',
+  );
+  @override
+  late final GeneratedColumn<String> filePath = GeneratedColumn<String>(
+    'file_path',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _totalBytesMeta = const VerificationMeta(
+    'totalBytes',
+  );
+  @override
+  late final GeneratedColumn<int> totalBytes = GeneratedColumn<int>(
+    'total_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _downloadedBytesMeta = const VerificationMeta(
+    'downloadedBytes',
+  );
+  @override
+  late final GeneratedColumn<int> downloadedBytes = GeneratedColumn<int>(
+    'downloaded_bytes',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _errorMeta = const VerificationMeta('error');
+  @override
+  late final GeneratedColumn<String> error = GeneratedColumn<String>(
+    'error',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    address,
+    name,
+    filePath,
+    totalBytes,
+    downloadedBytes,
+    status,
+    error,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'downloads';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<DownloadRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('address')) {
+      context.handle(
+        _addressMeta,
+        address.isAcceptableOrUnknown(data['address']!, _addressMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_addressMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('file_path')) {
+      context.handle(
+        _filePathMeta,
+        filePath.isAcceptableOrUnknown(data['file_path']!, _filePathMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_filePathMeta);
+    }
+    if (data.containsKey('total_bytes')) {
+      context.handle(
+        _totalBytesMeta,
+        totalBytes.isAcceptableOrUnknown(data['total_bytes']!, _totalBytesMeta),
+      );
+    }
+    if (data.containsKey('downloaded_bytes')) {
+      context.handle(
+        _downloadedBytesMeta,
+        downloadedBytes.isAcceptableOrUnknown(
+          data['downloaded_bytes']!,
+          _downloadedBytesMeta,
+        ),
+      );
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_statusMeta);
+    }
+    if (data.containsKey('error')) {
+      context.handle(
+        _errorMeta,
+        error.isAcceptableOrUnknown(data['error']!, _errorMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {address};
+  @override
+  DownloadRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return DownloadRow(
+      address: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}address'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      filePath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}file_path'],
+      )!,
+      totalBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}total_bytes'],
+      )!,
+      downloadedBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}downloaded_bytes'],
+      )!,
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      error: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}error'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $DownloadsTable createAlias(String alias) {
+    return $DownloadsTable(attachedDatabase, alias);
+  }
+}
+
+class DownloadRow extends DataClass implements Insertable<DownloadRow> {
+  /// Normalized XOR address (lowercase, no 0x prefix).
+  final String address;
+
+  /// File name at enqueue time (shown in the downloads queue).
+  final String name;
+
+  /// Absolute path of the (possibly partial) file on disk.
+  final String filePath;
+
+  /// 0 until the size is known (from /resolve or the response headers).
+  final int totalBytes;
+  final int downloadedBytes;
+
+  /// `queued` | `downloading` | `paused` | `done` | `error`.
+  final String status;
+  final String? error;
+  final int createdAt;
+  final int updatedAt;
+  const DownloadRow({
+    required this.address,
+    required this.name,
+    required this.filePath,
+    required this.totalBytes,
+    required this.downloadedBytes,
+    required this.status,
+    this.error,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['address'] = Variable<String>(address);
+    map['name'] = Variable<String>(name);
+    map['file_path'] = Variable<String>(filePath);
+    map['total_bytes'] = Variable<int>(totalBytes);
+    map['downloaded_bytes'] = Variable<int>(downloadedBytes);
+    map['status'] = Variable<String>(status);
+    if (!nullToAbsent || error != null) {
+      map['error'] = Variable<String>(error);
+    }
+    map['created_at'] = Variable<int>(createdAt);
+    map['updated_at'] = Variable<int>(updatedAt);
+    return map;
+  }
+
+  DownloadsCompanion toCompanion(bool nullToAbsent) {
+    return DownloadsCompanion(
+      address: Value(address),
+      name: Value(name),
+      filePath: Value(filePath),
+      totalBytes: Value(totalBytes),
+      downloadedBytes: Value(downloadedBytes),
+      status: Value(status),
+      error: error == null && nullToAbsent
+          ? const Value.absent()
+          : Value(error),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory DownloadRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return DownloadRow(
+      address: serializer.fromJson<String>(json['address']),
+      name: serializer.fromJson<String>(json['name']),
+      filePath: serializer.fromJson<String>(json['filePath']),
+      totalBytes: serializer.fromJson<int>(json['totalBytes']),
+      downloadedBytes: serializer.fromJson<int>(json['downloadedBytes']),
+      status: serializer.fromJson<String>(json['status']),
+      error: serializer.fromJson<String?>(json['error']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'address': serializer.toJson<String>(address),
+      'name': serializer.toJson<String>(name),
+      'filePath': serializer.toJson<String>(filePath),
+      'totalBytes': serializer.toJson<int>(totalBytes),
+      'downloadedBytes': serializer.toJson<int>(downloadedBytes),
+      'status': serializer.toJson<String>(status),
+      'error': serializer.toJson<String?>(error),
+      'createdAt': serializer.toJson<int>(createdAt),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+    };
+  }
+
+  DownloadRow copyWith({
+    String? address,
+    String? name,
+    String? filePath,
+    int? totalBytes,
+    int? downloadedBytes,
+    String? status,
+    Value<String?> error = const Value.absent(),
+    int? createdAt,
+    int? updatedAt,
+  }) => DownloadRow(
+    address: address ?? this.address,
+    name: name ?? this.name,
+    filePath: filePath ?? this.filePath,
+    totalBytes: totalBytes ?? this.totalBytes,
+    downloadedBytes: downloadedBytes ?? this.downloadedBytes,
+    status: status ?? this.status,
+    error: error.present ? error.value : this.error,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  DownloadRow copyWithCompanion(DownloadsCompanion data) {
+    return DownloadRow(
+      address: data.address.present ? data.address.value : this.address,
+      name: data.name.present ? data.name.value : this.name,
+      filePath: data.filePath.present ? data.filePath.value : this.filePath,
+      totalBytes: data.totalBytes.present
+          ? data.totalBytes.value
+          : this.totalBytes,
+      downloadedBytes: data.downloadedBytes.present
+          ? data.downloadedBytes.value
+          : this.downloadedBytes,
+      status: data.status.present ? data.status.value : this.status,
+      error: data.error.present ? data.error.value : this.error,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DownloadRow(')
+          ..write('address: $address, ')
+          ..write('name: $name, ')
+          ..write('filePath: $filePath, ')
+          ..write('totalBytes: $totalBytes, ')
+          ..write('downloadedBytes: $downloadedBytes, ')
+          ..write('status: $status, ')
+          ..write('error: $error, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    address,
+    name,
+    filePath,
+    totalBytes,
+    downloadedBytes,
+    status,
+    error,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is DownloadRow &&
+          other.address == this.address &&
+          other.name == this.name &&
+          other.filePath == this.filePath &&
+          other.totalBytes == this.totalBytes &&
+          other.downloadedBytes == this.downloadedBytes &&
+          other.status == this.status &&
+          other.error == this.error &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class DownloadsCompanion extends UpdateCompanion<DownloadRow> {
+  final Value<String> address;
+  final Value<String> name;
+  final Value<String> filePath;
+  final Value<int> totalBytes;
+  final Value<int> downloadedBytes;
+  final Value<String> status;
+  final Value<String?> error;
+  final Value<int> createdAt;
+  final Value<int> updatedAt;
+  final Value<int> rowid;
+  const DownloadsCompanion({
+    this.address = const Value.absent(),
+    this.name = const Value.absent(),
+    this.filePath = const Value.absent(),
+    this.totalBytes = const Value.absent(),
+    this.downloadedBytes = const Value.absent(),
+    this.status = const Value.absent(),
+    this.error = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  DownloadsCompanion.insert({
+    required String address,
+    required String name,
+    required String filePath,
+    this.totalBytes = const Value.absent(),
+    this.downloadedBytes = const Value.absent(),
+    required String status,
+    this.error = const Value.absent(),
+    required int createdAt,
+    required int updatedAt,
+    this.rowid = const Value.absent(),
+  }) : address = Value(address),
+       name = Value(name),
+       filePath = Value(filePath),
+       status = Value(status),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<DownloadRow> custom({
+    Expression<String>? address,
+    Expression<String>? name,
+    Expression<String>? filePath,
+    Expression<int>? totalBytes,
+    Expression<int>? downloadedBytes,
+    Expression<String>? status,
+    Expression<String>? error,
+    Expression<int>? createdAt,
+    Expression<int>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (address != null) 'address': address,
+      if (name != null) 'name': name,
+      if (filePath != null) 'file_path': filePath,
+      if (totalBytes != null) 'total_bytes': totalBytes,
+      if (downloadedBytes != null) 'downloaded_bytes': downloadedBytes,
+      if (status != null) 'status': status,
+      if (error != null) 'error': error,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  DownloadsCompanion copyWith({
+    Value<String>? address,
+    Value<String>? name,
+    Value<String>? filePath,
+    Value<int>? totalBytes,
+    Value<int>? downloadedBytes,
+    Value<String>? status,
+    Value<String?>? error,
+    Value<int>? createdAt,
+    Value<int>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return DownloadsCompanion(
+      address: address ?? this.address,
+      name: name ?? this.name,
+      filePath: filePath ?? this.filePath,
+      totalBytes: totalBytes ?? this.totalBytes,
+      downloadedBytes: downloadedBytes ?? this.downloadedBytes,
+      status: status ?? this.status,
+      error: error ?? this.error,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (address.present) {
+      map['address'] = Variable<String>(address.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (filePath.present) {
+      map['file_path'] = Variable<String>(filePath.value);
+    }
+    if (totalBytes.present) {
+      map['total_bytes'] = Variable<int>(totalBytes.value);
+    }
+    if (downloadedBytes.present) {
+      map['downloaded_bytes'] = Variable<int>(downloadedBytes.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (error.present) {
+      map['error'] = Variable<String>(error.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DownloadsCompanion(')
+          ..write('address: $address, ')
+          ..write('name: $name, ')
+          ..write('filePath: $filePath, ')
+          ..write('totalBytes: $totalBytes, ')
+          ..write('downloadedBytes: $downloadedBytes, ')
+          ..write('status: $status, ')
+          ..write('error: $error, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2099,6 +2671,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $MediaEntriesTable mediaEntries = $MediaEntriesTable(this);
   late final $MetadataCacheTable metadataCache = $MetadataCacheTable(this);
   late final $WatchStatesTable watchStates = $WatchStatesTable(this);
+  late final $DownloadsTable downloads = $DownloadsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2108,6 +2681,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     mediaEntries,
     metadataCache,
     watchStates,
+    downloads,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -3379,6 +3953,286 @@ typedef $$WatchStatesTableProcessedTableManager =
       WatchStateRow,
       PrefetchHooks Function()
     >;
+typedef $$DownloadsTableCreateCompanionBuilder =
+    DownloadsCompanion Function({
+      required String address,
+      required String name,
+      required String filePath,
+      Value<int> totalBytes,
+      Value<int> downloadedBytes,
+      required String status,
+      Value<String?> error,
+      required int createdAt,
+      required int updatedAt,
+      Value<int> rowid,
+    });
+typedef $$DownloadsTableUpdateCompanionBuilder =
+    DownloadsCompanion Function({
+      Value<String> address,
+      Value<String> name,
+      Value<String> filePath,
+      Value<int> totalBytes,
+      Value<int> downloadedBytes,
+      Value<String> status,
+      Value<String?> error,
+      Value<int> createdAt,
+      Value<int> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$DownloadsTableFilterComposer
+    extends Composer<_$AppDatabase, $DownloadsTable> {
+  $$DownloadsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get address => $composableBuilder(
+    column: $table.address,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get filePath => $composableBuilder(
+    column: $table.filePath,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get totalBytes => $composableBuilder(
+    column: $table.totalBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get downloadedBytes => $composableBuilder(
+    column: $table.downloadedBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get error => $composableBuilder(
+    column: $table.error,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$DownloadsTableOrderingComposer
+    extends Composer<_$AppDatabase, $DownloadsTable> {
+  $$DownloadsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get address => $composableBuilder(
+    column: $table.address,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get filePath => $composableBuilder(
+    column: $table.filePath,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get totalBytes => $composableBuilder(
+    column: $table.totalBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get downloadedBytes => $composableBuilder(
+    column: $table.downloadedBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get error => $composableBuilder(
+    column: $table.error,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$DownloadsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $DownloadsTable> {
+  $$DownloadsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get address =>
+      $composableBuilder(column: $table.address, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get filePath =>
+      $composableBuilder(column: $table.filePath, builder: (column) => column);
+
+  GeneratedColumn<int> get totalBytes => $composableBuilder(
+    column: $table.totalBytes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get downloadedBytes => $composableBuilder(
+    column: $table.downloadedBytes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<String> get error =>
+      $composableBuilder(column: $table.error, builder: (column) => column);
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$DownloadsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $DownloadsTable,
+          DownloadRow,
+          $$DownloadsTableFilterComposer,
+          $$DownloadsTableOrderingComposer,
+          $$DownloadsTableAnnotationComposer,
+          $$DownloadsTableCreateCompanionBuilder,
+          $$DownloadsTableUpdateCompanionBuilder,
+          (
+            DownloadRow,
+            BaseReferences<_$AppDatabase, $DownloadsTable, DownloadRow>,
+          ),
+          DownloadRow,
+          PrefetchHooks Function()
+        > {
+  $$DownloadsTableTableManager(_$AppDatabase db, $DownloadsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$DownloadsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$DownloadsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$DownloadsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> address = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> filePath = const Value.absent(),
+                Value<int> totalBytes = const Value.absent(),
+                Value<int> downloadedBytes = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<String?> error = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => DownloadsCompanion(
+                address: address,
+                name: name,
+                filePath: filePath,
+                totalBytes: totalBytes,
+                downloadedBytes: downloadedBytes,
+                status: status,
+                error: error,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String address,
+                required String name,
+                required String filePath,
+                Value<int> totalBytes = const Value.absent(),
+                Value<int> downloadedBytes = const Value.absent(),
+                required String status,
+                Value<String?> error = const Value.absent(),
+                required int createdAt,
+                required int updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => DownloadsCompanion.insert(
+                address: address,
+                name: name,
+                filePath: filePath,
+                totalBytes: totalBytes,
+                downloadedBytes: downloadedBytes,
+                status: status,
+                error: error,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$DownloadsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $DownloadsTable,
+      DownloadRow,
+      $$DownloadsTableFilterComposer,
+      $$DownloadsTableOrderingComposer,
+      $$DownloadsTableAnnotationComposer,
+      $$DownloadsTableCreateCompanionBuilder,
+      $$DownloadsTableUpdateCompanionBuilder,
+      (
+        DownloadRow,
+        BaseReferences<_$AppDatabase, $DownloadsTable, DownloadRow>,
+      ),
+      DownloadRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -3391,4 +4245,6 @@ class $AppDatabaseManager {
       $$MetadataCacheTableTableManager(_db, _db.metadataCache);
   $$WatchStatesTableTableManager get watchStates =>
       $$WatchStatesTableTableManager(_db, _db.watchStates);
+  $$DownloadsTableTableManager get downloads =>
+      $$DownloadsTableTableManager(_db, _db.downloads);
 }
