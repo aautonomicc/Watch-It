@@ -97,11 +97,34 @@ Two layers of caching keep streaming fast:
 
 ### Downloads / offline
 
-- **Download manager** in app core: queue, progress, pause/resume, per-item location
-  under app storage.
-- A downloaded item is the same library entry with a local path — full poster/detail/
-  resume experience offline. Stream vs downloaded is a playback-source detail, not a
-  different library.
+**Shipped (alpha.30/.31), pure Dart — no new native code.** The download
+manager streams the existing Range-capable `GET /xor/<addr>` endpoint (which
+serves deterministic decrypted bytes) to disk:
+
+- **Queue** persisted in SQLite (drift `downloads` table): sequential, with
+  pause/resume/remove; partial files resume from the bytes on disk via
+  `Range: bytes=N-`; total size pre-filled from `/resolve`. Files live in
+  app-private storage (Android, no permissions needed) or a user-chosen
+  desktop folder.
+- **Connection-loss handling**: a failed transfer probes `/health` and
+  auto-pauses (bytes kept, no error) when the embedded client is offline
+  (connecting, or ready with 0 peers), with a 2-minute no-data stall timeout
+  as backstop; resume is manual. Streaming playback with active downloads
+  can pause them (ask/always/never, remembered choice) and resumes them when
+  the player closes.
+- **Offline-aware UI**: a `ConnectivityMonitor` polls `/health` with the same
+  offline rule; browsing always works offline, downloaded titles play
+  locally with the full library experience (badges on every card: check =
+  downloaded, ring = downloading, any-downloaded count on show/season
+  cards), and Play is disabled with a hint on non-downloaded titles only.
+  The Up-next chain stops at a non-downloaded next episode only when
+  offline — online it falls back to streaming.
+- A downloaded item is the same library entry with a local path — stream vs
+  downloaded is a playback-source detail, not a different library.
+
+Known upstream limitation: when the OS network vanishes entirely, ant-core's
+`/health` can keep reporting ready with stale peers, so airplane-mode-style
+loss may go undetected (VPN-cut / handshake-timeout loss is detected fine).
 
 ### Playback
 
@@ -139,7 +162,8 @@ Watch-It/
 │   ├── lib/
 │   │   ├── db/                # drift database (lists, metadata cache)
 │   │   ├── services/          # embedded client FFI, library store, metadata
-│   │   │                      #   matcher, TMDB client, import, prefetch
+│   │   │                      #   matcher, TMDB client, import/export, prefetch,
+│   │   │                      #   downloads, connectivity
 │   │   ├── screens/           # home wall, show/season/detail, player,
 │   │   │                      #   media lists, settings
 │   │   ├── widgets/           # shared UI (detail header, …)
@@ -165,7 +189,7 @@ Watch-It/
 4. ~~List format~~ — **resolved (alpha.25)**: plain text, not JSON — optional
    `ListName="..."` section markers, then one `<xor-address> <file name>` per line;
    bad lines skipped and reported, 10MB file cap. Import from a local file or from
-   an Autonomi address; the same format will serve export.
+   an Autonomi address; export (alpha.31) writes the same format per list.
 5. ~~Streaming seek~~ — **resolved**: range/offset fetch verified byte-exact against
    the live network; with the chunk cache, keep-ahead prefetch, and persisted root
    maps, seek and warm starts are fast. Remaining UX cost is the cold first

@@ -1,7 +1,7 @@
 # Roadmap
 
-**Status (2026-07-24):** v0.1.0-alpha.29 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
-— signed Android APK + Linux AppImage on every release. Phase 0 and Phase 1 are
+**Status (2026-07-24):** v0.1.0-alpha.31 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
+— signed Android APK + Linux AppImage on every release. Phases 0, 1, and 2 are
 done: both platforms stream from the live Autonomi network via the embedded
 Rust client (`native/watchit_core`) with byte-exact seek, a chunk LRU cache with
 keep-ahead prefetch, and resolved root data maps persisted in SQLite (any title's
@@ -13,7 +13,11 @@ ratings, air dates, and episode screenshots, list import from file or Autonomi
 address with prefetch-on-import, and a Media Lists management page. Since
 alpha.29 watch state is remembered per title: Continue Watching and Recently
 Added rows on home, Resume / Start over + Watched badge on detail pages, and
-end-of-episode Up-next auto-play. The seeded
+end-of-episode Up-next auto-play. Alpha.30/.31 added downloads and offline:
+a persistent download queue with pause/resume and auto-pause on connection
+loss, download badges on all cards, offline gating (browse always, downloaded
+titles play locally, stream-only Play disabled with a hint), and per-list
+export. The seeded
 default movie is an H.264 8-bit 1080p encode named per the Plex/Jellyfin
 convention — see [NAMING.md](NAMING.md).
 
@@ -71,16 +75,39 @@ streams from the network → resume works after app restart. v0.1 release.
 → **All met** as of alpha.29; Phase 1 is feature-complete.
 
 ## Phase 2 — Downloads & offline
-- [ ] Download manager: queue, progress, pause/resume, storage settings
-- [ ] Offline library: downloaded items fully browsable/playable with no connectivity
-- [ ] Card badges for stream/downloading/downloaded state
+- [x] Download manager: queue, progress, pause/resume, storage settings
+      → shipped in alpha.30: pure Dart over the existing Range-capable `/xor`
+      endpoint (no Rust changes); sequential queue persisted in SQLite,
+      resume from bytes on disk, Download button with progress on detail
+      pages, Settings → Downloads (queue, desktop folder picker,
+      pause-downloads-while-streaming behaviour with remembered choice);
+      auto-pauses on connection loss instead of erroring (alpha.31), with a
+      2-minute stall-timeout backstop — resume is manual for now
+- [x] Offline library: downloaded items fully browsable/playable with no
+      connectivity → alpha.30/.31: finished downloads play locally (including
+      chained Up-next episodes); browsing always works offline; when offline
+      (embedded client connecting or 0 peers) Play is disabled with a hint on
+      non-downloaded titles only, and the Up-next chain stops at a
+      non-downloaded next episode — online it falls back to streaming
+- [x] Card badges for stream/downloading/downloaded state → alpha.31: copper
+      check = downloaded, progress ring = downloading, no badge = stream;
+      show/season cards badge once ANY episode is downloaded, with a count
 - [x] List **import** as files — pulled forward, shipped in alpha.25: local file
       picker or download from Autonomi by XOR address; multi-list files via
       `ListName="..."` sections; merge / create-new / skip on name clash; 10MB cap
-- [ ] List **export** as files
+- [x] List **export** as files → alpha.31: per-list from the Media Lists menu,
+      same plain-text format import reads; save dialog on desktop, share
+      sheet on Android
 - [x] Storage controls — pulled forward, shipped in alpha.28: Size on disk +
       double-confirmed Clear all data (factory reset) in Settings → About
 - v0.2 release (Linux + Android)
+
+**Exit criteria: all met** as of alpha.31; Phase 2 is feature-complete.
+Deferred niceties: auto-resume downloads on reconnect, per-direction
+bandwidth/concurrency settings. Known upstream limitation: ant-core's
+`/health` can report ready with stale peers when the OS network vanishes
+entirely, so total-network-loss detection (airplane mode) is unreliable —
+VPN-cut style losses are detected fine.
 
 ## Phase 3 — All desktop platforms
 - [ ] Windows + macOS builds and packaging (MSIX, .dmg)

@@ -82,7 +82,7 @@ TV notes: larger base type scale (readable at 3 m), no hover-only affordances, t
 entry kept to add/import flows only (paste via network share or a shown-on-TV import
 address is preferred over typing XOR addresses with a remote).
 
-## Built so far (alpha.29)
+## Built so far (alpha.31)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,
@@ -90,7 +90,12 @@ air dates, episode screenshots, Resume / Start over, Watched badge, Next
 episode), the player with buffering overlay, resume-from-saved-position and
 the end-of-episode Up-next auto-play card, the Media Lists management page
 (create/hide/rename/delete, import from file or Autonomi address with
-prefetch), and Settings (network status, metadata key, size on disk + factory
-reset) are all live on Android and Linux. Still to come from this document:
-filter/sort + fast-scroller on the grid, download badges and flows, the full
-desktop keyboard map, mobile gestures, and the TV layout.
+prefetch, per-list export), and Settings (network status, metadata key,
+Downloads queue page, size on disk + factory reset) are all live on Android
+and Linux. Downloads shipped in alpha.30/.31: a Download button with
+progress on detail pages, download badges on every card (copper check =
+downloaded, progress ring = downloading, any-downloaded count on show/season
+cards), downloaded titles playing locally, and offline gating — browsing
+always works, Play is disabled with a hint on non-downloaded titles when
+offline. Still to come from this document: filter/sort + fast-scroller on
+the grid, the full desktop keyboard map, mobile gestures, and the TV layout.
