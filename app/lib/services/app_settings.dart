@@ -58,7 +58,50 @@ class AppSettings {
       await prefs.setString(_tmdbKeyKey, trimmed);
     }
   }
+
+  static const _downloadDirKey = 'download_dir_v1';
+
+  /// User-chosen downloads folder (desktop only). Null = the app-private
+  /// default (`<support>/downloads/`). Applies to new downloads; files
+  /// already on disk stay where they are.
+  static Future<String?> downloadDirPath() async {
+    final prefs = await SharedPreferences.getInstance();
+    final path = prefs.getString(_downloadDirKey)?.trim() ?? '';
+    return path.isEmpty ? null : path;
+  }
+
+  static Future<void> setDownloadDirPath(String? path) async {
+    final prefs = await SharedPreferences.getInstance();
+    final trimmed = path?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      await prefs.remove(_downloadDirKey);
+    } else {
+      await prefs.setString(_downloadDirKey, trimmed);
+    }
+  }
+
+  static const _pauseDownloadsOnPlayKey = 'pause_downloads_on_play_v1';
+
+  /// What to do with active downloads when streaming playback starts
+  /// (a downloaded file plays locally and never asks). Set directly in
+  /// Settings → Downloads, or via "remember my choice" on the playback
+  /// prompt.
+  static Future<PauseDownloadsOnPlay> pauseDownloadsOnPlay() async {
+    final prefs = await SharedPreferences.getInstance();
+    final name = prefs.getString(_pauseDownloadsOnPlayKey);
+    return PauseDownloadsOnPlay.values.asNameMap()[name] ??
+        PauseDownloadsOnPlay.ask;
+  }
+
+  static Future<void> setPauseDownloadsOnPlay(
+      PauseDownloadsOnPlay value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_pauseDownloadsOnPlayKey, value.name);
+  }
 }
 
 /// Origin of the effective TMDB credential.
 enum TmdbKeySource { user, bundled, none }
+
+/// Whether starting streamed playback pauses active downloads.
+enum PauseDownloadsOnPlay { ask, always, never }

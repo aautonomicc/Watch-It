@@ -48,4 +48,30 @@ void main() {
       expect(await AppSettings.tmdbKeySource(), TmdbKeySource.none);
     });
   });
+
+  group('AppSettings downloads', () {
+    test('download dir defaults to null and round-trips', () async {
+      expect(await AppSettings.downloadDirPath(), isNull);
+      await AppSettings.setDownloadDirPath('/tmp/media');
+      expect(await AppSettings.downloadDirPath(), '/tmp/media');
+      await AppSettings.setDownloadDirPath(null);
+      expect(await AppSettings.downloadDirPath(), isNull);
+    });
+
+    test('pause-on-play defaults to ask and round-trips', () async {
+      expect(await AppSettings.pauseDownloadsOnPlay(),
+          PauseDownloadsOnPlay.ask);
+      for (final value in PauseDownloadsOnPlay.values) {
+        await AppSettings.setPauseDownloadsOnPlay(value);
+        expect(await AppSettings.pauseDownloadsOnPlay(), value);
+      }
+    });
+
+    test('corrupt stored pause-on-play value falls back to ask', () async {
+      SharedPreferences.setMockInitialValues(
+          {'pause_downloads_on_play_v1': 'garbage'});
+      expect(await AppSettings.pauseDownloadsOnPlay(),
+          PauseDownloadsOnPlay.ask);
+    });
+  });
 }

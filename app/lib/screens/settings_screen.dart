@@ -6,11 +6,13 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
+import '../services/download_manager.dart';
 import '../services/library_store.dart';
 import '../services/embedded_client.dart';
 import '../services/metadata_service.dart';
 import '../services/storage_usage.dart';
 import '../theme/tokens.dart';
+import 'downloads_screen.dart';
 import 'media_lists_screen.dart';
 
 /// Settings: library, streaming, metadata, and about sections.
@@ -38,6 +40,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadVersion();
     _loadDataSize();
     _scheduleHealthPoll();
+    DownloadManager.instance.ensureLoaded();
   }
 
   @override
@@ -272,6 +275,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   trailing: Icon(Icons.chevron_right, color: t.ash),
                   onTap: _openMediaLists,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
+                  child: Text(
+                    'DOWNLOADS',
+                    style: TextStyle(
+                      fontSize: 11,
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.w700,
+                      color: t.ash,
+                    ),
+                  ),
+                ),
+                ListenableBuilder(
+                  listenable: DownloadManager.instance,
+                  builder: (context, _) {
+                    final manager = DownloadManager.instance;
+                    final active = manager.activeCount;
+                    final done = manager.doneCount;
+                    return ListTile(
+                      leading:
+                          Icon(Icons.download_outlined, color: t.copper),
+                      title: Text('Downloads',
+                          style: TextStyle(color: t.bone, fontSize: 15)),
+                      subtitle: Text(
+                        manager.tasks.isEmpty
+                            ? 'Queue, storage, and playback behaviour'
+                            : '$active active · $done downloaded',
+                        style: TextStyle(color: t.ash, fontSize: 12),
+                      ),
+                      trailing: Icon(Icons.chevron_right, color: t.ash),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const DownloadsScreen()),
+                      ),
+                    );
+                  },
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
