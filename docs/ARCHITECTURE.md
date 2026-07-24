@@ -109,7 +109,8 @@ Two layers of caching keep streaming fast:
   localhost streaming URL.
 - Subtitles: embedded + sidecar; external subtitle files can be their own list entries
   attached to a media entry (open question 3).
-- Watch state: positions saved every ~10s to SQLite.
+- Watch state: position saved to SQLite every few seconds during playback and on
+  player exit; ≥95% watched marks the title as watched (shipped in alpha.29).
 
 ### Data & state
 
