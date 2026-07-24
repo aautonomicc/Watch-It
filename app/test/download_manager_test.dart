@@ -52,6 +52,14 @@ void main() {
   int? gateAfter;
   Completer<void> gateRelease = Completer<void>();
 
+  /// When set, the /xor handler sends this many bytes then destroys the
+  /// socket (simulates the connection dropping mid-transfer).
+  int? dropAfter;
+
+  /// What /health reports (the manager asks it whether a failed transfer
+  /// means the network is gone).
+  Map<String, Object?> healthBody = {'state': 'ready', 'peers': 5};
+
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -60,10 +68,18 @@ void main() {
     rangesSeen.clear();
     gateAfter = null;
     gateRelease = Completer<void>();
+    dropAfter = null;
+    healthBody = {'state': 'ready', 'peers': 5};
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     base = 'http://127.0.0.1:${server.port}';
     server.listen((req) async {
       try {
+        if (req.uri.path == '/health') {
+          req.response.headers.contentType = ContentType.json;
+          req.response.write(jsonEncode(healthBody));
+          await req.response.close();
+          return;
+        }
         if (req.uri.path.startsWith('/resolve/')) {
           req.response.headers.contentType = ContentType.json;
           req.response
@@ -81,6 +97,18 @@ void main() {
         }
         final body = payload.sublist(start);
         req.response.contentLength = body.length;
+        final drop = dropAfter;
+        if (drop != null && drop > start && drop < payload.length) {
+          req.response.add(body.sublist(0, drop - start));
+          await req.response.flush();
+          // Let the bytes reach the client before the abort (an early
+          // close RSTs the connection, discarding data in flight).
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          // Closing below contentLength aborts the connection — the
+          // client sees "connection closed while receiving data".
+          await req.response.close();
+          return;
+        }
         final gate = gateAfter;
         if (gate != null && gate > start && gate < payload.length) {
           req.response.add(body.sublist(0, gate - start));
@@ -221,6 +249,46 @@ void main() {
   test('resumeAfterPlayback with nothing paused reports false', () async {
     final manager = DownloadManager(base: base, directory: dir);
     expect(await manager.resumeAfterPlayback(), isFalse);
+  });
+
+  test('connection loss mid-transfer auto-pauses; resume finishes the file',
+      () async {
+    dropAfter = 16 * 1024;
+    healthBody = {'state': 'ready', 'peers': 0}; // network gone
+    final manager = DownloadManager(base: base, directory: dir);
+    await manager.enqueue(entry('Movie.mkv', _addrA));
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.paused);
+    final task = manager.taskFor(_addrA)!;
+    expect(task.error, isNull);
+    expect(task.downloadedBytes, lessThan(payload.length));
+
+    // Network back: resume picks up from the bytes on disk.
+    dropAfter = null;
+    healthBody = {'state': 'ready', 'peers': 5};
+    await manager.resume(_addrA);
+    await waitFor(() =>
+        manager.taskFor(_addrA)?.status == DownloadStatus.done);
+    expect(File(task.filePath).readAsBytesSync(), payload);
+  });
+
+  test('still connecting counts as connection loss (auto-pause)', () async {
+    dropAfter = 16 * 1024;
+    healthBody = {'state': 'connecting', 'attempts': 3};
+    final manager = DownloadManager(base: base, directory: dir);
+    await manager.enqueue(entry('Movie.mkv', _addrA));
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.paused);
+    expect(manager.taskFor(_addrA)!.error, isNull);
+  });
+
+  test('a transfer failure while online is still an error', () async {
+    dropAfter = 16 * 1024;
+    final manager = DownloadManager(base: base, directory: dir);
+    await manager.enqueue(entry('Movie.mkv', _addrA));
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.error);
+    expect(manager.taskFor(_addrA)!.error, isNotNull);
   });
 
   test('no embedded client marks the task failed; resume retries', () async {

@@ -404,7 +404,14 @@ class DownloadManager extends ChangeNotifier {
           mode: start > 0 ? FileMode.append : FileMode.write);
       var written = start;
       var lastPersisted = start;
-      await for (final chunk in res) {
+      // A dead connection usually errors the stream within seconds (the
+      // embedded client's chunk fetches time out); the stall timeout is
+      // the backstop for a stream that hangs instead.
+      final data = res.timeout(_stallTimeout, onTimeout: (sink) {
+        sink.addError(const HttpException('No data received (stalled)'));
+        sink.close();
+      });
+      await for (final chunk in data) {
         sink.add(chunk);
         written += chunk.length;
         // Progress lands in the DB only for bytes already flushed to
@@ -459,6 +466,14 @@ class DownloadManager extends ChangeNotifier {
         // the abort surfaced) — record what made it to disk; the pump
         // loop picks a queued task up again.
         _update(current.copyWith(downloadedBytes: bytes));
+      } else if (await _connectionLost()) {
+        // The transfer died because the network is gone, not because the
+        // download is broken — pause instead of erroring; the bytes on
+        // disk resume as usual once the user is back online.
+        _update(current.copyWith(
+            status: DownloadStatus.paused,
+            downloadedBytes: bytes,
+            clearError: true));
       } else {
         _update(current.copyWith(
             status: DownloadStatus.error,
@@ -475,6 +490,35 @@ class DownloadManager extends ChangeNotifier {
   }
 
   static const _persistEveryBytes = 4 * 1024 * 1024;
+
+  /// A transfer that delivers no bytes for this long counts as a lost
+  /// connection (cold first byte takes ~25s on the real network, so this
+  /// leaves generous headroom).
+  static const _stallTimeout = Duration(minutes: 2);
+
+  /// True when the embedded client reports no usable network connection
+  /// — still connecting, or connected with zero peers — the signature
+  /// of lost connectivity rather than a broken download.
+  Future<bool> _connectionLost() async {
+    final base = _base;
+    if (base == null) return false;
+    final client = HttpClient();
+    try {
+      final req = await client.getUrl(Uri.parse('$base/health'));
+      final res = await req.close();
+      final body = await res.transform(utf8.decoder).join();
+      if (res.statusCode != HttpStatus.ok) return false;
+      final map = jsonDecode(body) as Map<String, dynamic>;
+      final state = map['state'] as String?;
+      final peers = map['peers'] as int? ?? 0;
+      return state == 'connecting' || (state == 'ready' && peers == 0);
+    } catch (_) {
+      // The health endpoint itself failing is not a network verdict.
+      return false;
+    } finally {
+      client.close(force: true);
+    }
+  }
 
   /// Apply [task] to the in-memory queue, notify, and persist.
   void _update(DownloadTask task) {
