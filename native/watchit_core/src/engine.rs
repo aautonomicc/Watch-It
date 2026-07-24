@@ -58,8 +58,11 @@ pub static FETCHED_BYTES: std::sync::atomic::AtomicU64 =
 pub static CACHE_HIT_CHUNKS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
-/// Concurrent chunk fetches within one decrypt batch.
-const FETCH_CONCURRENCY: usize = 8;
+/// Concurrent chunk fetches within one decrypt batch. Chunks are ≤4 MiB,
+/// so 16 in flight bounds transient buffering at ~64 MiB. (The no-Range
+/// full-file path in `stream_full` is sized separately by ant-core's
+/// adaptive controller and does not read this.)
+const FETCH_CONCURRENCY: usize = 16;
 
 /// Chunks the prefetcher keeps fetched ahead of the last byte served to
 /// the player. Network chunks are ≤4 MiB, so 16 ≈ 64 MiB ≈ a minute of
