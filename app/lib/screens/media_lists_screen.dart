@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart' show SharePlus, ShareParams;
 
 import '../models/media_list.dart';
 import '../services/datamap_prefetch.dart';
@@ -366,6 +369,47 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     );
   }
 
+  /// Export one list as a text file in the same format import reads —
+  /// a save dialog on desktop, the system share sheet (save to Files,
+  /// send, …) on mobile, where there is no save dialog.
+  Future<void> _export(MediaList list) async {
+    if (list.entries.isEmpty) {
+      _showError('"${list.title}" is empty — nothing to export.');
+      return;
+    }
+    final bytes = utf8.encode(serializeMediaList(list));
+    var safe =
+        list.title.replaceAll(RegExp(r'[/\\:*?"<>|]'), '_').trim();
+    if (safe.isEmpty) safe = 'media-list';
+    final fileName = '$safe.txt';
+    try {
+      if (Platform.isAndroid || Platform.isIOS) {
+        await SharePlus.instance.share(ShareParams(
+          files: [XFile.fromData(bytes, mimeType: 'text/plain')],
+          fileNameOverrides: [fileName],
+        ));
+        return;
+      }
+      final location = await getSaveLocation(
+        suggestedName: fileName,
+        acceptedTypeGroups: const [
+          XTypeGroup(label: 'Text', extensions: ['txt']),
+        ],
+      );
+      if (location == null) return; // save dialog cancelled
+      await XFile.fromData(bytes, mimeType: 'text/plain', name: fileName)
+          .saveTo(location.path);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Exported ${list.entries.length} '
+            '${list.entries.length == 1 ? 'entry' : 'entries'} to '
+            '${location.path}'),
+      ));
+    } catch (e) {
+      _showError('Export failed: $e');
+    }
+  }
+
   /// First of `title (2)`, `title (3)`, … not already taken in [lists].
   String _uniqueTitle(String title, List<MediaList> lists) {
     final taken = lists.map((l) => l.title.toLowerCase()).toSet();
@@ -525,6 +569,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
                       color: t.ink2,
                       onSelected: (v) => switch (v) {
                         'rename' => _rename(list),
+                        'export' => _export(list),
                         'delete' => _delete(list),
                         _ => null,
                       },
@@ -532,6 +577,11 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
                         PopupMenuItem(
                           value: 'rename',
                           child: Text('Rename',
+                              style: TextStyle(color: t.bone, fontSize: 14)),
+                        ),
+                        PopupMenuItem(
+                          value: 'export',
+                          child: Text('Export',
                               style: TextStyle(color: t.bone, fontSize: 14)),
                         ),
                         PopupMenuItem(

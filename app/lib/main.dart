@@ -7,6 +7,8 @@ import 'models/media_list.dart';
 import 'screens/detail_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/show_screen.dart';
+import 'services/connectivity.dart';
+import 'services/download_manager.dart';
 import 'services/embedded_client.dart';
 import 'services/home_rows.dart';
 import 'services/library_store.dart';
@@ -15,6 +17,7 @@ import 'services/metadata_service.dart';
 import 'services/season_grouping.dart';
 import 'services/watch_state.dart';
 import 'theme/tokens.dart';
+import 'widgets/download_badge.dart';
 import 'widgets/prefetch_dialog.dart';
 
 Future<void> main() async {
@@ -25,6 +28,9 @@ Future<void> main() async {
   // Awaited: it must receive the app data dir (ant-core's $HOME on
   // Android) before any other code path can lazily start it without one.
   await EmbeddedClient.start();
+  // Background online/offline tracking for Play gating and the Up-next
+  // chain (browsing itself is never gated).
+  ConnectivityMonitor.instance.start();
   runApp(const WatchItApp());
 }
 
@@ -63,6 +69,8 @@ class _HomeScreenState extends State<HomeScreen> {
     // Watch states change while a player is open on top of this screen —
     // refresh the Continue Watching row as they land.
     WatchStateStore.instance.addListener(_reloadRows);
+    // Wall cards badge their download state — have the queue loaded.
+    unawaited(DownloadManager.instance.ensureLoaded());
     _reload();
   }
 
@@ -162,9 +170,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _libraryView(WiTokens t, List<MediaList> lists) {
-    // Poster cards upgrade in place as TMDB matches land in the cache.
+    // Poster cards upgrade in place as TMDB matches land in the cache,
+    // and re-badge as downloads progress.
     return ListenableBuilder(
-      listenable: MetadataService.instance,
+      listenable: Listenable.merge(
+          [MetadataService.instance, DownloadManager.instance]),
       builder: (context, _) => _posterWall(t, lists),
     );
   }
@@ -354,6 +364,7 @@ class _PosterCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = tokens;
     final meta = MetadataService.instance.metadataFor(entry);
+    final badge = entryDownloadBadge(t, entry);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(6),
@@ -367,12 +378,18 @@ class _PosterCard extends StatelessWidget {
               child: SizedBox(
                 width: 120,
                 height: 180,
-                child: posterImage(meta, fit: BoxFit.cover) ??
-                    Container(
-                      color: t.ink2,
-                      child:
-                          Icon(Icons.movie_outlined, color: t.ash, size: 40),
-                    ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    posterImage(meta, fit: BoxFit.cover) ??
+                        Container(
+                          color: t.ink2,
+                          child: Icon(Icons.movie_outlined,
+                              color: t.ash, size: 40),
+                        ),
+                    ?badge,
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 6),
@@ -460,6 +477,7 @@ class _ContinueCard extends StatelessWidget {
                           ),
                         ),
                       ),
+                    ?entryDownloadBadge(t, entry),
                   ],
                 ),
               ),
@@ -507,6 +525,8 @@ class _ShowCard extends StatelessWidget {
         .metadataFor(group.seasons.first.episodes.first);
     final seasons = group.seasons.length;
     final count = group.episodeCount;
+    final badge = groupDownloadBadge(
+        t, [for (final s in group.seasons) ...s.episodes]);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(6),
@@ -520,12 +540,18 @@ class _ShowCard extends StatelessWidget {
               child: SizedBox(
                 width: 120,
                 height: 180,
-                child: showPosterImage(meta, fit: BoxFit.cover) ??
-                    Container(
-                      color: t.ink2,
-                      child:
-                          Icon(Icons.live_tv_outlined, color: t.ash, size: 40),
-                    ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    showPosterImage(meta, fit: BoxFit.cover) ??
+                        Container(
+                          color: t.ink2,
+                          child: Icon(Icons.live_tv_outlined,
+                              color: t.ash, size: 40),
+                        ),
+                    ?badge,
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 6),

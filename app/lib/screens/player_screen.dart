@@ -6,6 +6,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
+import '../services/connectivity.dart';
 import '../services/embedded_client.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
@@ -179,18 +180,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
         .markCompleted(_entry, duration: _player.state.duration));
     final next = widget.nextFor?.call(_entry);
     if (next == null || !mounted) return;
-    setState(() {
-      _upNext = next;
-      _countdown = 10;
-    });
-    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      if (_countdown <= 1) {
-        _playNext();
-      } else {
-        setState(() => _countdown--);
-      }
-    });
+    // Chain rule: a downloaded next episode always chains; a streamed
+    // one needs the network — offline the chain stops here, with no
+    // skipping ahead to a later downloaded episode. Live probe, so a
+    // connection lost mid-episode is caught between poll ticks.
+    final nextIsLocal = widget.sourceFor?.call(next)?.local ?? false;
+    unawaited(() async {
+      final chain = await canChainInto(nextIsLocal: nextIsLocal);
+      if (!chain || !mounted || !_completed || _upNext != null) return;
+      setState(() {
+        _upNext = next;
+        _countdown = 10;
+      });
+      _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        if (_countdown <= 1) {
+          _playNext();
+        } else {
+          setState(() => _countdown--);
+        }
+      });
+    }());
   }
 
   /// Roll straight into the next episode inside this player. The

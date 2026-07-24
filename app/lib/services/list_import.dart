@@ -158,6 +158,18 @@ ParsedMediaListFile parseMediaListFile(String content) {
   return ParsedMediaListFile(lists: lists, skippedLines: skipped);
 }
 
+/// Serialize [list] in the plain-text format [parseMediaListFile] reads.
+/// Always the marker form — a `ListName="…"` line, then one
+/// `<xor address> <file name>` line per entry — so exported files can be
+/// concatenated into a multi-list file and still re-import losslessly.
+String serializeMediaList(MediaList list) {
+  final buffer = StringBuffer()..writeln('ListName="${list.title}"');
+  for (final entry in list.entries) {
+    buffer.writeln('${entry.address} ${entry.name}');
+  }
+  return buffer.toString();
+}
+
 /// Anything bigger than this is not a hand-written media list — refuse
 /// early instead of pulling a movie into memory.
 const int kMaxListFileBytes = 10 * 1024 * 1024;
