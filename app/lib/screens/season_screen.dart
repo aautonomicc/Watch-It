@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
+import '../services/download_manager.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/season_grouping.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
+import '../widgets/download_badge.dart';
 import 'detail_screen.dart';
 
 /// One season of a show: big season artwork with description and rating,
@@ -19,9 +21,11 @@ class SeasonScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Rebuild as TMDB matches for the episodes land in the cache.
+    // Rebuild as TMDB matches for the episodes land in the cache and as
+    // downloads change the episode tiles' badges.
     return ListenableBuilder(
-      listenable: MetadataService.instance,
+      listenable: Listenable.merge(
+          [MetadataService.instance, DownloadManager.instance]),
       builder: (context, _) => _build(context),
     );
   }
@@ -122,6 +126,7 @@ class _EpisodeTile extends StatelessWidget {
     final marker = 'S${parsed.season.toString().padLeft(2, '0')}'
         'E${parsed.episode.toString().padLeft(2, '0')}';
     final name = episodeNameFromLabel(meta.episodeLabel);
+    final badge = entryDownloadBadge(t, entry);
     return InkWell(
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => DetailScreen(entry: entry)),
@@ -137,12 +142,18 @@ class _EpisodeTile extends StatelessWidget {
               child: SizedBox(
                 width: width,
                 height: width * 9 / 16,
-                child: stillImage(meta, fit: BoxFit.cover) ??
-                    Container(
-                      color: t.ink2,
-                      child: Icon(Icons.play_circle_outline,
-                          color: t.ash, size: 36),
-                    ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    stillImage(meta, fit: BoxFit.cover) ??
+                        Container(
+                          color: t.ink2,
+                          child: Icon(Icons.play_circle_outline,
+                              color: t.ash, size: 36),
+                        ),
+                    ?badge,
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 6),

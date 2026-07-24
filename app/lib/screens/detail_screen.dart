@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
+import '../services/connectivity.dart';
 import '../services/datamap_prefetch.dart';
 import '../services/download_manager.dart';
 import '../services/home_rows.dart';
@@ -255,11 +256,14 @@ class _DetailScreenState extends State<DetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Rebuild when the TMDB match for this entry lands in the cache or
-    // this entry's download changes state.
+    // Rebuild when the TMDB match for this entry lands in the cache,
+    // this entry's download changes state, or connectivity flips.
     return ListenableBuilder(
-      listenable: Listenable.merge(
-          [MetadataService.instance, DownloadManager.instance]),
+      listenable: Listenable.merge([
+        MetadataService.instance,
+        DownloadManager.instance,
+        ConnectivityMonitor.instance,
+      ]),
       builder: (context, _) => _build(context),
     );
   }
@@ -269,6 +273,16 @@ class _DetailScreenState extends State<DetailScreen> {
     final meta = MetadataService.instance.metadataFor(entry);
     final task = DownloadManager.instance.taskFor(entry.address);
     final downloaded = task?.status == DownloadStatus.done;
+    final offline = ConnectivityMonitor.instance.offline;
+    // Offline, only downloaded titles can play; browsing stays open.
+    final playBlocked = offline && !downloaded;
+    // Offline the download button still allows the local actions —
+    // pausing a queued/running task, removing a finished one — but not
+    // the ones that need the network (start, resume, retry).
+    final downloadBlocked = offline &&
+        (task == null ||
+            task.status == DownloadStatus.paused ||
+            task.status == DownloadStatus.error);
     final (downloadIcon, downloadLabel) = switch (task?.status) {
       null => (Icons.download_outlined, 'Download'),
       DownloadStatus.queued => (Icons.pause, 'Queued'),
@@ -358,7 +372,8 @@ class _DetailScreenState extends State<DetailScreen> {
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     FilledButton.icon(
-                      onPressed: () => _play(context),
+                      onPressed:
+                          playBlocked ? null : () => _play(context),
                       style: FilledButton.styleFrom(
                         backgroundColor: t.copper,
                         foregroundColor: t.ink,
@@ -370,12 +385,16 @@ class _DetailScreenState extends State<DetailScreen> {
                     ),
                     if (_state?.resumable ?? false)
                       TextButton(
-                        onPressed: () => _play(context, fromStart: true),
+                        onPressed: playBlocked
+                            ? null
+                            : () => _play(context, fromStart: true),
                         child: Text('Start over',
                             style: TextStyle(color: t.boneDim)),
                       ),
                     OutlinedButton.icon(
-                      onPressed: () => _onDownloadPressed(task),
+                      onPressed: downloadBlocked
+                          ? null
+                          : () => _onDownloadPressed(task),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: downloaded ? t.copper : t.bone,
                         side: BorderSide(
@@ -399,6 +418,24 @@ class _DetailScreenState extends State<DetailScreen> {
                       ),
                   ],
                 ),
+                if (playBlocked) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Icon(Icons.cloud_off_outlined,
+                          size: 15, color: t.rust),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Offline — this title is not downloaded, so it '
+                          'cannot play until the connection is back.',
+                          style:
+                              TextStyle(fontSize: 11.5, color: t.boneDim),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 if (task != null && !downloaded) ...[
                   const SizedBox(height: 10),
                   ClipRRect(
