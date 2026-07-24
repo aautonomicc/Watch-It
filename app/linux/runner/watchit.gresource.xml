@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/io/github/aautonomicc/watchit">
+    <file>resources/watchit.png</file>
+  </gresource>
+</gresources>
