@@ -14,6 +14,7 @@ import '../services/metadata_service.dart';
 import '../services/storage_usage.dart';
 import '../theme/tokens.dart';
 import 'downloads_screen.dart';
+import 'home_layout_screen.dart';
 import 'media_lists_screen.dart';
 
 /// Settings: library, streaming, metadata, and about sections.
@@ -237,6 +238,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _reload();
   }
 
+  /// Reloads on return — the layout screen can change list visibility,
+  /// which the Media Lists subtitle counts.
+  Future<void> _openHomeLayout() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const HomeLayoutScreen()),
+    );
+    await _reload();
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
@@ -278,6 +288,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   trailing: Icon(Icons.chevron_right, color: t.ash),
                   onTap: _openMediaLists,
+                ),
+                ListTile(
+                  leading: Icon(Icons.view_agenda_outlined, color: t.copper),
+                  title: Text('Home screen',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    'Row order and visibility',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  trailing: Icon(Icons.chevron_right, color: t.ash),
+                  onTap: _openHomeLayout,
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),

@@ -1,5 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'home_sections.dart';
+
 /// App-wide user preferences (playback tuning etc.), separate from the
 /// media library which lives in [LibraryStore].
 class AppSettings {
@@ -84,6 +86,21 @@ class AppSettings {
     } else {
       await prefs.setString(_downloadDirKey, trimmed);
     }
+  }
+
+  static const _homeSectionsKey = 'home_sections_v1';
+
+  /// The stored home-row order and special-row visibility, raw. Callers
+  /// must pass this through [reconcileHomeSections] against the current
+  /// lists before use; an unset or corrupt value decodes to [] (defaults).
+  static Future<List<HomeSection>> homeSections() async {
+    final prefs = await SharedPreferences.getInstance();
+    return decodeHomeSections(prefs.getString(_homeSectionsKey) ?? '');
+  }
+
+  static Future<void> setHomeSections(List<HomeSection> sections) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_homeSectionsKey, encodeHomeSections(sections));
   }
 
   static const _pauseDownloadsOnPlayKey = 'pause_downloads_on_play_v1';

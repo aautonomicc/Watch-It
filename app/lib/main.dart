@@ -12,6 +12,7 @@ import 'services/connectivity.dart';
 import 'services/download_manager.dart';
 import 'services/embedded_client.dart';
 import 'services/home_rows.dart';
+import 'services/home_sections.dart';
 import 'services/library_store.dart';
 import 'services/metadata.dart';
 import 'services/metadata_service.dart';
@@ -65,6 +66,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<MediaList> _lists = [];
   List<ContinueItem> _continue = const [];
   List<HomeItem> _recent = const [];
+  List<HomeSection> _sections = const [];
   bool _tmdbNudge = false;
 
   @override
@@ -91,11 +93,14 @@ class _HomeScreenState extends State<HomeScreen> {
     // Re-checked on every reload so the banner disappears as soon as a
     // key is entered in Settings (returning from there reloads).
     final nudge = await shouldShowTmdbNudge();
+    final sections =
+        reconcileHomeSections(await AppSettings.homeSections(), lists);
     if (!mounted) return;
     setState(() {
       _lists = lists;
       _continue = continueRow;
       _recent = recentlyAdded(lists);
+      _sections = sections;
       _tmdbNudge = nudge;
     });
   }
@@ -244,49 +249,69 @@ class _HomeScreenState extends State<HomeScreen> {
     // vanishes live as downloads finish or are removed — this builder
     // already re-runs on every DownloadManager notification.
     final downloads = downloadedItems(lists);
+    final listsById = {for (final l in lists) l.id: l};
+    // _sections is still empty on the first frame (before _reload lands);
+    // reconciling against nothing yields the default order either way.
+    final sections = _sections.isNotEmpty
+        ? _sections
+        : reconcileHomeSections(const [], lists);
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
-        if (_continue.isNotEmpty) ...[
-          _sectionTitle(t, 'Continue Watching'),
-          SizedBox(
-            height: 232,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: _continue.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 12),
-              itemBuilder: (context, i) => _ContinueCard(
-                item: _continue[i],
-                tokens: t,
-                onTap: () => _openEntry(_continue[i].entry),
-              ),
-            ),
-          ),
-        ],
-        if (downloads.isNotEmpty) ...[
-          _sectionTitle(t, 'Downloads'),
-          _itemsRow(t, downloads),
-        ],
-        if (_recent.isNotEmpty) ...[
-          _sectionTitle(t, 'Recently Added'),
-          _itemsRow(t, _recent),
-        ],
-        for (final list in lists) ...[
-          _sectionTitle(t, list.title),
-          if (list.entries.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                'Empty list — add entries in Settings.',
-                style: TextStyle(fontSize: 12, color: t.ash),
-              ),
-            )
-          else
-            _itemsRow(t, groupShows(list.entries)),
-        ],
+        for (final section in sections)
+          if (section.visible)
+            ...switch (section.id) {
+              kSectionContinue => _continueSection(t),
+              kSectionDownloads => downloads.isEmpty
+                  ? const <Widget>[]
+                  : [_sectionTitle(t, 'Downloads'), _itemsRow(t, downloads)],
+              kSectionRecent => _recent.isEmpty
+                  ? const <Widget>[]
+                  : [_sectionTitle(t, 'Recently Added'), _itemsRow(t, _recent)],
+              // Sections whose list is hidden or was deleted after the
+              // last reconcile render nothing.
+              _ => _listSection(t, listsById[section.listId]),
+            },
       ],
     );
+  }
+
+  List<Widget> _continueSection(WiTokens t) {
+    if (_continue.isEmpty) return const [];
+    return [
+      _sectionTitle(t, 'Continue Watching'),
+      SizedBox(
+        height: 232,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          itemCount: _continue.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 12),
+          itemBuilder: (context, i) => _ContinueCard(
+            item: _continue[i],
+            tokens: t,
+            onTap: () => _openEntry(_continue[i].entry),
+          ),
+        ),
+      ),
+    ];
+  }
+
+  List<Widget> _listSection(WiTokens t, MediaList? list) {
+    if (list == null) return const [];
+    return [
+      _sectionTitle(t, list.title),
+      if (list.entries.isEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text(
+            'Empty list — add entries in Settings.',
+            style: TextStyle(fontSize: 12, color: t.ash),
+          ),
+        )
+      else
+        _itemsRow(t, groupShows(list.entries)),
+    ];
   }
 }
 
