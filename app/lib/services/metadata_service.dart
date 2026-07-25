@@ -85,6 +85,14 @@ class MetadataService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Forget this session's in-memory answers so rows seeded from outside
+  /// (a bundle import) are picked up on the next build. Unlike [reset]
+  /// this leaves the SQLite cache alone — the seeded rows are the point.
+  void notifyExternalSeed() {
+    _memory.clear();
+    notifyListeners();
+  }
+
   Future<void> _resolve(String key, String fileName) async {
     try {
       final resolved = await _fromCache(key) ?? await _fetch(key, fileName);
