@@ -33,10 +33,9 @@ void main() {
   });
 
   group('AppSettings TMDB key source', () {
-    // Tests run without --dart-define, so the bundled key is empty and
-    // TmdbKeySource.bundled cannot occur here.
     test('none when nothing is set', () async {
       expect(await AppSettings.tmdbKeySource(), TmdbKeySource.none);
+      expect(await AppSettings.tmdbApiKey(), isEmpty);
     });
 
     test('user once a key is stored, none again after clearing', () async {
@@ -46,6 +45,13 @@ void main() {
 
       await AppSettings.setTmdbApiKey('');
       expect(await AppSettings.tmdbKeySource(), TmdbKeySource.none);
+      expect(await AppSettings.tmdbApiKey(), isEmpty);
+    });
+
+    test('nudge dismissal is off by default and sticks', () async {
+      expect(await AppSettings.tmdbNudgeDismissed(), isFalse);
+      await AppSettings.setTmdbNudgeDismissed();
+      expect(await AppSettings.tmdbNudgeDismissed(), isTrue);
     });
   });
 

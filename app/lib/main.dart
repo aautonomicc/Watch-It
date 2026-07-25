@@ -7,6 +7,7 @@ import 'models/media_list.dart';
 import 'screens/detail_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/show_screen.dart';
+import 'services/app_settings.dart';
 import 'services/connectivity.dart';
 import 'services/download_manager.dart';
 import 'services/embedded_client.dart';
@@ -20,6 +21,7 @@ import 'theme/tokens.dart';
 import 'widgets/download_badge.dart';
 import 'widgets/downloads_indicator.dart';
 import 'widgets/prefetch_dialog.dart';
+import 'widgets/tmdb_nudge.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -63,6 +65,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<MediaList> _lists = [];
   List<ContinueItem> _continue = const [];
   List<HomeItem> _recent = const [];
+  bool _tmdbNudge = false;
 
   @override
   void initState() {
@@ -85,11 +88,15 @@ class _HomeScreenState extends State<HomeScreen> {
     await LibraryStore.ensureDefaults();
     final lists = await LibraryStore.load();
     final continueRow = await continueWatching(lists);
+    // Re-checked on every reload so the banner disappears as soon as a
+    // key is entered in Settings (returning from there reloads).
+    final nudge = await shouldShowTmdbNudge();
     if (!mounted) return;
     setState(() {
       _lists = lists;
       _continue = continueRow;
       _recent = recentlyAdded(lists);
+      _tmdbNudge = nudge;
     });
   }
 
@@ -161,6 +168,14 @@ class _HomeScreenState extends State<HomeScreen> {
       body: Column(
         children: [
           const NetworkStatusBar(),
+          if (_tmdbNudge)
+            TmdbNudgeBanner(
+              onOpenSettings: _openSettings,
+              onDismiss: () async {
+                await AppSettings.setTmdbNudgeDismissed();
+                if (mounted) setState(() => _tmdbNudge = false);
+              },
+            ),
           Expanded(
             child: visible.isEmpty
                 ? _EmptyState(tokens: t, allHidden: _lists.isNotEmpty)

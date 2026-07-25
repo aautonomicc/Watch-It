@@ -185,10 +185,15 @@ Watch-It/
 
 1. ~~Gateway sidecar vs Rust FFI~~ — **resolved**: embedded Rust FFI client with an
    in-process localhost server (see Autonomi access).
-2. ~~TMDB API key strategy~~ — **resolved (alpha.24)**: official builds bundle a
-   shared key via `--dart-define=TMDB_API_KEY`, so metadata works out of the box;
-   a user key entered in Settings → Metadata (v3 API key or v4 read access token)
-   overrides it. Without any key, cards fall back to parsed file names.
+2. ~~TMDB API key strategy~~ — **re-resolved (alpha.34): keyless by design.**
+   Alpha.24–.33 bundled a shared key via `--dart-define=TMDB_API_KEY`; that key
+   is strings-extractable from shipped binaries, so official builds no longer
+   bundle one. Users enter their own free key in Settings → Metadata (v3 API
+   key or v4 read access token); a one-time dismissible banner on home nudges
+   keyless users there. Without a key, cards fall back to parsed file names —
+   and `.watch-list` bundles carry metadata + posters, so bundle-importing
+   users need no key at all. The repo-root `.env` remains for dev runs and
+   live tests only.
 3. Subtitles for streamed items: sidecar files as linked list entries, or embedded-only
    in v1?
 4. ~~List format~~ — **resolved (alpha.25)**: plain text, not JSON — optional

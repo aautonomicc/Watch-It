@@ -33,9 +33,13 @@ ships a signed APK and a Linux AppImage that connect to the live Autonomi networ
 with an embedded Rust client (no gateway, no sidecar) and stream by XOR address
 with byte-exact seeking, a chunk cache with keep-ahead prefetch, and persisted
 data maps (a title resolves over the network at most once per device — instant
-on every later open). TMDB metadata works out of the box: entries get artwork,
-descriptions, ratings, and categories from their file names, with shows grouped
-into big-artwork Show → Season → Episode pages. Media lists can be created and
+on every later open). TMDB metadata gives entries artwork, descriptions,
+ratings, and categories from their file names, with shows grouped into
+big-artwork Show → Season → Episode pages. Releases are keyless by design:
+no TMDB key ships in the binaries — add your own free key (create one at
+[themoviedb.org](https://www.themoviedb.org/settings/api)) in
+Settings → Metadata, or skip it entirely: imported `.watch-list` bundles
+carry metadata and posters, so bundle-importing users never need a key. Media lists can be created and
 managed in-app and imported from a local file or straight from an Autonomi
 address, with optional prefetch of all data maps on import. Playback position
 is remembered per title: the home screen opens with Continue Watching and
@@ -54,7 +58,8 @@ export as plain text or as a bundle carrying TMDB metadata, posters,
 offline-verified instant-play root maps, and optional watch history, with a
 single auto-detecting Import button — see
 [docs/BUNDLE-FORMAT.md](docs/BUNDLE-FORMAT.md). The Linux AppImage also
-gained a proper taskbar icon.
+gained a proper taskbar icon. Unreleased on main: a show-level Download All
+button and the keyless releases described above.
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users
