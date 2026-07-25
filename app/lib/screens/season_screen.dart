@@ -6,9 +6,11 @@ import '../services/download_manager.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/season_grouping.dart';
+import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
 import '../widgets/download_badge.dart';
+import '../widgets/watch_progress.dart';
 import 'detail_screen.dart';
 
 /// One season of a show: big season artwork with description and rating,
@@ -24,12 +26,14 @@ class SeasonScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     // Rebuild as TMDB matches for the episodes land in the cache, as
     // downloads change the episode tiles' badges and the download-all
-    // button, and as connectivity flips the button's enabled state.
+    // button, as connectivity flips the button's enabled state, and as
+    // playback moves the episode tiles' watch-progress bars.
     return ListenableBuilder(
       listenable: Listenable.merge([
         MetadataService.instance,
         DownloadManager.instance,
         ConnectivityMonitor.instance,
+        WatchStateStore.instance,
       ]),
       builder: (context, _) => _build(context),
     );
@@ -204,6 +208,7 @@ class _EpisodeTile extends StatelessWidget {
                           child: Icon(Icons.play_circle_outline,
                               color: t.ash, size: 36),
                         ),
+                    ?entryWatchBar(t, entry),
                     ?badge,
                   ],
                 ),

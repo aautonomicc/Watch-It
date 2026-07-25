@@ -52,6 +52,11 @@ class WatchStateStore extends ChangeNotifier {
   /// resume point.
   static const minResumeMs = 60 * 1000;
 
+  /// address → state mirror of the table for sync lookups from card
+  /// builders; null until [cachedStateFor] triggers the first load.
+  Map<String, WatchState>? _memory;
+  bool _loadingMemory = false;
+
   /// Position at/after this fraction of the duration counts as watched.
   static const completedFraction = 0.95;
 
@@ -67,15 +72,23 @@ class WatchStateStore extends ChangeNotifier {
     final completed = duration > Duration.zero &&
         position.inMilliseconds >=
             duration.inMilliseconds * completedFraction;
+    final state = WatchState(
+      address: _normalize(entry.address),
+      positionMs: position.inMilliseconds,
+      durationMs: duration.inMilliseconds,
+      completed: completed,
+      updatedAt: DateTime.now().millisecondsSinceEpoch,
+    );
     await db.into(db.watchStates).insertOnConflictUpdate(
           WatchStatesCompanion.insert(
-            address: _normalize(entry.address),
-            positionMs: position.inMilliseconds,
-            durationMs: duration.inMilliseconds,
-            completed: Value(completed),
-            updatedAt: DateTime.now().millisecondsSinceEpoch,
+            address: state.address,
+            positionMs: state.positionMs,
+            durationMs: state.durationMs,
+            completed: Value(state.completed),
+            updatedAt: state.updatedAt,
           ),
         );
+    _memory?[state.address] = state;
     notifyListeners();
   }
 
@@ -88,15 +101,23 @@ class WatchStateStore extends ChangeNotifier {
       return;
     }
     final db = await LibraryStore.database();
+    final state = WatchState(
+      address: _normalize(entry.address),
+      positionMs: 0,
+      durationMs: 0,
+      completed: true,
+      updatedAt: DateTime.now().millisecondsSinceEpoch,
+    );
     await db.into(db.watchStates).insertOnConflictUpdate(
           WatchStatesCompanion.insert(
-            address: _normalize(entry.address),
-            positionMs: 0,
-            durationMs: 0,
-            completed: const Value(true),
-            updatedAt: DateTime.now().millisecondsSinceEpoch,
+            address: state.address,
+            positionMs: state.positionMs,
+            durationMs: state.durationMs,
+            completed: Value(state.completed),
+            updatedAt: state.updatedAt,
           ),
         );
+    _memory?[state.address] = state;
     notifyListeners();
   }
 
@@ -125,8 +146,35 @@ class WatchStateStore extends ChangeNotifier {
           );
       written++;
     }
-    if (written > 0) notifyListeners();
+    if (written > 0) {
+      // Imports are rare — drop the mirror and let the next lookup
+      // rebuild it rather than replaying the merge logic here.
+      _memory = null;
+      notifyListeners();
+    }
     return written;
+  }
+
+  /// Sync lookup for card builders: the state for [entry], or null when
+  /// never played — or while the mirror is still loading its first
+  /// snapshot (listeners are notified once it lands).
+  WatchState? cachedStateFor(MediaEntry entry) {
+    final memory = _memory;
+    if (memory == null) {
+      _warmMemory();
+      return null;
+    }
+    return memory[_normalize(entry.address)];
+  }
+
+  void _warmMemory() {
+    if (_loadingMemory) return;
+    _loadingMemory = true;
+    all().then((states) {
+      _memory = {for (final s in states) s.address: s};
+      _loadingMemory = false;
+      notifyListeners();
+    });
   }
 
   /// The stored state for [entry]'s address, or null when never played.

@@ -23,6 +23,7 @@ import 'widgets/download_badge.dart';
 import 'widgets/downloads_indicator.dart';
 import 'widgets/prefetch_dialog.dart';
 import 'widgets/tmdb_nudge.dart';
+import 'widgets/watch_progress.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -437,6 +438,7 @@ class _PosterCard extends StatelessWidget {
                           child: Icon(Icons.movie_outlined,
                               color: t.ash, size: 40),
                         ),
+                    ?entryWatchBar(t, entry),
                     ?badge,
                   ],
                 ),
@@ -516,17 +518,7 @@ class _ContinueCard extends StatelessWidget {
                               size: 40),
                         ),
                     if (progress != null && progress > 0)
-                      Align(
-                        alignment: Alignment.bottomCenter,
-                        child: SizedBox(
-                          height: 4,
-                          child: LinearProgressIndicator(
-                            value: progress,
-                            backgroundColor: Colors.black45,
-                            color: t.copper,
-                          ),
-                        ),
-                      ),
+                      watchProgressBar(t, progress),
                     ?entryDownloadBadge(t, entry),
                   ],
                 ),
