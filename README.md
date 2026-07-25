@@ -28,7 +28,7 @@ server compatibility** — Autonomi *is* the backend.
 
 ## Status
 
-**Working alpha on Android and Linux** — [v0.1.0-alpha.31](https://github.com/aautonomicc/Watch-It/releases)
+**Working alpha on Android and Linux** — [v0.1.0-alpha.32](https://github.com/aautonomicc/Watch-It/releases)
 ships a signed APK and a Linux AppImage that connect to the live Autonomi network
 with an embedded Rust client (no gateway, no sidecar) and stream by XOR address
 with byte-exact seeking, a chunk cache with keep-ahead prefetch, and persisted
@@ -47,14 +47,19 @@ connection drops, download badges on every card (check = downloaded,
 progress ring = downloading, count on show/season cards), and offline-aware
 playback — browsing always works offline, downloaded titles play locally
 with the full library experience, and stream-only titles are gated with a
-hint until the network returns. Lists can be exported (and imported) as
-plain-text files.
+hint until the network returns. Alpha.32 rounds downloads out with a season
+download-all button, a Downloads row on the home wall, queue multi-delete,
+and a top-bar download meter. Lists can be exported (and imported) as
+plain-text files; a richer `.watch-list` bundle format (metadata + posters +
+instant-play root maps) is spec-locked and next up — see
+[docs/BUNDLE-FORMAT.md](docs/BUNDLE-FORMAT.md).
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — tech stack decision and app structure
 - [docs/NAMING.md](docs/NAMING.md) — file naming convention (Plex/Jellyfin style)
 - [docs/UI-DESIGN.md](docs/UI-DESIGN.md) — screens and look-and-feel
+- [docs/BUNDLE-FORMAT.md](docs/BUNDLE-FORMAT.md) — `.watch-list` bundle spec (locked, unimplemented)
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased milestones
 
 ## License

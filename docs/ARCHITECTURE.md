@@ -66,7 +66,12 @@ A **list** is the unit of library organization. Each entry:
 - Users can hold multiple lists (e.g. "Movies", "Kids", "Docs") and add entries by
   pasting an address + name.
 - Lists are plain data → import/export as files, and (later) publish/subscribe to
-  lists stored on Autonomi itself.
+  lists stored on Autonomi itself. Two interchange formats: the shipped plain-text
+  list file, and the planned `.watch-list` **bundle** (a zip carrying the same
+  `list.txt` plus TMDB metadata, posters, optional offline-verified root data maps
+  and optional watch history) — spec locked, see
+  [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md). Import auto-detects the format by content
+  sniff; export offers both behind one button.
 - On add, the **metadata matcher** parses the file name (title/year, `SxxEyy`) and
   queries TMDB for artwork, overview, and genre/category — exactly the pipeline
   Plex/Emby/Jellyfin servers run, but on-device. Results cached in SQLite; entries
@@ -189,7 +194,10 @@ Watch-It/
 4. ~~List format~~ — **resolved (alpha.25)**: plain text, not JSON — optional
    `ListName="..."` section markers, then one `<xor-address> <file name>` per line;
    bad lines skipped and reported, 10MB file cap. Import from a local file or from
-   an Autonomi address; export (alpha.31) writes the same format per list.
+   an Autonomi address; export (alpha.31) writes the same format per list. A richer
+   `.watch-list` bundle format (zip: list + metadata + posters + optional root maps
+   + optional history) is spec-locked and next up — see
+   [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md).
 5. ~~Streaming seek~~ — **resolved**: range/offset fetch verified byte-exact against
    the live network; with the chunk cache, keep-ahead prefetch, and persisted root
    maps, seek and warm starts are fast. Remaining UX cost is the cold first
