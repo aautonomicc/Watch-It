@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:file_selector_platform_interface/file_selector_platform_interface.dart';
@@ -9,7 +11,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/main.dart';
+import 'package:watchit/services/bundle.dart';
 import 'package:watchit/services/library_store.dart';
+import 'package:watchit/services/metadata.dart';
 
 const _addrA =
     '66cacd06ae5b02aeb0b4b8a463885bd7ec392b1b4291c1eda75253e831c1bcbb';
@@ -122,6 +126,57 @@ void main() {
           hasLength(2));
       expect(lists.firstWhere((l) => l.title == 'Movies Pack').entries,
           hasLength(1));
+    });
+
+    testWidgets('a .watch-list bundle imports through the same button — '
+        'sniffed by zip magic, extras seeded, library.json applied to the '
+        'created list only', (tester) async {
+      final archive = Archive();
+      archive.addFile(ArchiveFile.string(
+          'list.txt',
+          'ListName="Bundle Pack"\n'
+          '$_addrA Bundled Movie (2024).mkv\n'));
+      archive.addFile(ArchiveFile.string(
+          'metadata.json',
+          jsonEncode({
+            'version': 1,
+            'attribution': kTmdbAttributionNotice,
+            'entries': [
+              {
+                'lookupKey':
+                    parseMediaName('Bundled Movie (2024).mkv').lookupKey,
+                'title': 'Bundled Movie',
+                'year': 2024,
+                'mediaType': 'movie',
+                'tmdbId': 7,
+              },
+            ],
+          })));
+      archive.addFile(ArchiveFile.string(
+          'library.json',
+          jsonEncode({
+            'version': 1,
+            'lists': [
+              {'title': 'Bundle Pack', 'enabled': false, 'position': 0},
+            ],
+          })));
+      FileSelectorPlatform.instance = _FakeFileSelector(XFile.fromData(
+        Uint8List.fromList(ZipEncoder().encode(archive)),
+        // Extension is deliberately wrong: routing must use the zip magic.
+        name: 'bundle.txt',
+      ));
+      await openMediaLists(tester);
+      await importLocal(tester);
+
+      expect(find.textContaining('Imported "Bundle Pack"'), findsOneWidget);
+      final imported = (await LibraryStore.load())
+          .firstWhere((l) => l.title == 'Bundle Pack');
+      expect(imported.entries.single.address, _addrA);
+      expect(imported.enabled, isFalse); // library.json applied
+
+      final db = await LibraryStore.database();
+      final rows = await db.select(db.metadataCache).get();
+      expect(rows.single.title, 'Bundled Movie'); // metadata seeded
     });
   });
 

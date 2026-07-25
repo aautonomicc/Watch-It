@@ -174,9 +174,17 @@ String serializeMediaList(MediaList list) {
 /// early instead of pulling a movie into memory.
 const int kMaxListFileBytes = 10 * 1024 * 1024;
 
-/// Download a list file from Autonomi via the embedded client and return
-/// its text. [base] overrides the embedded server URL (tests).
-Future<String> fetchListFromNetwork(String address, {String? base}) async {
+/// Download a list (or bundle) file from Autonomi via the embedded
+/// client and return its raw bytes — the caller sniffs zip-vs-text and
+/// applies the tighter plain-text cap. [maxBytes] bounds the download
+/// ([kMaxListFileBytes] for plain lists, the bundle cap for imports that
+/// may be a `.watch-list`). [base] overrides the embedded server URL
+/// (tests).
+Future<Uint8List> fetchBytesFromNetwork(
+  String address, {
+  String? base,
+  int maxBytes = kMaxListFileBytes,
+}) async {
   base ??= EmbeddedClient.baseUrl();
   if (base == null) {
     throw const ListImportException(
@@ -195,29 +203,35 @@ Future<String> fetchListFromNetwork(String address, {String? base}) async {
       throw ListImportException(
           'Download failed (HTTP ${res.statusCode}).');
     }
-    if ((res.contentLength ?? 0) > kMaxListFileBytes) {
+    if ((res.contentLength ?? 0) > maxBytes) {
       throw const ListImportException(
           'That file is too large to be a media list.');
     }
     final bytes = BytesBuilder(copy: false);
     await for (final chunk in res.stream) {
       bytes.add(chunk);
-      if (bytes.length > kMaxListFileBytes) {
+      if (bytes.length > maxBytes) {
         throw const ListImportException(
             'That file is too large to be a media list.');
       }
     }
-    try {
-      return utf8.decode(bytes.takeBytes());
-    } on FormatException {
-      throw const ListImportException(
-          'That file is not a text file.');
-    }
+    return bytes.takeBytes();
   } on ListImportException {
     rethrow;
   } catch (e) {
     throw ListImportException('Download failed: $e');
   } finally {
     client.close();
+  }
+}
+
+/// Download a plain-text list file and return its text (pre-bundle API,
+/// still used by tests and anything that wants text only).
+Future<String> fetchListFromNetwork(String address, {String? base}) async {
+  final bytes = await fetchBytesFromNetwork(address, base: base);
+  try {
+    return utf8.decode(bytes);
+  } on FormatException {
+    throw const ListImportException('That file is not a text file.');
   }
 }

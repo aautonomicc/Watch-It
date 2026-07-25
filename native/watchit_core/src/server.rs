@@ -4,8 +4,8 @@
 //! with byte-range support (`Accept-Ranges: bytes`), which is what libmpv
 //! needs for seeking. `GET /health` reports client connection state.
 
-use axum::body::Body;
-use axum::extract::Path;
+use axum::body::{Body, Bytes};
+use axum::extract::{DefaultBodyLimit, Path};
 use axum::http::{header, HeaderMap, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -13,7 +13,14 @@ use axum::Router;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt as _;
 
+use ant_core::data::DataMap;
+
 use crate::engine::Engine;
+
+/// Serialized root maps are ~100 bytes per content chunk, so even a
+/// terabyte-scale file stays far under this — anything bigger is not a
+/// data map (zip-bomb guard on the bundle import path).
+const MAX_ROOTMAP_BYTES: usize = 32 * 1024 * 1024;
 
 pub fn router(engine: &'static Engine) -> Router {
     Router::new()
@@ -21,6 +28,14 @@ pub fn router(engine: &'static Engine) -> Router {
         .route(
             "/resolve/{addr}",
             get(move |path: Path<String>| resolve_map(engine, path)),
+        )
+        .route(
+            "/rootmap/{addr}",
+            get(move |path: Path<String>| get_rootmap(engine, path))
+                .put(move |path: Path<String>, body: Bytes| {
+                    put_rootmap(engine, path, body)
+                })
+                .layer(DefaultBodyLimit::max(MAX_ROOTMAP_BYTES)),
         )
         .route(
             "/xor/{addr}",
@@ -75,6 +90,59 @@ async fn resolve_map(engine: &'static Engine, Path(addr_hex): Path<String>) -> R
         Err(e) => {
             tracing::warn!("resolve {addr_hex}: {e}");
             (StatusCode::BAD_GATEWAY, e).into_response()
+        }
+    }
+}
+
+/// Export side of bundle root maps: the locally stored root map for an
+/// address in `DataMap::to_bytes` form, 404 when it was never resolved
+/// (the exporter then skips it — never a network resolve from here).
+async fn get_rootmap(engine: &'static Engine, Path(addr_hex): Path<String>) -> Response {
+    let mut addr = [0u8; 32];
+    if hex::decode_to_slice(addr_hex.trim(), &mut addr).is_err() {
+        return (StatusCode::BAD_REQUEST, "address must be 64 hex chars").into_response();
+    }
+    match engine.stored_root_map(&addr) {
+        Some(map) => match map.to_bytes() {
+            Ok(bytes) => (
+                [(header::CONTENT_TYPE, "application/octet-stream")],
+                bytes,
+            )
+                .into_response(),
+            Err(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("serialize failed: {e}"))
+                    .into_response()
+            }
+        },
+        None => (StatusCode::NOT_FOUND, "no stored root map").into_response(),
+    }
+}
+
+/// Import side of bundle root maps: verify the supplied map offline
+/// (verify-then-store, see `verify::verify_root_map`) and persist it.
+/// 422 on any verification failure so the importer falls back to a
+/// normal network resolve for that entry.
+async fn put_rootmap(
+    engine: &'static Engine,
+    Path(addr_hex): Path<String>,
+    body: Bytes,
+) -> Response {
+    let mut addr = [0u8; 32];
+    if hex::decode_to_slice(addr_hex.trim(), &mut addr).is_err() {
+        return (StatusCode::BAD_REQUEST, "address must be 64 hex chars").into_response();
+    }
+    let map = match DataMap::from_bytes(&body) {
+        Ok(m) => m,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("not a data map: {e}"))
+                .into_response()
+        }
+    };
+    match engine.import_root_map(addr, map) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            tracing::warn!("rootmap import rejected for {addr_hex}: {e}");
+            (StatusCode::UNPROCESSABLE_ENTITY, e).into_response()
         }
     }
 }
@@ -176,6 +244,142 @@ fn parse_range(value: &str, size: u64) -> Option<(u64, u64)> {
         return None;
     }
     Some((start, end))
+}
+
+#[cfg(test)]
+mod rootmap_tests {
+    use super::*;
+    use http_body_util::BodyExt;
+    use std::collections::HashMap;
+    use tower::ServiceExt;
+    use xor_name::XorName;
+
+    /// Offline upload-equivalent (same as verify.rs tests): encrypt
+    /// deterministic content, derive the public address, resolve the root.
+    fn upload() -> ([u8; 32], DataMap) {
+        let mut v = Vec::with_capacity(10 * 1024);
+        let mut x = 0x9E3779B9u64;
+        while v.len() < 10 * 1024 {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            v.extend_from_slice(&x.to_le_bytes());
+        }
+        let (shrunk, chunks) = self_encryption::encrypt(v.into()).unwrap();
+        let addr = *blake3::hash(&rmp_serde::to_vec(&shrunk).unwrap()).as_bytes();
+        let by_name: HashMap<XorName, bytes::Bytes> = chunks
+            .iter()
+            .map(|c| (self_encryption::hash::content_hash(&c.content), c.content.clone()))
+            .collect();
+        let mut fetch = |name: XorName| {
+            by_name
+                .get(&name)
+                .cloned()
+                .ok_or_else(|| self_encryption::Error::Generic("missing chunk".into()))
+        };
+        let root = self_encryption::get_root_data_map(shrunk, &mut fetch).unwrap();
+        (addr, root)
+    }
+
+    fn test_router(name: &str) -> Router {
+        let dir = std::env::temp_dir().join(format!(
+            "wi-rootmap-api-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        // Engine::new never touches the network; the client connects only
+        // when a request needs it, which these endpoints never do.
+        let engine: &'static Engine =
+            Box::leak(Box::new(Engine::new(None, dir.to_str())));
+        router(engine)
+    }
+
+    async fn send(
+        app: &Router,
+        method: &str,
+        uri: &str,
+        body: Vec<u8>,
+    ) -> (StatusCode, Vec<u8>) {
+        let res = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = res.status();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        (status, bytes.to_vec())
+    }
+
+    #[tokio::test]
+    async fn put_verifies_then_get_round_trips() {
+        let app = test_router("roundtrip");
+        let (addr, root) = upload();
+        let hexaddr = hex::encode(addr);
+
+        // Unknown map: 404 before import.
+        let (status, _) = send(&app, "GET", &format!("/rootmap/{hexaddr}"), vec![]).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (status, _) = send(
+            &app,
+            "PUT",
+            &format!("/rootmap/{hexaddr}"),
+            root.to_bytes().unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        let (status, body) =
+            send(&app, "GET", &format!("/rootmap/{hexaddr}"), vec![]).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(DataMap::from_bytes(&body).unwrap(), root);
+    }
+
+    #[tokio::test]
+    async fn tampered_put_rejected() {
+        let app = test_router("tampered");
+        let (addr, root) = upload();
+        let mut infos = root.infos().to_vec();
+        infos[0].src_size += 1;
+        let tampered = DataMap::new(infos);
+        let (status, _) = send(
+            &app,
+            "PUT",
+            &format!("/rootmap/{}", hex::encode(addr)),
+            tampered.to_bytes().unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        // Nothing stored.
+        let (status, _) = send(
+            &app,
+            "GET",
+            &format!("/rootmap/{}", hex::encode(addr)),
+            vec![],
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn garbage_body_and_address_rejected() {
+        let app = test_router("garbage");
+        let (status, _) =
+            send(&app, "PUT", "/rootmap/nothex", b"junk".to_vec()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = send(
+            &app,
+            "PUT",
+            &format!("/rootmap/{}", hex::encode([1u8; 32])),
+            b"junk".to_vec(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
 }
 
 #[cfg(test)]

@@ -6,6 +6,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
+import '../services/bundle.dart' show kTmdbAttributionNotice;
 import '../services/download_manager.dart';
 import '../services/library_store.dart';
 import '../services/embedded_client.dart';
@@ -436,6 +437,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     'your library is a set of lists you hold on this '
                     'device — no server, no accounts, no telemetry.',
                     style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                ),
+                // TMDB terms require this attribution wherever their data
+                // or images appear (metadata matching + bundle exports).
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Image.asset(
+                        'assets/tmdb_logo.png',
+                        height: 13,
+                        semanticLabel: 'TMDB logo',
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        kTmdbAttributionNotice,
+                        style: TextStyle(fontSize: 11.5, color: t.ash),
+                      ),
+                    ],
                   ),
                 ),
                 ListTile(

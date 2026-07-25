@@ -242,6 +242,31 @@ impl Engine {
         Ok(root)
     }
 
+    /// Root map already held locally (memory or disk) — never touches the
+    /// network. The bundle-export path uses this so exporting a list can
+    /// tell "resolved" from "would need a 20-30s network resolve".
+    pub fn stored_root_map(&self, addr: &[u8; 32]) -> Option<DataMap> {
+        if let Some(dm) = self.root_maps.lock().unwrap().get(addr) {
+            return Some(dm.clone());
+        }
+        let dm = self.map_store.as_ref().and_then(|s| s.get(addr))?;
+        self.root_maps.lock().unwrap().insert(*addr, dm.clone());
+        Some(dm)
+    }
+
+    /// Verify an externally supplied root map (bundle import) fully
+    /// offline and store it in the memory + disk caches. A map that fails
+    /// verification is rejected so a tampered bundle cannot poison the
+    /// cache — the caller falls back to a normal network resolve.
+    pub fn import_root_map(&self, addr: [u8; 32], root: DataMap) -> Result<(), String> {
+        crate::verify::verify_root_map(&addr, &root)?;
+        self.root_maps.lock().unwrap().insert(addr, root.clone());
+        if let Some(store) = &self.map_store {
+            store.put(&addr, &root);
+        }
+        Ok(())
+    }
+
     /// Stream the whole file as decrypted bytes (constant memory).
     pub fn stream_full(
         &'static self,

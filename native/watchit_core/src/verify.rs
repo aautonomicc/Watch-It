@@ -1,0 +1,112 @@
+//! Offline verification of externally supplied root data maps.
+//!
+//! A `.watch-list` bundle can carry pre-resolved root maps so imported
+//! titles play instantly, but a tampered map must never poison the
+//! cache. Verification reverses the upload's address derivation without
+//! touching the network: re-shrink the root map (convergent encryption,
+//! so the wrapper chunks are reproduced bit-for-bit), serialize the
+//! outermost map exactly like ant-core's `data_map_store`
+//! (`rmp_serde::to_vec`), hash it (`blake3`, ant-protocol's
+//! `compute_address`), and require the result to equal the claimed XOR
+//! address. Costs ~ms per map.
+
+use ant_core::data::DataMap;
+
+/// Check that `root` really is the resolved root data map published at
+/// `addr`. Any failure (shrink/serialize error or hash mismatch) means
+/// the map must be discarded.
+pub fn verify_root_map(addr: &[u8; 32], root: &DataMap) -> Result<(), String> {
+    if root.is_child() {
+        return Err("map is a shrunk child map, not a root map".to_string());
+    }
+    // No-op store: re-shrinking only needs the resulting outermost map,
+    // not the wrapper chunks themselves.
+    let (shrunk, _) = self_encryption::shrink_data_map(root.clone(), |_, _| Ok(()))
+        .map_err(|e| format!("re-shrink failed: {e}"))?;
+    let serialized = rmp_serde::to_vec(&shrunk)
+        .map_err(|e| format!("serialize failed: {e}"))?;
+    if blake3::hash(&serialized).as_bytes() == addr {
+        Ok(())
+    } else {
+        Err("content hash does not match the address".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+    use std::collections::HashMap;
+    use xor_name::XorName;
+
+    /// Deterministic pseudo-random content (no rand dependency).
+    fn content(len: usize) -> Bytes {
+        let mut v = Vec::with_capacity(len);
+        let mut x = 0x2545F491u64;
+        while v.len() < len {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            v.extend_from_slice(&x.to_le_bytes());
+        }
+        v.truncate(len);
+        Bytes::from(v)
+    }
+
+    /// Upload-equivalent: encrypt, derive the public address the way
+    /// ant-core's public upload does, then resolve the root map back
+    /// from the encrypted chunks — all offline.
+    fn upload(len: usize) -> ([u8; 32], DataMap) {
+        let (shrunk, chunks) = self_encryption::encrypt(content(len)).unwrap();
+        let addr = *blake3::hash(&rmp_serde::to_vec(&shrunk).unwrap()).as_bytes();
+        let by_name: HashMap<XorName, Bytes> = chunks
+            .iter()
+            .map(|c| (self_encryption::hash::content_hash(&c.content), c.content.clone()))
+            .collect();
+        let mut fetch = |name: XorName| {
+            by_name
+                .get(&name)
+                .cloned()
+                .ok_or_else(|| self_encryption::Error::Generic("missing chunk".into()))
+        };
+        let root = self_encryption::get_root_data_map(shrunk, &mut fetch).unwrap();
+        (addr, root)
+    }
+
+    #[test]
+    fn small_file_roundtrip() {
+        // 3 chunks — the map is its own root, no shrink round.
+        let (addr, root) = upload(10 * 1024);
+        assert!(!root.is_child());
+        verify_root_map(&addr, &root).unwrap();
+    }
+
+    #[test]
+    fn large_file_roundtrip() {
+        // >3 chunks — the published map is a shrunk child, so verification
+        // exercises the real re-shrink path.
+        let (addr, root) = upload(14 * 1024 * 1024);
+        assert!(!root.is_child());
+        verify_root_map(&addr, &root).unwrap();
+    }
+
+    #[test]
+    fn tampered_map_rejected() {
+        let (addr, root) = upload(10 * 1024);
+        let mut infos = root.infos().to_vec();
+        infos[0].src_size += 1;
+        let tampered = DataMap::new(infos);
+        assert!(verify_root_map(&addr, &tampered).is_err());
+    }
+
+    #[test]
+    fn wrong_address_rejected() {
+        let (_, root) = upload(10 * 1024);
+        assert!(verify_root_map(&[0u8; 32], &root).is_err());
+    }
+
+    #[test]
+    fn child_map_rejected() {
+        let (addr, root) = upload(14 * 1024 * 1024);
+        let child = DataMap::with_child(root.infos().to_vec(), 1);
+        assert!(verify_root_map(&addr, &child).is_err());
+    }
+}
