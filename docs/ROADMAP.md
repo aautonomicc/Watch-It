@@ -110,30 +110,30 @@ bandwidth/concurrency settings. Known upstream limitation: ant-core's
 entirely, so total-network-loss detection (airplane mode) is unreliable —
 VPN-cut style losses are detected fine.
 
-## Next up — `.watch-list` bundles (spec locked 2026-07-25)
+## `.watch-list` bundles (spec locked 2026-07-25, implemented 2026-07-25, unreleased)
 
 Share-ready list bundles: a zip carrying the plain-text list plus TMDB
 metadata, posters, optional root data maps (instant play on import, verified
-offline), and optional watch history (device migration). All design decisions
-are closed — full spec in [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md). Est ~2 days,
-shippable in slices:
+offline), and optional watch history (device migration). Full spec in
+[BUNDLE-FORMAT.md](BUNDLE-FORMAT.md):
 
-- [ ] TMDB attribution (owed today, independent of bundles): standard notice +
+- [x] TMDB attribution (owed today, independent of bundles): standard notice +
       logo in Settings → About/Metadata
-- [ ] Base bundle (~1 day): zip read/write (`archive` dep), single Import
+- [x] Base bundle: zip read/write (`archive` dep), single Import
       button with zip-magic sniff (plain `.txt` vs bundle, extension
       irrelevant), single Export button with two-step dialog (List only /
       Full bundle → checkboxes), cancellable pre-resolve pass on export
       (Cancel keeps the partial bundle), caps 10MB txt / 200MB bundle with
       per-member decompressed sanity limits, mobile SAF save for bundles,
-      round-trip test into a clean keyless profile
-- [ ] Library + history (~0.5 day): whole-library export as one bundle,
+      round-trip verified into a clean keyless profile
+- [x] Library + history: whole-library export as one bundle,
       `library.json` home-state restore (applies only to lists the import
       creates), `history.json` merge with newer-updatedAt-wins, history
       checkbox default OFF
-- [ ] Root maps (~0.5 day): `GET`/`PUT /rootmap/{addr}` endpoints in the
+- [x] Root maps: `GET`/`PUT /rootmap/{addr}` endpoints in the
       embedded Rust server, offline shrink/serialize/hash verification on
-      import, root-maps checkbox default ON
+      import (garbage → 400, wrong address → 422), root-maps checkbox
+      default ON
 
 ## Phase 3 — All desktop platforms
 - [ ] Windows + macOS builds and packaging (MSIX, .dmg)

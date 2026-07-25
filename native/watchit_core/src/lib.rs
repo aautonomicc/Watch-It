@@ -9,6 +9,7 @@ pub mod cache;
 pub mod engine;
 pub mod mapstore;
 pub mod server;
+pub mod verify;
 
 use std::ffi::CStr;
 use std::os::raw::c_char;

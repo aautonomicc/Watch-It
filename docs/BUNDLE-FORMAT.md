@@ -1,9 +1,11 @@
 # .watch-list bundle format — spec v1
 
-**Status: locked 2026-07-25, not yet implemented.** All six open design decisions
-were closed with the user; this document is the implementation reference.
-Estimated effort ~2 days, shippable in slices (metadata-only bundle first, then
-library/history, then root maps).
+**Status: locked 2026-07-25, implemented 2026-07-25 (unreleased).** All six
+open design decisions were closed with the user; this document is the
+implementation reference. Implementation: `app/lib/services/bundle.dart`
+(build/parse/seed), the import/export flows in
+`app/lib/screens/media_lists_screen.dart`, and offline map verification in
+`native/watchit_core/src/verify.rs` + the `/rootmap` endpoints in `server.rs`.
 
 ## What it is
 

@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/screens/settings_screen.dart';
+import 'package:watchit/services/bundle.dart' show kTmdbAttributionNotice;
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/storage_usage.dart';
 import 'package:watchit/theme/tokens.dart';
@@ -55,6 +56,19 @@ void main() {
       found = find.textContaining('2 KB').evaluate().isNotEmpty;
     }
     expect(find.textContaining('2 KB'), findsOneWidget);
+  });
+
+  testWidgets('About shows the TMDB attribution notice and logo',
+      (tester) async {
+    await pumpSettings(tester);
+    expect(find.text(kTmdbAttributionNotice), findsOneWidget);
+    expect(
+      find.byWidgetPredicate((w) =>
+          w is Image &&
+          w.image is AssetImage &&
+          (w.image as AssetImage).assetName == 'assets/tmdb_logo.png'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('Clear all data needs two confirmations and can be backed '

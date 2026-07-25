@@ -100,6 +100,35 @@ class WatchStateStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Merge externally sourced states (a bundle's history.json):
+  /// newer-updatedAt-wins per address, so an import never regresses local
+  /// progress. Returns how many rows were written.
+  Future<int> mergeAll(Iterable<WatchState> states) async {
+    final db = await LibraryStore.database();
+    var written = 0;
+    for (final state in states) {
+      final address = _normalize(state.address);
+      final existing = await (db.select(db.watchStates)
+            ..where((t) => t.address.equals(address)))
+          .getSingleOrNull();
+      if (existing != null && existing.updatedAt >= state.updatedAt) {
+        continue;
+      }
+      await db.into(db.watchStates).insertOnConflictUpdate(
+            WatchStatesCompanion.insert(
+              address: address,
+              positionMs: state.positionMs,
+              durationMs: state.durationMs,
+              completed: Value(state.completed),
+              updatedAt: state.updatedAt,
+            ),
+          );
+      written++;
+    }
+    if (written > 0) notifyListeners();
+    return written;
+  }
+
   /// The stored state for [entry]'s address, or null when never played.
   Future<WatchState?> stateFor(MediaEntry entry) async {
     final db = await LibraryStore.database();
