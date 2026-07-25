@@ -399,6 +399,66 @@ void main() {
           .stateFor(const MediaEntry(name: 'b', address: _addrB));
       expect(b!.completed, isTrue);
     });
+
+    test('importHistory: false skips the merge entirely', () async {
+      final bundle = ParsedBundle(
+        listText: '',
+        metadataRows: {
+          _lookupKey('The Movie (2024).mkv'): {
+            'lookupKey': _lookupKey('The Movie (2024).mkv'),
+            'title': 'The Movie',
+          },
+        },
+        posters: const {},
+        rootMaps: const {},
+        libraryPrefs: const {},
+        history: {
+          _addrA: const WatchState(
+            address: _addrA,
+            positionMs: 30000,
+            durationMs: 120000,
+            completed: false,
+            updatedAt: 100,
+          ),
+        },
+      );
+      final summary = await seedBundle(bundle,
+          importHistory: false, postersDirProvider: postersDirProvider);
+      expect(summary.historyMerged, 0);
+      final a = await WatchStateStore.instance
+          .stateFor(const MediaEntry(name: 'a', address: _addrA));
+      expect(a, isNull);
+      expect(summary.metadataSeeded, 1); // other members still seed
+    });
+
+    test('importRootMaps: false never touches the embedded client',
+        () async {
+      var requests = 0;
+      final server = await HttpServer.bind('127.0.0.1', 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((req) async {
+        requests++;
+        req.response.statusCode = 204;
+        await req.response.close();
+      });
+      final bundle = ParsedBundle(
+        listText: '',
+        metadataRows: const {},
+        posters: const {},
+        rootMaps: {
+          _addrA: Uint8List.fromList([1, 2, 3]),
+        },
+        libraryPrefs: const {},
+        history: const {},
+      );
+      final summary = await seedBundle(bundle,
+          base: 'http://127.0.0.1:${server.port}',
+          importRootMaps: false,
+          postersDirProvider: postersDirProvider);
+      expect(summary.mapsStored, 0);
+      expect(summary.mapsRejected, 0);
+      expect(requests, 0);
+    });
   });
 
   group('applyLibraryPrefs', () {

@@ -168,7 +168,19 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         _showError(e.message);
         return;
       }
-      await _finishImport(bundle.listText, bundle: bundle);
+      var importRootMaps = true;
+      var importHistory = true;
+      if (bundle.rootMaps.isNotEmpty || bundle.history.isNotEmpty) {
+        if (!mounted) return;
+        final choice = await _promptBundleImportOptions(bundle);
+        if (choice == null) return; // whole import cancelled
+        importRootMaps = choice.rootMaps;
+        importHistory = choice.history;
+      }
+      await _finishImport(bundle.listText,
+          bundle: bundle,
+          importRootMaps: importRootMaps,
+          importHistory: importHistory);
       return;
     }
     if (bytes.length > kMaxListFileBytes) {
@@ -185,7 +197,87 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     await _finishImport(content);
   }
 
-  Future<void> _finishImport(String content, {ParsedBundle? bundle}) async {
+  /// A bundle can carry the exporter's watch history and resolved data
+  /// maps. History is someone else's viewing state and maps prime the
+  /// local store, so neither is applied silently — this dialog asks
+  /// which to take, showing a row only for what the bundle actually
+  /// contains. Returns null when the user cancels the whole import.
+  Future<({bool rootMaps, bool history})?> _promptBundleImportOptions(
+      ParsedBundle bundle) async {
+    final t = WiTokens.of(context);
+    // Default ON: the exporter included them deliberately, and this
+    // dialog is the explicit chance to opt out.
+    var rootMaps = true;
+    var history = true;
+    final maps = bundle.rootMaps.length;
+    final entries = bundle.history.length;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: t.ink2,
+          title: Text('This bundle also contains',
+              style: TextStyle(color: t.bone, fontSize: 16)),
+          contentPadding: const EdgeInsets.fromLTRB(8, 16, 8, 0),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (bundle.rootMaps.isNotEmpty)
+                CheckboxListTile(
+                  value: rootMaps,
+                  activeColor: t.copper,
+                  checkColor: t.ink,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  onChanged: (v) =>
+                      setDialogState(() => rootMaps = v ?? true),
+                  title: Text(
+                      'Data maps ($maps ${maps == 1 ? 'title' : 'titles'})',
+                      style: TextStyle(color: t.bone, fontSize: 14)),
+                  subtitle: Text(
+                      'Instant first play — skipping just means a one-time '
+                      'network resolve when a title first plays',
+                      style: TextStyle(color: t.ash, fontSize: 11.5)),
+                ),
+              if (bundle.history.isNotEmpty)
+                CheckboxListTile(
+                  value: history,
+                  activeColor: t.copper,
+                  checkColor: t.ink,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  onChanged: (v) =>
+                      setDialogState(() => history = v ?? true),
+                  title: Text(
+                      'Watch history ($entries '
+                      '${entries == 1 ? 'entry' : 'entries'})',
+                      style: TextStyle(color: t.bone, fontSize: 14)),
+                  subtitle: Text(
+                      "The exporter's resume points and watched marks — "
+                      'merged only where newer than yours',
+                      style: TextStyle(color: t.ash, fontSize: 11.5)),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text('Cancel', style: TextStyle(color: t.ash)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text('Import', style: TextStyle(color: t.copper)),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (go != true) return null;
+    return (rootMaps: rootMaps, history: history);
+  }
+
+  Future<void> _finishImport(String content,
+      {ParsedBundle? bundle,
+      bool importRootMaps = true,
+      bool importHistory = true}) async {
     final ParsedMediaListFile parsed;
     try {
       parsed = parseMediaListFile(content);
@@ -291,7 +383,10 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     // embedded client's offline verification and resolve over the
     // network later instead.
     if (bundle.hasSeedableExtras) {
-      final seeded = await seedBundle(bundle, base: widget.prefetchBase);
+      final seeded = await seedBundle(bundle,
+          base: widget.prefetchBase,
+          importRootMaps: importRootMaps,
+          importHistory: importHistory);
       final parts = [
         if (seeded.metadataSeeded > 0)
           '${seeded.metadataSeeded} metadata '
@@ -313,8 +408,10 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       MetadataService.instance.notifyExternalSeed();
     }
     // Only offer the data-map prefetch for entries the bundle did not
-    // already cover.
-    final covered = bundle.rootMaps.keys.toSet();
+    // already cover (declined maps were never stored, so nothing is
+    // covered then).
+    final covered =
+        importRootMaps ? bundle.rootMaps.keys.toSet() : <String>{};
     await _offerPrefetch([
       for (final e in importedEntries)
         if (!covered

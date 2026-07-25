@@ -470,10 +470,14 @@ List<MediaList> applyLibraryPrefs(
 /// that don't exist locally), history merges newer-updatedAt-wins, and
 /// root maps go through the embedded client's verify-then-store PUT
 /// (a tampered map is rejected there and simply resolves over the
-/// network later).
+/// network later). [importRootMaps]/[importHistory] come from the
+/// import-side options dialog — a declined member is skipped entirely,
+/// as if the bundle never carried it.
 Future<BundleSeedSummary> seedBundle(
   ParsedBundle bundle, {
   String? base,
+  bool importRootMaps = true,
+  bool importHistory = true,
   Future<Directory> Function()? postersDirProvider,
 }) async {
   final summary = BundleSeedSummary();
@@ -538,7 +542,7 @@ Future<BundleSeedSummary> seedBundle(
 
   // Root maps: verified offline (in Rust) before storing.
   base ??= EmbeddedClient.baseUrl();
-  if (bundle.rootMaps.isNotEmpty && base != null) {
+  if (importRootMaps && bundle.rootMaps.isNotEmpty && base != null) {
     final client = HttpClient();
     try {
       for (final entry in bundle.rootMaps.entries) {
@@ -563,7 +567,7 @@ Future<BundleSeedSummary> seedBundle(
   }
 
   // Watch history: newer-updatedAt-wins, never regresses local progress.
-  if (bundle.history.isNotEmpty) {
+  if (importHistory && bundle.history.isNotEmpty) {
     summary.historyMerged =
         await WatchStateStore.instance.mergeAll(bundle.history.values);
   }
