@@ -24,29 +24,21 @@ class AppSettings {
 
   static const _tmdbKeyKey = 'tmdb_api_key_v1';
 
-  /// Build-time default TMDB credential
-  /// (`flutter build --dart-define=TMDB_API_KEY=…`); release builds bundle
-  /// one so metadata works out of the box, and a key entered in Settings
-  /// overrides it. Accepts either a v3 API key or a v4 Read Access Token.
-  static const bundledTmdbApiKey = String.fromEnvironment('TMDB_API_KEY');
-
-  /// The user's TMDB credential, falling back to [bundledTmdbApiKey].
-  /// Empty string = metadata matching disabled.
+  /// The user's TMDB credential, entered in Settings → Metadata (either a
+  /// v3 API key or a v4 Read Access Token). Empty string = metadata
+  /// matching disabled. Releases ship no key by design — imported bundles
+  /// carry metadata and posters, so casual users never need one.
   static Future<String> tmdbApiKey() async {
     final prefs = await SharedPreferences.getInstance();
-    final key = prefs.getString(_tmdbKeyKey)?.trim() ?? '';
-    return key.isNotEmpty ? key : bundledTmdbApiKey;
+    return prefs.getString(_tmdbKeyKey)?.trim() ?? '';
   }
 
   /// Where the credential returned by [tmdbApiKey] comes from. The
-  /// settings UI shows this instead of the key itself, so the bundled
-  /// key can't be copied out of the app.
+  /// settings UI shows this instead of the key itself, so the key is
+  /// never displayed once entered.
   static Future<TmdbKeySource> tmdbKeySource() async {
-    final prefs = await SharedPreferences.getInstance();
-    final key = prefs.getString(_tmdbKeyKey)?.trim() ?? '';
-    if (key.isNotEmpty) return TmdbKeySource.user;
-    if (bundledTmdbApiKey.isNotEmpty) return TmdbKeySource.bundled;
-    return TmdbKeySource.none;
+    final key = await tmdbApiKey();
+    return key.isNotEmpty ? TmdbKeySource.user : TmdbKeySource.none;
   }
 
   static Future<void> setTmdbApiKey(String key) async {
@@ -57,6 +49,20 @@ class AppSettings {
     } else {
       await prefs.setString(_tmdbKeyKey, trimmed);
     }
+  }
+
+  static const _tmdbNudgeDismissedKey = 'tmdb_nudge_dismissed_v1';
+
+  /// Whether the one-time keyless-metadata nudge on the home screen has
+  /// been dismissed. Never reset — the Settings tile remains the way in.
+  static Future<bool> tmdbNudgeDismissed() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_tmdbNudgeDismissedKey) ?? false;
+  }
+
+  static Future<void> setTmdbNudgeDismissed() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_tmdbNudgeDismissedKey, true);
   }
 
   static const _downloadDirKey = 'download_dir_v1';
@@ -101,7 +107,7 @@ class AppSettings {
 }
 
 /// Origin of the effective TMDB credential.
-enum TmdbKeySource { user, bundled, none }
+enum TmdbKeySource { user, none }
 
 /// Whether starting streamed playback pauses active downloads.
 enum PauseDownloadsOnPlay { ask, always, never }

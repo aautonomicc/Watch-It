@@ -138,6 +138,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       hint: _tmdbKeySource == TmdbKeySource.user
           ? 'New key (leave empty to remove yours)'
           : 'API key or read access token',
+      note: 'Get a free key at themoviedb.org/settings/api '
+          '(a TMDB account is free too).',
     );
     if (entered == null) return;
     // An empty save only means something when a user key exists to remove.
@@ -387,7 +389,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: Text(
                     switch (_tmdbKeySource) {
                       TmdbKeySource.user => 'Using your key',
-                      TmdbKeySource.bundled => 'Using the built-in key',
                       TmdbKeySource.none =>
                         'Not set — titles come from file names only',
                     },
@@ -401,10 +402,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: Text(
                     'Artwork, descriptions, and categories are matched from '
                     'TMDB using each entry\'s file name, then cached on this '
-                    'device. To use your own key, create a free one at '
-                    'themoviedb.org (Settings → API) and paste either the '
-                    'API key or the read access token here — it overrides '
-                    'the built-in key and is never displayed.',
+                    'device. Watch-it ships without a key: create a free one '
+                    'at themoviedb.org (Settings → API) and paste either the '
+                    'API key or the read access token here — it is never '
+                    'displayed. Imported bundles carry metadata and posters, '
+                    'so a key is only needed for titles a bundle doesn\'t '
+                    'cover.',
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
                 ),
@@ -502,12 +505,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-/// Single-field text prompt used for list titles and renames.
+/// Single-field text prompt used for list titles and renames. An
+/// optional [note] renders as small print above the field.
 Future<String?> promptForText(
   BuildContext context, {
   required String title,
   required String hint,
   String initial = '',
+  String? note,
 }) {
   final controller = TextEditingController(text: initial);
   return showDialog<String>(
@@ -517,15 +522,25 @@ Future<String?> promptForText(
       return AlertDialog(
         backgroundColor: t.ink2,
         title: Text(title, style: TextStyle(color: t.bone, fontSize: 16)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          style: TextStyle(color: t.bone),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: TextStyle(color: t.ash),
-          ),
-          onSubmitted: (v) => Navigator.of(context).pop(v),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (note != null) ...[
+              Text(note, style: TextStyle(color: t.boneDim, fontSize: 12)),
+              const SizedBox(height: 12),
+            ],
+            TextField(
+              controller: controller,
+              autofocus: true,
+              style: TextStyle(color: t.bone),
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle: TextStyle(color: t.ash),
+              ),
+              onSubmitted: (v) => Navigator.of(context).pop(v),
+            ),
+          ],
         ),
         actions: [
           TextButton(

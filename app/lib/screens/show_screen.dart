@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../models/media_list.dart';
+import '../services/connectivity.dart';
 import '../services/download_manager.dart';
 import '../services/metadata_service.dart';
 import '../services/season_grouping.dart';
@@ -20,13 +22,30 @@ class ShowScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Rebuild as TMDB matches for the episodes land in the cache and as
-    // downloads change the season tiles' badges.
+    // Rebuild as TMDB matches for the episodes land in the cache, as
+    // downloads change the season tiles' badges and the download-all
+    // button, and as connectivity flips the button's enabled state.
     return ListenableBuilder(
-      listenable: Listenable.merge(
-          [MetadataService.instance, DownloadManager.instance]),
+      listenable: Listenable.merge([
+        MetadataService.instance,
+        DownloadManager.instance,
+        ConnectivityMonitor.instance,
+      ]),
       builder: (context, _) => _build(context),
     );
+  }
+
+  /// Queue every not-yet-downloaded episode ([remaining]) for download.
+  Future<void> _downloadAll(
+      BuildContext context, List<MediaEntry> remaining) async {
+    for (final entry in remaining) {
+      await DownloadManager.instance.enqueue(entry);
+    }
+    if (!context.mounted) return;
+    final n = remaining.length;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+            n == 1 ? '1 episode added to downloads' : '$n episodes added to downloads')));
   }
 
   Widget _build(BuildContext context) {
@@ -36,6 +55,19 @@ class ShowScreen extends StatelessWidget {
     final meta = MetadataService.instance.metadataFor(
         seasons.first.episodes.first);
     final overview = meta.showOverview ?? meta.overview;
+    // Episodes across every season not fully downloaded yet — what
+    // "download show" queues (all seasons' episodes are already in
+    // memory on this screen).
+    final episodes = [for (final s in seasons) ...s.episodes];
+    final remaining = [
+      for (final e in episodes)
+        if (DownloadManager.instance.taskFor(e.address)?.status !=
+            DownloadStatus.done)
+          e,
+    ];
+    // Starting a download needs the network (same gating as SeasonScreen);
+    // browsing the show stays open.
+    final offline = ConnectivityMonitor.instance.offline;
     return Scaffold(
       appBar: AppBar(
         backgroundColor: t.ink,
@@ -86,6 +118,31 @@ class ShowScreen extends StatelessWidget {
                         fontSize: 13.5, height: 1.5, color: t.boneDim),
                   ),
                 ],
+                const SizedBox(height: 16),
+                if (remaining.isEmpty)
+                  OutlinedButton.icon(
+                    onPressed: null,
+                    style: OutlinedButton.styleFrom(
+                      disabledForegroundColor: t.copper,
+                      side: BorderSide(color: t.copper),
+                    ),
+                    icon: const Icon(Icons.download_done, size: 18),
+                    label: const Text('Show downloaded'),
+                  )
+                else
+                  OutlinedButton.icon(
+                    onPressed: offline
+                        ? null
+                        : () => _downloadAll(context, remaining),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: t.bone,
+                      side: BorderSide(color: t.ash),
+                    ),
+                    icon: const Icon(Icons.download_outlined, size: 18),
+                    label: Text(remaining.length == episodes.length
+                        ? 'Download show'
+                        : 'Download remaining (${remaining.length})'),
+                  ),
               ],
             ),
           ),

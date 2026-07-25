@@ -7,7 +7,8 @@ Rust client (`native/watchit_core`) with byte-exact seek, a chunk LRU cache with
 keep-ahead prefetch, and resolved root data maps persisted in SQLite (any title's
 map is fetched from the network at most once per device — cold ~30s, then ~7ms
 across restarts). The library is a full poster-wall experience: TMDB metadata from
-file names (key bundled in official builds since alpha.24; BYO key overrides),
+file names (bring your own free key — releases are keyless by design since
+alpha.34, and bundles carry metadata + posters so casual users need no key),
 show-level grouping on the home wall, big-artwork Show → Season → Detail pages with
 ratings, air dates, and episode screenshots, list import from file or Autonomi
 address with prefetch-on-import, and a Media Lists management page. Since
@@ -22,7 +23,10 @@ multi-select/delete-all, and a home top-bar download meter. Alpha.33 ships
 `.watch-list` bundles (lists with metadata, posters, offline-verified
 instant-play root maps, and optional watch history — see
 [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md)), TMDB attribution in Settings → About,
-and a Linux taskbar icon. The seeded
+and a Linux taskbar icon. Unreleased on main: a show-level Download All
+button (all seasons at once) and keyless releases — the shared TMDB key is
+no longer bundled; a dismissible home banner points keyless users to
+Settings → Metadata. The seeded
 default movie is an H.264 8-bit 1080p encode named per the Plex/Jellyfin
 convention — see [NAMING.md](NAMING.md).
 

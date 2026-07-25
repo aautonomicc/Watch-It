@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Release build (APK + AppImage, TMDB key bundled) for the version currently
-# in app/pubspec.yaml. Runs under systemd --user so the build survives the
+# Release build (APK + AppImage) for the version currently
+# in app/pubspec.yaml. Keyless by design since alpha.34: no TMDB key is
+# bundled — users bring their own via Settings → Metadata (the repo-root
+# .env stays for dev runs and live tests only).
+# Runs under systemd --user so the build survives the
 # session that launched it (detached builds died with their session twice).
 # Just invoke it; it re-execs itself as transient unit 'watchit-build'.
 #   follow:  tail -f /tmp/watchit-build.log
@@ -32,15 +35,12 @@ fi
 export PATH="$HOME/flutter/bin:$HOME/.cargo/bin:$PATH"
 source "$HOME/Android/env.sh"
 
-set -a; source "$REPO/.env"; set +a
-[ -n "${TMDB_API_KEY:-}" ] || { echo "FATAL: TMDB_API_KEY unset"; exit 1; }
-
 echo "=== APK build start $(date) ==="
 "$REPO/native/build-android.sh"
 cd "$REPO/app"
-flutter build apk --release --dart-define=TMDB_API_KEY="$TMDB_API_KEY"
+flutter build apk --release
 echo "=== APK done $(date) ==="
 
 echo "=== AppImage build start $(date) ==="
-"$REPO/scripts/build_appimage.sh" --dart-define=TMDB_API_KEY="$TMDB_API_KEY"
+"$REPO/scripts/build_appimage.sh"
 echo "=== ALL BUILDS DONE $(date) ==="
