@@ -1,6 +1,6 @@
 # Roadmap
 
-**Status (2026-07-25):** v0.1.0-alpha.32 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
+**Status (2026-07-25):** v0.1.0-alpha.33 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
 — signed Android APK + Linux AppImage on every release. Phases 0, 1, and 2 are
 done: both platforms stream from the live Autonomi network via the embedded
 Rust client (`native/watchit_core`) with byte-exact seek, a chunk LRU cache with
@@ -18,7 +18,11 @@ a persistent download queue with pause/resume and auto-pause on connection
 loss, download badges on all cards, offline gating (browse always, downloaded
 titles play locally, stream-only Play disabled with a hint), and per-list
 export. Alpha.32 added season download-all, a home Downloads row, queue
-multi-select/delete-all, and a home top-bar download meter. The seeded
+multi-select/delete-all, and a home top-bar download meter. Alpha.33 ships
+`.watch-list` bundles (lists with metadata, posters, offline-verified
+instant-play root maps, and optional watch history — see
+[BUNDLE-FORMAT.md](BUNDLE-FORMAT.md)), TMDB attribution in Settings → About,
+and a Linux taskbar icon. The seeded
 default movie is an H.264 8-bit 1080p encode named per the Plex/Jellyfin
 convention — see [NAMING.md](NAMING.md).
 
@@ -110,7 +114,7 @@ bandwidth/concurrency settings. Known upstream limitation: ant-core's
 entirely, so total-network-loss detection (airplane mode) is unreliable —
 VPN-cut style losses are detected fine.
 
-## `.watch-list` bundles (spec locked 2026-07-25, implemented 2026-07-25, unreleased)
+## `.watch-list` bundles (spec locked 2026-07-25, released in v0.1.0-alpha.33)
 
 Share-ready list bundles: a zip carrying the plain-text list plus TMDB
 metadata, posters, optional root data maps (instant play on import, verified

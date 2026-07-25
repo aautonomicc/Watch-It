@@ -28,7 +28,7 @@ server compatibility** — Autonomi *is* the backend.
 
 ## Status
 
-**Working alpha on Android and Linux** — [v0.1.0-alpha.32](https://github.com/aautonomicc/Watch-It/releases)
+**Working alpha on Android and Linux** — [v0.1.0-alpha.33](https://github.com/aautonomicc/Watch-It/releases)
 ships a signed APK and a Linux AppImage that connect to the live Autonomi network
 with an embedded Rust client (no gateway, no sidecar) and stream by XOR address
 with byte-exact seeking, a chunk cache with keep-ahead prefetch, and persisted
@@ -49,10 +49,12 @@ playback — browsing always works offline, downloaded titles play locally
 with the full library experience, and stream-only titles are gated with a
 hint until the network returns. Alpha.32 rounds downloads out with a season
 download-all button, a Downloads row on the home wall, queue multi-delete,
-and a top-bar download meter. Lists can be exported (and imported) as
-plain-text files; a richer `.watch-list` bundle format (metadata + posters +
-instant-play root maps) is spec-locked and next up — see
-[docs/BUNDLE-FORMAT.md](docs/BUNDLE-FORMAT.md).
+and a top-bar download meter. Alpha.33 ships `.watch-list` bundles: lists
+export as plain text or as a bundle carrying TMDB metadata, posters,
+offline-verified instant-play root maps, and optional watch history, with a
+single auto-detecting Import button — see
+[docs/BUNDLE-FORMAT.md](docs/BUNDLE-FORMAT.md). The Linux AppImage also
+gained a proper taskbar icon.
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users

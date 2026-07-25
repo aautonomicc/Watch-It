@@ -1,6 +1,7 @@
 # .watch-list bundle format — spec v1
 
-**Status: locked 2026-07-25, implemented 2026-07-25 (unreleased).** All six
+**Status: locked 2026-07-25, implemented 2026-07-25, released in
+v0.1.0-alpha.33.** All six
 open design decisions were closed with the user; this document is the
 implementation reference. Implementation: `app/lib/services/bundle.dart`
 (build/parse/seed), the import/export flows in

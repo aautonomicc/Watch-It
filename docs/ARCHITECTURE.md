@@ -196,7 +196,7 @@ Watch-It/
    bad lines skipped and reported, 10MB file cap. Import from a local file or from
    an Autonomi address; export (alpha.31) writes the same format per list. A richer
    `.watch-list` bundle format (zip: list + metadata + posters + optional root maps
-   + optional history) is spec-locked and next up — see
+   + optional history) shipped in alpha.33 — see
    [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md).
 5. ~~Streaming seek~~ — **resolved**: range/offset fetch verified byte-exact against
    the live network; with the chunk cache, keep-ahead prefetch, and persisted root
