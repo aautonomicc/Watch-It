@@ -41,6 +41,14 @@ network resolve, no history).
   zip magic (`PK`) → bundle path, otherwise plain text. The `.watch-list`
   extension is cosmetic; routing never depends on it. The same sniff applies
   to lists fetched from an Autonomi address.
+- **Personal-ish extras are opt-out at import.** A bundle carrying root maps
+  and/or watch history shows a "This bundle also contains" dialog before
+  anything is applied — one pre-checked checkbox per member actually present
+  (data maps with title count, history with entry count); Cancel aborts the
+  whole import. Declined members are skipped as if the bundle never carried
+  them (declined maps also re-enable the post-import prefetch offer for those
+  entries). Metadata and posters always seed — they are the point of the
+  bundle and gap-fill only.
 - **Seeding fills gaps only.** Existing local `metadata_cache` rows and poster
   files win; only missing ones are seeded (`fetchedAt` stamped at import).
   Keyless installs get full posters/overviews/episode names with zero TMDB

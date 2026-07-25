@@ -11,9 +11,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/main.dart';
+import 'package:watchit/models/media_list.dart';
 import 'package:watchit/services/bundle.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata.dart';
+import 'package:watchit/services/watch_state.dart';
 
 const _addrA =
     '66cacd06ae5b02aeb0b4b8a463885bd7ec392b1b4291c1eda75253e831c1bcbb';
@@ -44,6 +46,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await LibraryStore.useForTesting(
         AppDatabase.forTesting(NativeDatabase.memory()));
+    WatchStateStore.instance = WatchStateStore();
   });
 
   Future<void> openMediaLists(WidgetTester tester) async {
@@ -177,6 +180,86 @@ void main() {
       final db = await LibraryStore.database();
       final rows = await db.select(db.metadataCache).get();
       expect(rows.single.title, 'Bundled Movie'); // metadata seeded
+    });
+
+    Uint8List bundleWithHistory() {
+      final archive = Archive();
+      archive.addFile(ArchiveFile.string(
+          'list.txt',
+          'ListName="History Pack"\n'
+          '$_addrA Watched Movie (2024).mkv\n'));
+      archive.addFile(ArchiveFile.string(
+          'history.json',
+          jsonEncode({
+            'version': 1,
+            'entries': [
+              {
+                'address': _addrA,
+                'positionMs': 90000,
+                'durationMs': 120000,
+                'completed': false,
+                'updatedAt': 5000,
+              },
+            ],
+          })));
+      return Uint8List.fromList(ZipEncoder().encode(archive));
+    }
+
+    testWidgets('a bundle with watch history asks first; leaving the box '
+        'checked merges it', (tester) async {
+      FileSelectorPlatform.instance = _FakeFileSelector(
+          XFile.fromData(bundleWithHistory(), name: 'pack.watch-list'));
+      await openMediaLists(tester);
+      await importLocal(tester);
+
+      expect(find.text('This bundle also contains'), findsOneWidget);
+      expect(find.textContaining('Watch history (1 entry)'), findsOneWidget);
+      // No data maps in this bundle: no row for them.
+      expect(find.textContaining('Data maps'), findsNothing);
+      await tester.tap(find.text('Import'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Imported "History Pack"'), findsOneWidget);
+      final state = await WatchStateStore.instance
+          .stateFor(const MediaEntry(name: 'w', address: _addrA));
+      expect(state!.positionMs, 90000);
+    });
+
+    testWidgets('unchecking watch history imports the list but not the '
+        'history', (tester) async {
+      FileSelectorPlatform.instance = _FakeFileSelector(
+          XFile.fromData(bundleWithHistory(), name: 'pack.watch-list'));
+      await openMediaLists(tester);
+      await importLocal(tester);
+
+      await tester.tap(find.textContaining('Watch history (1 entry)'));
+      await tester.pump();
+      await tester.tap(find.text('Import'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Imported "History Pack"'), findsOneWidget);
+      expect(
+          await WatchStateStore.instance
+              .stateFor(const MediaEntry(name: 'w', address: _addrA)),
+          isNull);
+    });
+
+    testWidgets('cancelling the bundle-extras dialog aborts the whole '
+        'import', (tester) async {
+      FileSelectorPlatform.instance = _FakeFileSelector(
+          XFile.fromData(bundleWithHistory(), name: 'pack.watch-list'));
+      await openMediaLists(tester);
+      final before = (await LibraryStore.load()).length;
+      await importLocal(tester);
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      expect((await LibraryStore.load()).length, before);
+      expect(
+          await WatchStateStore.instance
+              .stateFor(const MediaEntry(name: 'w', address: _addrA)),
+          isNull);
     });
   });
 
