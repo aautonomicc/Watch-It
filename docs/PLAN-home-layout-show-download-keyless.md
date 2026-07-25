@@ -1,7 +1,7 @@
 # Plan: Home layout settings · Show-level Download All · Strip bundled TMDB key
 
-Status: items **2 and 3 implemented** (2026-07-25); item **1 still planned,
-not implemented**. Grounded in code as of commit c321d58.
+Status: **all three items implemented** (2026-07-25). Grounded in code as
+of commit c321d58.
 
 ---
 
