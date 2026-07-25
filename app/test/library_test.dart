@@ -708,6 +708,10 @@ void main() {
       expect(find.text('Season 1 · 2 ep'), findsOneWidget);
       expect(find.text('The Movie (2024)'), findsOneWidget);
 
+      // The keyless-nudge banner (shown here — no key, not dismissed)
+      // pushes the wall down; scroll the card into view first.
+      await tester.ensureVisible(find.text('Season 1 · 2 ep'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Season 1 · 2 ep'));
       await tester.pumpAndSettle();
 
