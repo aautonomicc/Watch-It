@@ -1,22 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Brand-spec [>] mark for the launcher icon foreground.
+    Striped popcorn-bucket mark (branding/icon.svg) for the launcher
+    icon foreground. Android 8+ launchers use THIS adaptive icon, not
+    the mipmap PNGs — keep it in sync with the canonical SVG.
 
-    Sized to match etchit's launcher icon side-by-side: same scale,
-    same path-coord system, same viewport. The two apps read as a
-    matched pair on the home screen — only the centre glyph differs
-    (chevron here, slash for etchit). Scale 2× from the source viewBox
-    (32×16) into our adaptive-icon viewport (108×108):
+    Scale 0.17× from the SVG's 512 viewBox (content box 256×240
+    centred at 256,280) into the 108×108 adaptive-icon viewport:
 
-        x' = x*2 + 22    y' = y*2 + 38
+        x' = (x - 256) * 0.17 + 54    y' = (y - 280) * 0.17 + 54
 
-    Mark bounding box: (30..78, 42..66). Max distance from centre
-    is ~27 — comfortably inside the ~33 safe-circle radius launchers
-    crop to.
+    Farthest points are the top outer corners at ~29.8 from centre —
+    inside the ~33 safe-circle radius launchers crop to.
 
-    Filled paths from the canonical brand SVG (private/fetchit-brand.html
-    § "the chevron vs. the slash"). Copper #c9732b.
-    Background (ink #0a0a0a) supplied by the adaptive-icon XML.
+    Bone #f5f2eb outer stripes, red #ef5350 centre stripe (icon-only
+    accent, outside the BRAND.md token set). Background (ink #0a0a0a)
+    supplied by the adaptive-icon XML.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -25,10 +23,15 @@
     android:viewportHeight="108">
 
     <path
-        android:fillColor="#c9732b"
-        android:pathData="
-            M 30 42 L 42 42 L 42 46 L 34 46 L 34 62 L 42 62 L 42 66 L 30 66 Z
-            M 66 42 L 78 42 L 78 66 L 66 66 L 66 62 L 74 62 L 74 46 L 66 46 Z
-            M 46 42 L 52 42 L 62 54 L 52 66 L 46 66 L 56 54 Z" />
+        android:fillColor="#f5f2eb"
+        android:pathData="M 32.24 33.6 L 40.944 33.6 L 46.656 74.4 L 41.76 74.4 Z" />
+
+    <path
+        android:fillColor="#ef5350"
+        android:pathData="M 49.648 33.6 L 58.352 33.6 L 56.448 74.4 L 51.552 74.4 Z" />
+
+    <path
+        android:fillColor="#f5f2eb"
+        android:pathData="M 67.056 33.6 L 75.76 33.6 L 66.24 74.4 L 61.344 74.4 Z" />
 
 </vector>
