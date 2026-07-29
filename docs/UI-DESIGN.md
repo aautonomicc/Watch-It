@@ -87,7 +87,7 @@ TV notes: larger base type scale (readable at 3 m), no hover-only affordances, t
 entry kept to add/import flows only (paste via network share or a shown-on-TV import
 address is preferred over typing XOR addresses with a remote).
 
-## Built so far (alpha.35)
+## Built so far (alpha.36)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,
@@ -113,6 +113,8 @@ reorder + show/hide rows), and the 8px watch-progress bar on all cards.
 Alpha.35 ships home-page library search (docs/PLAN-home-search.md) —
 search icon in the home app bar (`/` or Ctrl+F on desktop) opening a
 full-screen live search over the library, grouped Shows / Movies /
-Episodes with download/watched badges. Still to
+Episodes with download/watched badges. Alpha.36 ships the striped
+popcorn-bucket logo — launcher/taskbar icon on Android and Linux plus the
+icon + 'watch-it' lockup in the home app bar. Still to
 come from this document: filter/sort + fast-scroller on
 the grid, the full desktop keyboard map, mobile gestures, and the TV layout.
