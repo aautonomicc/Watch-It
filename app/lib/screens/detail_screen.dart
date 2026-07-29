@@ -16,6 +16,7 @@ import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
 import '../widgets/prefetch_dialog.dart' show wiMessengerKey;
+import '../widgets/watch_progress.dart';
 import 'player_screen.dart';
 
 /// Movie/episode detail: big artwork with description and rating, and
@@ -314,6 +315,11 @@ class _DetailScreenState extends State<DetailScreen> {
               meta.episodeLabel != null
                   ? Icons.live_tv_outlined
                   : Icons.movie_outlined,
+              overlay: (_state != null &&
+                      _state!.resumable &&
+                      _state!.progress > 0)
+                  ? watchProgressBar(t, _state!.progress)
+                  : null,
             ),
             info: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/main.dart';
 import 'package:watchit/models/media_list.dart';
+import 'package:watchit/screens/detail_screen.dart';
 import 'package:watchit/screens/season_screen.dart';
 import 'package:watchit/services/connectivity.dart';
 import 'package:watchit/services/download_manager.dart';
@@ -98,6 +99,30 @@ void main() {
     await WatchStateStore.instance
         .markCompleted(_movie, duration: const Duration(minutes: 100));
     await tester.pumpWidget(const WatchItApp());
+    await tester.pumpAndSettle();
+
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+  });
+
+  testWidgets('detail page: bar over the artwork for a resumable movie',
+      (tester) async {
+    await resume(_movie);
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: DetailScreen(entry: _movie),
+    ));
+    await tester.pumpAndSettle();
+
+    // No download task exists, so the only indicator is the watch bar.
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    expectBarHeights(tester);
+  });
+
+  testWidgets('detail page: no bar for an unplayed movie', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: DetailScreen(entry: _movie),
+    ));
     await tester.pumpAndSettle();
 
     expect(find.byType(LinearProgressIndicator), findsNothing);
