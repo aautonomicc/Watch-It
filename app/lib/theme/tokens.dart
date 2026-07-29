@@ -29,6 +29,10 @@ class WiTokens extends ThemeExtension<WiTokens> {
   final Color rust;
   final Color signalOk;
 
+  /// Center-stripe red of the popcorn-bucket app icon (branding/icon.svg).
+  /// Icon-only accent — fixed across themes, never used for UI chrome.
+  static const bucketRed = Color(0xFFEF5350);
+
   static const dark = WiTokens(
     ink: Color(0xFF0A0A0A),
     ink2: Color(0xFF141414),

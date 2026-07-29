@@ -15,8 +15,9 @@ The family pattern is a lowercase compound with a separator glyph
 > **`watch-it`** — mono family, 18px, weight 700, lowercase.
 
 In app chrome (the home app bar) the wordmark is locked up with the launcher
-icon's mark: **`[>] watch-it`** — the `[>]` in copper, the wordmark in bone,
-same mono/size/weight throughout.
+icon's bucket mark: the three tapered popcorn-bucket stripes (bone / red /
+bone, drawn by `widgets/brand_mark.dart`) followed by **`watch-it`** in bone —
+mono, 18px, weight 700.
 
 Tagline slot in the family: *etch it. fetch it. **watch it.***
 
@@ -133,6 +134,11 @@ One accent, used sparingly so poster art stays the hero:
 
 ## App icon
 
-Family-consistent: copper glyph on near-black `#0a0a0a` rounded square. Glyph
-direction: a play triangle cut in the same angular style as fetchit's `>` mark.
-(To be drawn; keep flat, no gradients except the standard scrim.)
+A striped popcorn bucket on the family's near-black `#0a0a0a` square: three
+tapered stripes (steep-sided bucket silhouette, top wider than the base) —
+bone, **red `#ef5350`**, bone. The red is icon-only (`WiTokens.bucketRed`);
+it never appears in UI chrome, which stays on the copper accent. Flat, no
+gradients. Canonical source: `branding/icon.svg` (512px master render
+`branding/icon-512.png`); launcher PNGs are resized from it (Android mipmaps
+48–192px, `linux/runner/resources/watchit.png` 192px, AppImage icon reuses
+the xxxhdpi mipmap via `scripts/build_appimage.sh`).

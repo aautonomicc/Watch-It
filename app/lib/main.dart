@@ -21,6 +21,7 @@ import 'services/metadata_service.dart';
 import 'services/season_grouping.dart';
 import 'services/watch_state.dart';
 import 'theme/tokens.dart';
+import 'widgets/brand_mark.dart';
 import 'widgets/download_badge.dart';
 import 'widgets/downloads_indicator.dart';
 import 'widgets/prefetch_dialog.dart';
@@ -170,21 +171,23 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
-        // App-bar lockup: the launcher icon's copper [>] mark + wordmark.
-        title: Text.rich(
-          TextSpan(
-            style: TextStyle(
-              fontFamily: wiMonoFamily,
-              fontFamilyFallback: wiMonoFallback,
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: t.bone,
+        // App-bar lockup: the launcher icon's bucket mark + wordmark.
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const BrandMark(height: 16),
+            const SizedBox(width: 8),
+            Text(
+              'watch-it',
+              style: TextStyle(
+                fontFamily: wiMonoFamily,
+                fontFamilyFallback: wiMonoFallback,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: t.bone,
+              ),
             ),
-            children: [
-              TextSpan(text: '[>] ', style: TextStyle(color: t.copper)),
-              const TextSpan(text: 'watch-it'),
-            ],
-          ),
+          ],
         ),
         actions: [
           IconButton(
