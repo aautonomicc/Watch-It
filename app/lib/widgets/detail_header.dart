@@ -5,26 +5,37 @@ import '../theme/tokens.dart';
 /// Big-artwork header shared by the movie/episode detail, show, and
 /// season pages: artwork at ~4x the home-tile area (240×360, vs the
 /// wall's 120×180) with the info block beside it on wide layouts and
-/// below it on phones.
+/// below it on phones. [actions] (play/download controls) renders under
+/// the artwork at artwork width on wide layouts, and after [info] on
+/// phones.
 class DetailHeader extends StatelessWidget {
-  const DetailHeader({super.key, required this.poster, required this.info});
+  const DetailHeader(
+      {super.key, required this.poster, required this.info, this.actions});
 
   static const double posterWidth = 240;
   static const double posterHeight = 360;
 
   final Widget poster;
   final Widget info;
+  final Widget? actions;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
       if (constraints.maxWidth >= 520) {
-        // Info block hugs the artwork's bottom edge so the title and
-        // action buttons sit level with the poster's base, not its top.
         return Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            poster,
+            actions == null
+                ? poster
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      poster,
+                      const SizedBox(height: 16),
+                      SizedBox(width: posterWidth, child: actions),
+                    ],
+                  ),
             const SizedBox(width: 20),
             Expanded(child: info),
           ],
@@ -36,6 +47,10 @@ class DetailHeader extends StatelessWidget {
           Center(child: poster),
           const SizedBox(height: 16),
           info,
+          if (actions != null) ...[
+            const SizedBox(height: 16),
+            actions!,
+          ],
         ],
       );
     });
