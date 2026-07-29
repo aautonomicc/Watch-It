@@ -736,9 +736,6 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.textContaining('Episode 1'));
       await tester.pumpAndSettle();
-      // The header's under-artwork action block pushes the file-name
-      // section below the lazy ListView's viewport; scroll it into view.
-      await tester.scrollUntilVisible(find.text('FILE NAME'), 100);
       expect(find.text('Show.S01E01.mkv'), findsOneWidget);
       expect(find.text('FILE NAME'), findsOneWidget);
     });
