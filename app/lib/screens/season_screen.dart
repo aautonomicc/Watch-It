@@ -120,7 +120,11 @@ class SeasonScreen extends StatelessWidget {
                         fontSize: 13.5, height: 1.5, color: t.boneDim),
                   ),
                 ],
-                const SizedBox(height: 16),
+              ],
+            ),
+            actions: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 if (remaining.isEmpty)
                   OutlinedButton.icon(
                     onPressed: null,
