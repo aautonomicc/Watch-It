@@ -7,6 +7,7 @@ import 'package:watchit/db/app_database.dart';
 import 'package:watchit/main.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/theme/tokens.dart';
+import 'package:watchit/widgets/brand_mark.dart';
 
 void main() {
   // Each test gets its own in-memory database, so the multiple-instance
@@ -19,10 +20,11 @@ void main() {
         AppDatabase.forTesting(NativeDatabase.memory()));
   });
 
-  testWidgets('home screen shows wordmark and empty state', (tester) async {
+  testWidgets('home screen shows lockup and empty state', (tester) async {
     await tester.pumpWidget(const WatchItApp());
 
-    expect(find.text('[>] watch-it'), findsOneWidget);
+    expect(find.byType(BrandMark), findsOneWidget);
+    expect(find.text('watch-it'), findsOneWidget);
     expect(find.text('Your library is empty'), findsOneWidget);
   });
 
@@ -30,5 +32,6 @@ void main() {
     expect(WiTokens.dark.ink.toARGB32(), 0xFF0A0A0A);
     expect(WiTokens.dark.copper.toARGB32(), 0xFFC9732B);
     expect(WiTokens.dark.bone.toARGB32(), 0xFFF5F2EB);
+    expect(WiTokens.bucketRed.toARGB32(), 0xFFEF5350);
   });
 }
