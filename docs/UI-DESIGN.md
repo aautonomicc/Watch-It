@@ -106,6 +106,10 @@ offline. Alpha.32 added a season download-all button, a Downloads row on the
 home wall, multi-select/delete-all in the downloads queue, and a top-bar
 download meter. Alpha.33 added `.watch-list` bundle export/import (two-step
 Export dialog, one auto-detecting Import button) on the Media Lists page,
-TMDB attribution in Settings → About, and the Linux taskbar icon. Still to
+TMDB attribution in Settings → About, and the Linux taskbar icon.
+Unreleased on main: home-page library search (docs/PLAN-home-search.md) —
+search icon in the home app bar (`/` or Ctrl+F on desktop) opening a
+full-screen live search over the library, grouped Shows / Movies /
+Episodes with download/watched badges. Still to
 come from this document: filter/sort + fast-scroller on
 the grid, the full desktop keyboard map, mobile gestures, and the TV layout.
