@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="160" viewBox="0 0 640 160">
+  <rect width="640" height="160" fill="#0a0a0a"/>
+  <g fill="none" stroke="#c9732b" stroke-width="10" stroke-linecap="square">
+    <path d="M 66 50 L 52 50 L 52 110 L 66 110"/>
+    <path d="M 102 50 L 116 50 L 116 110 L 102 110"/>
+    <path d="M 72 80 L 96 80"/>
+  </g>
+  <text x="140" y="98" font-family="monospace" font-size="52" font-weight="700" fill="#f5f2eb">watch-it</text>
+</svg>
