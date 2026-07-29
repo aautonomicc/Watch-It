@@ -28,7 +28,7 @@ server compatibility** — Autonomi *is* the backend.
 
 ## Status
 
-**Working alpha on Android and Linux** — [v0.1.0-alpha.34](https://github.com/aautonomicc/Watch-It/releases)
+**Working alpha on Android and Linux** — [v0.1.0-alpha.35](https://github.com/aautonomicc/Watch-It/releases)
 ships a signed APK and a Linux AppImage that connect to the live Autonomi network
 with an embedded Rust client (no gateway, no sidecar) and stream by XOR address
 with byte-exact seeking, a chunk cache with keep-ahead prefetch, and persisted
@@ -58,8 +58,14 @@ export as plain text or as a bundle carrying TMDB metadata, posters,
 offline-verified instant-play root maps, and optional watch history, with a
 single auto-detecting Import button — see
 [docs/BUNDLE-FORMAT.md](docs/BUNDLE-FORMAT.md). The Linux AppImage also
-gained a proper taskbar icon. Unreleased on main: a show-level Download All
-button and the keyless releases described above.
+gained a proper taskbar icon. Alpha.34 shipped the keyless releases
+described above, a show-level Download All button, home-row customization
+(reorder/hide the home wall rows in Settings), and a taller watch-progress
+bar on every card. Alpha.35 adds home-page library search: a search icon in
+the home app bar (`/` or Ctrl+F on desktop) opens a full-screen
+live-as-you-type search over your library — titles, years, and episode
+markers like s02e05 — grouped into Shows / Movies / Episodes with the usual
+download and watched badges.
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users

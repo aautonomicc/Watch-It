@@ -87,7 +87,7 @@ TV notes: larger base type scale (readable at 3 m), no hover-only affordances, t
 entry kept to add/import flows only (paste via network share or a shown-on-TV import
 address is preferred over typing XOR addresses with a remote).
 
-## Built so far (alpha.34)
+## Built so far (alpha.35)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,
@@ -107,7 +107,10 @@ home wall, multi-select/delete-all in the downloads queue, and a top-bar
 download meter. Alpha.33 added `.watch-list` bundle export/import (two-step
 Export dialog, one auto-detecting Import button) on the Media Lists page,
 TMDB attribution in Settings → About, and the Linux taskbar icon.
-Unreleased on main: home-page library search (docs/PLAN-home-search.md) —
+Alpha.34 added keyless releases (with the dismissible TMDB nudge banner),
+show-level Download All, home-row customization (Settings → Home screen:
+reorder + show/hide rows), and the 8px watch-progress bar on all cards.
+Alpha.35 ships home-page library search (docs/PLAN-home-search.md) —
 search icon in the home app bar (`/` or Ctrl+F on desktop) opening a
 full-screen live search over the library, grouped Shows / Movies /
 Episodes with download/watched badges. Still to
