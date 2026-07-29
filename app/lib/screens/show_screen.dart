@@ -118,11 +118,7 @@ class ShowScreen extends StatelessWidget {
                         fontSize: 13.5, height: 1.5, color: t.boneDim),
                   ),
                 ],
-              ],
-            ),
-            actions: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+                const SizedBox(height: 16),
                 if (remaining.isEmpty)
                   OutlinedButton.icon(
                     onPressed: null,

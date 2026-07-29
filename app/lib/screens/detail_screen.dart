@@ -371,11 +371,7 @@ class _DetailScreenState extends State<DetailScreen> {
                     ],
                   ),
                 ],
-              ],
-            ),
-            actions: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+                const SizedBox(height: 16),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
