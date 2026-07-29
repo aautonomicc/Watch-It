@@ -1,6 +1,6 @@
 # Roadmap
 
-**Status (2026-07-25):** v0.1.0-alpha.34 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
+**Status (2026-07-29):** v0.1.0-alpha.35 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
 — signed Android APK + Linux AppImage on every release. Phases 0, 1, and 2 are
 done: both platforms stream from the live Autonomi network via the embedded
 Rust client (`native/watchit_core`) with byte-exact seek, a chunk LRU cache with
@@ -23,10 +23,14 @@ multi-select/delete-all, and a home top-bar download meter. Alpha.33 ships
 `.watch-list` bundles (lists with metadata, posters, offline-verified
 instant-play root maps, and optional watch history — see
 [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md)), TMDB attribution in Settings → About,
-and a Linux taskbar icon. Unreleased on main: a show-level Download All
-button (all seasons at once) and keyless releases — the shared TMDB key is
-no longer bundled; a dismissible home banner points keyless users to
-Settings → Metadata. The seeded
+and a Linux taskbar icon. Alpha.34 shipped keyless releases (the shared
+TMDB key is no longer bundled; a dismissible home banner points keyless
+users to Settings → Metadata), a show-level Download All button (all
+seasons at once), home-row customization (reorder/hide home wall rows),
+and the 8px watch-progress bar on every card. Alpha.35 adds home-page
+library search: a search icon on the home app bar (`/` / Ctrl+F on
+desktop) opens a live full-screen search over parsed titles, years, and
+episode markers, grouped Shows / Movies / Episodes. The seeded
 default movie is an H.264 8-bit 1080p encode named per the Plex/Jellyfin
 convention — see [NAMING.md](NAMING.md).
 
