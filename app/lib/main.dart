@@ -1,10 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 
 import 'models/media_list.dart';
 import 'screens/detail_screen.dart';
+import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/show_screen.dart';
 import 'services/app_settings.dart';
@@ -118,6 +120,14 @@ class _HomeScreenState extends State<HomeScreen> {
     await _reload();
   }
 
+  Future<void> _openSearch() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => SearchScreen(lists: _lists)),
+    );
+    // Playing/downloading from a search result changes the home rows.
+    await _reload();
+  }
+
   Future<void> _openEntry(MediaEntry entry) async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => DetailScreen(entry: entry)),
@@ -142,6 +152,20 @@ class _HomeScreenState extends State<HomeScreen> {
       for (final l in _lists)
         if (l.enabled) l,
     ];
+    // Desktop/TV nicety: `/` or Ctrl+F opens search (the Focus node
+    // gives the shortcuts somewhere to land when nothing else is
+    // focused; SearchScreen is its own route, so typing there is safe).
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.slash): _openSearch,
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+            _openSearch,
+      },
+      child: Focus(autofocus: true, child: _scaffold(t, visible)),
+    );
+  }
+
+  Widget _scaffold(WiTokens t, List<MediaList> visible) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: t.ink,
@@ -163,6 +187,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         actions: [
+          IconButton(
+            tooltip: 'Search',
+            icon: Icon(Icons.search, color: t.boneDim),
+            onPressed: _openSearch,
+          ),
           const DownloadsIndicator(),
           IconButton(
             tooltip: 'Settings',
