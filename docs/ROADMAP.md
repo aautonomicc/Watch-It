@@ -1,6 +1,6 @@
 # Roadmap
 
-**Status (2026-07-29):** v0.1.0-alpha.35 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
+**Status (2026-07-29):** v0.1.0-alpha.36 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
 — signed Android APK + Linux AppImage on every release. Phases 0, 1, and 2 are
 done: both platforms stream from the live Autonomi network via the embedded
 Rust client (`native/watchit_core`) with byte-exact seek, a chunk LRU cache with
@@ -30,7 +30,9 @@ seasons at once), home-row customization (reorder/hide home wall rows),
 and the 8px watch-progress bar on every card. Alpha.35 adds home-page
 library search: a search icon on the home app bar (`/` / Ctrl+F on
 desktop) opens a live full-screen search over parsed titles, years, and
-episode markers, grouped Shows / Movies / Episodes. The seeded
+episode markers, grouped Shows / Movies / Episodes. Alpha.36 adopts the
+striped popcorn-bucket logo (bone/red/bone on ink) as the launcher/taskbar
+icon and app-bar lockup on both platforms. The seeded
 default movie is an H.264 8-bit 1080p encode named per the Plex/Jellyfin
 convention — see [NAMING.md](NAMING.md).
 
