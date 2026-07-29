@@ -19,8 +19,10 @@ class DetailHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
       if (constraints.maxWidth >= 520) {
+        // Info block hugs the artwork's bottom edge so the title and
+        // action buttons sit level with the poster's base, not its top.
         return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             poster,
             const SizedBox(width: 20),
