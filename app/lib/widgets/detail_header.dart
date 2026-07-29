@@ -42,17 +42,22 @@ class DetailHeader extends StatelessWidget {
 
 /// The header's artwork slot: [image] clipped to the big poster size, or
 /// a placeholder tile with [placeholder] when there is no artwork yet.
-Widget headerArtwork(WiTokens t, Widget? image, IconData placeholder) {
+/// [overlay] is stacked over the artwork (e.g. the watch-progress bar).
+Widget headerArtwork(WiTokens t, Widget? image, IconData placeholder,
+    {Widget? overlay}) {
+  final art = image ??
+      Container(
+        color: t.ink2,
+        child: Icon(placeholder, color: t.ash, size: 96),
+      );
   return ClipRRect(
     borderRadius: BorderRadius.circular(8),
     child: SizedBox(
       width: DetailHeader.posterWidth,
       height: DetailHeader.posterHeight,
-      child: image ??
-          Container(
-            color: t.ink2,
-            child: Icon(placeholder, color: t.ash, size: 96),
-          ),
+      child: overlay == null
+          ? art
+          : Stack(fit: StackFit.expand, children: [art, overlay]),
     ),
   );
 }
