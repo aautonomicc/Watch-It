@@ -157,6 +157,26 @@ class DownloadManager extends ChangeNotifier {
   /// Re-evaluate the downloads network policy now (Settings changed it).
   void onNetworkPolicyChanged() => unawaited(_applyNetworkPolicy());
 
+  /// Pause every active download as a system pause (auto-resumes when
+  /// conditions clear). The Android foreground service's 6h dataSync
+  /// timeout lands here.
+  Future<void> systemPauseAll() async {
+    var any = false;
+    for (final task in _tasks.values.toList()) {
+      if (task.active) {
+        _update(task.copyWith(
+            status: DownloadStatus.paused, pausedBySystem: true));
+        any = true;
+      }
+    }
+    if (any) _activeClient?.close(force: true);
+  }
+
+  /// App came back to the foreground: restart anything the app itself
+  /// paused (6h background timeout, connection loss that never flipped
+  /// the monitor while frozen), policy permitting.
+  Future<void> onAppResumed() => _resumeSystemPausedIfAllowed();
+
   /// Whether the downloads policy permits transfers on the current
   /// transport. No [NetworkEvents] bound (desktop before main wiring,
   /// tests) means no gating, like before.
