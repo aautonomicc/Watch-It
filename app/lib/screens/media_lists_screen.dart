@@ -77,7 +77,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           SimpleDialogOption(
             onPressed: () => Navigator.of(context).pop('local'),
             child: Row(children: [
-              Icon(Icons.folder_open, color: t.copper, size: 20),
+              Icon(Icons.folder_open, color: t.accent, size: 20),
               const SizedBox(width: 12),
               Text('Local file',
                   style: TextStyle(color: t.bone, fontSize: 14)),
@@ -86,7 +86,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           SimpleDialogOption(
             onPressed: () => Navigator.of(context).pop('network'),
             child: Row(children: [
-              Icon(Icons.cloud_download_outlined, color: t.copper, size: 20),
+              Icon(Icons.cloud_download_outlined, color: t.accent, size: 20),
               const SizedBox(width: 12),
               Text('Download from network (XOR address)',
                   style: TextStyle(color: t.bone, fontSize: 14)),
@@ -225,7 +225,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
               if (bundle.rootMaps.isNotEmpty)
                 CheckboxListTile(
                   value: rootMaps,
-                  activeColor: t.copper,
+                  activeColor: t.accent,
                   checkColor: t.ink,
                   controlAffinity: ListTileControlAffinity.leading,
                   onChanged: (v) =>
@@ -241,7 +241,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
               if (bundle.history.isNotEmpty)
                 CheckboxListTile(
                   value: history,
-                  activeColor: t.copper,
+                  activeColor: t.accent,
                   checkColor: t.ink,
                   controlAffinity: ListTileControlAffinity.leading,
                   onChanged: (v) =>
@@ -264,7 +264,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: Text('Import', style: TextStyle(color: t.copper)),
+              child: Text('Import', style: TextStyle(color: t.accent)),
             ),
           ],
         ),
@@ -449,7 +449,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Prefetch', style: TextStyle(color: t.copper)),
+            child: Text('Prefetch', style: TextStyle(color: t.accent)),
           ),
         ],
       ),
@@ -504,7 +504,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Prefetch', style: TextStyle(color: t.copper)),
+            child: Text('Prefetch', style: TextStyle(color: t.accent)),
           ),
         ],
       ),
@@ -540,7 +540,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop('merge'),
-            child: Text('Merge', style: TextStyle(color: t.copper)),
+            child: Text('Merge', style: TextStyle(color: t.accent)),
           ),
         ],
       ),
@@ -588,7 +588,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           SimpleDialogOption(
             onPressed: () => Navigator.of(context).pop('txt'),
             child: Row(children: [
-              Icon(Icons.description_outlined, color: t.copper, size: 20),
+              Icon(Icons.description_outlined, color: t.accent, size: 20),
               const SizedBox(width: 12),
               Expanded(
                 child: Text('List only (.txt)\nJust the addresses and file '
@@ -600,7 +600,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           SimpleDialogOption(
             onPressed: () => Navigator.of(context).pop('bundle'),
             child: Row(children: [
-              Icon(Icons.inventory_2_outlined, color: t.copper, size: 20),
+              Icon(Icons.inventory_2_outlined, color: t.accent, size: 20),
               const SizedBox(width: 12),
               Expanded(
                 child: Text('Full bundle (.watch-list)\nAdds artwork, '
@@ -645,7 +645,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
             children: [
               CheckboxListTile(
                 value: includeRootMaps,
-                activeColor: t.copper,
+                activeColor: t.accent,
                 checkColor: t.ink,
                 controlAffinity: ListTileControlAffinity.leading,
                 onChanged: (v) =>
@@ -659,7 +659,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
               ),
               CheckboxListTile(
                 value: includeHistory,
-                activeColor: t.copper,
+                activeColor: t.accent,
                 checkColor: t.ink,
                 controlAffinity: ListTileControlAffinity.leading,
                 onChanged: (v) =>
@@ -680,7 +680,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: Text('Export', style: TextStyle(color: t.copper)),
+              child: Text('Export', style: TextStyle(color: t.accent)),
             ),
           ],
         ),
@@ -758,7 +758,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CircularProgressIndicator(color: t.copper),
+              CircularProgressIndicator(color: t.accent),
               const SizedBox(height: 18),
               ValueListenableBuilder(
                 valueListenable: progress,
@@ -957,7 +957,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _createList,
-        backgroundColor: t.copper,
+        backgroundColor: t.accent,
         foregroundColor: t.ink,
         icon: const Icon(Icons.add),
         label: const Text('New list'),
@@ -987,7 +987,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
                   ListTile(
                     leading: Checkbox(
                       value: list.enabled,
-                      activeColor: t.copper,
+                      activeColor: t.accent,
                       checkColor: t.ink,
                       side: BorderSide(color: t.ash),
                       onChanged: (v) => _setEnabled(list, v ?? true),

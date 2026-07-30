@@ -12,8 +12,8 @@ class WiTokens extends ThemeExtension<WiTokens> {
     required this.bone,
     required this.boneDim,
     required this.ash,
-    required this.copper,
-    required this.copperBright,
+    required this.accent,
+    required this.accentBright,
     required this.rust,
     required this.signalOk,
   });
@@ -24,14 +24,14 @@ class WiTokens extends ThemeExtension<WiTokens> {
   final Color bone;
   final Color boneDim;
   final Color ash;
-  final Color copper;
-  final Color copperBright;
+  final Color accent;
+  final Color accentBright;
   final Color rust;
   final Color signalOk;
 
-  /// Center-stripe red of the popcorn-bucket app icon (branding/icon.svg).
-  /// Icon-only accent — fixed across themes, never used for UI chrome.
-  static const bucketRed = Color(0xFFEF5350);
+  /// Center-stripe blue of the popcorn-bucket app icon (branding/icon.svg).
+  /// Same hue as the dark-theme `accent` — fixed across themes.
+  static const bucketBlue = Color(0xFF42A5F5);
 
   static const dark = WiTokens(
     ink: Color(0xFF0A0A0A),
@@ -40,8 +40,8 @@ class WiTokens extends ThemeExtension<WiTokens> {
     bone: Color(0xFFF5F2EB),
     boneDim: Color(0xFFD6CFC0),
     ash: Color(0xFF8A8A8A),
-    copper: Color(0xFFC9732B),
-    copperBright: Color(0xFFE58A3F),
+    accent: Color(0xFF42A5F5),
+    accentBright: Color(0xFF64B5F6),
     rust: Color(0xFFFF8A7A),
     signalOk: Color(0xFF6AB04C),
   );
@@ -53,8 +53,8 @@ class WiTokens extends ThemeExtension<WiTokens> {
     bone: Color(0xFFF5F2EB),
     boneDim: Color(0xFFE6DFD0),
     ash: Color(0xFFA09A90),
-    copper: Color(0xFFC9732B),
-    copperBright: Color(0xFFE58A3F),
+    accent: Color(0xFF42A5F5),
+    accentBright: Color(0xFF64B5F6),
     rust: Color(0xFFFF8A7A),
     signalOk: Color(0xFF6AB04C),
   );
@@ -66,8 +66,8 @@ class WiTokens extends ThemeExtension<WiTokens> {
     bone: Color(0xFF0A0A0A),
     boneDim: Color(0xFF1A1814),
     ash: Color(0xFF3A3A3A),
-    copper: Color(0xFFC9732B),
-    copperBright: Color(0xFFB86420),
+    accent: Color(0xFF1976D2),
+    accentBright: Color(0xFF1565C0),
     rust: Color(0xFFC0392B),
     signalOk: Color(0xFF3D7E2C),
   );
@@ -83,8 +83,8 @@ class WiTokens extends ThemeExtension<WiTokens> {
     Color? bone,
     Color? boneDim,
     Color? ash,
-    Color? copper,
-    Color? copperBright,
+    Color? accent,
+    Color? accentBright,
     Color? rust,
     Color? signalOk,
   }) {
@@ -95,8 +95,8 @@ class WiTokens extends ThemeExtension<WiTokens> {
       bone: bone ?? this.bone,
       boneDim: boneDim ?? this.boneDim,
       ash: ash ?? this.ash,
-      copper: copper ?? this.copper,
-      copperBright: copperBright ?? this.copperBright,
+      accent: accent ?? this.accent,
+      accentBright: accentBright ?? this.accentBright,
       rust: rust ?? this.rust,
       signalOk: signalOk ?? this.signalOk,
     );
@@ -112,8 +112,8 @@ class WiTokens extends ThemeExtension<WiTokens> {
       bone: Color.lerp(bone, other.bone, t)!,
       boneDim: Color.lerp(boneDim, other.boneDim, t)!,
       ash: Color.lerp(ash, other.ash, t)!,
-      copper: Color.lerp(copper, other.copper, t)!,
-      copperBright: Color.lerp(copperBright, other.copperBright, t)!,
+      accent: Color.lerp(accent, other.accent, t)!,
+      accentBright: Color.lerp(accentBright, other.accentBright, t)!,
       rust: Color.lerp(rust, other.rust, t)!,
       signalOk: Color.lerp(signalOk, other.signalOk, t)!,
     );
@@ -133,10 +133,10 @@ ThemeData wiTheme(WiTokens t, {required Brightness brightness}) {
     cardColor: t.ink2,
     dividerColor: t.line,
     colorScheme: ColorScheme.fromSeed(
-      seedColor: t.copper,
+      seedColor: t.accent,
       brightness: brightness,
       surface: t.ink,
-      primary: t.copper,
+      primary: t.accent,
       error: t.rust,
     ),
     textTheme: Typography.material2021(platform: defaultTargetPlatform)

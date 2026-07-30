@@ -30,8 +30,8 @@ void main() {
 
   test('dark tokens match BRAND.md contract', () {
     expect(WiTokens.dark.ink.toARGB32(), 0xFF0A0A0A);
-    expect(WiTokens.dark.copper.toARGB32(), 0xFFC9732B);
+    expect(WiTokens.dark.accent.toARGB32(), 0xFF42A5F5);
     expect(WiTokens.dark.bone.toARGB32(), 0xFFF5F2EB);
-    expect(WiTokens.bucketRed.toARGB32(), 0xFFEF5350);
+    expect(WiTokens.bucketBlue.toARGB32(), 0xFF42A5F5);
   });
 }

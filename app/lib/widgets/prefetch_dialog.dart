@@ -98,7 +98,7 @@ class PrefetchProgressDialog extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(color: t.copper),
+            CircularProgressIndicator(color: t.accent),
             const SizedBox(height: 18),
             ListenableBuilder(
               listenable: manager,
@@ -134,7 +134,7 @@ class PrefetchProgressDialog extends StatelessWidget {
                 const SizedBox(width: 4),
                 TextButton(
                   onPressed: onHide,
-                  child: Text('Hide', style: TextStyle(color: t.copper)),
+                  child: Text('Hide', style: TextStyle(color: t.accent)),
                 ),
               ],
             ),

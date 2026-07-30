@@ -4,7 +4,7 @@ import '../models/media_list.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 
-/// Copper watch-progress bar along a card's bottom edge — how far
+/// Accent watch-progress bar along a card's bottom edge — how far
 /// through a partially watched file the viewer is. Callers place it
 /// inside the poster's Stack; [entryWatchBar] returns null when there is
 /// nothing to show so the Stack stays untouched.
@@ -21,7 +21,7 @@ Widget watchProgressBar(WiTokens t, double progress) => Align(
         child: LinearProgressIndicator(
           value: progress,
           backgroundColor: Colors.black45,
-          color: t.copper,
+          color: t.accent,
         ),
       ),
     );

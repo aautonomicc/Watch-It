@@ -36,7 +36,7 @@ class DownloadsIndicator extends StatelessWidget {
                     child: CircularProgressIndicator(
                       value: batch.progress,
                       strokeWidth: 2.5,
-                      color: t.copper,
+                      color: t.accent,
                       backgroundColor: Colors.white24,
                     ),
                   ),
