@@ -42,8 +42,10 @@ Future<void> main() async {
   // chain (browsing itself is never gated).
   ConnectivityMonitor.instance.start();
   // Downloads auto-pause on connection loss; wire them to auto-resume
-  // when the connection is back.
+  // when the connection is back, and to hold on mobile data when
+  // Settings → Network says Wi-Fi only.
   DownloadManager.instance.bindConnectivity(ConnectivityMonitor.instance);
+  DownloadManager.instance.bindNetwork(NetworkEvents.instance);
   // Reconnect fast-paths: phone wake and OS network changes (cable
   // replug on Linux via NetworkManager) re-probe immediately and kick
   // the embedded client's reconnect supervisor instead of waiting for

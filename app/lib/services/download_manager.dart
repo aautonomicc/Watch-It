@@ -12,6 +12,7 @@ import 'app_settings.dart';
 import 'connectivity.dart';
 import 'embedded_client.dart';
 import 'library_store.dart';
+import 'network_events.dart';
 import 'storage_usage.dart';
 
 /// Lifecycle of one managed download.
@@ -129,12 +130,73 @@ class DownloadManager extends ChangeNotifier {
 
   void _onConnectivityFlip() {
     final monitor = _monitor;
-    if (monitor != null && !monitor.offline) _resumeSystemPaused();
+    if (monitor != null && !monitor.offline) {
+      unawaited(_resumeSystemPausedIfAllowed());
+    }
   }
 
-  /// Re-queue every download the app itself paused. The user's own
+  NetworkEvents? _network;
+  bool _waitingForWifi = false;
+
+  /// True while the whole queue is system-paused because we are on
+  /// mobile data and Settings → Network says downloads are Wi-Fi-only.
+  /// The queue UI labels those pauses "Waiting for Wi-Fi".
+  bool get waitingForWifi => _waitingForWifi;
+
+  /// Watch the OS transport and enforce the downloads network policy:
+  /// going cellular under Wi-Fi-only pauses the queue, Wi-Fi coming
+  /// back resumes it. Called once from main().
+  void bindNetwork(NetworkEvents network) {
+    _network?.removeListener(_onTransportFlip);
+    _network = network;
+    network.addListener(_onTransportFlip);
+  }
+
+  void _onTransportFlip() => unawaited(_applyNetworkPolicy());
+
+  /// Re-evaluate the downloads network policy now (Settings changed it).
+  void onNetworkPolicyChanged() => unawaited(_applyNetworkPolicy());
+
+  /// Whether the downloads policy permits transfers on the current
+  /// transport. No [NetworkEvents] bound (desktop before main wiring,
+  /// tests) means no gating, like before.
+  Future<bool> _downloadsAllowedNow() async {
+    final network = _network;
+    if (network == null || !network.onCellular) return true;
+    return await AppSettings.downloadNetworkPolicy() ==
+        DownloadNetworkPolicy.any;
+  }
+
+  Future<void> _applyNetworkPolicy() async {
+    if (await _downloadsAllowedNow()) {
+      if (_waitingForWifi) {
+        _waitingForWifi = false;
+        notifyListeners();
+      }
+      await _resumeSystemPausedIfAllowed();
+    } else {
+      var any = false;
+      for (final task in _tasks.values.toList()) {
+        if (task.active) {
+          _update(task.copyWith(
+              status: DownloadStatus.paused, pausedBySystem: true));
+          any = true;
+        }
+      }
+      if (any) _activeClient?.close(force: true);
+      if (!_waitingForWifi) {
+        _waitingForWifi = true;
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Re-queue every download the app itself paused — unless the network
+  /// policy still forbids transfers (offline recovery while on cellular
+  /// with Wi-Fi-only set must not restart anything). The user's own
   /// pauses (pausedBySystem false) stay put.
-  void _resumeSystemPaused() {
+  Future<void> _resumeSystemPausedIfAllowed() async {
+    if (!await _downloadsAllowedNow()) return;
     var any = false;
     for (final task in _tasks.values.toList()) {
       if (task.status == DownloadStatus.paused && task.pausedBySystem) {
@@ -254,7 +316,7 @@ class DownloadManager extends ChangeNotifier {
     if (monitor != null &&
         _tasks.values.any(
             (t) => t.status == DownloadStatus.paused && t.pausedBySystem)) {
-      if (!await monitor.refresh()) _resumeSystemPaused();
+      if (!await monitor.refresh()) await _resumeSystemPausedIfAllowed();
     }
   }
 
@@ -475,6 +537,12 @@ class DownloadManager extends ChangeNotifier {
             }
           }
           if (next == null) break;
+          // Network policy gate: on cellular with Wi-Fi-only set, the
+          // queue system-pauses ("Waiting for Wi-Fi") instead of running.
+          if (!await _downloadsAllowedNow()) {
+            await _applyNetworkPolicy();
+            break;
+          }
           await _download(next.address);
         }
       } finally {
