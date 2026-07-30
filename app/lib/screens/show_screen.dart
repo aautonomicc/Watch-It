@@ -123,8 +123,8 @@ class ShowScreen extends StatelessWidget {
                   OutlinedButton.icon(
                     onPressed: null,
                     style: OutlinedButton.styleFrom(
-                      disabledForegroundColor: t.copper,
-                      side: BorderSide(color: t.copper),
+                      disabledForegroundColor: t.accent,
+                      side: BorderSide(color: t.accent),
                     ),
                     icon: const Icon(Icons.download_done, size: 18),
                     label: const Text('Show downloaded'),

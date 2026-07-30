@@ -125,8 +125,8 @@ class SeasonScreen extends StatelessWidget {
                   OutlinedButton.icon(
                     onPressed: null,
                     style: OutlinedButton.styleFrom(
-                      disabledForegroundColor: t.copper,
-                      side: BorderSide(color: t.copper),
+                      disabledForegroundColor: t.accent,
+                      side: BorderSide(color: t.accent),
                     ),
                     icon: const Icon(Icons.download_done, size: 18),
                     label: const Text('Season downloaded'),
@@ -223,7 +223,7 @@ class _EpisodeTile extends StatelessWidget {
                     fontFamily: wiMonoFamily,
                     fontFamilyFallback: wiMonoFallback,
                     fontSize: 11.5,
-                    color: t.copper,
+                    color: t.accent,
                   ),
                 ),
                 TextSpan(

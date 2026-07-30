@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/tokens.dart';
 
 /// The launcher icon's popcorn-bucket mark (branding/icon.svg): three tapered
-/// stripes — bone, red, bone — drawn on a transparent background so it sits on
+/// stripes — bone, blue, bone — drawn on a transparent background so it sits on
 /// whatever chrome hosts it. Geometry mirrors the SVG's 256x240 content box.
 class BrandMark extends StatelessWidget {
   const BrandMark({super.key, this.height = 16});
@@ -15,7 +15,7 @@ class BrandMark extends StatelessWidget {
     final t = WiTokens.of(context);
     return CustomPaint(
       size: Size(height * 256 / 240, height),
-      painter: _BucketPainter(stripe: t.bone, center: WiTokens.bucketRed),
+      painter: _BucketPainter(stripe: t.bone, center: WiTokens.bucketBlue),
     );
   }
 }

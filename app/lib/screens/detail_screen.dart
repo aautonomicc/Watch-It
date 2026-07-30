@@ -114,7 +114,7 @@ class _DetailScreenState extends State<DetailScreen> {
                     setDialogState(() => remember = v ?? false),
                 controlAffinity: ListTileControlAffinity.leading,
                 contentPadding: EdgeInsets.zero,
-                activeColor: t.copper,
+                activeColor: t.accent,
                 title: Text('Remember my choice',
                     style: TextStyle(color: t.boneDim, fontSize: 13)),
               ),
@@ -129,7 +129,7 @@ class _DetailScreenState extends State<DetailScreen> {
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
               child: Text('Pause downloads',
-                  style: TextStyle(color: t.copper)),
+                  style: TextStyle(color: t.accent)),
             ),
           ],
         ),
@@ -166,7 +166,7 @@ class _DetailScreenState extends State<DetailScreen> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: Text('OK', style: TextStyle(color: t.copper)),
+                child: Text('OK', style: TextStyle(color: t.accent)),
               ),
             ],
           );
@@ -364,7 +364,7 @@ class _DetailScreenState extends State<DetailScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(Icons.check_circle_outline,
-                          color: t.copper, size: 16),
+                          color: t.accent, size: 16),
                       const SizedBox(width: 5),
                       Text('Watched',
                           style: TextStyle(fontSize: 12.5, color: t.boneDim)),
@@ -381,7 +381,7 @@ class _DetailScreenState extends State<DetailScreen> {
                       onPressed:
                           playBlocked ? null : () => _play(context),
                       style: FilledButton.styleFrom(
-                        backgroundColor: t.copper,
+                        backgroundColor: t.accent,
                         foregroundColor: t.ink,
                       ),
                       icon: const Icon(Icons.play_arrow),
@@ -402,9 +402,9 @@ class _DetailScreenState extends State<DetailScreen> {
                           ? null
                           : () => _onDownloadPressed(task),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: downloaded ? t.copper : t.bone,
+                        foregroundColor: downloaded ? t.accent : t.bone,
                         side: BorderSide(
-                            color: downloaded ? t.copper : t.ash),
+                            color: downloaded ? t.accent : t.ash),
                       ),
                       icon: Icon(downloadIcon, size: 18),
                       label: Text(downloadLabel),
@@ -451,7 +451,7 @@ class _DetailScreenState extends State<DetailScreen> {
                       child: LinearProgressIndicator(
                         value: task.progress,
                         backgroundColor: t.ink2,
-                        color: t.copper,
+                        color: t.accent,
                       ),
                     ),
                   ),

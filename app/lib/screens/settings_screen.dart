@@ -112,7 +112,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 for (final mb in AppSettings.bufferSizeOptionsMb)
                   RadioListTile<int>(
                     value: mb,
-                    activeColor: t.copper,
+                    activeColor: t.accent,
                     title: Text(
                       '$mb MB'
                       '${mb == AppSettings.defaultBufferSizeMb ? '  ·  default' : ''}',
@@ -216,7 +216,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: Text('Keep my data', style: TextStyle(color: t.copper)),
+            child: Text('Keep my data', style: TextStyle(color: t.accent)),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
@@ -274,7 +274,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 ListTile(
-                  leading: Icon(Icons.video_library_outlined, color: t.copper),
+                  leading: Icon(Icons.video_library_outlined, color: t.accent),
                   title: Text('Media Lists',
                       style: TextStyle(color: t.bone, fontSize: 15)),
                   subtitle: Text(
@@ -290,7 +290,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onTap: _openMediaLists,
                 ),
                 ListTile(
-                  leading: Icon(Icons.view_agenda_outlined, color: t.copper),
+                  leading: Icon(Icons.view_agenda_outlined, color: t.accent),
                   title: Text('Home screen',
                       style: TextStyle(color: t.bone, fontSize: 15)),
                   subtitle: Text(
@@ -320,7 +320,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     final done = manager.doneCount;
                     return ListTile(
                       leading:
-                          Icon(Icons.download_outlined, color: t.copper),
+                          Icon(Icons.download_outlined, color: t.accent),
                       title: Text('Downloads',
                           style: TextStyle(color: t.bone, fontSize: 15)),
                       subtitle: Text(
@@ -350,7 +350,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 ListTile(
-                  leading: Icon(Icons.cloud_outlined, color: t.copper),
+                  leading: Icon(Icons.cloud_outlined, color: t.accent),
                   title: Text('Built-in Autonomi client',
                       style: TextStyle(color: t.bone, fontSize: 15)),
                   subtitle: Text(
@@ -370,7 +370,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 ListTile(
-                  leading: Icon(Icons.memory_outlined, color: t.copper),
+                  leading: Icon(Icons.memory_outlined, color: t.accent),
                   title: Text('Buffer size',
                       style: TextStyle(color: t.bone, fontSize: 15)),
                   subtitle: Text(
@@ -404,7 +404,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 ListTile(
-                  leading: Icon(Icons.image_search_outlined, color: t.copper),
+                  leading: Icon(Icons.image_search_outlined, color: t.accent),
                   title: Text('TMDB API key',
                       style: TextStyle(color: t.bone, fontSize: 15)),
                   subtitle: Text(
@@ -445,7 +445,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 ListTile(
-                  leading: Icon(Icons.play_circle_outline, color: t.copper),
+                  leading: Icon(Icons.play_circle_outline, color: t.accent),
                   title: Text(
                     'watch-it',
                     style: TextStyle(
@@ -484,7 +484,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 ListTile(
-                  leading: Icon(Icons.info_outline, color: t.copper),
+                  leading: Icon(Icons.info_outline, color: t.accent),
                   title: Text('Version',
                       style: TextStyle(color: t.bone, fontSize: 15)),
                   subtitle: Text(
@@ -493,7 +493,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 ListTile(
-                  leading: Icon(Icons.sd_storage_outlined, color: t.copper),
+                  leading: Icon(Icons.sd_storage_outlined, color: t.accent),
                   title: Text('Size on disk',
                       style: TextStyle(color: t.bone, fontSize: 15)),
                   subtitle: Text(
@@ -570,7 +570,7 @@ Future<String?> promptForText(
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(controller.text),
-            child: Text('Save', style: TextStyle(color: t.copper)),
+            child: Text('Save', style: TextStyle(color: t.accent)),
           ),
         ],
       );

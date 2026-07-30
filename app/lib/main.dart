@@ -397,7 +397,7 @@ class _NetworkStatusBarState extends State<NetworkStatusBar> {
               '${h.peers == 1 ? 'peer' : 'peers'}',
         ),
       'connecting' => (
-          t.copper,
+          t.accent,
           h.message == null
               ? 'Autonomi network: connecting…'
                   '${h.attempts > 1 ? ' (attempt ${h.attempts})' : ''}'
@@ -665,7 +665,7 @@ class _EmptyState extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.play_circle_outline, size: 64, color: t.copper),
+          Icon(Icons.play_circle_outline, size: 64, color: t.accent),
           const SizedBox(height: 16),
           Text(
             allHidden ? 'All your lists are hidden' : 'Your library is empty',

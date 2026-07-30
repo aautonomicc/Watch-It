@@ -132,7 +132,7 @@ class _ListEditScreenState extends State<ListEditScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _addEntry,
-        backgroundColor: t.copper,
+        backgroundColor: t.accent,
         foregroundColor: t.ink,
         icon: const Icon(Icons.add),
         label: const Text('Add entry'),
@@ -241,7 +241,7 @@ Future<MediaEntry?> _promptForEntry(BuildContext context) {
                   Navigator.of(context)
                       .pop(MediaEntry(name: name, address: addr));
                 },
-                child: Text('Add', style: TextStyle(color: t.copper)),
+                child: Text('Add', style: TextStyle(color: t.accent)),
               ),
             ],
           );
