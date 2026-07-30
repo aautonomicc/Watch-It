@@ -180,6 +180,12 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     final (statusText, statusColor) = switch (task.status) {
       DownloadStatus.queued => ('Queued', t.boneDim),
       DownloadStatus.downloading => ('Downloading', t.accent),
+      // A policy pause explains itself — it clears on its own when
+      // Wi-Fi is back, unlike a pause by hand.
+      DownloadStatus.paused
+          when task.pausedBySystem &&
+              DownloadManager.instance.waitingForWifi =>
+        ('Waiting for Wi-Fi', t.boneDim),
       DownloadStatus.paused => ('Paused', t.boneDim),
       DownloadStatus.done => ('Downloaded', t.accent),
       DownloadStatus.error => (task.error ?? 'Failed', t.rust),

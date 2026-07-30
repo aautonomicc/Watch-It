@@ -103,6 +103,42 @@ class AppSettings {
     await prefs.setString(_homeSectionsKey, encodeHomeSections(sections));
   }
 
+  static const _downloadNetworkKey = 'download_network_v1';
+
+  /// Which networks downloads may use (Settings → Network). Wi-Fi-only
+  /// is the default: a queued 5GB movie must never silently eat a
+  /// mobile-data allowance. Only enforced where the OS reports a
+  /// cellular transport — desktop never gates.
+  static Future<DownloadNetworkPolicy> downloadNetworkPolicy() async {
+    final prefs = await SharedPreferences.getInstance();
+    final name = prefs.getString(_downloadNetworkKey);
+    return DownloadNetworkPolicy.values.asNameMap()[name] ??
+        DownloadNetworkPolicy.wifiOnly;
+  }
+
+  static Future<void> setDownloadNetworkPolicy(
+      DownloadNetworkPolicy value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_downloadNetworkKey, value.name);
+  }
+
+  static const _streamingNetworkKey = 'streaming_network_v1';
+
+  /// What streamed playback does on mobile data (Settings → Network).
+  /// Default asks once per session; a downloaded title always plays.
+  static Future<StreamingNetworkPolicy> streamingNetworkPolicy() async {
+    final prefs = await SharedPreferences.getInstance();
+    final name = prefs.getString(_streamingNetworkKey);
+    return StreamingNetworkPolicy.values.asNameMap()[name] ??
+        StreamingNetworkPolicy.ask;
+  }
+
+  static Future<void> setStreamingNetworkPolicy(
+      StreamingNetworkPolicy value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_streamingNetworkKey, value.name);
+  }
+
   static const _pauseDownloadsOnPlayKey = 'pause_downloads_on_play_v1';
 
   /// What to do with active downloads when streaming playback starts
@@ -125,6 +161,12 @@ class AppSettings {
 
 /// Origin of the effective TMDB credential.
 enum TmdbKeySource { user, none }
+
+/// Which networks downloads may use.
+enum DownloadNetworkPolicy { wifiOnly, any }
+
+/// What streamed playback does on mobile data.
+enum StreamingNetworkPolicy { ask, allow, wifiOnly }
 
 /// Whether starting streamed playback pauses active downloads.
 enum PauseDownloadsOnPlay { ask, always, never }

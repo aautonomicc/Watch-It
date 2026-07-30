@@ -562,6 +562,10 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.scrollUntilVisible(find.text('Buffer size'), 100);
+      // The tile can sit half off-screen after the scroll — bring it in
+      // fully before tapping.
+      await tester.ensureVisible(find.text('Buffer size'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Buffer size'));
       await tester.pumpAndSettle();
 
