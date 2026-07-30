@@ -3,9 +3,12 @@
 Watch-It's visual identity follows the **etchit.io family** design language
 (see [etchit-io/fetchit](https://github.com/etchit-io/fetchit) `docs/BRAND.md`
 and <https://etchit.io/brand.html>): warm near-black surfaces, bone-white text,
-a single copper accent, system fonts, lowercase mono wordmark. The apps in that
+a single accent colour, system fonts, lowercase mono wordmark. The apps in that
 family read as one continuous brand; Watch-It adopts the same tokens so it sits
 naturally beside them, extended with the handful of roles a media player needs.
+One deliberate divergence (2026-07-30): Watch-It's accent is **blue `#42a5f5`**
+(matching its bucket icon's centre stripe), not the family copper — the copper
+read too close to the poster art it sits over.
 
 ## Wordmark
 
@@ -15,7 +18,7 @@ The family pattern is a lowercase compound with a separator glyph
 > **`watch-it`** — mono family, 18px, weight 700, lowercase.
 
 In app chrome (the home app bar) the wordmark is locked up with the launcher
-icon's bucket mark: the three tapered popcorn-bucket stripes (bone / red /
+icon's bucket mark: the three tapered popcorn-bucket stripes (bone / blue /
 bone, drawn by `widgets/brand_mark.dart`) followed by **`watch-it`** in bone —
 mono, 18px, weight 700.
 
@@ -35,18 +38,18 @@ extensions.
 | `--bone`          | primary text                                |
 | `--bone-dim`      | secondary text                              |
 | `--ash`           | labels, muted, helper text                  |
-| `--copper`        | accent (play, focus, progress, links)       |
-| `--copper-bright` | accent hover / active                       |
+| `--accent`        | accent (play, focus, progress, links)       |
+| `--accent-bright` | accent hover / active                       |
 | `--rust`          | error (fetch failed, playback error)        |
 | `--signal-ok`     | success (downloaded, verified)              |
 | `--wi-scrim`      | poster/backdrop gradient overlay            |
-| `--wi-progress`   | watched-progress bar fill (= `--copper`)    |
+| `--wi-progress`   | watched-progress bar fill (= `--accent`)    |
 
 ### Dark (default)
 
 ```css
 --ink: #0a0a0a;       --ink-2: #141414;      --line: #222;
---copper: #c9732b;    --copper-bright: #e58a3f;
+--accent: #42a5f5;    --accent-bright: #64b5f6;
 --bone: #f5f2eb;      --bone-dim: #d6cfc0;   --ash: #8a8a8a;
 --rust: #ff8a7a;      --signal-ok: #6ab04c;
 --wi-scrim: linear-gradient(rgba(10,10,10,0) 40%, #0a0a0a 100%);
@@ -56,7 +59,7 @@ extensions.
 
 ```css
 --ink: #1a1612;       --ink-2: #221d18;      --line: #2a2520;
---copper: #c9732b;    --copper-bright: #e58a3f;
+--accent: #42a5f5;    --accent-bright: #64b5f6;
 --bone: #f5f2eb;      --bone-dim: #e6dfd0;   --ash: #a09a90;
 --rust: #ff8a7a;      --signal-ok: #6ab04c;
 --wi-scrim: linear-gradient(rgba(26,22,18,0) 40%, #1a1612 100%);
@@ -66,7 +69,7 @@ extensions.
 
 ```css
 --ink: #f5f2eb;       --ink-2: #faf7f2;      --line: #d6cfc0;
---copper: #c9732b;    --copper-bright: #b86420;
+--accent: #1976d2;    --accent-bright: #1565c0;
 --bone: #0a0a0a;      --bone-dim: #1a1814;   --ash: #3a3a3a;
 --rust: #c0392b;      --signal-ok: #3d7e2c;
 --wi-scrim: linear-gradient(rgba(245,242,235,0) 40%, #f5f2eb 100%);
@@ -125,19 +128,19 @@ switching — no per-theme text styles.
 One accent, used sparingly so poster art stays the hero:
 
 - **Play/Resume button, focus rings, active tab, seek bar fill, watched-progress
-  bars** → `--copper` (hover/drag: `--copper-bright`).
+  bars** → `--accent` (hover/drag: `--accent-bright`).
 - **Download states on cards**: stream-only = outline glyph in `--ash`;
-  downloading = progress ring in `--copper`; downloaded = check in
+  downloading = progress ring in `--accent`; downloaded = check in
   `--signal-ok`; failed = `--rust`.
-- Never colour large surfaces with copper; it is a line-and-glyph accent on
+- Never colour large surfaces with the accent; it is a line-and-glyph accent on
   `--ink` / `--ink-2`.
 
 ## App icon
 
 A striped popcorn bucket on the family's near-black `#0a0a0a` square: three
 tapered stripes (steep-sided bucket silhouette, top wider than the base) —
-bone, **red `#ef5350`**, bone. The red is icon-only (`WiTokens.bucketRed`);
-it never appears in UI chrome, which stays on the copper accent. Flat, no
+bone, **blue `#42a5f5`**, bone (`WiTokens.bucketBlue`, the same hue as the
+dark-theme `--accent`, so the icon and UI chrome read as one). Flat, no
 gradients. Canonical source: `branding/icon.svg` (512px master render
 `branding/icon-512.png`); launcher PNGs are resized from it (Android mipmaps
 48–192px, `linux/runner/resources/watchit.png` 192px, AppImage icon reuses

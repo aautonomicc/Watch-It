@@ -5,7 +5,7 @@ import '../services/download_manager.dart';
 import '../theme/tokens.dart';
 
 /// Corner badges telling a card's download state apart at a glance:
-/// a copper check = downloaded, a progress ring = download under way
+/// an accent-blue check = downloaded, a progress ring = download under way
 /// (queued/paused/failed included — a partial file lives on disk), and
 /// no badge = plain streaming. Show/season cards aggregate: a `3/8`
 /// count once ANY episode is downloaded, the full check when all are.
@@ -48,7 +48,7 @@ Widget? groupDownloadBadge(WiTokens t, Iterable<MediaEntry> episodes) {
     child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(Icons.download_done, size: 11, color: t.copper),
+        Icon(Icons.download_done, size: 11, color: t.accent),
         const SizedBox(width: 3),
         Text(
           '$done/$total',
@@ -67,7 +67,7 @@ Widget _check(WiTokens t) => _pin(Container(
       width: 20,
       height: 20,
       decoration: BoxDecoration(
-        color: t.copper,
+        color: t.accent,
         shape: BoxShape.circle,
         boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 4)],
       ),
@@ -85,7 +85,7 @@ Widget _ring(WiTokens t, double progress) => _pin(Container(
       child: CircularProgressIndicator(
         value: progress.clamp(0.0, 1.0),
         strokeWidth: 2,
-        color: t.copper,
+        color: t.accent,
         backgroundColor: Colors.white24,
       ),
     ));

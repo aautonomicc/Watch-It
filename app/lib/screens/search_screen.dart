@@ -137,7 +137,7 @@ class _SearchScreenState extends State<SearchScreen> {
             autofocus: true,
             textInputAction: TextInputAction.search,
             style: TextStyle(fontSize: 16, color: t.bone),
-            cursorColor: t.copper,
+            cursorColor: t.accent,
             decoration: InputDecoration(
               hintText: 'Search your library',
               hintStyle: TextStyle(fontSize: 16, color: t.ash),
@@ -241,7 +241,7 @@ class _SearchScreenState extends State<SearchScreen> {
               onPressed: () => setState(() => _expanded.add(title)),
               child: Text(
                 'Show all ${items.length}',
-                style: TextStyle(fontSize: 12.5, color: t.copper),
+                style: TextStyle(fontSize: 12.5, color: t.accent),
               ),
             ),
           ),
@@ -329,12 +329,12 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// Copper check for a fully watched movie/episode (the cards' watch
+  /// Accent check for a fully watched movie/episode (the cards' watch
   /// bar covers only partial progress).
   Widget? _watchedCheck(WiTokens t, MediaEntry entry) {
     final state = WatchStateStore.instance.cachedStateFor(entry);
     if (state == null || !state.completed) return null;
-    return Icon(Icons.check_circle_outline, size: 18, color: t.copper);
+    return Icon(Icons.check_circle_outline, size: 18, color: t.accent);
   }
 
   /// Small poster thumbnail with the cards' download badge and watch bar

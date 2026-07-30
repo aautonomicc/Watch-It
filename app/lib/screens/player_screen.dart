@@ -256,7 +256,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return Container(
         color: Colors.black54,
         alignment: Alignment.center,
-        child: CircularProgressIndicator(color: t.copper),
+        child: CircularProgressIndicator(color: t.accent),
       );
     }
     return Container(
@@ -265,7 +265,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          CircularProgressIndicator(color: t.copper),
+          CircularProgressIndicator(color: t.accent),
           const SizedBox(height: 16),
           Text(
             'Fetching from the Autonomi network…',
@@ -298,7 +298,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline, color: t.copper, size: 40),
+          Icon(Icons.error_outline, color: t.accent, size: 40),
           const SizedBox(height: 12),
           Text(
             'Playback failed',
@@ -344,7 +344,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       fontSize: 10,
                       letterSpacing: 1.5,
                       fontWeight: FontWeight.w700,
-                      color: t.copper,
+                      color: t.accent,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -370,7 +370,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             FilledButton(
               onPressed: _playNext,
               style: FilledButton.styleFrom(
-                backgroundColor: t.copper,
+                backgroundColor: t.accent,
                 foregroundColor: t.ink,
               ),
               child: const Text('Play now'),

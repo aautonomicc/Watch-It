@@ -77,7 +77,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                 for (final option in PauseDownloadsOnPlay.values)
                   RadioListTile<PauseDownloadsOnPlay>(
                     value: option,
-                    activeColor: t.copper,
+                    activeColor: t.accent,
                     title: Text(
                       pauseOnPlayLabel(option),
                       style: TextStyle(color: t.bone, fontSize: 14),
@@ -179,9 +179,9 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   Widget _taskTile(WiTokens t, DownloadTask task) {
     final (statusText, statusColor) = switch (task.status) {
       DownloadStatus.queued => ('Queued', t.boneDim),
-      DownloadStatus.downloading => ('Downloading', t.copper),
+      DownloadStatus.downloading => ('Downloading', t.accent),
       DownloadStatus.paused => ('Paused', t.boneDim),
-      DownloadStatus.done => ('Downloaded', t.copper),
+      DownloadStatus.done => ('Downloaded', t.accent),
       DownloadStatus.error => (task.error ?? 'Failed', t.rust),
     };
     final active = task.active;
@@ -193,7 +193,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
         children: [
           Checkbox(
             value: _selected.contains(task.address),
-            activeColor: t.copper,
+            activeColor: t.accent,
             checkColor: t.ink,
             side: BorderSide(color: t.ash),
             visualDensity: VisualDensity.compact,
@@ -220,7 +220,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                       child: LinearProgressIndicator(
                         value: task.progress,
                         backgroundColor: t.ink2,
-                        color: t.copper,
+                        color: t.accent,
                       ),
                     ),
                   ),
@@ -254,7 +254,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                   task.status == DownloadStatus.error
                       ? Icons.refresh
                       : Icons.play_arrow,
-                  color: t.copper,
+                  color: t.accent,
                   size: 20),
               onPressed: () => DownloadManager.instance.resume(task.address),
             ),
@@ -320,10 +320,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                         TextButton.icon(
                           onPressed: manager.resumeAll,
                           icon: Icon(Icons.play_arrow,
-                              size: 16, color: t.copper),
+                              size: 16, color: t.accent),
                           label: Text('Resume all',
                               style: TextStyle(
-                                  color: t.copper, fontSize: 12.5)),
+                                  color: t.accent, fontSize: 12.5)),
                         ),
                       if (_selected.isNotEmpty)
                         TextButton.icon(
@@ -348,7 +348,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
               ],
               _sectionLabel(t, 'STORAGE'),
               ListTile(
-                leading: Icon(Icons.folder_outlined, color: t.copper),
+                leading: Icon(Icons.folder_outlined, color: t.accent),
                 title: Text('Download location',
                     style: TextStyle(color: t.bone, fontSize: 15)),
                 subtitle: Text(
@@ -386,7 +386,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                 ),
               _sectionLabel(t, 'PLAYBACK'),
               ListTile(
-                leading: Icon(Icons.pause_circle_outline, color: t.copper),
+                leading: Icon(Icons.pause_circle_outline, color: t.accent),
                 title: Text('Downloads while playing',
                     style: TextStyle(color: t.bone, fontSize: 15)),
                 subtitle: Text(

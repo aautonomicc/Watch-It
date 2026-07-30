@@ -123,7 +123,7 @@ class _HomeLayoutScreenState extends State<HomeLayoutScreen> {
       key: ValueKey(section.id),
       leading: Checkbox(
         value: section.visible,
-        activeColor: t.copper,
+        activeColor: t.accent,
         onChanged: (v) => _setVisible(index, v ?? true),
       ),
       title: Text(

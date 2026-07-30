@@ -47,7 +47,7 @@ convention — see [NAMING.md](NAMING.md).
       HTTP Range seek verified byte-exact against the live network
 - [x] CI: `flutter analyze` + `flutter test` on push → GitHub Actions
       (.github/workflows/ci.yml), pinned Flutter 3.44.6, runs on push to main + PRs
-- [x] Decide accent color / app icon → copper #c9732b accent; icon: striped popcorn bucket (bone/red #ef5350/bone, branding/icon.svg) — replaced the original `[>]` chevron 2026-07-29 (too close to Plex)
+- [x] Decide accent color / app icon → blue #42a5f5 accent since 2026-07-30 (was copper #c9732b); icon: striped popcorn bucket (bone/blue #42a5f5/bone, branding/icon.svg) — bucket replaced the original `[>]` chevron 2026-07-29 (too close to Plex), stripe went red→blue with the accent change
       icon on ink, app-bar wordmark lockup matches (alpha.12); see BRAND.md
 
 **Exit criteria:** play a video file on Linux and Android, and prove seekable playback

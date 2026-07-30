@@ -67,7 +67,7 @@ Widget ratingLine(WiTokens t, double rating) {
   return Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      Icon(Icons.star_rounded, color: t.copper, size: 20),
+      Icon(Icons.star_rounded, color: t.accent, size: 20),
       const SizedBox(width: 4),
       Text(
         rating.toStringAsFixed(1),

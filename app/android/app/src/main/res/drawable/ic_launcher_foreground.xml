@@ -12,7 +12,7 @@
     Farthest points are the top outer corners at ~29.8 from centre —
     inside the ~33 safe-circle radius launchers crop to.
 
-    Bone #f5f2eb outer stripes, red #ef5350 centre stripe (icon-only
+    Bone #f5f2eb outer stripes, blue #42a5f5 centre stripe (icon-only
     accent, outside the BRAND.md token set). Background (ink #0a0a0a)
     supplied by the adaptive-icon XML.
 -->
@@ -27,7 +27,7 @@
         android:pathData="M 32.24 33.6 L 40.944 33.6 L 46.656 74.4 L 41.76 74.4 Z" />
 
     <path
-        android:fillColor="#ef5350"
+        android:fillColor="#42a5f5"
         android:pathData="M 49.648 33.6 L 58.352 33.6 L 56.448 74.4 L 51.552 74.4 Z" />
 
     <path

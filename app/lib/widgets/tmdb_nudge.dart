@@ -36,7 +36,7 @@ class TmdbNudgeBanner extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 6, 4, 6),
           child: Row(
             children: [
-              Icon(Icons.image_search_outlined, color: t.copper, size: 18),
+              Icon(Icons.image_search_outlined, color: t.accent, size: 18),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
