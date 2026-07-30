@@ -18,6 +18,7 @@ import 'services/home_sections.dart';
 import 'services/library_store.dart';
 import 'services/metadata.dart';
 import 'services/metadata_service.dart';
+import 'services/rootmap_seeder.dart';
 import 'services/season_grouping.dart';
 import 'services/watch_state.dart';
 import 'theme/tokens.dart';
@@ -39,6 +40,10 @@ Future<void> main() async {
   // Background online/offline tracking for Play gating and the Up-next
   // chain (browsing itself is never gated).
   ConnectivityMonitor.instance.start();
+  // Bundled root data maps (the demo movie) seed the embedded client's
+  // store so a fresh install skips the cold network resolve on first
+  // play. Fire-and-forget: fully offline, idempotent, verified server-side.
+  unawaited(seedBundledRootMaps());
   runApp(const WatchItApp());
 }
 
