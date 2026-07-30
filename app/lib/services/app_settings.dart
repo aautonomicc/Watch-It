@@ -139,6 +139,19 @@ class AppSettings {
     await prefs.setString(_streamingNetworkKey, value.name);
   }
 
+  static const _samsungTipDismissedKey = 'samsung_tip_dismissed_v1';
+
+  /// One-time Samsung battery-management tip on Settings → Downloads.
+  static Future<bool> samsungTipDismissed() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_samsungTipDismissedKey) ?? false;
+  }
+
+  static Future<void> setSamsungTipDismissed() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_samsungTipDismissedKey, true);
+  }
+
   static const _pauseDownloadsOnPlayKey = 'pause_downloads_on_play_v1';
 
   /// What to do with active downloads when streaming playback starts

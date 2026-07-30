@@ -4,6 +4,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../services/app_settings.dart';
+import '../services/download_foreground.dart';
 import '../services/download_manager.dart';
 import '../theme/tokens.dart';
 
@@ -20,6 +21,10 @@ class DownloadsScreen extends StatefulWidget {
 class _DownloadsScreenState extends State<DownloadsScreen> {
   String? _downloadDir;
   PauseDownloadsOnPlay _pauseOnPlay = PauseDownloadsOnPlay.ask;
+
+  /// One-time tip for Samsung phones, whose battery management kills
+  /// even foreground services under "Sleeping apps".
+  bool _showSamsungTip = false;
 
   /// Addresses ticked for deletion via the per-item checkboxes.
   final Set<String> _selected = {};
@@ -39,12 +44,21 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   Future<void> _loadPrefs() async {
     final dir = await AppSettings.downloadDirPath();
     final pauseOnPlay = await AppSettings.pauseDownloadsOnPlay();
+    final samsungTip = !await AppSettings.samsungTipDismissed() &&
+        (await DownloadForegroundBridge.instance.manufacturer())
+            .contains('samsung');
     if (mounted) {
       setState(() {
         _downloadDir = dir;
         _pauseOnPlay = pauseOnPlay;
+        _showSamsungTip = samsungTip;
       });
     }
+  }
+
+  Future<void> _dismissSamsungTip() async {
+    await AppSettings.setSamsungTipDismissed();
+    if (mounted) setState(() => _showSamsungTip = false);
   }
 
   Future<void> _pickFolder() async {
@@ -298,6 +312,42 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
               task.status == DownloadStatus.error);
           return ListView(
             children: [
+              if (_showSamsungTip)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: t.ink2,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.battery_alert_outlined,
+                            size: 18, color: t.accent),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Samsung tip: battery management can stop '
+                            'background downloads. In the phone\'s '
+                            'Settings, open Apps → Watch-It → Battery '
+                            'and allow background activity (and keep '
+                            'the app out of "Sleeping apps").',
+                            style:
+                                TextStyle(fontSize: 12, color: t.boneDim),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: _dismissSamsungTip,
+                          child: Text('Got it',
+                              style: TextStyle(
+                                  color: t.accent, fontSize: 12.5)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               _sectionLabel(t, 'QUEUE'),
               if (tasks.isEmpty)
                 Padding(

@@ -11,6 +11,7 @@ import 'screens/settings_screen.dart';
 import 'screens/show_screen.dart';
 import 'services/app_settings.dart';
 import 'services/connectivity.dart';
+import 'services/download_foreground.dart';
 import 'services/download_manager.dart';
 import 'services/embedded_client.dart';
 import 'services/home_rows.dart';
@@ -46,6 +47,9 @@ Future<void> main() async {
   // Settings → Network says Wi-Fi only.
   DownloadManager.instance.bindConnectivity(ConnectivityMonitor.instance);
   DownloadManager.instance.bindNetwork(NetworkEvents.instance);
+  // Android: keep transfers alive while backgrounded via the dataSync
+  // foreground service + progress notification (no-op elsewhere).
+  DownloadForegroundBridge.instance.bind(DownloadManager.instance);
   // Reconnect fast-paths: phone wake and OS network changes (cable
   // replug on Linux via NetworkManager) re-probe immediately and kick
   // the embedded client's reconnect supervisor instead of waiting for
@@ -77,6 +81,9 @@ class _LifecycleReconnector with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(ConnectivityMonitor.instance.onExternalNetworkEvent());
+      // Also restart downloads the app itself parked (6h background
+      // budget, connection loss while frozen).
+      unawaited(DownloadManager.instance.onAppResumed());
     }
   }
 }
