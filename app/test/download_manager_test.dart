@@ -9,7 +9,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/models/media_list.dart';
+import 'package:watchit/services/connectivity.dart';
 import 'package:watchit/services/download_manager.dart';
+import 'package:watchit/services/embedded_client.dart';
 import 'package:watchit/services/library_store.dart';
 
 const _addrA =
@@ -296,6 +298,81 @@ void main() {
     await waitFor(
         () => manager.taskFor(_addrA)?.status == DownloadStatus.paused);
     expect(manager.taskFor(_addrA)!.error, isNull);
+  });
+
+  test('connection-loss pause is a system pause and auto-resumes when '
+      'the monitor flips back online', () async {
+    dropAfter = 16 * 1024;
+    healthBody = {'state': 'ready', 'peers': 0}; // network gone
+    var health = const ClientHealth(state: 'ready', peers: 0);
+    final monitor = ConnectivityMonitor(
+        probe: () async => health, kick: () async {});
+    await monitor.refresh(); // now offline
+    final manager = DownloadManager(base: base, directory: dir);
+    manager.bindConnectivity(monitor);
+    await manager.enqueue(entry('Movie.mkv', _addrA));
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.paused);
+    expect(manager.taskFor(_addrA)!.pausedBySystem, isTrue);
+
+    // Network back: the monitor flip alone must restart the download.
+    dropAfter = null;
+    healthBody = {'state': 'ready', 'peers': 5};
+    health = const ClientHealth(state: 'ready', peers: 5);
+    await monitor.refresh();
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.done);
+    expect(manager.taskFor(_addrA)!.pausedBySystem, isFalse);
+    expect(File(manager.taskFor(_addrA)!.filePath).readAsBytesSync(),
+        payload);
+  });
+
+  test('a pause by hand never auto-resumes on reconnect', () async {
+    var health = const ClientHealth(state: 'ready', peers: 0);
+    final monitor = ConnectivityMonitor(
+        probe: () async => health, kick: () async {});
+    await monitor.refresh();
+    final manager = DownloadManager(base: base, directory: dir);
+    manager.bindConnectivity(monitor);
+    gateAfter = 8 * 1024;
+    await manager.enqueue(entry('Movie.mkv', _addrA));
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.downloading);
+    await manager.pause(_addrA);
+    gateRelease.complete();
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.paused);
+    expect(manager.taskFor(_addrA)!.pausedBySystem, isFalse);
+
+    health = const ClientHealth(state: 'ready', peers: 5);
+    await monitor.refresh(); // back online
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(manager.taskFor(_addrA)!.status, DownloadStatus.paused);
+  });
+
+  test('system-paused rows auto-resume on the next launch while online',
+      () async {
+    dropAfter = 16 * 1024;
+    healthBody = {'state': 'ready', 'peers': 0};
+    final first = DownloadManager(base: base, directory: dir);
+    await first.enqueue(entry('Movie.mkv', _addrA));
+    await waitFor(
+        () => first.taskFor(_addrA)?.status == DownloadStatus.paused);
+    expect(first.taskFor(_addrA)!.pausedBySystem, isTrue);
+
+    // "Restart": a fresh manager over the same database, now online.
+    dropAfter = null;
+    healthBody = {'state': 'ready', 'peers': 5};
+    final monitor = ConnectivityMonitor(
+        probe: () async => const ClientHealth(state: 'ready', peers: 5),
+        kick: () async {});
+    final second = DownloadManager(base: base, directory: dir);
+    second.bindConnectivity(monitor);
+    await second.ensureLoaded();
+    await waitFor(
+        () => second.taskFor(_addrA)?.status == DownloadStatus.done);
+    expect(File(second.taskFor(_addrA)!.filePath).readAsBytesSync(),
+        payload);
   });
 
   test('a transfer failure while online is still an error', () async {

@@ -263,6 +263,48 @@ void main() {
       final db = await LibraryStore.database();
       expect(await db.select(db.watchStates).get(), isEmpty);
     });
+
+    test('v6 downloads gain pausedBySystem on upgrade, defaulting false',
+        () async {
+      final dir = await Directory.systemTemp.createTemp('watchit-migration');
+      addTearDown(() => dir.delete(recursive: true));
+      final file = File('${dir.path}/watchit.sqlite');
+
+      // Hand-build the alpha.30–37 (schema v6) downloads table: no
+      // paused_by_system column yet, one task paused mid-flight.
+      final raw = sqlite3.open(file.path);
+      raw.execute('''
+        CREATE TABLE media_lists (
+          id TEXT NOT NULL, title TEXT NOT NULL, position INTEGER NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (id));
+        CREATE TABLE media_entries (
+          entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          list_id TEXT NOT NULL REFERENCES media_lists (id) ON DELETE CASCADE,
+          name TEXT NOT NULL, address TEXT NOT NULL,
+          position INTEGER NOT NULL, added_at INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE downloads (
+          address TEXT NOT NULL, name TEXT NOT NULL,
+          file_path TEXT NOT NULL,
+          total_bytes INTEGER NOT NULL DEFAULT 0,
+          downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL, error TEXT,
+          created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+          PRIMARY KEY (address));
+        INSERT INTO downloads (address, name, file_path, status,
+          created_at, updated_at)
+          VALUES ('$_addr', 'Old.mkv', '/tmp/Old.mkv', 'paused', 1, 1);
+        PRAGMA user_version = 6;
+      ''');
+      raw.close();
+
+      await LibraryStore.useForTesting(
+          AppDatabase.forTesting(NativeDatabase(file)));
+      final db = await LibraryStore.database();
+      final row = (await db.select(db.downloads).get()).single;
+      // An old pause was by definition a user pause — never auto-resume.
+      expect(row.pausedBySystem, isFalse);
+      expect(row.status, 'paused');
+    });
   });
 
   group('Legacy SharedPreferences import', () {
