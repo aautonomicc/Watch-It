@@ -28,7 +28,7 @@ server compatibility** — Autonomi *is* the backend.
 
 ## Status
 
-**Working alpha on Android and Linux** — [v0.1.0-alpha.37](https://github.com/aautonomicc/Watch-It/releases)
+**Working alpha on Android and Linux** — [v0.1.0-alpha.38](https://github.com/aautonomicc/Watch-It/releases)
 ships a signed APK and a Linux AppImage that connect to the live Autonomi network
 with an embedded Rust client (no gateway, no sidecar) and stream by XOR address
 with byte-exact seeking, a chunk cache with keep-ahead prefetch, and persisted
@@ -66,9 +66,16 @@ the home app bar (`/` or Ctrl+F on desktop) opens a full-screen
 live-as-you-type search over your library — titles, years, and episode
 markers like s02e05 — grouped into Shows / Movies / Episodes with the usual
 download and watched badges. Alpha.36 gives Watch-It its own identity: a
-new striped popcorn-bucket logo (bone / red / bone on ink) as the launcher
+new striped popcorn-bucket logo as the launcher
 and taskbar icon on both platforms and as the icon + wordmark lockup in
-the app bar.
+the app bar; alpha.37 turns the logo stripe and the app accent blue
+(#42a5f5). Alpha.38 makes the connection self-healing and downloads
+phone-friendly: the app automatically reconnects after a network loss
+(cable unplugged, phone sleep/wake) with no restart needed, Android
+downloads keep running in the background with a progress notification,
+Settings → Network adds Wi-Fi/mobile-data policies (downloads Wi-Fi-only
+by default, ask-before-streaming on cellular), and the demo movie's data
+map ships inside the app so it starts fast on a fresh install.
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users

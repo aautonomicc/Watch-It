@@ -7,18 +7,18 @@ poster art everywhere, minimal chrome.
 
 Colours, fonts, and type scale live in **[BRAND.md](BRAND.md)** — Watch-It follows
 the etchit.io family design language (fetch>it / etch/it): warm near-black
-"ink" surfaces, bone-white text, copper `#c9732b` accent, system UI fonts,
+"ink" surfaces, bone-white text, blue `#42a5f5` accent (a deliberate divergence from the family copper — see BRAND.md), system UI fonts,
 mono for XOR addresses, lowercase `watch-it` wordmark.
 
 - **Dark-first.** `--ink` (#0a0a0a) canvas, poster art provides the colour.
   Three themes (dark / dim / light), dark default.
-- **One accent — copper** (#c9732b): distinct from Plex yellow-orange,
+- **One accent — blue** (#42a5f5; #1976d2 in the light theme): distinct from Plex yellow-orange,
   Jellyfin purple, Emby green; used for play/focus/progress only, never
   large surfaces.
 - Poster cards with rounded corners, hover/focus scale on desktop, watched-progress bar
-  along the card bottom (copper fill), unwatched-count badge for shows.
+  along the card bottom (accent fill), unwatched-count badge for shows.
 - **Download/offline state on every card**: small badge (ash outline = stream-only,
-  green check = downloaded, copper progress ring = downloading).
+  green check = downloaded, accent progress ring = downloading).
 
 ## Screens
 
@@ -78,7 +78,7 @@ mono for XOR addresses, lowercase `watch-it` wordmark.
 | | Mobile (Android/iOS) | Desktop (Linux/Win/Mac) | TV (Android TV, 10-foot) |
 |---|---|---|---|
 | Nav | bottom tab bar (Home · Library · Search · Settings) | slim left sidebar | left rail, collapsed to icons; D-pad only |
-| Grid | 3 posters wide | responsive, 6–10 wide | 5–6 wide, focused card scales + copper focus ring |
+| Grid | 3 posters wide | responsive, 6–10 wide | 5–6 wide, focused card scales + accent focus ring |
 | Detail | vertical scroll | two-column hero | full-bleed backdrop, focusable button row |
 | Player | gesture-driven | keyboard + mouse hover | remote-driven (see Player above) |
 | Input | touch | keyboard + mouse | D-pad focus traversal; every action reachable without a pointer |
@@ -87,7 +87,7 @@ TV notes: larger base type scale (readable at 3 m), no hover-only affordances, t
 entry kept to add/import flows only (paste via network share or a shown-on-TV import
 address is preferred over typing XOR addresses with a remote).
 
-## Built so far (alpha.37)
+## Built so far (alpha.38)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,
@@ -98,7 +98,7 @@ the end-of-episode Up-next auto-play card, the Media Lists management page
 prefetch, per-list export), and Settings (network status, metadata key,
 Downloads queue page, size on disk + factory reset) are all live on Android
 and Linux. Downloads shipped in alpha.30/.31: a Download button with
-progress on detail pages, download badges on every card (copper check =
+progress on detail pages, download badges on every card (accent check =
 downloaded, progress ring = downloading, any-downloaded count on show/season
 cards), downloaded titles playing locally, and offline gating — browsing
 always works, Play is disabled with a hint on non-downloaded titles when
@@ -115,6 +115,11 @@ search icon in the home app bar (`/` or Ctrl+F on desktop) opening a
 full-screen live search over the library, grouped Shows / Movies /
 Episodes with download/watched badges. Alpha.36 ships the striped
 popcorn-bucket logo — launcher/taskbar icon on Android and Linux plus the
-icon + 'watch-it' lockup in the home app bar. Still to
+icon + 'watch-it' lockup in the home app bar — and alpha.37 turns the
+logo stripe and the app accent blue (#42a5f5). Alpha.38 adds Settings →
+Network (downloads Wi-Fi-only by default, ask-before-streaming on
+cellular), automatic reconnection after network loss on both platforms,
+an Android background-download progress notification, and the bundled
+demo-movie data map for a fast first play. Still to
 come from this document: filter/sort + fast-scroller on
 the grid, the full desktop keyboard map, mobile gestures, and the TV layout.

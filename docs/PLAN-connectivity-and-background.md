@@ -1,6 +1,6 @@
 # Plan — auto-reconnect, background downloads, network preference, bundled NOTLD map
 
-**Status: IMPLEMENTED 2026-07-30 (commits cf0a90b, 1265717, 9d8fba3, ba4a3fb — unreleased). Written 2026-07-30 from the
+**Status: IMPLEMENTED 2026-07-30 (commits cf0a90b, 1265717, 9d8fba3, ba4a3fb), released in v0.1.0-alpha.38. Written 2026-07-30 from the
 user's alpha.37 field reports.** Covers five asks:
 
 1. AppImage: after unplugging the network cable, the app never reconnects

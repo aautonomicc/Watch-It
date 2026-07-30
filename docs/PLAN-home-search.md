@@ -62,7 +62,7 @@ reusing the exact grouping home already does (`groupShows`/`parseMediaName`):
 
 Reuse existing sync stores (both already keyed by address, both ChangeNotifiers the
 screen listens to):
-- Watched ✓ / progress via `WatchStateStore.cachedStateFor` — same copper bar / badge
+- Watched ✓ / progress via `WatchStateStore.cachedStateFor` — same accent bar / badge
   as cards.
 - Downloaded badge via `DownloadManager.taskFor(addr)?.status == done` (same predicate
   as `home_rows.dart` downloadedItems).

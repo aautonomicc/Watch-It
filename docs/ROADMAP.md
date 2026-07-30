@@ -1,6 +1,6 @@
 # Roadmap
 
-**Status (2026-07-29):** v0.1.0-alpha.36 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
+**Status (2026-07-30):** v0.1.0-alpha.38 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
 — signed Android APK + Linux AppImage on every release. Phases 0, 1, and 2 are
 done: both platforms stream from the live Autonomi network via the embedded
 Rust client (`native/watchit_core`) with byte-exact seek, a chunk LRU cache with
@@ -31,8 +31,14 @@ and the 8px watch-progress bar on every card. Alpha.35 adds home-page
 library search: a search icon on the home app bar (`/` / Ctrl+F on
 desktop) opens a live full-screen search over parsed titles, years, and
 episode markers, grouped Shows / Movies / Episodes. Alpha.36 adopts the
-striped popcorn-bucket logo (bone/red/bone on ink) as the launcher/taskbar
-icon and app-bar lockup on both platforms. The seeded
+striped popcorn-bucket logo as the launcher/taskbar
+icon and app-bar lockup on both platforms; alpha.37 turns the logo stripe
+and the whole app accent blue (#42a5f5, replacing the family copper).
+Alpha.38 ships the connectivity & background work (see the section below):
+automatic reconnect after network loss on both platforms, Android
+background downloads with a progress notification, Wi-Fi/mobile-data
+policies in Settings → Network, and the demo movie's root data map bundled
+into the app for a fast first play. The seeded
 default movie is an H.264 8-bit 1080p encode named per the Plex/Jellyfin
 convention — see [NAMING.md](NAMING.md).
 
@@ -104,7 +110,7 @@ streams from the network → resume works after app restart. v0.1 release.
       (embedded client connecting or 0 peers) Play is disabled with a hint on
       non-downloaded titles only, and the Up-next chain stops at a
       non-downloaded next episode — online it falls back to streaming
-- [x] Card badges for stream/downloading/downloaded state → alpha.31: copper
+- [x] Card badges for stream/downloading/downloaded state → alpha.31: accent
       check = downloaded, progress ring = downloading, no badge = stream;
       show/season cards badge once ANY episode is downloaded, with a count
 - [x] List **import** as files — pulled forward, shipped in alpha.25: local file
@@ -118,11 +124,12 @@ streams from the network → resume works after app restart. v0.1 release.
 - v0.2 release (Linux + Android)
 
 **Exit criteria: all met** as of alpha.31; Phase 2 is feature-complete.
-Deferred niceties: auto-resume downloads on reconnect, per-direction
-bandwidth/concurrency settings. Known upstream limitation: ant-core's
-`/health` can report ready with stale peers when the OS network vanishes
-entirely, so total-network-loss detection (airplane mode) is unreliable —
-VPN-cut style losses are detected fine.
+Auto-resume of connection-loss pauses shipped in alpha.38 (system pauses
+auto-resume on reconnect/Wi-Fi/app-resume/next-launch; user pauses stay
+manual). Still deferred: per-direction bandwidth/concurrency settings.
+The old total-network-loss blind spot (ant-core reporting ready with stale
+peers) is handled since alpha.38: the reconnect supervisor evicts the
+client when peers stay at 0 and re-dials automatically.
 
 ## `.watch-list` bundles (spec locked 2026-07-25, released in v0.1.0-alpha.33)
 
@@ -148,6 +155,30 @@ offline), and optional watch history (device migration). Full spec in
       embedded Rust server, offline shrink/serialize/hash verification on
       import (garbage → 400, wrong address → 422), root-maps checkbox
       default ON
+
+## Connectivity & background (planned 2026-07-30, released in v0.1.0-alpha.38)
+
+From the alpha.37 field reports — full plan in
+[PLAN-connectivity-and-background.md](PLAN-connectivity-and-background.md):
+
+- [x] Auto-reconnect after network loss (both platforms): the embedded
+      client is supervised — when peers drop to 0 it is evicted and
+      re-dialled with backoff, kicked immediately on OS
+      connectivity/lifecycle events (cable replug, phone wake); no app
+      restart needed
+- [x] Android background downloads: dataSync foreground service with
+      wake/Wi-Fi locks and a silent progress notification; the 6-hour
+      Android timeout system-pauses the queue with a "reopen to continue"
+      notice; Samsung battery-settings tip card in Settings → Downloads
+- [x] Wi-Fi / mobile-data policies (Settings → Network): downloads
+      Wi-Fi-only by default (queue shows "Waiting for Wi-Fi"), streaming
+      asks once per session on cellular (or always-allow / Wi-Fi-only)
+- [x] Bundled demo-movie root data map: the NOTLD map ships as an app
+      asset and is seeded into the map store at startup — first play on a
+      fresh install skips the 20–30s network resolve
+- [x] System-pause auto-resume: pauses caused by the system (connection
+      loss, waiting-for-Wi-Fi, Android timeout) resume automatically on
+      reconnect/Wi-Fi/app-resume/next-launch; user pauses stay manual
 
 ## Phase 3 — All desktop platforms
 - [ ] Windows + macOS builds and packaging (MSIX, .dmg)
