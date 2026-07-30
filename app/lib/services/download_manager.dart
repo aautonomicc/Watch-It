@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import '../db/app_database.dart';
 import '../models/media_list.dart';
 import 'app_settings.dart';
+import 'connectivity.dart';
 import 'embedded_client.dart';
 import 'library_store.dart';
 import 'storage_usage.dart';
@@ -27,6 +28,7 @@ class DownloadTask {
     required this.status,
     required this.createdAt,
     this.error,
+    this.pausedBySystem = false,
   });
 
   final String address;
@@ -44,6 +46,12 @@ class DownloadTask {
   /// Failure detail while [status] is [DownloadStatus.error].
   final String? error;
 
+  /// This pause was the app's doing (connection lost, waiting for
+  /// Wi-Fi), so it auto-resumes when the blocking condition clears —
+  /// persisted, so that also works across an app restart. A pause or
+  /// resume by the user clears it.
+  final bool pausedBySystem;
+
   /// 0..1 through the file; null while the total size is unknown.
   double? get progress => totalBytes > 0
       ? (downloadedBytes / totalBytes).clamp(0.0, 1.0)
@@ -59,6 +67,7 @@ class DownloadTask {
     DownloadStatus? status,
     String? error,
     bool clearError = false,
+    bool? pausedBySystem,
   }) =>
       DownloadTask(
         address: address,
@@ -69,6 +78,7 @@ class DownloadTask {
         status: status ?? this.status,
         createdAt: createdAt,
         error: clearError ? null : (error ?? this.error),
+        pausedBySystem: pausedBySystem ?? this.pausedBySystem,
       );
 }
 
@@ -105,6 +115,38 @@ class DownloadManager extends ChangeNotifier {
   /// [resumeAfterPlayback] — a manual pause is not in here and stays
   /// paused when playback ends.
   final Set<String> _pausedForPlayback = {};
+
+  ConnectivityMonitor? _monitor;
+
+  /// Watch [monitor] and auto-resume system-paused downloads (connection
+  /// loss) the moment it reports the network is back. Called once from
+  /// main(); tests may bind a monitor with an injected probe.
+  void bindConnectivity(ConnectivityMonitor monitor) {
+    _monitor?.removeListener(_onConnectivityFlip);
+    _monitor = monitor;
+    monitor.addListener(_onConnectivityFlip);
+  }
+
+  void _onConnectivityFlip() {
+    final monitor = _monitor;
+    if (monitor != null && !monitor.offline) _resumeSystemPaused();
+  }
+
+  /// Re-queue every download the app itself paused. The user's own
+  /// pauses (pausedBySystem false) stay put.
+  void _resumeSystemPaused() {
+    var any = false;
+    for (final task in _tasks.values.toList()) {
+      if (task.status == DownloadStatus.paused && task.pausedBySystem) {
+        _update(task.copyWith(
+            status: DownloadStatus.queued,
+            clearError: true,
+            pausedBySystem: false));
+        any = true;
+      }
+    }
+    if (any) _pump();
+  }
 
   /// The current batch: every task queued or downloading since the queue
   /// was last idle. Members that finish stay counted (that is what makes
@@ -200,11 +242,20 @@ class DownloadManager extends ChangeNotifier {
         status: status,
         createdAt: row.createdAt,
         error: row.error,
+        pausedBySystem: row.pausedBySystem,
       );
     }
     _trackBatch();
     notifyListeners();
     _pump();
+    // Tasks the app paused (connection loss, waiting for Wi-Fi) in a
+    // previous run resume by themselves once we know we are online.
+    final monitor = _monitor;
+    if (monitor != null &&
+        _tasks.values.any(
+            (t) => t.status == DownloadStatus.paused && t.pausedBySystem)) {
+      if (!await monitor.refresh()) _resumeSystemPaused();
+    }
   }
 
   /// Queue [entry] for download. Re-queues a paused or failed task;
@@ -242,11 +293,13 @@ class DownloadManager extends ChangeNotifier {
   }
 
   /// Pause one download (aborts the transfer if it is the running one).
+  /// A pause by hand is never auto-resumed.
   Future<void> pause(String address) async {
     final addr = normalize(address);
     final task = _tasks[addr];
     if (task == null || !task.active) return;
-    _update(task.copyWith(status: DownloadStatus.paused));
+    _update(
+        task.copyWith(status: DownloadStatus.paused, pausedBySystem: false));
     if (_activeAddress == addr) _activeClient?.close(force: true);
   }
 
@@ -260,7 +313,10 @@ class DownloadManager extends ChangeNotifier {
       return;
     }
     _pausedForPlayback.remove(addr);
-    _update(task.copyWith(status: DownloadStatus.queued, clearError: true));
+    _update(task.copyWith(
+        status: DownloadStatus.queued,
+        clearError: true,
+        pausedBySystem: false));
     _pump();
   }
 
@@ -295,7 +351,8 @@ class DownloadManager extends ChangeNotifier {
     var any = false;
     for (final task in _tasks.values.toList()) {
       if (task.active) {
-        _update(task.copyWith(status: DownloadStatus.paused));
+        _update(task.copyWith(
+            status: DownloadStatus.paused, pausedBySystem: false));
         any = true;
       }
     }
@@ -311,7 +368,10 @@ class DownloadManager extends ChangeNotifier {
     for (final task in _tasks.values.toList()) {
       if (task.status == DownloadStatus.paused ||
           task.status == DownloadStatus.error) {
-        _update(task.copyWith(status: DownloadStatus.queued, clearError: true));
+        _update(task.copyWith(
+            status: DownloadStatus.queued,
+            clearError: true,
+            pausedBySystem: false));
         any = true;
       }
     }
@@ -532,12 +592,13 @@ class DownloadManager extends ChangeNotifier {
         _update(current.copyWith(downloadedBytes: bytes));
       } else if (await _connectionLost()) {
         // The transfer died because the network is gone, not because the
-        // download is broken — pause instead of erroring; the bytes on
-        // disk resume as usual once the user is back online.
+        // download is broken — pause instead of erroring; marked as a
+        // system pause so it auto-resumes when the connection is back.
         _update(current.copyWith(
             status: DownloadStatus.paused,
             downloadedBytes: bytes,
-            clearError: true));
+            clearError: true,
+            pausedBySystem: true));
       } else {
         _update(current.copyWith(
             status: DownloadStatus.error,
@@ -604,6 +665,7 @@ class DownloadManager extends ChangeNotifier {
               downloadedBytes: Value(task.downloadedBytes),
               status: task.status.name,
               error: Value(task.error),
+              pausedBySystem: Value(task.pausedBySystem),
               createdAt: task.createdAt,
               updatedAt: DateTime.now().millisecondsSinceEpoch,
             ),

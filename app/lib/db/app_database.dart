@@ -118,6 +118,12 @@ class Downloads extends Table {
   /// `queued` | `downloading` | `paused` | `done` | `error`.
   TextColumn get status => text()();
   TextColumn get error => text().nullable()();
+
+  /// Paused by the app (connection loss, waiting for Wi-Fi), not by the
+  /// user — these auto-resume when the blocking condition clears, also
+  /// across an app restart. Any user action clears the flag.
+  BoolColumn get pausedBySystem =>
+      boolean().withDefault(const Constant(false))();
   IntColumn get createdAt => integer()(); // epoch ms
   IntColumn get updatedAt => integer()(); // epoch ms
 
@@ -142,7 +148,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -167,6 +173,12 @@ class AppDatabase extends _$AppDatabase {
           if (from < 6) {
             // alpha.30: download manager.
             await m.createTable(downloads);
+          }
+          if (from >= 6 && from < 7) {
+            // alpha.38: system-vs-user pause distinction so downloads
+            // auto-resume on reconnect / Wi-Fi return. (An older `from`
+            // just created the table with the column already in it.)
+            await m.addColumn(downloads, downloads.pausedBySystem);
           }
         },
         beforeOpen: (details) async {
