@@ -52,6 +52,29 @@ void main() {
     });
   });
 
+  group('onExternalNetworkEvent', () {
+    test('offline after re-probe kicks the reconnect supervisor', () async {
+      var kicks = 0;
+      final monitor = ConnectivityMonitor(
+        probe: () async => _health('ready', peers: 0),
+        kick: () async => kicks++,
+      );
+      await monitor.onExternalNetworkEvent();
+      expect(monitor.offline, isTrue);
+      expect(kicks, 1);
+    });
+
+    test('online after re-probe does not kick', () async {
+      var kicks = 0;
+      final monitor = ConnectivityMonitor(
+        probe: () async => _health('ready', peers: 5),
+        kick: () async => kicks++,
+      );
+      await monitor.onExternalNetworkEvent();
+      expect(kicks, 0);
+    });
+  });
+
   group('canChainInto', () {
     test('downloaded next episode always chains, without probing', () async {
       var probed = false;

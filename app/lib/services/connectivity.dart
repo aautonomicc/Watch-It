@@ -16,13 +16,17 @@ import 'embedded_client.dart';
 /// Browsing is never gated. Consumers (Play buttons, the Up-next chain)
 /// listen and re-check [offline] when it flips.
 class ConnectivityMonitor extends ChangeNotifier {
-  ConnectivityMonitor({Future<ClientHealth> Function()? probe})
-      : _probe = probe ?? EmbeddedClient.health;
+  ConnectivityMonitor({
+    Future<ClientHealth> Function()? probe,
+    Future<void> Function()? kick,
+  })  : _probe = probe ?? EmbeddedClient.health,
+        _kick = kick ?? EmbeddedClient.reconnectKick;
 
   /// Replaceable for tests (fresh instance per test).
   static ConnectivityMonitor instance = ConnectivityMonitor();
 
   final Future<ClientHealth> Function() _probe;
+  final Future<void> Function() _kick;
   Timer? _timer;
   bool _offline = false;
 
@@ -53,6 +57,16 @@ class ConnectivityMonitor extends ChangeNotifier {
   Future<bool> refresh() async {
     _apply(await _probe());
     return _offline;
+  }
+
+  /// External hint that connectivity may have just changed (app resumed
+  /// from sleep, OS reported a network change): re-probe immediately and,
+  /// if the embedded client is offline, kick its reconnect supervisor so
+  /// recovery starts now instead of after the current backoff sleep.
+  Future<void> onExternalNetworkEvent() async {
+    if (await refresh()) {
+      unawaited(_kick());
+    }
   }
 
   void _apply(ClientHealth health) {

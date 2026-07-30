@@ -73,6 +73,26 @@ class EmbeddedClient {
     }
   }
 
+  /// Nudge the embedded client's reconnect supervisor: cancels its
+  /// current backoff sleep so a connect attempt starts immediately.
+  /// Fire-and-forget; harmless while connected (the supervisor just
+  /// re-samples its peer count). Used on app resume and OS network
+  /// changes so recovery feels instant instead of waiting out backoff.
+  static Future<void> reconnectKick() async {
+    final base = baseUrl();
+    if (base == null) return;
+    final client = HttpClient();
+    try {
+      final req = await client.postUrl(Uri.parse('$base/reconnect'));
+      final res = await req.close();
+      await res.drain<void>();
+    } catch (_) {
+      // Best-effort: the supervisor reconnects on its own timer anyway.
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   /// Health snapshot from the embedded server.
   static Future<ClientHealth> health() async {
     final base = baseUrl();

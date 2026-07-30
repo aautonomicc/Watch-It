@@ -2,13 +2,15 @@
 //!
 //! `GET /xor/{address}` serves a public Autonomi file as decrypted bytes
 //! with byte-range support (`Accept-Ranges: bytes`), which is what libmpv
-//! needs for seeking. `GET /health` reports client connection state.
+//! needs for seeking. `GET /health` reports client connection state;
+//! `POST /reconnect` nudges the reconnect supervisor (phone wake, cable
+//! replug) so recovery does not wait for the next poll interval.
 
 use axum::body::{Body, Bytes};
 use axum::extract::{DefaultBodyLimit, Path};
 use axum::http::{header, HeaderMap, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt as _;
@@ -25,6 +27,7 @@ const MAX_ROOTMAP_BYTES: usize = 32 * 1024 * 1024;
 pub fn router(engine: &'static Engine) -> Router {
     Router::new()
         .route("/health", get(move || health(engine)))
+        .route("/reconnect", post(move || reconnect(engine)))
         .route(
             "/resolve/{addr}",
             get(move |path: Path<String>| resolve_map(engine, path)),
@@ -68,6 +71,15 @@ async fn health(engine: &'static Engine) -> Response {
         })
     };
     ([(header::CONTENT_TYPE, "application/json")], body.to_string()).into_response()
+}
+
+/// Kick the reconnect supervisor: cancel its current backoff sleep (or
+/// poll interval) so a connect attempt starts now. No-op in effect while
+/// connected with peers — the supervisor just re-samples and carries on.
+/// Returns the current health JSON so the caller sees where things stand.
+async fn reconnect(engine: &'static Engine) -> Response {
+    engine.kick_reconnect();
+    health(engine).await
 }
 
 /// Resolve (and persist) the root data map for an address without

@@ -8,14 +8,14 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use std::time::Duration;
 
 use ant_core::data::{Client, ClientConfig, DataMap, Error as AntError};
 use bytes::Bytes;
 use futures::StreamExt;
 use tokio::runtime::Handle;
-use tokio::sync::{mpsc, watch, OnceCell};
+use tokio::sync::{mpsc, watch, Mutex as AsyncMutex, Notify};
 use xor_name::XorName;
 
 use crate::cache::{ChunkCache, Lookup};
@@ -92,8 +92,27 @@ pub fn cache_resident_bytes() -> usize {
 /// "connecting" forever (the stuck state observed on Android).
 const CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How often the supervisor samples the connected-peer count while a
+/// client is installed.
+const SUPERVISE_POLL: Duration = Duration::from_secs(10);
+
+/// Consecutive zero-peer samples before the supervisor declares the
+/// client dead and re-dials (~20s — rides out transient blips without
+/// tearing down a connection that is about to recover).
+const OFFLINE_POLLS_BEFORE_RECONNECT: u32 = 2;
+
 pub struct Engine {
-    client: OnceCell<Client>,
+    /// The live client, replaceable: the supervisor evicts it when its
+    /// peers are all gone (cable pull, phone sleep) so the connect
+    /// machinery runs again. Streams in flight keep their own `Arc` and
+    /// die on their next fetch — their error paths already handle that.
+    client: RwLock<Option<Arc<Client>>>,
+    /// Serializes connect attempts so concurrent callers share one dial
+    /// round instead of racing the bootstrap peers.
+    connect_gate: AsyncMutex<()>,
+    /// `POST /reconnect` pings this to cut short the supervisor's backoff
+    /// sleep / next poll (cable replug and phone wake feel instant).
+    kick: Notify,
     peers: Vec<SocketAddr>,
     root_maps: Mutex<HashMap<[u8; 32], DataMap>>,
     /// On-disk root-map cache; `None` when no data dir is available
@@ -128,7 +147,9 @@ impl Engine {
                 }
             });
         Self {
-            client: OnceCell::new(),
+            client: RwLock::new(None),
+            connect_gate: AsyncMutex::new(()),
+            kick: Notify::new(),
             peers,
             root_maps: Mutex::new(HashMap::new()),
             map_store,
@@ -153,39 +174,57 @@ impl Engine {
     }
 
     pub fn is_ready(&self) -> bool {
-        self.client.initialized()
+        self.client.read().unwrap().is_some()
     }
 
-    /// Connected client, connecting on first call. Concurrent callers share
-    /// one attempt; a failed attempt leaves the cell empty so the next
+    /// The client currently installed, without connecting.
+    fn current(&self) -> Option<Arc<Client>> {
+        self.client.read().unwrap().clone()
+    }
+
+    /// Drop the installed client so the next request (or supervisor
+    /// round) dials afresh. Streams holding their own `Arc` clones just
+    /// drain it; nothing else to do.
+    fn evict(&self) {
+        *self.client.write().unwrap() = None;
+    }
+
+    /// Connected client, dialling if none is installed. Concurrent
+    /// callers queue on one gate, and whoever wins installs the client
+    /// for the rest; a failed attempt leaves the slot empty so the next
     /// request retries.
-    pub async fn client(&self) -> Result<&Client, String> {
-        let result = self
-            .client
-            .get_or_try_init(|| async {
-                let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
-                tracing::info!(
-                    "connecting to Autonomi network (attempt {attempt}, {} bootstrap peers)",
-                    self.peers.len()
-                );
-                // Public peers reject loopback-flavoured handshakes; try the
-                // CLI-default dual-stack socket first, fall back to IPv4-only
-                // for hosts/carriers with a broken v6 stack.
-                let mut config = ClientConfig::default();
-                config.allow_loopback = false;
-                config.ipv6 = true;
-                match connect_bounded(self.peers.clone(), config.clone()).await {
-                    Ok(c) => Ok(c),
-                    Err(e) => {
-                        tracing::warn!("dual-stack connect failed ({e}); retrying IPv4-only");
-                        config.ipv6 = false;
-                        connect_bounded(self.peers.clone(), config).await
-                    }
-                }
-            })
-            .await;
+    pub async fn client(&self) -> Result<Arc<Client>, String> {
+        if let Some(c) = self.current() {
+            return Ok(c);
+        }
+        let _gate = self.connect_gate.lock().await;
+        // A caller queued on the gate finds the winner's client here.
+        if let Some(c) = self.current() {
+            return Ok(c);
+        }
+        let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
+        tracing::info!(
+            "connecting to Autonomi network (attempt {attempt}, {} bootstrap peers)",
+            self.peers.len()
+        );
+        // Public peers reject loopback-flavoured handshakes; try the
+        // CLI-default dual-stack socket first, fall back to IPv4-only
+        // for hosts/carriers with a broken v6 stack.
+        let mut config = ClientConfig::default();
+        config.allow_loopback = false;
+        config.ipv6 = true;
+        let result = match connect_bounded(self.peers.clone(), config.clone()).await {
+            Ok(c) => Ok(c),
+            Err(e) => {
+                tracing::warn!("dual-stack connect failed ({e}); retrying IPv4-only");
+                config.ipv6 = false;
+                connect_bounded(self.peers.clone(), config).await
+            }
+        };
         match result {
             Ok(c) => {
+                let c = Arc::new(c);
+                *self.client.write().unwrap() = Some(c.clone());
                 *self.last_error.lock().unwrap() = None;
                 Ok(c)
             }
@@ -198,9 +237,72 @@ impl Engine {
     }
 
     pub async fn connected_peer_count(&self) -> usize {
-        match self.client.get() {
+        match self.current() {
             Some(c) => c.network().connected_peers().await.len(),
             None => 0,
+        }
+    }
+
+    /// Cut short the supervisor's current backoff sleep / poll interval
+    /// so an externally observed network recovery (cable replug, phone
+    /// wake) is acted on immediately instead of on the next timer tick.
+    /// Harmless while healthy: the supervisor just re-samples the peer
+    /// count and carries on.
+    pub fn kick_reconnect(&self) {
+        self.kick.notify_one();
+    }
+
+    /// Keep the engine connected, forever: dial until a client is up
+    /// (2s→60s backoff, restarted per round), then watch its peer count
+    /// and evict it once the network is gone ([`SUPERVISE_POLL`] ×
+    /// [`OFFLINE_POLLS_BEFORE_RECONNECT`], or one poll after a kick) —
+    /// `/health` then reports `connecting` again and the UI's offline
+    /// machinery takes over while this loop re-dials. saorsa-core never
+    /// re-dials bootstrap peers on its own, so without this a network
+    /// drop left a "ready" client with zero peers forever.
+    pub async fn supervise(&'static self) {
+        let mut delay = Duration::from_secs(2);
+        loop {
+            let client = match self.client().await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("connect failed, retrying in {delay:?}: {e}");
+                    tokio::select! {
+                        _ = tokio::time::sleep(delay) => {}
+                        _ = self.kick.notified() => {
+                            tracing::info!("reconnect kick — retrying now");
+                        }
+                    }
+                    delay = (delay * 2).min(Duration::from_secs(60));
+                    continue;
+                }
+            };
+            delay = Duration::from_secs(2);
+            let mut zero_polls = 0u32;
+            loop {
+                let kicked = tokio::select! {
+                    _ = tokio::time::sleep(SUPERVISE_POLL) => false,
+                    _ = self.kick.notified() => true,
+                };
+                let peers = client.network().connected_peers().await.len();
+                if peers > 0 {
+                    zero_polls = 0;
+                    continue;
+                }
+                zero_polls += 1;
+                // A kick is outside knowledge that the network changed:
+                // skip the second confirming poll and re-dial now.
+                if kicked || zero_polls >= OFFLINE_POLLS_BEFORE_RECONNECT {
+                    tracing::warn!(
+                        "connection lost (0 peers, {zero_polls} polls{}) — re-dialling",
+                        if kicked { ", kicked" } else { "" }
+                    );
+                    *self.last_error.lock().unwrap() =
+                        Some("connection lost — reconnecting".to_string());
+                    self.evict();
+                    break;
+                }
+            }
         }
     }
 
@@ -225,7 +327,7 @@ impl Engine {
             let handle = Handle::current();
             tokio::task::spawn_blocking(move || {
                 let fetch = |batch: &[(usize, XorName)]| {
-                    handle.block_on(fetch_chunk_batch(client, batch))
+                    handle.block_on(fetch_chunk_batch(&client, batch))
                 };
                 self_encryption::get_root_data_map_parallel(dm, &fetch)
             })
@@ -313,11 +415,16 @@ impl Engine {
             // the prefetcher follows. Dropping the sender (loop returns for
             // any reason) shuts the prefetcher down.
             let (pos_tx, pos_rx) = watch::channel(start);
-            tokio::spawn(prefetch_ahead(client, chunk_offsets(&root), pos_rx, end));
+            tokio::spawn(prefetch_ahead(
+                client.clone(),
+                chunk_offsets(&root),
+                pos_rx,
+                end,
+            ));
             let handle = Handle::current();
             let blocking = tokio::task::spawn_blocking(move || {
                 let fetch = |batch: &[(usize, XorName)]| {
-                    handle.block_on(fetch_chunk_batch(client, batch))
+                    handle.block_on(fetch_chunk_batch(&client, batch))
                 };
                 let stream = match self_encryption::streaming_decrypt(&root, fetch) {
                     Ok(s) => s,
@@ -509,7 +616,7 @@ fn chunk_offsets(root: &DataMap) -> Vec<(u64, XorName)> {
 /// Exits when the serving side drops its position sender (stream done or
 /// player disconnected).
 async fn prefetch_ahead(
-    client: &'static Client,
+    client: Arc<Client>,
     chunks: Vec<(u64, XorName)>,
     mut pos: watch::Receiver<u64>,
     end: u64,
@@ -538,7 +645,7 @@ async fn prefetch_ahead(
             continue;
         }
         let results = futures::stream::iter(
-            wanted.into_iter().map(|name| cached_chunk_get(client, name)),
+            wanted.into_iter().map(|name| cached_chunk_get(&client, name)),
         )
         .buffer_unordered(PREFETCH_CONCURRENCY)
         .collect::<Vec<_>>()

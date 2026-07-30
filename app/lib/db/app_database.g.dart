@@ -2171,6 +2171,21 @@ class $DownloadsTable extends Downloads
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _pausedBySystemMeta = const VerificationMeta(
+    'pausedBySystem',
+  );
+  @override
+  late final GeneratedColumn<bool> pausedBySystem = GeneratedColumn<bool>(
+    'paused_by_system',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("paused_by_system" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -2202,6 +2217,7 @@ class $DownloadsTable extends Downloads
     downloadedBytes,
     status,
     error,
+    pausedBySystem,
     createdAt,
     updatedAt,
   ];
@@ -2270,6 +2286,15 @@ class $DownloadsTable extends Downloads
         error.isAcceptableOrUnknown(data['error']!, _errorMeta),
       );
     }
+    if (data.containsKey('paused_by_system')) {
+      context.handle(
+        _pausedBySystemMeta,
+        pausedBySystem.isAcceptableOrUnknown(
+          data['paused_by_system']!,
+          _pausedBySystemMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -2323,6 +2348,10 @@ class $DownloadsTable extends Downloads
         DriftSqlType.string,
         data['${effectivePrefix}error'],
       ),
+      pausedBySystem: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}paused_by_system'],
+      )!,
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}created_at'],
@@ -2357,6 +2386,11 @@ class DownloadRow extends DataClass implements Insertable<DownloadRow> {
   /// `queued` | `downloading` | `paused` | `done` | `error`.
   final String status;
   final String? error;
+
+  /// Paused by the app (connection loss, waiting for Wi-Fi), not by the
+  /// user — these auto-resume when the blocking condition clears, also
+  /// across an app restart. Any user action clears the flag.
+  final bool pausedBySystem;
   final int createdAt;
   final int updatedAt;
   const DownloadRow({
@@ -2367,6 +2401,7 @@ class DownloadRow extends DataClass implements Insertable<DownloadRow> {
     required this.downloadedBytes,
     required this.status,
     this.error,
+    required this.pausedBySystem,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -2382,6 +2417,7 @@ class DownloadRow extends DataClass implements Insertable<DownloadRow> {
     if (!nullToAbsent || error != null) {
       map['error'] = Variable<String>(error);
     }
+    map['paused_by_system'] = Variable<bool>(pausedBySystem);
     map['created_at'] = Variable<int>(createdAt);
     map['updated_at'] = Variable<int>(updatedAt);
     return map;
@@ -2398,6 +2434,7 @@ class DownloadRow extends DataClass implements Insertable<DownloadRow> {
       error: error == null && nullToAbsent
           ? const Value.absent()
           : Value(error),
+      pausedBySystem: Value(pausedBySystem),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -2416,6 +2453,7 @@ class DownloadRow extends DataClass implements Insertable<DownloadRow> {
       downloadedBytes: serializer.fromJson<int>(json['downloadedBytes']),
       status: serializer.fromJson<String>(json['status']),
       error: serializer.fromJson<String?>(json['error']),
+      pausedBySystem: serializer.fromJson<bool>(json['pausedBySystem']),
       createdAt: serializer.fromJson<int>(json['createdAt']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
@@ -2431,6 +2469,7 @@ class DownloadRow extends DataClass implements Insertable<DownloadRow> {
       'downloadedBytes': serializer.toJson<int>(downloadedBytes),
       'status': serializer.toJson<String>(status),
       'error': serializer.toJson<String?>(error),
+      'pausedBySystem': serializer.toJson<bool>(pausedBySystem),
       'createdAt': serializer.toJson<int>(createdAt),
       'updatedAt': serializer.toJson<int>(updatedAt),
     };
@@ -2444,6 +2483,7 @@ class DownloadRow extends DataClass implements Insertable<DownloadRow> {
     int? downloadedBytes,
     String? status,
     Value<String?> error = const Value.absent(),
+    bool? pausedBySystem,
     int? createdAt,
     int? updatedAt,
   }) => DownloadRow(
@@ -2454,6 +2494,7 @@ class DownloadRow extends DataClass implements Insertable<DownloadRow> {
     downloadedBytes: downloadedBytes ?? this.downloadedBytes,
     status: status ?? this.status,
     error: error.present ? error.value : this.error,
+    pausedBySystem: pausedBySystem ?? this.pausedBySystem,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -2470,6 +2511,9 @@ class DownloadRow extends DataClass implements Insertable<DownloadRow> {
           : this.downloadedBytes,
       status: data.status.present ? data.status.value : this.status,
       error: data.error.present ? data.error.value : this.error,
+      pausedBySystem: data.pausedBySystem.present
+          ? data.pausedBySystem.value
+          : this.pausedBySystem,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -2485,6 +2529,7 @@ class DownloadRow extends DataClass implements Insertable<DownloadRow> {
           ..write('downloadedBytes: $downloadedBytes, ')
           ..write('status: $status, ')
           ..write('error: $error, ')
+          ..write('pausedBySystem: $pausedBySystem, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -2500,6 +2545,7 @@ class DownloadRow extends DataClass implements Insertable<DownloadRow> {
     downloadedBytes,
     status,
     error,
+    pausedBySystem,
     createdAt,
     updatedAt,
   );
@@ -2514,6 +2560,7 @@ class DownloadRow extends DataClass implements Insertable<DownloadRow> {
           other.downloadedBytes == this.downloadedBytes &&
           other.status == this.status &&
           other.error == this.error &&
+          other.pausedBySystem == this.pausedBySystem &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -2526,6 +2573,7 @@ class DownloadsCompanion extends UpdateCompanion<DownloadRow> {
   final Value<int> downloadedBytes;
   final Value<String> status;
   final Value<String?> error;
+  final Value<bool> pausedBySystem;
   final Value<int> createdAt;
   final Value<int> updatedAt;
   final Value<int> rowid;
@@ -2537,6 +2585,7 @@ class DownloadsCompanion extends UpdateCompanion<DownloadRow> {
     this.downloadedBytes = const Value.absent(),
     this.status = const Value.absent(),
     this.error = const Value.absent(),
+    this.pausedBySystem = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -2549,6 +2598,7 @@ class DownloadsCompanion extends UpdateCompanion<DownloadRow> {
     this.downloadedBytes = const Value.absent(),
     required String status,
     this.error = const Value.absent(),
+    this.pausedBySystem = const Value.absent(),
     required int createdAt,
     required int updatedAt,
     this.rowid = const Value.absent(),
@@ -2566,6 +2616,7 @@ class DownloadsCompanion extends UpdateCompanion<DownloadRow> {
     Expression<int>? downloadedBytes,
     Expression<String>? status,
     Expression<String>? error,
+    Expression<bool>? pausedBySystem,
     Expression<int>? createdAt,
     Expression<int>? updatedAt,
     Expression<int>? rowid,
@@ -2578,6 +2629,7 @@ class DownloadsCompanion extends UpdateCompanion<DownloadRow> {
       if (downloadedBytes != null) 'downloaded_bytes': downloadedBytes,
       if (status != null) 'status': status,
       if (error != null) 'error': error,
+      if (pausedBySystem != null) 'paused_by_system': pausedBySystem,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
@@ -2592,6 +2644,7 @@ class DownloadsCompanion extends UpdateCompanion<DownloadRow> {
     Value<int>? downloadedBytes,
     Value<String>? status,
     Value<String?>? error,
+    Value<bool>? pausedBySystem,
     Value<int>? createdAt,
     Value<int>? updatedAt,
     Value<int>? rowid,
@@ -2604,6 +2657,7 @@ class DownloadsCompanion extends UpdateCompanion<DownloadRow> {
       downloadedBytes: downloadedBytes ?? this.downloadedBytes,
       status: status ?? this.status,
       error: error ?? this.error,
+      pausedBySystem: pausedBySystem ?? this.pausedBySystem,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
@@ -2634,6 +2688,9 @@ class DownloadsCompanion extends UpdateCompanion<DownloadRow> {
     if (error.present) {
       map['error'] = Variable<String>(error.value);
     }
+    if (pausedBySystem.present) {
+      map['paused_by_system'] = Variable<bool>(pausedBySystem.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<int>(createdAt.value);
     }
@@ -2656,6 +2713,7 @@ class DownloadsCompanion extends UpdateCompanion<DownloadRow> {
           ..write('downloadedBytes: $downloadedBytes, ')
           ..write('status: $status, ')
           ..write('error: $error, ')
+          ..write('pausedBySystem: $pausedBySystem, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
@@ -3962,6 +4020,7 @@ typedef $$DownloadsTableCreateCompanionBuilder =
       Value<int> downloadedBytes,
       required String status,
       Value<String?> error,
+      Value<bool> pausedBySystem,
       required int createdAt,
       required int updatedAt,
       Value<int> rowid,
@@ -3975,6 +4034,7 @@ typedef $$DownloadsTableUpdateCompanionBuilder =
       Value<int> downloadedBytes,
       Value<String> status,
       Value<String?> error,
+      Value<bool> pausedBySystem,
       Value<int> createdAt,
       Value<int> updatedAt,
       Value<int> rowid,
@@ -4021,6 +4081,11 @@ class $$DownloadsTableFilterComposer
 
   ColumnFilters<String> get error => $composableBuilder(
     column: $table.error,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get pausedBySystem => $composableBuilder(
+    column: $table.pausedBySystem,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4079,6 +4144,11 @@ class $$DownloadsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<bool> get pausedBySystem => $composableBuilder(
+    column: $table.pausedBySystem,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -4123,6 +4193,11 @@ class $$DownloadsTableAnnotationComposer
 
   GeneratedColumn<String> get error =>
       $composableBuilder(column: $table.error, builder: (column) => column);
+
+  GeneratedColumn<bool> get pausedBySystem => $composableBuilder(
+    column: $table.pausedBySystem,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<int> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -4169,6 +4244,7 @@ class $$DownloadsTableTableManager
                 Value<int> downloadedBytes = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<String?> error = const Value.absent(),
+                Value<bool> pausedBySystem = const Value.absent(),
                 Value<int> createdAt = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -4180,6 +4256,7 @@ class $$DownloadsTableTableManager
                 downloadedBytes: downloadedBytes,
                 status: status,
                 error: error,
+                pausedBySystem: pausedBySystem,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -4193,6 +4270,7 @@ class $$DownloadsTableTableManager
                 Value<int> downloadedBytes = const Value.absent(),
                 required String status,
                 Value<String?> error = const Value.absent(),
+                Value<bool> pausedBySystem = const Value.absent(),
                 required int createdAt,
                 required int updatedAt,
                 Value<int> rowid = const Value.absent(),
@@ -4204,6 +4282,7 @@ class $$DownloadsTableTableManager
                 downloadedBytes: downloadedBytes,
                 status: status,
                 error: error,
+                pausedBySystem: pausedBySystem,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,

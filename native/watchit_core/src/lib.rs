@@ -170,20 +170,12 @@ pub fn start(peers_override: Option<&str>, data_dir: Option<&str>) -> Result<i32
 
     let app = server::router(engine);
     runtime.spawn(async move {
-        // Keep connecting until it sticks. A single warm-up attempt is not
-        // enough: nothing else retries until a playback request arrives, so
-        // one failed bootstrap left the app stuck on "connecting" forever.
-        tokio::spawn(async {
-            let mut delay = std::time::Duration::from_secs(2);
-            loop {
-                match engine.client().await {
-                    Ok(_) => break,
-                    Err(e) => tracing::warn!("connect failed, retrying in {delay:?}: {e}"),
-                }
-                tokio::time::sleep(delay).await;
-                delay = (delay * 2).min(std::time::Duration::from_secs(60));
-            }
-        });
+        // Connection supervisor: dials until connected (nothing else
+        // retries until a playback request arrives), then keeps watching
+        // the peer count and re-dials when the network drops — a client
+        // that lost all its peers (cable pull, phone sleep) never
+        // recovers on its own.
+        tokio::spawn(engine.supervise());
         if let Err(e) = axum::serve(listener, app).await {
             tracing::error!("http server exited: {e}");
         }

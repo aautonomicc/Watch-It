@@ -47,6 +47,7 @@ dependencies:
   file_selector: ^1.0.3
   share_plus: ^13.3.0
   archive: ^4.0.9
+  connectivity_plus: ^7.3.1
 
 # Vendored media_kit_video 2.0.1 with a Linux H/W-rendering fix: upstream
 # reads Flutter's EGL display via eglGetCurrentDisplay() on the platform

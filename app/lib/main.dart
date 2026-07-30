@@ -18,6 +18,7 @@ import 'services/home_sections.dart';
 import 'services/library_store.dart';
 import 'services/metadata.dart';
 import 'services/metadata_service.dart';
+import 'services/network_events.dart';
 import 'services/rootmap_seeder.dart';
 import 'services/season_grouping.dart';
 import 'services/watch_state.dart';
@@ -40,11 +41,42 @@ Future<void> main() async {
   // Background online/offline tracking for Play gating and the Up-next
   // chain (browsing itself is never gated).
   ConnectivityMonitor.instance.start();
+  // Downloads auto-pause on connection loss; wire them to auto-resume
+  // when the connection is back.
+  DownloadManager.instance.bindConnectivity(ConnectivityMonitor.instance);
+  // Reconnect fast-paths: phone wake and OS network changes (cable
+  // replug on Linux via NetworkManager) re-probe immediately and kick
+  // the embedded client's reconnect supervisor instead of waiting for
+  // the next poll/backoff round.
+  WidgetsBinding.instance.addObserver(_LifecycleReconnector());
+  NetworkEvents.instance.start();
+  NetworkEvents.instance.addListener(() {
+    if (NetworkEvents.instance.hasNetwork) {
+      unawaited(ConnectivityMonitor.instance.onExternalNetworkEvent());
+    } else {
+      // Network fully gone: just refresh so gating flips fast — no point
+      // dialling with no route.
+      unawaited(ConnectivityMonitor.instance.refresh());
+    }
+  });
   // Bundled root data maps (the demo movie) seed the embedded client's
   // store so a fresh install skips the cold network resolve on first
   // play. Fire-and-forget: fully offline, idempotent, verified server-side.
   unawaited(seedBundledRootMaps());
   runApp(const WatchItApp());
+}
+
+/// On resume from background (phone wake), the QUIC sockets are often
+/// dead but the client still reports ready+0 peers until the supervisor
+/// notices — probe and kick right away so reconnection starts while the
+/// user is still looking at the app.
+class _LifecycleReconnector with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(ConnectivityMonitor.instance.onExternalNetworkEvent());
+    }
+  }
 }
 
 class WatchItApp extends StatelessWidget {
