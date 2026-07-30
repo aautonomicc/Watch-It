@@ -7,12 +7,15 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
+
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/services/connectivity.dart';
 import 'package:watchit/services/download_manager.dart';
 import 'package:watchit/services/embedded_client.dart';
 import 'package:watchit/services/library_store.dart';
+import 'package:watchit/services/network_events.dart';
 
 const _addrA =
     'a3f1c9e07b6d5a4f2e8c1b0d9f7a6e5c4b3a2d1e0f9c8b7a6d5e4f3c2b1a0d9e';
@@ -373,6 +376,74 @@ void main() {
         () => second.taskFor(_addrA)?.status == DownloadStatus.done);
     expect(File(second.taskFor(_addrA)!.filePath).readAsBytesSync(),
         payload);
+  });
+
+  test('Wi-Fi-only policy holds the queue on cellular and releases it '
+      'when Wi-Fi returns', () async {
+    // Default policy is Wi-Fi only; start on cellular.
+    final transport = StreamController<List<ConnectivityResult>>.broadcast();
+    final network = NetworkEvents(
+        stream: transport.stream,
+        check: () async => [ConnectivityResult.mobile]);
+    network.start();
+    await Future<void>.delayed(Duration.zero);
+    final manager = DownloadManager(base: base, directory: dir);
+    manager.bindNetwork(network);
+
+    await manager.enqueue(entry('Movie.mkv', _addrA));
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.paused);
+    expect(manager.taskFor(_addrA)!.pausedBySystem, isTrue);
+    expect(manager.waitingForWifi, isTrue);
+    expect(rangesSeen, isEmpty); // never even started a transfer
+
+    // Wi-Fi back: queue releases by itself.
+    transport.add([ConnectivityResult.wifi]);
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.done);
+    expect(manager.waitingForWifi, isFalse);
+    expect(File(manager.taskFor(_addrA)!.filePath).readAsBytesSync(),
+        payload);
+    await transport.close();
+  });
+
+  test('Wi-Fi + mobile data policy downloads on cellular', () async {
+    SharedPreferences.setMockInitialValues({
+      'download_network_v1': 'any',
+    });
+    final network = NetworkEvents(
+        stream: const Stream.empty(),
+        check: () async => [ConnectivityResult.mobile]);
+    network.start();
+    await Future<void>.delayed(Duration.zero);
+    final manager = DownloadManager(base: base, directory: dir);
+    manager.bindNetwork(network);
+    await manager.enqueue(entry('Movie.mkv', _addrA));
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.done);
+  });
+
+  test('going cellular mid-transfer pauses a running download', () async {
+    final transport = StreamController<List<ConnectivityResult>>.broadcast();
+    final network = NetworkEvents(
+        stream: transport.stream,
+        check: () async => [ConnectivityResult.wifi]);
+    network.start();
+    await Future<void>.delayed(Duration.zero);
+    final manager = DownloadManager(base: base, directory: dir);
+    manager.bindNetwork(network);
+    gateAfter = 8 * 1024; // hold the transfer mid-flight
+    await manager.enqueue(entry('Movie.mkv', _addrA));
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.downloading);
+
+    transport.add([ConnectivityResult.mobile]);
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.paused);
+    expect(manager.taskFor(_addrA)!.pausedBySystem, isTrue);
+    expect(manager.waitingForWifi, isTrue);
+    gateRelease.complete();
+    await transport.close();
   });
 
   test('a transfer failure while online is still an error', () async {

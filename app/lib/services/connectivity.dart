@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'embedded_client.dart';
+import 'network_policy.dart';
 
 /// App-wide view of whether the embedded Autonomi client has a usable
 /// network connection, polled from `/health` in the background.
@@ -88,11 +89,14 @@ class ConnectivityMonitor extends ChangeNotifier {
 /// a downloaded episode always plays; a streamed one needs the network,
 /// checked with a live probe so a connection lost mid-episode stops the
 /// chain instead of handing mpv a dead stream. Offline + not downloaded
-/// = stop (no skipping ahead); online falls back to streaming.
+/// = stop (no skipping ahead); online falls back to streaming — unless
+/// the mobile-data policy forbids it (no prompting from inside the
+/// chain; an Ask consent given at Play time carries through).
 Future<bool> canChainInto({
   required bool nextIsLocal,
   ConnectivityMonitor? monitor,
 }) async {
   if (nextIsLocal) return true;
+  if (await streamingGateNow() != StreamingGate.allow) return false;
   return !await (monitor ?? ConnectivityMonitor.instance).refresh();
 }

@@ -12,6 +12,7 @@ import '../services/library_store.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/embedded_client.dart';
+import '../services/network_policy.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
@@ -174,6 +175,23 @@ class _DetailScreenState extends State<DetailScreen> {
       );
       return;
     }
+    // Mobile-data policy (Settings → Network): streamed playback may be
+    // blocked on cellular, or ask first — once per session.
+    if (!source.local) {
+      final gate = await streamingGateNow();
+      if (gate == StreamingGate.block) {
+        wiMessengerKey.currentState?.showSnackBar(const SnackBar(
+            content: Text("You're on mobile data — streaming is set to "
+                'Wi-Fi only (Settings → Network)')));
+        return;
+      }
+      if (gate == StreamingGate.ask) {
+        if (!context.mounted) return;
+        if (await _confirmCellularStreaming(context) != true) return;
+        CellularStreamingConsent.granted = true;
+      }
+    }
+    if (!context.mounted) return;
     // A downloaded file plays locally and competes with nothing; only
     // streamed playback may pause active downloads (per the preference).
     var pausedForPlayback = false;
@@ -211,6 +229,36 @@ class _DetailScreenState extends State<DetailScreen> {
     }
     // Refresh the Resume button with the position playback stopped at.
     await _loadState();
+  }
+
+  /// Once-per-session confirmation for streaming over mobile data
+  /// (the Ask policy in Settings → Network).
+  Future<bool?> _confirmCellularStreaming(BuildContext context) {
+    final t = WiTokens.of(context);
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text("You're on mobile data",
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        content: Text(
+          'Streaming uses your mobile-data allowance (a movie can be '
+          'several GB). Stream anyway? You will not be asked again '
+          'until the app restarts.',
+          style: TextStyle(color: t.boneDim, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel', style: TextStyle(color: t.ash)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Stream anyway', style: TextStyle(color: t.accent)),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Download button action by state: start, pause, resume/retry, or
