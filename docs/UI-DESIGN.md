@@ -87,7 +87,7 @@ TV notes: larger base type scale (readable at 3 m), no hover-only affordances, t
 entry kept to add/import flows only (paste via network share or a shown-on-TV import
 address is preferred over typing XOR addresses with a remote).
 
-## Built so far (alpha.38)
+## Built so far (alpha.39)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,

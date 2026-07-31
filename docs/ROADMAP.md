@@ -2,8 +2,8 @@
 
 **Status (2026-07-31):** rebranded **watch-it → W@tch** (display-only: Anton
 wordmark, launcher labels, window titles, user-facing strings; repo and all
-technical identifiers keep their names — see BRAND.md); ships in the next
-release. v0.1.0-alpha.38 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
+technical identifiers keep their names — see BRAND.md), shipped in
+v0.1.0-alpha.39 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
 — signed Android APK + Linux AppImage on every release. Phases 0, 1, and 2 are
 done: both platforms stream from the live Autonomi network via the embedded
 Rust client (`native/watchit_core`) with byte-exact seek, a chunk LRU cache with
