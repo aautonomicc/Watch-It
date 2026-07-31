@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'library_store.dart';
 
-/// Size on disk and factory reset for everything watch-it stores: the
+/// Size on disk and factory reset for everything W@tch stores: the
 /// media-list database, cached artwork and metadata, prefetched data
 /// maps, settings, and the embedded client's network state — all of it
 /// lives under the app support directory.

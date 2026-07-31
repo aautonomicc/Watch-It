@@ -81,7 +81,7 @@ class DownloadForegroundService : Service() {
             NOTIFICATION_ID + 1,
             baseBuilder()
                 .setContentTitle("Downloads paused")
-                .setContentText("Android's background time ran out — reopen Watch-It to continue.")
+                .setContentText("Android's background time ran out — reopen W@tch to continue.")
                 .setOngoing(false)
                 .setAutoCancel(true)
                 .build()

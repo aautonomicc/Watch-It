@@ -2,7 +2,7 @@
 
 ## One-liner
 
-Watch-It makes public media on the Autonomi network look and feel like a premium
+W@tch makes public media on the Autonomi network look and feel like a premium
 streaming service — with nothing to host and no server to install.
 
 ## The problem
@@ -41,7 +41,7 @@ streaming service — with nothing to host and no server to install.
   out by design. Autonomi is the only remote source.
 - **Not a server itself.** No transcoding for other devices, no user management.
 - **No live TV / DVR, no music-first experience** in v1.
-- **No piracy features** — Watch-It plays what's publicly addressed on Autonomi; it
+- **No piracy features** — W@tch plays what's publicly addressed on Autonomi; it
   ships no torrent/debrid integrations.
 
 ## Target users

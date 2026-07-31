@@ -111,7 +111,7 @@ pure in-memory Dart, so no index/DB/Rust/network changes are needed. Three tiers
    set the TextField text, existing live query runs. No RECORD_AUDIO permission needed
    (system speech activity holds it). Hide the button when `resolveActivity` finds no
    recognizer (AOSP boxes, Fire TV, Linux desktop — voice stays Android-only).
-3. **Global Assistant search** (remote mic outside the app, "find X on Watch-It"):
+3. **Global Assistant search** (remote mic outside the app, "find X on W@tch"):
    needs native Kotlin (`searchable.xml` + Leanback ContentProvider) and an exported
    queryable copy of the in-memory library. Disproportionate — defer indefinitely.
 

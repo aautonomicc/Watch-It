@@ -331,7 +331,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                           child: Text(
                             'Samsung tip: battery management can stop '
                             'background downloads. In the phone\'s '
-                            'Settings, open Apps → Watch-It → Battery '
+                            'Settings, open Apps → W@tch → Battery '
                             'and allow background activity (and keep '
                             'the app out of "Sleeping apps").',
                             style:

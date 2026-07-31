@@ -1,11 +1,14 @@
-# Watch-It
+# W@tch
+
+*Formerly **watch-it** — rebranded 2026-07-31. The repository keeps the name
+`Watch-It` (GitHub disallows `@`), as do all technical identifiers.*
 
 A beautiful, cross-platform media player for the **Autonomi network** — one codebase,
 six platforms: **Android, Android TV, iPhone (iOS), Linux, Windows, and Mac.**
 
 Think the Plex / Emby / [Silo](https://github.com/Silo-Server/) experience —
 poster-wall library, rich metadata, resume-watching — but **with no server to install**.
-Watch-It is client-only: your media library is one or more lists of publicly available
+W@tch is client-only: your media library is one or more lists of publicly available
 files on the decentralized [Autonomi](https://github.com/WithAutonomi/ant-client)
 network, streamed on demand or downloaded for offline watching.
 
@@ -13,7 +16,7 @@ network, streamed on demand or downloaded for offline watching.
 
 1. **Lists of media.** You keep one or more lists of public media. Each entry is an
    Autonomi **XOR public file address** plus a **file name**.
-2. **Metadata from the name.** From the file name Watch-It looks up the same public
+2. **Metadata from the name.** From the file name W@tch looks up the same public
    databases the media servers use (TMDB) and fetches artwork, description, and
    category to organize and display the collection as a poster-wall library. Name
    files with the Plex/Jellyfin convention —
@@ -65,7 +68,7 @@ bar on every card. Alpha.35 adds home-page library search: a search icon in
 the home app bar (`/` or Ctrl+F on desktop) opens a full-screen
 live-as-you-type search over your library — titles, years, and episode
 markers like s02e05 — grouped into Shows / Movies / Episodes with the usual
-download and watched badges. Alpha.36 gives Watch-It its own identity: a
+download and watched badges. Alpha.36 gives W@tch its own identity: a
 new striped popcorn-bucket logo as the launcher
 and taskbar icon on both platforms and as the icon + wordmark lockup in
 the app bar; alpha.37 turns the logo stripe and the app accent blue

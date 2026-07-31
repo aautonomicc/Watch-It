@@ -1,6 +1,9 @@
 # Roadmap
 
-**Status (2026-07-30):** v0.1.0-alpha.38 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
+**Status (2026-07-31):** rebranded **watch-it → W@tch** (display-only: Anton
+wordmark, launcher labels, window titles, user-facing strings; repo and all
+technical identifiers keep their names — see BRAND.md); ships in the next
+release. v0.1.0-alpha.38 released ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
 — signed Android APK + Linux AppImage on every release. Phases 0, 1, and 2 are
 done: both platforms stream from the live Autonomi network via the embedded
 Rust client (`native/watchit_core`) with byte-exact seek, a chunk LRU cache with
@@ -53,7 +56,7 @@ convention — see [NAMING.md](NAMING.md).
       HTTP Range seek verified byte-exact against the live network
 - [x] CI: `flutter analyze` + `flutter test` on push → GitHub Actions
       (.github/workflows/ci.yml), pinned Flutter 3.44.6, runs on push to main + PRs
-- [x] Decide accent color / app icon → blue #42a5f5 accent since 2026-07-30 (was copper #c9732b); icon: striped popcorn bucket (bone/blue #42a5f5/bone, branding/icon.svg) — bucket replaced the original `[>]` chevron 2026-07-29 (too close to Plex), stripe went red→blue with the accent change
+- [x] Decide accent color / app icon → blue #42a5f5 accent since 2026-07-30 (was copper #c9732b); icon: striped popcorn bucket (bone/blue #42a5f5/bone, branding/icon.svg) — bucket replaced the original `[>]` chevron 2026-07-29 (too close to Plex), stripe went red→blue with the accent change; name/wordmark: **W@tch** in Anton since 2026-07-31 (was lowercase mono `watch-it`)
       icon on ink, app-bar wordmark lockup matches (alpha.12); see BRAND.md
 
 **Exit criteria:** play a video file on Linux and Android, and prove seekable playback

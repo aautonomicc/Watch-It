@@ -1,33 +1,43 @@
 # Brand & design tokens
 
-Watch-It's visual identity follows the **etchit.io family** design language
+W@tch's visual identity follows the **etchit.io family** design language
 (see [etchit-io/fetchit](https://github.com/etchit-io/fetchit) `docs/BRAND.md`
 and <https://etchit.io/brand.html>): warm near-black surfaces, bone-white text,
 a single accent colour, system fonts, lowercase mono wordmark. The apps in that
-family read as one continuous brand; Watch-It adopts the same tokens so it sits
+family read as one continuous brand; W@tch adopts the same tokens so it sits
 naturally beside them, extended with the handful of roles a media player needs.
-One deliberate divergence (2026-07-30): Watch-It's accent is **blue `#42a5f5`**
-(matching its bucket icon's centre stripe), not the family copper — the copper
-read too close to the poster art it sits over.
+Two deliberate divergences: the accent is **blue `#42a5f5`** (2026-07-30,
+matching the bucket icon's centre stripe), not the family copper — the copper
+read too close to the poster art it sits over — and the wordmark is **`W@tch`
+in Anton** (2026-07-31), not the family's lowercase mono compound; see below.
+(The name W@tch is display-only: the GitHub repo stays `Watch-It`, and every
+identifier — applicationId `io.github.aautonomicc.watchit`, pubspec `watchit`,
+binary/crate names, artifact filenames — stays `watchit`/`Watch-It`, since `@`
+is illegal or hostile in most of those contexts.)
 
 ## Wordmark
 
-The family pattern is a lowercase compound with a separator glyph
-(`fetch>it`, `etch/it`). Ours keeps the hyphen:
+The family pattern is a compound with a separator glyph (`fetch>it`,
+`etch/it`). Ours folds the separator into the name itself:
 
-> **`watch-it`** — mono family, 18px, weight 700, lowercase.
+> **`W@tch`** — Anton (Regular, the face's only weight), 18px, `W`/`tch` in
+> bone with the `@` in the accent blue.
+
+Anton is bundled as a Flutter font asset (`app/assets/fonts/Anton-Regular.ttf`,
+SIL OFL — license shipped alongside as `Anton-OFL.txt`) and used **only** for
+the wordmark; all other UI text stays on system fonts. Drawn by
+`BrandWordmark` in `widgets/brand_mark.dart`.
 
 In app chrome (the home app bar) the wordmark is locked up with the launcher
 icon's bucket mark: the three tapered popcorn-bucket stripes (bone / blue /
-bone, drawn by `widgets/brand_mark.dart`) followed by **`watch-it`** in bone —
-mono, 18px, weight 700.
+bone, drawn by `BrandMark` in the same file) followed by **`W@tch`**.
 
 Tagline slot in the family: *etch it. fetch it. **watch it.***
 
 ## Theme tokens
 
 Three themes; **dark is default** (poster art provides the colour). Token names
-and values match the fetchit contract exactly; the `wi-*` tokens are Watch-It
+and values match the fetchit contract exactly; the `wi-*` tokens are W@tch
 extensions.
 
 | Token             | Role                                        |
@@ -85,13 +95,13 @@ Rules carried over from the fetchit contract:
 
 ## Fonts
 
-**App chrome: system fonts only.** No bundled or downloaded UI font — Watch-It
+**App chrome: system fonts only.** No bundled or downloaded UI font — W@tch
 melts into the host OS like the rest of the family (Roboto on Android, San
 Francisco on iOS/macOS, Segoe UI on Windows, Cantarell/host font on Linux).
-Body base is `14px/1.5`.
+Body base is `14px/1.5`. Sole exception (2026-07-31): **Anton** ships as an
+asset for the `W@tch` wordmark alone — it never sets UI text.
 
-**Monospace** — used for the wordmark and for XOR addresses / hex / data-map
-displays:
+**Monospace** — used for XOR addresses / hex / data-map displays:
 
 ```
 "JetBrains Mono", "Source Code Pro", Menlo, Consolas, monospace
@@ -115,7 +125,7 @@ new size is genuinely needed, add it to this table first.
 | Compact body (episode rows, descriptions)  | 13px |    400 | `line-height: 1.55`                                   |
 | Helper / meta (runtime, year, file size)   | 12px |    400 | `color: var(--ash)`                                   |
 | Micro chip (badge counts, quality tags)    | 11px |    500 | Tag pills, unwatched counts                           |
-| Wordmark                                   | 18px |    700 | Mono family, lowercase                                |
+| Wordmark                                   | 18px |    400 | Anton (bundled, wordmark-only); `@` in `--accent`     |
 | Tab / nav label                            | 13px |    500 | `letter-spacing: 0.02em`                              |
 | Poster card title                          | 13px |    500 | Single line, ellipsized                               |
 | XOR address / hex                          | 13px |    400 | Mono                                                  |
