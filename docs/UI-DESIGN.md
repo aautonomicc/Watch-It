@@ -5,10 +5,10 @@ poster art everywhere, minimal chrome.
 
 ## Design language
 
-Colours, fonts, and type scale live in **[BRAND.md](BRAND.md)** — Watch-It follows
+Colours, fonts, and type scale live in **[BRAND.md](BRAND.md)** — W@tch follows
 the etchit.io family design language (fetch>it / etch/it): warm near-black
 "ink" surfaces, bone-white text, blue `#42a5f5` accent (a deliberate divergence from the family copper — see BRAND.md), system UI fonts,
-mono for XOR addresses, lowercase `watch-it` wordmark.
+mono for XOR addresses, the `W@tch` wordmark in Anton (since 2026-07-31; formerly lowercase mono `watch-it`).
 
 - **Dark-first.** `--ink` (#0a0a0a) canvas, poster art provides the colour.
   Three themes (dark / dim / light), dark default.
@@ -115,7 +115,7 @@ search icon in the home app bar (`/` or Ctrl+F on desktop) opening a
 full-screen live search over the library, grouped Shows / Movies /
 Episodes with download/watched badges. Alpha.36 ships the striped
 popcorn-bucket logo — launcher/taskbar icon on Android and Linux plus the
-icon + 'watch-it' lockup in the home app bar — and alpha.37 turns the
+icon + wordmark lockup in the home app bar — and alpha.37 turns the
 logo stripe and the app accent blue (#42a5f5). Alpha.38 adds Settings →
 Network (downloads Wi-Fi-only by default, ask-before-streaming on
 cellular), automatic reconnection after network loss on both platforms,

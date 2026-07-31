@@ -13,6 +13,7 @@ import '../services/embedded_client.dart';
 import '../services/metadata_service.dart';
 import '../services/storage_usage.dart';
 import '../theme/tokens.dart';
+import '../widgets/brand_mark.dart';
 import 'downloads_screen.dart';
 import 'home_layout_screen.dart';
 import 'media_lists_screen.dart';
@@ -183,7 +184,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: Text('Clear all data?',
             style: TextStyle(color: t.bone, fontSize: 16)),
         content: Text(
-          'This resets watch-it to factory defaults, deleting everything '
+          'This resets W@tch to factory defaults, deleting everything '
           'stored on this device:\n\n'
           '•  all media lists and their entries\n'
           '•  all settings, including a TMDB key you entered\n'
@@ -215,7 +216,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'Your media lists exist only on this device — they are not '
           'stored on the network. Unless you exported them to a file, '
           'there is no way to get them back after this.\n\n'
-          'watch-it will close when the reset finishes; open it again to '
+          'W@tch will close when the reset finishes; open it again to '
           'start fresh.',
           style: TextStyle(color: t.boneDim, fontSize: 13),
         ),
@@ -568,7 +569,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: Text(
                     'Artwork, descriptions, and categories are matched from '
                     'TMDB using each entry\'s file name, then cached on this '
-                    'device. Watch-it ships without a key: create a free one '
+                    'device. W@tch ships without a key: create a free one '
                     'at themoviedb.org (Settings → API) and paste either the '
                     'API key or the read access token here — it is never '
                     'displayed. Imported bundles carry metadata and posters, '
@@ -591,15 +592,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 ListTile(
                   leading: Icon(Icons.play_circle_outline, color: t.accent),
-                  title: Text(
-                    'watch-it',
-                    style: TextStyle(
-                      fontFamily: wiMonoFamily,
-                      fontFamilyFallback: wiMonoFallback,
-                      fontWeight: FontWeight.w700,
-                      color: t.bone,
-                      fontSize: 15,
-                    ),
+                  title: const Align(
+                    alignment: Alignment.centerLeft,
+                    child: BrandWordmark(fontSize: 16),
                   ),
                   subtitle: Text(
                     'Media player for the Autonomi network. Client-only: '
@@ -659,7 +654,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: Text('Clear all data',
                       style: TextStyle(color: t.rust, fontSize: 15)),
                   subtitle: Text(
-                    'Reset watch-it to factory defaults',
+                    'Reset W@tch to factory defaults',
                     style: TextStyle(color: t.ash, fontSize: 12),
                   ),
                   onTap: _clearAllData,

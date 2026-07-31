@@ -8,7 +8,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <!-- AntTP gateways are plain HTTP (LAN/self-hosted), so allow cleartext. -->
     <application
-        android:label="watch-it"
+        android:label="W@tch"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"

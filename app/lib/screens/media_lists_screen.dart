@@ -567,7 +567,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       _showError('Your library is empty — nothing to export.');
       return;
     }
-    await _exportFlow(withEntries, library: true, baseName: 'watch-it library');
+    await _exportFlow(withEntries, library: true, baseName: 'W@tch library');
   }
 
   /// Two-step export dialog (docs/BUNDLE-FORMAT.md): plain `.txt` vs full
@@ -724,7 +724,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       result.bytes,
       fileName: '$safe.watch-list',
       mimeType: 'application/zip',
-      typeLabel: 'watch-it bundle',
+      typeLabel: 'W@tch bundle',
       extension: 'watch-list',
       entryCount: entries.length,
       // ~200MB through the share sheet is unreliable; the SAF save

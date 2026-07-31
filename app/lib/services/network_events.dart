@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 
-/// The transport class the OS says we are on. Watch-It only distinguishes
+/// The transport class the OS says we are on. W@tch only distinguishes
 /// what its policies need: cellular (metered by assumption) vs everything
 /// else, and "no network at all".
 enum NetworkTransport { wifi, ethernet, cellular, other, none }

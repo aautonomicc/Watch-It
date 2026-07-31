@@ -94,7 +94,7 @@ class WatchItApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'watch-it',
+      title: 'W@tch',
       debugShowCheckedModeBanner: false,
       // App-wide messenger so a background data-map prefetch can report
       // its outcome whatever screen is on top when it finishes.
@@ -223,16 +223,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             const BrandMark(height: 16),
             const SizedBox(width: 8),
-            Text(
-              'watch-it',
-              style: TextStyle(
-                fontFamily: wiMonoFamily,
-                fontFamilyFallback: wiMonoFallback,
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: t.bone,
-              ),
-            ),
+            const BrandWordmark(fontSize: 18),
           ],
         ),
         actions: [
