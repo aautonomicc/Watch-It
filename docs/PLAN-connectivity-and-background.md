@@ -180,7 +180,7 @@ and Samsung is a **foreground service** with a visible notification.
 - **Android 15 dataSync 6h/day cap** (relevant: targetSdk follows
   Flutter's default and will reach 35): the service gets
   `onTimeout()` → gracefully system-pause the queue + notify "Downloads
-  paused — reopen Watch-It to continue". Resume-from-byte already works,
+  paused — reopen W@tch to continue". Resume-from-byte already works,
   so nothing is lost. A 5.3GB movie on a decent link finishes well
   inside 6h; note it, don't engineer around it in v1.
 - **Samsung**: aggressive battery management can still kill foreground

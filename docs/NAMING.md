@@ -1,6 +1,6 @@
 # File naming convention
 
-Watch-It resolves artwork and descriptions from the **file name** of each list
+W@tch resolves artwork and descriptions from the **file name** of each list
 entry, so good names mean good metadata. Matching runs against TMDB and needs a
 free API key (Settings → Metadata; create one at themoviedb.org → Settings →
 API) — without one, cards show the parsed title only. Use the de-facto
@@ -23,7 +23,7 @@ Night of the Living Dead (1968) {imdb-tt0063350} - [1080p].mp4
   the metadata matcher do an exact TMDB `/find` lookup instead of a fuzzy
   title/year search — no wrong-movie artwork.
 - **Interoperable.** The same names work unchanged on Plex, Jellyfin, and Emby,
-  so files can be shared between Watch-It lists and a conventional media server.
+  so files can be shared between W@tch lists and a conventional media server.
 
 ## What the parser accepts
 

@@ -60,6 +60,9 @@ LIBMPV="$(/sbin/ldconfig -p | awk '/libmpv\.so\.2 .*x86-64/{print $NF; exit}')"
   --output appimage
 
 mkdir -p "$OUT_DIR"
-mv Watch-It*.AppImage "$OUT_DIR/Watch-It-$VERSION-x86_64.AppImage" 2>/dev/null \
+# linuxdeploy names the output from the .desktop Name= (now "W@tch"); the
+# published artifact keeps the @-free Watch-It name (matches the repo).
+mv W@tch*.AppImage "$OUT_DIR/Watch-It-$VERSION-x86_64.AppImage" 2>/dev/null \
+  || mv Watch-It*.AppImage "$OUT_DIR/Watch-It-$VERSION-x86_64.AppImage" 2>/dev/null \
   || mv watchit*.AppImage "$OUT_DIR/Watch-It-$VERSION-x86_64.AppImage"
 echo "Built $OUT_DIR/Watch-It-$VERSION-x86_64.AppImage"

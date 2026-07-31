@@ -90,6 +90,14 @@ flutter:
     - assets/posters/
     - assets/rootmaps/
     - assets/tmdb_logo.png
+    - assets/fonts/Anton-OFL.txt
+
+  # Wordmark only — the "W@tch" lockup uses Anton (SIL OFL, license bundled
+  # above); all other UI text stays on system fonts per docs/BRAND.md.
+  fonts:
+    - family: Anton
+      fonts:
+        - asset: assets/fonts/Anton-Regular.ttf
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

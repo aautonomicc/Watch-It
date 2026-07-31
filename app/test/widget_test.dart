@@ -24,7 +24,8 @@ void main() {
     await tester.pumpWidget(const WatchItApp());
 
     expect(find.byType(BrandMark), findsOneWidget);
-    expect(find.text('watch-it'), findsOneWidget);
+    expect(find.byType(BrandWordmark), findsOneWidget);
+    expect(find.text('W@tch', findRichText: true), findsOneWidget);
     expect(find.text('Your library is empty'), findsOneWidget);
   });
 
