@@ -16,6 +16,7 @@ import 'services/download_manager.dart';
 import 'services/embedded_client.dart';
 import 'services/home_rows.dart';
 import 'services/home_sections.dart';
+import 'services/library_migration.dart';
 import 'services/library_store.dart';
 import 'services/metadata.dart';
 import 'services/metadata_service.dart';
@@ -27,7 +28,7 @@ import 'theme/tokens.dart';
 import 'widgets/brand_mark.dart';
 import 'widgets/download_badge.dart';
 import 'widgets/downloads_indicator.dart';
-import 'widgets/prefetch_dialog.dart';
+import 'widgets/messenger.dart';
 import 'widgets/tmdb_nudge.dart';
 import 'widgets/watch_progress.dart';
 
@@ -69,7 +70,56 @@ Future<void> main() async {
   // store so a fresh install skips the cold network resolve on first
   // play. Fire-and-forget: fully offline, idempotent, verified server-side.
   unawaited(seedBundledRootMaps());
+  // Datamap-first upgrade (alpha.40): entries now require their root map
+  // in the local store — one background pass covers libraries that
+  // predate the change. Fire-and-forget; retries next launch if needed.
+  unawaited(runDatamapMigration());
   runApp(const WatchItApp());
+}
+
+/// Run the one-time library migration to the datamap-first entry model
+/// (services/library_migration.dart): wait for the embedded client to
+/// have peers (missing maps resolve over the network), then walk the
+/// library behind a cancellable progress snackbar. Entries that stay
+/// unresolved keep the pass pending, so the next launch retries.
+Future<void> runDatamapMigration() async {
+  if (!await LibraryMigrator.pending()) return;
+  final base = EmbeddedClient.baseUrl();
+  if (base == null) return;
+  // The seeded demo entry must exist before the pass counts it — its
+  // map is the bundled asset, covered offline by the seeder above.
+  await LibraryStore.ensureDefaults();
+  // Wait (bounded) for peers so missing maps can actually resolve — but
+  // run regardless afterwards: a library whose maps are all stored
+  // completes fully offline, and a partial pass simply retries next
+  // launch.
+  for (var attempt = 0; attempt < 24; attempt++) {
+    final health = await EmbeddedClient.health();
+    if (health.state == 'ready' && health.peers > 0) break;
+    if (health.state == 'unavailable') return;
+    await Future<void>.delayed(const Duration(seconds: 5));
+  }
+  final migrator = LibraryMigrator(base: base);
+  final messenger = wiMessengerKey.currentState;
+  final banner = messenger?.showSnackBar(SnackBar(
+    duration: const Duration(days: 1),
+    content: ListenableBuilder(
+      listenable: migrator,
+      builder: (context, _) => Text(migrator.total == 0
+          ? 'Upgrading library — checking data maps…'
+          : 'Upgrading library — fetching data maps, '
+              '${migrator.current} of ${migrator.total}'),
+    ),
+    action: SnackBarAction(label: 'Cancel', onPressed: migrator.cancel),
+  ));
+  final unresolved = await migrator.run();
+  banner?.close();
+  if (unresolved != null && unresolved > 0) {
+    wiMessengerKey.currentState?.showSnackBar(SnackBar(
+      content: Text('$unresolved ${unresolved == 1 ? 'entry' : 'entries'} '
+          'could not fetch a data map — will retry on the next launch.'),
+    ));
+  }
 }
 
 /// On resume from background (phone wake), the QUIC sockets are often
@@ -96,8 +146,8 @@ class WatchItApp extends StatelessWidget {
     return MaterialApp(
       title: 'W@tch',
       debugShowCheckedModeBanner: false,
-      // App-wide messenger so a background data-map prefetch can report
-      // its outcome whatever screen is on top when it finishes.
+      // App-wide messenger so background work (the upgrade migration
+      // pass) can report its outcome whatever screen is on top.
       scaffoldMessengerKey: wiMessengerKey,
       theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
       home: const HomeScreen(),

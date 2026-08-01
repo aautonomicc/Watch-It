@@ -189,7 +189,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           '•  all media lists and their entries\n'
           '•  all settings, including a TMDB key you entered\n'
           '•  cached artwork and descriptions\n'
-          '•  prefetched data maps and network state\n\n'
+          '•  imported data maps and network state\n\n'
           'Media on Autonomi is not affected — only this device\'s data.',
           style: TextStyle(color: t.boneDim, fontSize: 13),
         ),
