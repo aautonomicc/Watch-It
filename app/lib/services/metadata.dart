@@ -21,6 +21,7 @@ class MediaMetadata {
     this.airDate,
     this.stillFilePath,
     this.showPosterFilePath,
+    this.mediaType,
   });
 
   final String title;
@@ -29,6 +30,11 @@ class MediaMetadata {
 
   /// Genre names joined with ` · ` (e.g. `Horror · Thriller`), if matched.
   final String? category;
+
+  /// `'movie'` or `'tv'` from the TMDB match; the fallback guesses from
+  /// the file name (episode marker → `'tv'`). Drives the auto-by-type
+  /// arrangement (services/library_arrangement.dart).
+  final String? mediaType;
 
   /// For TV episodes: `S01E02 · Episode Name` (name when TMDB knows it).
   final String? episodeLabel;
@@ -89,6 +95,7 @@ const _notld = MediaMetadata(
       'Romero’s landmark 1968 independent film invented the modern '
       'zombie genre and is now in the public domain.',
   posterAsset: 'assets/posters/notld_1968.jpg',
+  mediaType: 'movie',
 );
 
 /// Bundled catalog, keyed by XOR address.
@@ -112,6 +119,7 @@ MediaMetadata fallbackMetadataFor(MediaEntry entry) {
         ? 'S${parsed.season.toString().padLeft(2, '0')}'
             'E${parsed.episode.toString().padLeft(2, '0')}'
         : null,
+    mediaType: parsed.isEpisode ? 'tv' : 'movie',
   );
 }
 
