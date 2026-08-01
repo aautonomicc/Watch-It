@@ -16,6 +16,7 @@ import 'package:watchit/services/library_arrangement.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata.dart';
 import 'package:watchit/services/metadata_service.dart';
+import 'package:watchit/services/watch_state.dart';
 import 'package:watchit/theme/tokens.dart';
 import 'package:watchit/widgets/library_drawer.dart';
 import 'package:watchit/widgets/poster_cards.dart';
@@ -45,6 +46,7 @@ void main() {
       postersDirProvider: () async => Directory.systemTemp,
     );
     ArrangementStore.instance = ArrangementStore();
+    WatchStateStore.instance = WatchStateStore();
   });
 
   // Seeds INSIDE the test body: the drift DB must see its first use in
@@ -167,6 +169,120 @@ void main() {
     expect(find.text('2 entries'), findsOneWidget);
     expect(find.byType(ShowCard), findsOneWidget);
     expect(find.byType(PosterCard), findsNothing);
+  });
+
+  testWidgets('auto mode swaps the Media page rows for the virtual lists',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'defaults_seeded_v3': true,
+      'library_arrangement_v1': 'autoByType',
+    });
+    await seedLibrary();
+    await tester.pumpWidget(page(const MediaListsScreen()));
+    await tester.pumpAndSettle();
+
+    // Virtual rows, not the stored list; no 3-dot menu, no tap-to-edit.
+    expect(find.text('Movies'), findsOneWidget);
+    expect(find.text('TV Shows'), findsOneWidget);
+    expect(find.text('Favourites'), findsNothing);
+    expect(find.byTooltip('List options'), findsNothing);
+
+    // Unchecking TV Shows hides it from home and persists.
+    await tester.tap(find.descendant(
+        of: find.widgetWithText(ListTile, 'TV Shows'),
+        matching: find.byType(Checkbox)));
+    await tester.pumpAndSettle();
+    expect(ArrangementStore.instance.hiddenAutoIds, {kAutoTvShowsListId});
+    expect(await AppSettings.autoHiddenLists(), {kAutoTvShowsListId});
+    expect(find.text('2 entries  ·  hidden from home'), findsOneWidget);
+
+    // Back in My lists, the user rows return with the hide untouched.
+    await tester.tap(find.text('My lists'));
+    await tester.pumpAndSettle();
+    expect(find.text('Favourites'), findsOneWidget);
+    expect(find.byTooltip('List options'), findsOneWidget);
+    final favourites = await LibraryStore.load();
+    expect(favourites.single.enabled, isTrue);
+  });
+
+  testWidgets('hidden virtual list leaves the wall and drawer',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'defaults_seeded_v3': true,
+      'library_arrangement_v1': 'autoByType',
+      'auto_hidden_lists_v1': [kAutoTvShowsListId],
+    });
+    await seedLibrary();
+    await tester.pumpWidget(const WatchItApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Movies'), findsOneWidget);
+    await tester.drag(find.byType(ListView).last, const Offset(0, -400));
+    await tester.pumpAndSettle();
+    expect(find.text('TV Shows'), findsNothing);
+
+    await tester.tap(find.byTooltip('Open navigation menu'));
+    await tester.pumpAndSettle();
+    Finder inDrawer(String text) => find.descendant(
+        of: find.byType(WiLibraryDrawer), matching: find.text(text));
+    expect(inDrawer('Movies'), findsOneWidget);
+    expect(inDrawer('TV Shows'), findsNothing);
+  });
+
+  testWidgets('hidden virtual list filters Continue Watching and Recently '
+      'Added', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'defaults_seeded_v3': true,
+      'library_arrangement_v1': 'autoByType',
+      'auto_hidden_lists_v1': [kAutoTvShowsListId],
+    });
+    await seedLibrary();
+    await WatchStateStore.instance.record(_ep1,
+        position: const Duration(minutes: 10),
+        duration: const Duration(minutes: 45));
+    await WatchStateStore.instance.record(_movie,
+        position: const Duration(minutes: 10),
+        duration: const Duration(minutes: 100));
+    await tester.pumpWidget(const WatchItApp());
+    await tester.pumpAndSettle();
+
+    // The movie stays; the hidden show's episode drops out of the row.
+    expect(find.text('Continue Watching'), findsOneWidget);
+    expect(find.text('Alpha (2020)'), findsWidgets);
+    expect(find.text('Showname'), findsNothing);
+  });
+
+  testWidgets('both virtual lists hidden shows the all-media-hidden state',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'defaults_seeded_v3': true,
+      'library_arrangement_v1': 'autoByType',
+      'auto_hidden_lists_v1': [kAutoMoviesListId, kAutoTvShowsListId],
+    });
+    await seedLibrary();
+    await tester.pumpWidget(const WatchItApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('All media is hidden'), findsOneWidget);
+    expect(find.text('Enable a list in Settings → Media to show it here.'),
+        findsOneWidget);
+    // Flush the offline metadata resolves the last build scheduled —
+    // they resolve to nothing and never notify, so pumpAndSettle alone
+    // leaves their zero-duration timers pending at teardown.
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('user mode ignores the auto-mode hide set', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'defaults_seeded_v3': true,
+      'auto_hidden_lists_v1': [kAutoMoviesListId, kAutoTvShowsListId],
+    });
+    await seedLibrary();
+    await tester.pumpWidget(const WatchItApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Favourites'), findsOneWidget);
+    expect(find.text('All media is hidden'), findsNothing);
   });
 
   testWidgets('genre chips multi-select narrows the grid', (tester) async {
