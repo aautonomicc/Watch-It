@@ -578,7 +578,8 @@ void main() {
       expect(await AppSettings.bufferSizeMb(), 128);
     });
 
-    testWidgets('create a titled list, then add an entry', (tester) async {
+    testWidgets('create a titled list, then open its edit page',
+        (tester) async {
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
 
@@ -598,24 +599,18 @@ void main() {
       expect(find.text('My Films'), findsOneWidget);
       expect(find.text('0 entries'), findsOneWidget);
 
-      // Open it and add an entry.
+      // Open it: entries are added from .datamap files now (the picker
+      // flow is covered in list_import_flow_test.dart); the empty state
+      // points there.
       await tester.tap(find.text('My Films'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Add entry'));
-      await tester.pumpAndSettle();
-      await tester.enterText(
-          find.widgetWithText(TextField, 'File name'), 'Movie.mkv');
-      await tester.enterText(
-          find.widgetWithText(TextField, 'XOR address'), _addr);
-      await tester.tap(find.text('Add'));
-      await tester.pumpAndSettle();
-      expect(find.text('Movie.mkv'), findsOneWidget);
+      expect(find.text('Add .datamap files'), findsOneWidget);
+      expect(find.textContaining('ant file upload'), findsOneWidget);
 
-      // Persisted: store now holds the list with its entry (alongside the
-      // seeded Movies list).
+      // Persisted alongside the seeded Movies list.
       final lists = await LibraryStore.load();
       final mine = lists.singleWhere((l) => l.title == 'My Films');
-      expect(mine.entries.single.name, 'Movie.mkv');
+      expect(mine.entries, isEmpty);
     });
 
     testWidgets('home shows the list after returning from settings',

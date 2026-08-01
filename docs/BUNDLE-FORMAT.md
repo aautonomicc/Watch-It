@@ -1,112 +1,166 @@
-# .watch-list bundle format — spec v1
+# .watch-list bundle format — spec v2
 
-**Status: locked 2026-07-25, implemented 2026-07-25, released in
-v0.1.0-alpha.33.** All six
-open design decisions were closed with the user; this document is the
-implementation reference. Implementation: `app/lib/services/bundle.dart`
-(build/parse/seed), the import/export flows in
-`app/lib/screens/media_lists_screen.dart`, and offline map verification in
-`native/watchit_core/src/verify.rs` + the `/rootmap` endpoints in `server.rs`.
+**Status: implemented 2026-08-01, ships in v0.1.0-alpha.40.** Spec v2 is the
+datamap-first container from docs/PLAN-datamap-privacy.md: the `.datamap`
+files *are* the entries, and the public-XOR-address line grammar is gone.
+v1 bundles (alpha.33–39 exports) still import — every legacy entry is
+converted at the import border (see "v1 bundles" below). Implementation:
+`app/lib/services/bundle.dart` (build/parse/convert/seed), the import/export
+flows in `app/lib/screens/media_lists_screen.dart`, and the address
+derivation in `native/watchit_core/src/verify.rs` + the `/datamap` endpoints
+in `server.rs`.
 
 ## What it is
 
-A `.watch-list` file is a **zip archive** that carries a media list *plus*
-everything needed to enjoy it instantly on another device: TMDB metadata,
-poster images, optionally resolved root data maps (instant playback, no 20–30s
-cold resolve) and optionally watch history (device migration).
+A `.watch-list` file is a **zip archive** that carries the `.datamap` files
+of a media library *plus* everything needed to enjoy it instantly on another
+device: TMDB metadata, poster images, optionally watch history (device
+migration). A datamap grants full access to its content, so **share a bundle
+as privately as the content deserves** — and note that publishing a bundle
+at a public Autonomi address makes every title in it discoverable
+(privacy is transitive).
 
-The plain-text list format (see ARCHITECTURE.md open question 4) remains
-unchanged and remains the interchange baseline — a `.watch-list` bundle
-contains it verbatim as `list.txt`, so unzipping and importing the inner file
-always works.
+The format's floor is deliberate: a hand-made
+`zip "My Library.watch-list" *.datamap` — no W@tch involved, no `list.txt`
+— is a valid bundle. Everything else is optional decoration.
 
 ## Container members
 
 | Member | Required | Contents |
 |---|---|---|
-| `list.txt` | ✅ | The current plain-text export format, byte-identical to a plain export. Multi-list files use the existing `ListName="..."` markers (this is how a whole-library export is one file). |
+| `datamaps/<file name>.datamap` | no* | Raw ant-cli private-upload datamap files (bare msgpack root `DataMap`), byte-identical to what `ant file upload` wrote. The file name minus `.datamap` is the media file name, which feeds the NAMING.md parser / TMDB matcher. Members are **also accepted at the zip root** (the hand-made floor above); on a duplicate base name the `datamaps/` copy wins. |
+| `list.txt` | no* | Optional list assignment. `ListName="..."` markers split lists; entry lines are **only** the member-file-name form — a line ending in `.datamap`, referencing a member. One member may be referenced from several lists (no duplication). Members no list references land in a default list named after the bundle file (a network-fetched bundle has no file name — the importer prompts, fallback "Imported"). |
 | `metadata.json` | no | `metadata_cache` rows for the bundled entries, keyed by `lookupKey`, plus a top-level `attribution` field (see Attribution below). |
 | `posters/` | no | The cached w342 poster JPGs for the bundled entries, deduped. |
-| `rootmaps/<addr>.map` | no | Resolved root data maps in `DataMap::to_bytes` format, **only** for the bundled entries' addresses (never a wholesale `root_maps.sqlite` dump — that would leak every title ever played). |
 | `library.json` | no | Library export only: per-list `{enabled, position}` so a fresh-device import restores home-screen order/visibility. |
-| `history.json` | no | Watch-history rows `{address, positionMs, durationMs, completed, updatedAt}`. Keyed by XOR content address, so device-independent — no remapping needed. |
+| `history.json` | no | Watch-history rows `{address, positionMs, durationMs, completed, updatedAt}`. Keyed by derived address — deterministic from the map, so device-independent with no remapping. |
 
-Partial bundles are always valid: whatever a member is absent, import simply
-doesn't seed it and the entry degrades gracefully (name-only cards, normal
-network resolve, no history).
+\* A bundle must carry at least one `.datamap` member or a `list.txt`
+(a v1 bundle has only the latter); otherwise there is nothing to import.
+
+Example `list.txt`:
+
+```
+ListName="TV Series"
+Some Show S01E01 (2023) [1080p].mkv.datamap
+Some Show S01E02 (2023) [1080p].mkv.datamap
+ListName="Movies"
+Some Movie (2024) [2160p].mp4.datamap
+```
+
+Partial bundles are always valid: whatever member is absent, import simply
+doesn't seed it and the entry degrades gracefully (name-only cards, no
+history). A `list.txt` line referencing a missing member is skipped with a
+warning; import never fails on extras.
+
+## Identity: the derived address
+
+Every entry's identity is its **derived address**: `blake3` of the
+`rmp_serde`-serialized, re-shrunk root data map — computed fully offline by
+the embedded client (`POST /datamap`) at import. This is exactly the address
+a *public* upload of the same file would have had, which is why:
+
+- entries created from XOR addresses by pre-alpha.40 versions keep their
+  identity unchanged after conversion;
+- `history.json`, `metadata.json` and poster references need no migration;
+- importing the same content twice (any route) dedupes naturally.
+
+Nothing exists *on the network* at a private upload's derived address —
+that is the point: the map never leaves the devices you share it with.
 
 ## Import
 
-- **One Import button, no format question.** Import sniffs the first bytes:
-  zip magic (`PK`) → bundle path, otherwise plain text. The `.watch-list`
-  extension is cosmetic; routing never depends on it. The same sniff applies
-  to lists fetched from an Autonomi address.
-- **Personal-ish extras are opt-out at import.** A bundle carrying root maps
-  and/or watch history shows a "This bundle also contains" dialog before
-  anything is applied — one pre-checked checkbox per member actually present
-  (data maps with title count, history with entry count); Cancel aborts the
-  whole import. Declined members are skipped as if the bundle never carried
-  them (declined maps also re-enable the post-import prefetch offer for those
-  entries). Metadata and posters always seed — they are the point of the
-  bundle and gap-fill only.
-- **Seeding fills gaps only.** Existing local `metadata_cache` rows and poster
-  files win; only missing ones are seeded (`fetchedAt` stamped at import).
-  Keyless installs get full posters/overviews/episode names with zero TMDB
-  calls.
-- **Root maps are verified fully offline before storing.** For each
-  `rootmaps/<addr>.map`: re-shrink the map
-  (`self_encryption::shrink_data_map`, deterministic convergent encryption),
-  serialize the top-level map with `rmp_serde` (exactly ant-core's
-  `data_map_store` path at the pinned rev), hash, and require the content hash
-  to equal the entry's XOR address. Mismatch → discard that map and fall back
-  to a normal network resolve; import never fails and tampered maps cannot
-  poison the cache. Verification costs ~ms per map.
-- **History merges newer-`updatedAt`-wins** — an import never regresses local
-  progress.
-- **`library.json` applies only to lists the import creates.** Existing lists
-  are never reordered, hidden, or re-enabled. Fresh-device migration hits an
-  empty library, so full home state restores anyway.
-- **Caps:** plain text stays 10 MB; bundles are capped at 200 MB with
-  per-member decompressed-size sanity limits (zip-bomb guard).
+- **Routing sniffs bytes, not extensions.** Zip magic (`PK`) → bundle;
+  a loose `.datamap` file imports as a single entry; anything else —
+  including the removed plain-text list format — is refused with a pointer
+  at bundles.
+- **Members become entries first.** Each `.datamap` member is parsed
+  (msgpack canonically; legacy ant-gui JSON accepted via the same first-byte
+  sniff as ant-core's `read_datamap`), its address derived offline, and the
+  map stored in the local map store. Unparseable members are skipped and
+  counted. Maps arrive at import time *by construction* — there is no
+  post-import resolve step and no cold first-play resolve.
+- **Watch history is opt-out at import.** A bundle carrying `history.json`
+  shows the "This bundle also contains" dialog (pre-checked checkbox,
+  Cancel aborts the whole import). History merges
+  newer-`updatedAt`-wins — an import never regresses local progress.
+- **Metadata and posters always seed, gaps only.** Existing local rows and
+  files win. Keyless installs get full posters/overviews/episode names with
+  zero TMDB calls.
+- **`library.json` applies only to lists the import creates.** Existing
+  lists are never reordered, hidden, or re-enabled.
+- **Member-name hygiene:** member names with path separators or `..`
+  segments are dropped (nothing can escape the archive); export neutralizes
+  separators in entry names and resolves name collisions with a short
+  derived-address suffix before `.datamap`. Windows-illegal characters
+  (`:` etc.) in media names would break extraction there — rarely an issue
+  because the names come from real files.
+- **Caps:** bundles are capped at 200 MB with per-member decompressed-size
+  sanity limits (zip-bomb guard); a `.datamap` member is capped at 32 MB
+  (a root map is ~100 bytes per chunk — NOTLD's 5.3 GB movie has a 108 KB
+  map; a 100-title library ≈ 10 MB of maps).
+
+### v1 bundles (alpha.33–39): border conversion
+
+A v1 `list.txt` line is `<64-hex address> <file name>` — finding one marks
+the bundle as v1. **No legacy entry type exists anymore**; each hex entry is
+converted into a datamap entry at the import border:
+
+1. A `rootmaps/<addr>.map` member (Full-bundle v1 exports always carried
+   them) is imported under that address — offline and free. The map is
+   verified in Rust (re-shrink → serialize → hash must equal the address)
+   so a tampered bundle cannot poison the store.
+2. No member (or verification failed) → **one** network
+   `data_map_fetch` via `GET /resolve/{addr}` during the import, behind a
+   progress dialog. An entry whose map cannot be obtained is **skipped with
+   a warning** — it is never imported map-less.
+
+Public XOR address == derived address, so a converted entry is
+indistinguishable from a native v2 import. This conversion path (and the
+`/resolve` network fetch behind it) is scheduled for removal after the
+deprecation window — see ROADMAP.md.
 
 ## Export
 
-- **One Export button** (per-list 3-dot menu *and* the library option), with a
-  two-step dialog:
-  1. Radio: **List only** (`.txt`, today's byte-identical plain export) vs
-     **Full bundle** (`.watch-list`).
-  2. Full bundle only — checkboxes: **Include watch history** (default
-     **OFF**, for both per-list and library export: shared lists shouldn't
-     leak viewing habits; a migration backup opts in explicitly) and
-     **Include root maps (instant play on import)** (default **ON** — the
-     addresses are already in `list.txt`, so no privacy delta).
-- **Pre-resolve pass:** entries never browsed/played lack cached metadata and
-  root maps (a cold root-map resolve is 22–31 s per movie-sized title), so a
-  bundle export runs a cancellable DataMapPrefetcher-style progress pass
-  (spinner, `File X of N`, Cancel). **Cancel keeps the partial bundle** —
-  missing members degrade gracefully on import.
-- **Library export** = `serializeMediaList` over all lists (including
-  disabled ones — it's a backup) in position order, concatenated into one
-  `list.txt`; metadata/posters/maps are the union across all entries;
-  `library.json` added.
-- **Delivery:** desktop uses the save-file dialog for both formats. Mobile
-  uses the SAF save-file dialog (`file_selector.getSaveLocation`) for
-  bundles (reliable at ~200 MB) and keeps the share sheet for plain `.txt`.
+- **One format: the bundle.** The plain `.txt` export is gone — a filename
+  list without its maps is unplayable, and a hex list would recreate the
+  public-address format this app no longer supports. The export dialog has
+  one checkbox: **Include watch history** (default **OFF** — shared lists
+  shouldn't leak viewing habits; a migration backup opts in explicitly),
+  plus `library.json` for the whole-library export.
+- **Members come straight from the local store** (`GET /datamap/{addr}`,
+  ant-cli-compatible bytes). Maps are local by construction, so there is no
+  pre-resolve pass; a rare "map missing" entry (interrupted upgrade
+  migration) is skipped, counted, and left out of `list.txt` too.
+- **Library export** includes disabled lists (it's a backup) in position
+  order; metadata/posters are the union across all entries.
+- **Delivery:** the save-file dialog everywhere (SAF on mobile — reliable
+  at ~200 MB).
 
 ## Native plumbing
 
-`root_maps.sqlite` is Rust-owned, so the embedded server gains two endpoints:
+The embedded server's map endpoints:
 
-- `GET /rootmap/{addr}` — export; returns the stored map, 404 if unresolved.
-- `PUT /rootmap/{addr}` — import; runs the offline verification above **in
-  Rust** (verify-then-store), 4xx on mismatch.
-
-New Flutter dependency: the pure-Dart `archive` package for zip read/write.
+- `POST /datamap` — import; body is raw `.datamap` bytes (msgpack, or
+  legacy JSON sniffed by first byte `{`). Rejects shrunk child maps.
+  Derives the address offline, stores the map, returns
+  `{address, size, chunks}`.
+- `GET /datamap/{addr}` — export; the stored root map as canonical msgpack
+  (a byte-valid standalone `.datamap` file), 404 when not stored.
+- `GET /rootmap/{addr}` / `PUT /rootmap/{addr}` — bincode
+  (`DataMap::to_bytes`) variants kept for the NOTLD seeder asset and v1
+  `rootmaps/` members; PUT verifies-then-stores.
+- `GET /resolve/{addr}` — network map fetch + persist; **only** used by v1
+  border conversion, the upgrade migration pass, and bundle-download by
+  address. Scheduled for deletion (ROADMAP.md release 3).
+- `GET /xor/{addr}` — the stream path; serves **locally stored maps only**
+  and fast-fails 404 ("data map missing — re-import the list or bundle")
+  instead of the old doomed 20–30 s network resolve.
 
 ## Attribution
 
-TMDB terms require attribution wherever their data/images appear — owed by the
-app today, independent of bundles:
+TMDB terms require attribution wherever their data/images appear — owed by
+the app today, independent of bundles:
 
 - Settings → About/Metadata shows the standard TMDB notice + logo
   ("This product uses the TMDB API but is not endorsed or certified by TMDB").
@@ -117,13 +171,5 @@ app today, independent of bundles:
 
 - The `downloads` table and downloaded files (absolute local paths;
   re-download on the new device).
-- Anything in `root_maps.sqlite` beyond the bundled entries' own maps.
-
-## Estimate breakdown
-
-- ~1 day — base bundle: zip read/write + `archive` dep, export pre-resolve
-  pass with progress UI, two-step export dialog, sniff + seed import, cap
-  raise, round-trip test into a clean keyless profile.
-- ~0.5 day — `library.json` + `history.json`.
-- ~0.5 day — root maps: the two Rust endpoints + offline
-  shrink/serialize/hash verification.
+- Anything in the map store beyond the bundled entries' own maps (a
+  wholesale dump would leak every title ever played).

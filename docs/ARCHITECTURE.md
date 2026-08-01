@@ -55,23 +55,41 @@ is the only remote source, accessed via the
 └──────────────────────────────────────────────┘
 ```
 
-### Lists — the library model
+### Lists — the library model (datamap-first since alpha.40)
 
 A **list** is the unit of library organization. Each entry:
 
 ```
-{ address: <XOR public file address>, name: "The Movie (2023).mkv" }
+{ address: <derived address>, name: "The Movie (2023).mkv" }
 ```
 
-- Users can hold multiple lists (e.g. "Movies", "Kids", "Docs") and add entries by
-  pasting an address + name.
-- Lists are plain data → import/export as files, and (later) publish/subscribe to
-  lists stored on Autonomi itself. Two interchange formats: the shipped plain-text
-  list file, and the planned `.watch-list` **bundle** (a zip carrying the same
-  `list.txt` plus TMDB metadata, posters, optional offline-verified root data maps
-  and optional watch history) — spec locked, see
-  [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md). Import auto-detects the format by content
-  sniff; export offers both behind one button.
+The **derived address** is `blake3(rmp_serde(shrink(root data map)))` —
+computed fully offline from the entry's `.datamap` file at import, with the
+root map stored in the embedded client's local map store. There is no other
+entry kind: **public XOR addresses were removed as an entry type in
+alpha.40**, because a public Autonomi upload stores its root data map as a
+plaintext chunk on the network (any node operator can trawl chunks for valid
+maps and read the whole file), and an app keyed on public addresses nudges
+users into uploading their media libraries insecurely. A private upload
+(`ant file upload`, no flags) stores the same encrypted chunks but keeps the
+map in the local `.datamap` file — without it the chunks are unlinkable
+noise. For a file that *was* uploaded publicly the derived address equals
+its XOR address, so entries created by older versions kept their identity
+unchanged.
+
+- Content enters the library exactly two ways: importing `.datamap` files
+  (multi-select picker; the file name minus `.datamap` is the media name,
+  feeding the metadata matcher) or importing a `.watch-list` **bundle** (a
+  zip of datamap members plus TMDB metadata, posters, optional watch
+  history) — spec v2 in [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md). Export is the
+  bundle, full stop (a name list without maps is unplayable).
+- A datamap is full access to its content: sharing a bundle shares the
+  ability to watch, and publishing one at a public address re-leaks every
+  title (privacy is transitive). Future publish/subscribe features must
+  default private.
+- An entry whose map is missing locally (interrupted upgrade migration)
+  cannot play — the stream path fast-fails with a "re-import" message
+  rather than attempting a network resolve.
 - On add, the **metadata matcher** parses the file name (title/year, `SxxEyy`) and
   queries TMDB for artwork, overview, and genre/category — exactly the pipeline
   Plex/Emby/Jellyfin servers run, but on-device. Results cached in SQLite; entries
@@ -93,12 +111,15 @@ Two layers of caching keep streaming fast:
 - **Chunk LRU cache + keep-ahead prefetch** — all chunk traffic goes through a
   byte-bounded in-memory LRU (256 MiB desktop / 128 MiB Android); while serving,
   a prefetcher keeps ~64 MiB ahead of the playhead warm.
-- **Root data-map persistence** — resolved root data maps are content-addressed
-  and immutable, so they are stored in SQLite (`root_maps.sqlite`) forever: a
-  title's map is fetched from the network at most once per device (cold ~30s for
-  a 5GB file, ~7ms from disk afterwards, across app restarts). `GET /resolve/{addr}`
-  resolves and persists a map without streaming it — used by prefetch-on-import
-  and by warming a title when its detail page opens.
+- **Root data-map store** — root maps are content-addressed and immutable,
+  so they are stored in SQLite (`root_maps.sqlite`) forever. Since alpha.40
+  maps arrive **at import time** (`POST /datamap` derives the address
+  offline and stores the map; `GET /datamap/{addr}` exports ant-cli-
+  compatible bytes), and the `/xor` stream path serves locally stored maps
+  only — no cold first-play resolve exists anymore. `GET /resolve/{addr}`
+  (network fetch + persist) survives solely for v1-bundle conversion, the
+  one-time upgrade migration, and bundle-download by address; it is
+  scheduled for deletion (ROADMAP.md, datamap-first release 3).
 
 ### Downloads / offline
 
@@ -167,8 +188,9 @@ Watch-It/
 │   ├── lib/
 │   │   ├── db/                # drift database (lists, metadata cache)
 │   │   ├── services/          # embedded client FFI, library store, metadata
-│   │   │                      #   matcher, TMDB client, import/export, prefetch,
-│   │   │                      #   downloads, connectivity
+│   │   │                      #   matcher, TMDB client, datamap/bundle
+│   │   │                      #   import/export, migration, downloads,
+│   │   │                      #   connectivity
 │   │   ├── screens/           # home wall, show/season/detail, player,
 │   │   │                      #   media lists, settings
 │   │   ├── widgets/           # shared UI (detail header, …)
@@ -196,15 +218,14 @@ Watch-It/
    live tests only.
 3. Subtitles for streamed items: sidecar files as linked list entries, or embedded-only
    in v1?
-4. ~~List format~~ — **resolved (alpha.25)**: plain text, not JSON — optional
-   `ListName="..."` section markers, then one `<xor-address> <file name>` per line;
-   bad lines skipped and reported, 10MB file cap. Import from a local file or from
-   an Autonomi address; export (alpha.31) writes the same format per list. A richer
-   `.watch-list` bundle format (zip: list + metadata + posters + optional root maps
-   + optional history) shipped in alpha.33 — see
-   [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md).
+4. ~~List format~~ — **re-resolved (alpha.40): the `.watch-list` bundle is the
+   only interchange format.** The alpha.25 plain-text `<xor-address> <name>`
+   list was removed together with public-XOR entries; bundle spec v2 carries
+   raw `.datamap` members named by original filename plus an optional
+   filename-line `list.txt` — see [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md)
+   (v1 bundles convert at the import border during the deprecation window).
 5. ~~Streaming seek~~ — **resolved**: range/offset fetch verified byte-exact against
-   the live network; with the chunk cache, keep-ahead prefetch, and persisted root
-   maps, seek and warm starts are fast. Remaining UX cost is the cold first
-   resolve of a new title (~20–30s), mitigated by prefetch-on-import and
-   tile-open warm-up.
+   the live network; with the chunk cache, keep-ahead prefetch, and the local
+   map store, seek and warm starts are fast. The old cold-first-resolve UX
+   cost (~20–30s per new title) is gone since alpha.40 — maps arrive at
+   import time by construction.

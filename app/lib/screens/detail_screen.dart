@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
 import '../services/connectivity.dart';
-import '../services/datamap_prefetch.dart';
 import '../services/download_manager.dart';
 import '../services/home_rows.dart';
 import '../services/library_store.dart';
@@ -16,7 +15,7 @@ import '../services/network_policy.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
-import '../widgets/prefetch_dialog.dart' show wiMessengerKey;
+import '../widgets/messenger.dart' show wiMessengerKey;
 import '../widgets/watch_progress.dart';
 import 'player_screen.dart';
 
@@ -42,11 +41,8 @@ class _DetailScreenState extends State<DetailScreen> {
   @override
   void initState() {
     super.initState();
-    // Warm the entry's data map in the background the moment its page
-    // opens: resolving it is most of the pre-first-byte wait, so by the
-    // time the user presses Play the file starts as fast as possible.
-    // Once per address per session; a no-op when already stored.
-    unawaited(DataMapPrefetcher.warm(entry));
+    // No data-map warm needed: every entry's map arrived at import time
+    // (datamap-first model) — playback reads it from the local store.
     unawaited(DownloadManager.instance.ensureLoaded());
     unawaited(_loadState());
   }
@@ -542,7 +538,7 @@ class _DetailScreenState extends State<DetailScreen> {
               style: TextStyle(fontSize: 12.5, color: t.ash),
             ),
           const SizedBox(height: 24),
-          sectionLabel(t, 'XOR ADDRESS'),
+          sectionLabel(t, 'ADDRESS'),
           const SizedBox(height: 6),
           SelectableText(
             entry.address,

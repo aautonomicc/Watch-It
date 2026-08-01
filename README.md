@@ -8,21 +8,30 @@ six platforms: **Android, Android TV, iPhone (iOS), Linux, Windows, and Mac.**
 
 Think the Plex / Emby / [Silo](https://github.com/Silo-Server/) experience —
 poster-wall library, rich metadata, resume-watching — but **with no server to install**.
-W@tch is client-only: your media library is one or more lists of publicly available
-files on the decentralized [Autonomi](https://github.com/WithAutonomi/ant-client)
+W@tch is client-only: your media library is one or more lists of files stored
+privately on the decentralized [Autonomi](https://github.com/WithAutonomi/ant-client)
 network, streamed on demand or downloaded for offline watching.
 
 ## How it works
 
-1. **Lists of media.** You keep one or more lists of public media. Each entry is an
-   Autonomi **XOR public file address** plus a **file name**.
-2. **Metadata from the name.** From the file name W@tch looks up the same public
+1. **Upload privately, keep the datamap.** Upload media with
+   `ant file upload <file>` (private is the default — **don't** use `-p`).
+   The upload prints a small `<file name>.datamap` file: that file *is* the
+   key to the content. The encrypted chunks on the network are unreadable
+   noise to everyone who doesn't hold it — unlike a *public* upload, whose
+   datamap is itself stored on the network where any node operator can find
+   it and watch the file. That's why W@tch takes datamaps only, and has no
+   public-address entry type.
+2. **Lists of media.** Import `.datamap` files into one or more lists; share
+   a library as a `.watch-list` bundle (datamaps + artwork). A datamap grants
+   full access, so share bundles as privately as the content deserves.
+3. **Metadata from the name.** From the file name W@tch looks up the same public
    databases the media servers use (TMDB) and fetches artwork, description, and
    category to organize and display the collection as a poster-wall library. Name
    files with the Plex/Jellyfin convention —
-   `Title (Year) {imdb-ttXXXXXXX} - [quality].ext` — for exact matches; see
+   `Title (Year) {imdb-ttXXXXXXX} - [quality].ext` — **before uploading**; see
    [docs/NAMING.md](docs/NAMING.md).
-3. **Stream or download.** Hit play to stream straight from the network, or download
+4. **Stream or download.** Hit play to stream straight from the network, or download
    an item to the device for offline watching. Downloaded items play with the full
    library experience, no connectivity needed.
 
@@ -31,20 +40,23 @@ server compatibility** — Autonomi *is* the backend.
 
 ## Status
 
-**Working alpha on Android and Linux** — [v0.1.0-alpha.39](https://github.com/aautonomicc/Watch-It/releases)
+**Working alpha on Android and Linux** — [the latest release](https://github.com/aautonomicc/Watch-It/releases)
 ships a signed APK and a Linux AppImage that connect to the live Autonomi network
-with an embedded Rust client (no gateway, no sidecar) and stream by XOR address
-with byte-exact seeking, a chunk cache with keep-ahead prefetch, and persisted
-data maps (a title resolves over the network at most once per device — instant
-on every later open). TMDB metadata gives entries artwork, descriptions,
+with an embedded Rust client (no gateway, no sidecar) and stream with
+byte-exact seeking and a chunk cache with keep-ahead prefetch. Since
+alpha.40 the library is **datamap-first**: entries are created from
+`.datamap` files or `.watch-list` bundles, addresses are derived offline,
+and every title's data map is on-device from the moment it's imported — so
+first plays start fast (no cold network resolve) and nothing about your
+library is discoverable on the network. TMDB metadata gives entries artwork, descriptions,
 ratings, and categories from their file names, with shows grouped into
 big-artwork Show → Season → Episode pages. Releases are keyless by design:
 no TMDB key ships in the binaries — add your own free key (create one at
 [themoviedb.org](https://www.themoviedb.org/settings/api)) in
 Settings → Metadata, or skip it entirely: imported `.watch-list` bundles
 carry metadata and posters, so bundle-importing users never need a key. Media lists can be created and
-managed in-app and imported from a local file or straight from an Autonomi
-address, with optional prefetch of all data maps on import. Playback position
+managed in-app; `.datamap` files import via a multi-select picker and
+bundles import from a local file or by network address. Playback position
 is remembered per title: the home screen opens with Continue Watching and
 Recently Added rows, detail pages offer Resume / Start over with a Watched
 badge, and finishing an episode auto-plays the next one via an Up-next
@@ -78,14 +90,20 @@ phone-friendly: the app automatically reconnects after a network loss
 downloads keep running in the background with a progress notification,
 Settings → Network adds Wi-Fi/mobile-data policies (downloads Wi-Fi-only
 by default, ask-before-streaming on cellular), and the demo movie's data
-map ships inside the app so it starts fast on a fresh install.
+map ships inside the app so it starts fast on a fresh install. Alpha.40
+removes public XOR addresses entirely in favour of the datamap-first model
+above: adding media means importing `.datamap` files or bundles (spec v2 —
+raw datamap members named by original filename, so even a hand-made
+`zip lib.watch-list *.datamap` imports), the plain-text address list format
+is gone, old bundles convert on import, and existing libraries migrate
+automatically in a one-time background pass on first launch.
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — tech stack decision and app structure
 - [docs/NAMING.md](docs/NAMING.md) — file naming convention (Plex/Jellyfin style)
 - [docs/UI-DESIGN.md](docs/UI-DESIGN.md) — screens and look-and-feel
-- [docs/BUNDLE-FORMAT.md](docs/BUNDLE-FORMAT.md) — `.watch-list` bundle spec (locked, unimplemented)
+- [docs/BUNDLE-FORMAT.md](docs/BUNDLE-FORMAT.md) — `.watch-list` bundle spec v2 (datamap-first)
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased milestones
 
 ## License

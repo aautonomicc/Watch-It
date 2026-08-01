@@ -2,8 +2,9 @@
 
 ## One-liner
 
-W@tch makes public media on the Autonomi network look and feel like a premium
-streaming service — with nothing to host and no server to install.
+W@tch makes media on the Autonomi network look and feel like a premium
+streaming service — with nothing to host, no server to install, and your
+library private by construction.
 
 ## The problem
 
@@ -22,17 +23,24 @@ streaming service — with nothing to host and no server to install.
 2. **Client-only. No server, ever.** The Autonomi network is the backend. Install the
    app, add a list, get a poster-wall library. No accounts, no configuration, nothing
    to host.
-3. **Lists as libraries.** A library is a list of entries — XOR public file address +
-   file name. Users can keep several lists, and lists can be shared/imported (a list
-   is itself just data that can live on Autonomi).
-4. **Metadata like the big apps.** From the file name alone, fetch artwork,
+3. **Lists as libraries.** A library is a list of entries, each backed by a
+   `.datamap` file — the key a private `ant file upload` produces. Users can
+   keep several lists and share them as `.watch-list` bundles.
+4. **Private by construction.** Public Autonomi uploads are discoverable —
+   their data map sits on the network in plaintext, readable by any node
+   operator. W@tch therefore takes datamaps only: content stays invisible on
+   the network, and access travels exactly as far as the datamap does.
+   (Corollary: a datamap grants full access, so bundles should be shared as
+   privately as their content deserves — publishing one at a public address
+   re-leaks every title in it.)
+5. **Metadata like the big apps.** From the file name alone, fetch artwork,
    description, and category from the same public databases the media servers use
-   (TMDB), so a bare address list becomes a rich, browsable collection.
-5. **Stream or keep.** Play instantly from the network, or download for offline —
+   (TMDB), so a bare file list becomes a rich, browsable collection.
+6. **Stream or keep.** Play instantly from the network, or download for offline —
    downloaded items keep the full library experience.
-6. **Play everything.** libmpv-based engine: every container/codec, subtitles,
+7. **Play everything.** libmpv-based engine: every container/codec, subtitles,
    multiple audio tracks, chapters.
-7. **Own your data.** Watch history, resume points, lists, and cached metadata stored
+8. **Own your data.** Watch history, resume points, lists, and cached metadata stored
    locally. No telemetry.
 
 ## Non-goals
@@ -41,8 +49,8 @@ streaming service — with nothing to host and no server to install.
   out by design. Autonomi is the only remote source.
 - **Not a server itself.** No transcoding for other devices, no user management.
 - **No live TV / DVR, no music-first experience** in v1.
-- **No piracy features** — W@tch plays what's publicly addressed on Autonomi; it
-  ships no torrent/debrid integrations.
+- **No piracy features** — W@tch plays what its users hold datamaps for on
+  Autonomi; it ships no torrent/debrid integrations.
 
 ## Target users
 
@@ -50,7 +58,9 @@ streaming service — with nothing to host and no server to install.
    nothing nice to play it with.
 2. **The streaming-fatigued viewer** — wants a Plex-quality library experience
    without running or paying for anything.
-3. **The curator** — maintains and shares lists of public media for others to import.
+3. **The curator** — maintains and shares `.watch-list` bundles of media
+   (their own uploads, or the fetched datamaps of legitimately public
+   material) for others to import.
 
 ## Product principles
 

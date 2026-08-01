@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -9,24 +8,22 @@ import 'package:share_plus/share_plus.dart' show SharePlus, ShareParams;
 
 import '../models/media_list.dart';
 import '../services/bundle.dart';
-import '../services/datamap_prefetch.dart';
+import '../services/datamap_import.dart';
 import '../services/library_store.dart';
 import '../services/list_import.dart';
 import '../services/metadata_service.dart';
-import '../services/prefetch_manager.dart';
 import '../theme/tokens.dart';
-import '../widgets/prefetch_dialog.dart';
 import 'list_edit_screen.dart';
 import 'settings_screen.dart' show promptForText;
 
 /// Manage media lists: create, show/hide on the home screen, open for
 /// editing, rename, delete.
 class MediaListsScreen extends StatefulWidget {
-  const MediaListsScreen({super.key, this.prefetchBase});
+  const MediaListsScreen({super.key, this.importBase});
 
-  /// Embedded-server URL override for the post-import data-map prefetch
-  /// (tests); null means the real embedded client.
-  final String? prefetchBase;
+  /// Embedded-server URL override for datamap/bundle imports (tests);
+  /// null means the real embedded client.
+  final String? importBase;
 
   @override
   State<MediaListsScreen> createState() => _MediaListsScreenState();
@@ -62,25 +59,40 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     if (mounted) setState(() => _lists = lists);
   }
 
-  /// Import lists from a text file: either a single list (first line is
-  /// the list name) or several lists separated by `ListName="..."`
-  /// markers; every other line is one `<xor address> <file name>` entry.
+  /// Add media to the library: loose `.datamap` files (a private
+  /// `ant file upload` writes one per file) or a `.watch-list` bundle,
+  /// local or downloaded from the network by address.
   Future<void> _importList() async {
     final t = WiTokens.of(context);
     final source = await showDialog<String>(
       context: context,
       builder: (context) => SimpleDialog(
         backgroundColor: t.ink2,
-        title: Text('Import list from file',
+        title: Text('Add to library',
             style: TextStyle(color: t.bone, fontSize: 16)),
         children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(context).pop('datamaps'),
+            child: Row(children: [
+              Icon(Icons.note_add_outlined, color: t.accent, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                    'Add .datamap files\nFrom a private "ant file upload"',
+                    style: TextStyle(color: t.bone, fontSize: 14)),
+              ),
+            ]),
+          ),
           SimpleDialogOption(
             onPressed: () => Navigator.of(context).pop('local'),
             child: Row(children: [
               Icon(Icons.folder_open, color: t.accent, size: 20),
               const SizedBox(width: 12),
-              Text('Local file',
-                  style: TextStyle(color: t.bone, fontSize: 14)),
+              Expanded(
+                child: Text('Import .watch-list bundle\nLists with artwork '
+                    'and instant-play data',
+                    style: TextStyle(color: t.bone, fontSize: 14)),
+              ),
             ]),
           ),
           SimpleDialogOption(
@@ -88,18 +100,87 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
             child: Row(children: [
               Icon(Icons.cloud_download_outlined, color: t.accent, size: 20),
               const SizedBox(width: 12),
-              Text('Download from network (XOR address)',
-                  style: TextStyle(color: t.bone, fontSize: 14)),
+              Expanded(
+                child: Text('Download bundle from network\nBy its share '
+                    'address',
+                    style: TextStyle(color: t.bone, fontSize: 14)),
+              ),
             ]),
           ),
         ],
       ),
     );
-    if (source == 'local') {
-      await _importFromLocalFile();
-    } else if (source == 'network') {
-      await _importFromNetwork();
+    switch (source) {
+      case 'datamaps':
+        await _importDatamapFiles();
+      case 'local':
+        await _importFromLocalFile();
+      case 'network':
+        await _importFromNetwork();
     }
+  }
+
+  /// Multi-select `.datamap` picker → one entry per file, added to a
+  /// list the user names (existing titles merge via the clash dialog).
+  Future<void> _importDatamapFiles() async {
+    final List<XFile> files;
+    try {
+      files = await openFiles(acceptedTypeGroups: [
+        const XTypeGroup(label: 'Data maps', extensions: ['datamap']),
+      ]);
+    } catch (e) {
+      _showError('Could not open the file picker: $e');
+      return;
+    }
+    if (files.isEmpty || !mounted) return;
+    final title = await promptForText(
+      context,
+      title: 'Add to which list?',
+      hint: 'List title',
+      initial: 'Imported',
+    );
+    if (title == null || title.trim().isEmpty) return;
+    final named = <({String name, Uint8List bytes})>[];
+    for (final file in files) {
+      try {
+        named.add((name: file.name, bytes: await file.readAsBytes()));
+      } catch (_) {
+        _showError('Could not read "${file.name}".');
+      }
+    }
+    await _importDatamaps(named, listTitle: title.trim());
+  }
+
+  /// Import [files] as datamap entries into [listTitle]. Each file's
+  /// address is derived offline by the embedded client; unreadable files
+  /// are skipped and reported.
+  Future<void> _importDatamaps(
+    List<({String name, Uint8List bytes})> files, {
+    required String listTitle,
+  }) async {
+    final entries = <MediaEntry>[];
+    var failed = 0;
+    for (final file in files) {
+      try {
+        entries.add(await entryFromDatamapFile(file.name, file.bytes,
+            base: widget.importBase));
+      } on ListImportException {
+        failed++;
+      }
+    }
+    if (entries.isEmpty) {
+      _showError('No data maps could be imported'
+          '${failed > 0 ? ' ($failed unreadable)' : ''}.');
+      return;
+    }
+    await _applyImportedLists(
+      [ParsedMediaList(title: listTitle, entries: entries)],
+      extraNotes: [
+        if (failed > 0)
+          '$failed ${failed == 1 ? 'file' : 'files'} skipped (not a '
+              'data map)',
+      ],
+    );
   }
 
   Future<void> _importFromLocalFile() async {
@@ -113,8 +194,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     if (file == null) return;
     try {
       if (await file.length() > kMaxBundleBytes) {
-        _showError('"${file.name}" is too large to be a media list or '
-            'bundle.');
+        _showError('"${file.name}" is too large to be a bundle.');
         return;
       }
     } catch (_) {
@@ -134,8 +214,8 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
   Future<void> _importFromNetwork() async {
     final address = await promptForText(
       context,
-      title: 'Download list',
-      hint: 'XOR address of the list file',
+      title: 'Download bundle',
+      hint: 'Share address of the bundle',
     );
     if (address == null || address.trim().isEmpty) return;
     if (!mounted) return;
@@ -148,68 +228,157 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     Uint8List? bytes;
     try {
       bytes = await fetchBytesFromNetwork(address,
-          base: widget.prefetchBase, maxBytes: kMaxBundleBytes);
+          base: widget.importBase, maxBytes: kMaxBundleBytes);
     } on ListImportException catch (e) {
       _showError(e.message);
     } finally {
       if (mounted) Navigator.of(context, rootNavigator: true).pop();
     }
-    if (bytes != null) await _finishImportBytes(bytes, 'downloaded file');
+    // No file name: the default-list prompt asks instead.
+    if (bytes != null) await _finishImportBytes(bytes, null);
   }
 
-  /// One Import path, no format question: zip magic → bundle, otherwise
-  /// plain text (the `.watch-list` extension is cosmetic).
-  Future<void> _finishImportBytes(Uint8List bytes, String name) async {
+  /// Route picked/downloaded bytes: zip magic → bundle; a loose
+  /// `.datamap` file still imports (the picker filter is advisory);
+  /// anything else — including the removed plain-text list format — is
+  /// refused with a pointer at bundles.
+  Future<void> _finishImportBytes(Uint8List bytes, String? name) async {
     if (looksLikeZip(bytes)) {
-      final ParsedBundle bundle;
-      try {
-        bundle = parseBundle(bytes);
-      } on ListImportException catch (e) {
-        _showError(e.message);
-        return;
-      }
-      var importRootMaps = true;
-      var importHistory = true;
-      if (bundle.rootMaps.isNotEmpty || bundle.history.isNotEmpty) {
-        if (!mounted) return;
-        final choice = await _promptBundleImportOptions(bundle);
-        if (choice == null) return; // whole import cancelled
-        importRootMaps = choice.rootMaps;
-        importHistory = choice.history;
-      }
-      await _finishImport(bundle.listText,
-          bundle: bundle,
-          importRootMaps: importRootMaps,
-          importHistory: importHistory);
+      await _importBundle(bytes, fileName: name);
       return;
     }
-    if (bytes.length > kMaxListFileBytes) {
-      _showError('"$name" is too large to be a media list.');
+    if (name != null && mediaNameFromDatamapFileName(name) != null) {
+      if (!mounted) return;
+      final title = await promptForText(
+        context,
+        title: 'Add to which list?',
+        hint: 'List title',
+        initial: 'Imported',
+      );
+      if (title == null || title.trim().isEmpty) return;
+      await _importDatamaps([(name: name, bytes: bytes)],
+          listTitle: title.trim());
       return;
     }
-    final String content;
-    try {
-      content = utf8.decode(bytes);
-    } on FormatException {
-      _showError('Could not read "$name" as a text file.');
-      return;
-    }
-    await _finishImport(content);
+    _showError('${name == null ? 'That file' : '"$name"'} is not a '
+        '.watch-list bundle or .datamap file. Plain-text lists are no '
+        'longer supported — ask for a bundle instead.');
   }
 
-  /// A bundle can carry the exporter's watch history and resolved data
-  /// maps. History is someone else's viewing state and maps prime the
-  /// local store, so neither is applied silently — this dialog asks
-  /// which to take, showing a row only for what the bundle actually
-  /// contains. Returns null when the user cancels the whole import.
-  Future<({bool rootMaps, bool history})?> _promptBundleImportOptions(
-      ParsedBundle bundle) async {
+  /// Full bundle import: parse, ask about history, then convert every
+  /// member and line into datamap-backed entries (a v1 bundle's legacy
+  /// entries fetch their maps here, behind a progress dialog) and merge
+  /// the resulting lists into the library.
+  Future<void> _importBundle(Uint8List bytes, {String? fileName}) async {
+    final ParsedBundle bundle;
+    try {
+      bundle = parseBundle(bytes);
+    } on ListImportException catch (e) {
+      _showError(e.message);
+      return;
+    }
+
+    // Members no list claims land in a default list named after the
+    // bundle file (minus its extension, whatever the picker delivered);
+    // a network-fetched bundle has no file name — ask.
+    var defaultTitle =
+        fileName?.replaceFirst(RegExp(r'\.[^.]+$'), '').trim();
+    if ((defaultTitle == null || defaultTitle.isEmpty) &&
+        bundle.datamapMembers.isNotEmpty) {
+      if (!mounted) return;
+      defaultTitle = (await promptForText(
+        context,
+        title: 'List name for this bundle',
+        hint: 'List title',
+        initial: 'Imported',
+      ))
+          ?.trim();
+      if (defaultTitle == null || defaultTitle.isEmpty) return;
+    }
+
+    var importHistory = true;
+    if (bundle.history.isNotEmpty) {
+      if (!mounted) return;
+      final choice = await _promptBundleImportOptions(bundle);
+      if (choice == null) return; // whole import cancelled
+      importHistory = choice;
+    }
+
+    if (!mounted) return;
     final t = WiTokens.of(context);
-    // Default ON: the exporter included them deliberately, and this
-    // dialog is the explicit chance to opt out.
-    var rootMaps = true;
+    final progress = ValueNotifier<(int, int)>((0, 0));
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Dialog(
+        backgroundColor: t.ink2,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: t.accent),
+              const SizedBox(height: 18),
+              ValueListenableBuilder(
+                valueListenable: progress,
+                builder: (context, (int, int) p, _) => Text(
+                  p.$2 == 0
+                      ? 'Importing…'
+                      : 'Converting legacy entries — ${p.$1} of ${p.$2}',
+                  style: TextStyle(fontSize: 13, color: t.boneDim),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ));
+    BundleImportResult? result;
+    try {
+      result = await importBundleEntries(
+        bundle,
+        base: widget.importBase,
+        defaultListTitle: defaultTitle ?? 'Imported',
+        onConvertProgress: (current, total, _) =>
+            progress.value = (current, total),
+      );
+    } on ListImportException catch (e) {
+      _showError(e.message);
+    } finally {
+      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+    }
+    if (result == null) return;
+
+    await _applyImportedLists(
+      result.lists,
+      bundle: bundle,
+      importHistory: importHistory,
+      extraNotes: [
+        if (result.datamapsInvalid > 0)
+          '${result.datamapsInvalid} unreadable data '
+              '${result.datamapsInvalid == 1 ? 'map' : 'maps'} skipped',
+        if (result.refsMissing > 0)
+          '${result.refsMissing} listed ${result.refsMissing == 1 ? 'file' : 'files'} '
+              'missing from the bundle',
+        if (result.convertFailed > 0)
+          '${result.convertFailed} legacy '
+              '${result.convertFailed == 1 ? 'entry' : 'entries'} skipped '
+              '(data map unavailable)',
+        if (result.skippedLines.isNotEmpty)
+          '${result.skippedLines.length} invalid '
+              '${result.skippedLines.length == 1 ? 'line' : 'lines'} skipped',
+      ],
+    );
+  }
+
+  /// A bundle can carry the exporter's watch history — someone else's
+  /// viewing state, so it is never applied silently. Returns the
+  /// checkbox value, or null when the user cancels the whole import.
+  Future<bool?> _promptBundleImportOptions(ParsedBundle bundle) async {
+    final t = WiTokens.of(context);
+    // Default ON: the exporter included it deliberately, and this dialog
+    // is the explicit chance to opt out.
     var history = true;
-    final maps = bundle.rootMaps.length;
     final entries = bundle.history.length;
     final go = await showDialog<bool>(
       context: context,
@@ -222,39 +391,22 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (bundle.rootMaps.isNotEmpty)
-                CheckboxListTile(
-                  value: rootMaps,
-                  activeColor: t.accent,
-                  checkColor: t.ink,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  onChanged: (v) =>
-                      setDialogState(() => rootMaps = v ?? true),
-                  title: Text(
-                      'Data maps ($maps ${maps == 1 ? 'title' : 'titles'})',
-                      style: TextStyle(color: t.bone, fontSize: 14)),
-                  subtitle: Text(
-                      'Instant first play — skipping just means a one-time '
-                      'network resolve when a title first plays',
-                      style: TextStyle(color: t.ash, fontSize: 11.5)),
-                ),
-              if (bundle.history.isNotEmpty)
-                CheckboxListTile(
-                  value: history,
-                  activeColor: t.accent,
-                  checkColor: t.ink,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  onChanged: (v) =>
-                      setDialogState(() => history = v ?? true),
-                  title: Text(
-                      'Watch history ($entries '
-                      '${entries == 1 ? 'entry' : 'entries'})',
-                      style: TextStyle(color: t.bone, fontSize: 14)),
-                  subtitle: Text(
-                      "The exporter's resume points and watched marks — "
-                      'merged only where newer than yours',
-                      style: TextStyle(color: t.ash, fontSize: 11.5)),
-                ),
+              CheckboxListTile(
+                value: history,
+                activeColor: t.accent,
+                checkColor: t.ink,
+                controlAffinity: ListTileControlAffinity.leading,
+                onChanged: (v) =>
+                    setDialogState(() => history = v ?? true),
+                title: Text(
+                    'Watch history ($entries '
+                    '${entries == 1 ? 'entry' : 'entries'})',
+                    style: TextStyle(color: t.bone, fontSize: 14)),
+                subtitle: Text(
+                    "The exporter's resume points and watched marks — "
+                    'merged only where newer than yours',
+                    style: TextStyle(color: t.ash, fontSize: 11.5)),
+              ),
             ],
           ),
           actions: [
@@ -271,27 +423,24 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       ),
     );
     if (go != true) return null;
-    return (rootMaps: rootMaps, history: history);
+    return history;
   }
 
-  Future<void> _finishImport(String content,
-      {ParsedBundle? bundle,
-      bool importRootMaps = true,
-      bool importHistory = true}) async {
-    final ParsedMediaListFile parsed;
-    try {
-      parsed = parseMediaListFile(content);
-    } on ListImportException catch (e) {
-      _showError(e.message);
-      return;
-    }
+  /// Merge freshly imported lists into the library (clash dialog per
+  /// existing title), save, seed any bundle extras, and report what
+  /// happened in one snackbar.
+  Future<void> _applyImportedLists(
+    List<ParsedMediaList> parsed, {
+    ParsedBundle? bundle,
+    bool importHistory = true,
+    List<String> extraNotes = const [],
+  }) async {
     var lists = List<MediaList>.of(_lists ?? []);
     var idBase = DateTime.now().microsecondsSinceEpoch;
     final importedTitles = <String>[];
-    final importedEntries = <MediaEntry>[];
     final createdIds = <String>{};
     var merged = 0, added = 0, duplicates = 0, listsSkipped = 0;
-    for (final list in parsed.lists) {
+    for (final list in parsed) {
       final i = lists.indexWhere(
           (l) => l.title.toLowerCase() == list.title.toLowerCase());
       if (i < 0) {
@@ -303,7 +452,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         ));
         createdIds.add(id);
         importedTitles.add(list.title);
-        importedEntries.addAll(list.entries);
         added += list.entries.length;
         continue;
       }
@@ -317,7 +465,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         duplicates += list.entries.length - fresh.length;
         lists[i] = existing
             .copyWith(entries: [...existing.entries, ...fresh]);
-        importedEntries.addAll(fresh);
         added += fresh.length;
         merged++;
       } else if (action == 'new') {
@@ -330,7 +477,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         ));
         createdIds.add(id);
         importedTitles.add(title);
-        importedEntries.addAll(list.entries);
         added += list.entries.length;
       } else {
         listsSkipped++;
@@ -365,28 +511,19 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
             'skipped',
       if (listsSkipped > 0)
         '$listsSkipped ${listsSkipped == 1 ? 'list' : 'lists'} skipped',
-      if (parsed.skippedLines.isNotEmpty)
-        '${parsed.skippedLines.length} invalid '
-            '${parsed.skippedLines.length == 1 ? 'line' : 'lines'} skipped',
+      ...extraNotes,
     ].join(', ');
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text('$what — $added '
           '${added == 1 ? 'entry' : 'entries'}'
           '${notes.isEmpty ? '' : ' ($notes)'}'),
     ));
-    if (bundle == null) {
-      await _offerPrefetch(importedEntries);
-      return;
-    }
+    if (bundle == null) return;
     // Seed the caches from the bundle's optional members. Existing local
-    // state wins throughout; tampered root maps are rejected by the
-    // embedded client's offline verification and resolve over the
-    // network later instead.
+    // state wins throughout.
     if (bundle.hasSeedableExtras) {
-      final seeded = await seedBundle(bundle,
-          base: widget.prefetchBase,
-          importRootMaps: importRootMaps,
-          importHistory: importHistory);
+      final seeded =
+          await seedBundle(bundle, importHistory: importHistory);
       final parts = [
         if (seeded.metadataSeeded > 0)
           '${seeded.metadataSeeded} metadata '
@@ -394,9 +531,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         if (seeded.postersSeeded > 0)
           '${seeded.postersSeeded} '
               '${seeded.postersSeeded == 1 ? 'poster' : 'posters'}',
-        if (seeded.mapsStored > 0)
-          '${seeded.mapsStored} instant-play '
-              '${seeded.mapsStored == 1 ? 'map' : 'maps'}',
         if (seeded.historyMerged > 0)
           '${seeded.historyMerged} watch-history '
               '${seeded.historyMerged == 1 ? 'entry' : 'entries'}',
@@ -407,111 +541,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       }
       MetadataService.instance.notifyExternalSeed();
     }
-    // Only offer the data-map prefetch for entries the bundle did not
-    // already cover (declined maps were never stored, so nothing is
-    // covered then).
-    final covered =
-        importRootMaps ? bundle.rootMaps.keys.toSet() : <String>{};
-    await _offerPrefetch([
-      for (final e in importedEntries)
-        if (!covered
-            .contains(e.address.toLowerCase().replaceFirst('0x', '')))
-          e,
-    ]);
-  }
-
-  /// Offer to resolve the data maps of the just-imported entries so their
-  /// first play starts fast. Declining costs nothing lasting: the embedded
-  /// client saves each map the first time a title plays anyway.
-  Future<void> _offerPrefetch(List<MediaEntry> entries) async {
-    if (entries.isEmpty || !mounted) return;
-    final prefetcher = DataMapPrefetcher(base: widget.prefetchBase);
-    if (!prefetcher.available) return;
-    final t = WiTokens.of(context);
-    final n = entries.length;
-    final go = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: t.ink2,
-        title: Text('Prefetch data maps?',
-            style: TextStyle(color: t.bone, fontSize: 16)),
-        content: Text(
-          'Download the small data-map index for each of the $n imported '
-          '${n == 1 ? 'file' : 'files'} now, so playback starts faster the '
-          'first time you play them. If you skip this, each map is saved '
-          'automatically the first time a title plays.',
-          style: TextStyle(color: t.boneDim, fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text('Skip', style: TextStyle(color: t.ash)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Prefetch', style: TextStyle(color: t.accent)),
-          ),
-        ],
-      ),
-    );
-    if (go != true || !mounted) return;
-    await startPrefetchWithProgress(context, entries,
-        base: widget.prefetchBase);
-  }
-
-  /// App-bar action: prefetch the data maps of every entry in every list.
-  /// Maps already stored resolve from disk in milliseconds, so this both
-  /// resumes a cancelled prefetch and picks up files added since — only
-  /// the missing maps cost network time. Reopens the progress dialog when
-  /// a run is already going.
-  Future<void> _prefetchAll() async {
-    if (PrefetchManager.instance.running) {
-      await watchPrefetch(context);
-      return;
-    }
-    final entries = [
-      for (final list in _lists ?? <MediaList>[]) ...list.entries,
-    ];
-    if (entries.isEmpty) {
-      _showError('No entries to prefetch — your lists are empty.');
-      return;
-    }
-    final prefetcher = DataMapPrefetcher(base: widget.prefetchBase);
-    if (!prefetcher.available) {
-      _showError('The built-in Autonomi client is not available.');
-      return;
-    }
-    if (!mounted) return;
-    final t = WiTokens.of(context);
-    final n = entries.length;
-    final go = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: t.ink2,
-        title: Text('Prefetch data maps?',
-            style: TextStyle(color: t.bone, fontSize: 16)),
-        content: Text(
-          'Download the small data-map index for each of the $n '
-          '${n == 1 ? 'file' : 'files'} in your lists, so first plays '
-          'start faster. Files already prefetched are skipped almost '
-          'instantly — running this again resumes a cancelled prefetch.',
-          style: TextStyle(color: t.boneDim, fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text('Cancel', style: TextStyle(color: t.ash)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Prefetch', style: TextStyle(color: t.accent)),
-          ),
-        ],
-      ),
-    );
-    if (go != true || !mounted) return;
-    await startPrefetchWithProgress(context, entries,
-        base: widget.prefetchBase);
   }
 
   /// Ask what to do with an imported list whose name already exists:
@@ -570,92 +599,41 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     await _exportFlow(withEntries, library: true, baseName: 'W@tch library');
   }
 
-  /// Two-step export dialog (docs/BUNDLE-FORMAT.md): plain `.txt` vs full
-  /// `.watch-list` bundle, then the bundle's include options.
+  /// Export dialog (docs/BUNDLE-FORMAT.md): a `.watch-list` bundle is
+  /// the only format — its `.datamap` members *are* the entries, so
+  /// there is no maps checkbox and no plain-text option (a text list
+  /// without the maps would be unplayable, and a hex list would recreate
+  /// the public-address format this app no longer supports).
   Future<void> _exportFlow(
     List<MediaList> lists, {
     required bool library,
     required String baseName,
   }) async {
     final t = WiTokens.of(context);
-    final format = await showDialog<String>(
-      context: context,
-      builder: (context) => SimpleDialog(
-        backgroundColor: t.ink2,
-        title: Text(library ? 'Export library' : 'Export list',
-            style: TextStyle(color: t.bone, fontSize: 16)),
-        children: [
-          SimpleDialogOption(
-            onPressed: () => Navigator.of(context).pop('txt'),
-            child: Row(children: [
-              Icon(Icons.description_outlined, color: t.accent, size: 20),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text('List only (.txt)\nJust the addresses and file '
-                    'names — small and universal',
-                    style: TextStyle(color: t.bone, fontSize: 14)),
-              ),
-            ]),
-          ),
-          SimpleDialogOption(
-            onPressed: () => Navigator.of(context).pop('bundle'),
-            child: Row(children: [
-              Icon(Icons.inventory_2_outlined, color: t.accent, size: 20),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text('Full bundle (.watch-list)\nAdds artwork, '
-                    'descriptions and instant-play data for the receiver',
-                    style: TextStyle(color: t.bone, fontSize: 14)),
-              ),
-            ]),
-          ),
-        ],
-      ),
-    );
-    if (format == null || !mounted) return;
     var safe = baseName.replaceAll(RegExp(r'[/\\:*?"<>|]'), '_').trim();
     if (safe.isEmpty) safe = 'media-list';
-    if (format == 'txt') {
-      final text = lists.map(serializeMediaList).join();
-      await _deliverExport(
-        utf8.encode(text),
-        fileName: '$safe.txt',
-        mimeType: 'text/plain',
-        typeLabel: 'Text',
-        extension: 'txt',
-        entryCount: lists.fold(0, (n, l) => n + l.entries.length),
-        shareOnMobile: true,
-      );
-      return;
-    }
 
-    // Step 2 — bundle include options.
     var includeHistory = false; // shared lists shouldn't leak viewing habits
-    var includeRootMaps = true; // addresses are public in list.txt anyway
     final go = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           backgroundColor: t.ink2,
-          title: Text('Bundle contents',
+          title: Text(library ? 'Export library' : 'Export list',
               style: TextStyle(color: t.bone, fontSize: 16)),
           contentPadding: const EdgeInsets.fromLTRB(8, 16, 8, 0),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CheckboxListTile(
-                value: includeRootMaps,
-                activeColor: t.accent,
-                checkColor: t.ink,
-                controlAffinity: ListTileControlAffinity.leading,
-                onChanged: (v) =>
-                    setDialogState(() => includeRootMaps = v ?? true),
-                title: Text('Include root maps',
-                    style: TextStyle(color: t.bone, fontSize: 14)),
-                subtitle: Text(
-                    'Instant playback on import — skips the first-play '
-                    'network resolve',
-                    style: TextStyle(color: t.ash, fontSize: 11.5)),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                child: Text(
+                  'Exports a .watch-list bundle: the data maps plus '
+                  'artwork and descriptions. Anyone with the bundle can '
+                  'play its titles — share it as privately as the '
+                  'content deserves.',
+                  style: TextStyle(color: t.boneDim, fontSize: 12.5),
+                ),
               ),
               CheckboxListTile(
                 value: includeHistory,
@@ -689,15 +667,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     if (go != true || !mounted) return;
 
     final entries = [for (final l in lists) ...l.entries];
-    if (includeRootMaps) {
-      // Entries never browsed/played have no cached metadata or root map
-      // (a cold resolve is 20-30s per movie-sized title), so resolve them
-      // now behind a cancellable progress pass. Cancel keeps the partial
-      // bundle — missing members degrade gracefully on import.
-      await _preResolveForExport(entries);
-      if (!mounted) return;
-    }
-
     unawaited(showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -709,10 +678,9 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         lists,
         BundleExportOptions(
           includeHistory: includeHistory,
-          includeRootMaps: includeRootMaps,
           includeLibrary: library,
         ),
-        base: widget.prefetchBase,
+        base: widget.importBase,
       );
     } catch (e) {
       _showError('Export failed: $e');
@@ -730,80 +698,12 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       // ~200MB through the share sheet is unreliable; the SAF save
       // dialog handles it, so bundles use it on every platform.
       shareOnMobile: false,
-      note: result.rootMapsMissing > 0
-          ? '${result.rootMapsMissing} instant-play '
-              '${result.rootMapsMissing == 1 ? 'map' : 'maps'} not '
-              'included'
+      note: result.entriesMissingMap > 0
+          ? '${result.entriesMissingMap} '
+              '${result.entriesMissingMap == 1 ? 'entry' : 'entries'} '
+              'skipped — data map missing, re-import them first'
           : null,
     );
-  }
-
-  /// Resolve the data maps of [entries] before a bundle export, behind a
-  /// modal `File X of N` progress dialog with Cancel. Maps already stored
-  /// resolve from disk in milliseconds.
-  Future<void> _preResolveForExport(List<MediaEntry> entries) async {
-    final prefetcher = DataMapPrefetcher(base: widget.prefetchBase);
-    if (!prefetcher.available) return;
-    final t = WiTokens.of(context);
-    final progress = ValueNotifier<(int, int, String)>(
-        (0, entries.length, ''));
-    var open = true;
-    unawaited(showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => Dialog(
-        backgroundColor: t.ink2,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 28, 24, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(color: t.accent),
-              const SizedBox(height: 18),
-              ValueListenableBuilder(
-                valueListenable: progress,
-                builder: (context, (int, int, String) p, _) => Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Preparing bundle — file ${p.$1} of ${p.$2}',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: t.bone,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      p.$3,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 11.5, color: t.ash),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: prefetcher.cancel,
-                    child: Text('Cancel', style: TextStyle(color: t.ash)),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    ).then((_) => open = false));
-    await prefetcher.run(entries,
-        onProgress: (current, total, name) =>
-            progress.value = (current, total, name));
-    if (open && mounted) {
-      Navigator.of(context, rootNavigator: true).pop();
-    }
   }
 
   /// Hand the exported bytes to the user: the system share sheet on
@@ -939,12 +839,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
             Text('Media Lists', style: TextStyle(color: t.bone, fontSize: 18)),
         actions: [
           IconButton(
-            tooltip: 'Prefetch data maps',
-            icon: Icon(Icons.downloading_outlined, color: t.bone),
-            onPressed: _prefetchAll,
-          ),
-          IconButton(
-            tooltip: 'Import list from file',
+            tooltip: 'Add to library',
             icon: Icon(Icons.download_outlined, color: t.bone),
             onPressed: _importList,
           ),

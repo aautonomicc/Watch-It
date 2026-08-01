@@ -362,11 +362,18 @@ impl Engine {
     /// cache — the caller falls back to a normal network resolve.
     pub fn import_root_map(&self, addr: [u8; 32], root: DataMap) -> Result<(), String> {
         crate::verify::verify_root_map(&addr, &root)?;
+        self.store_root_map(addr, &root);
+        Ok(())
+    }
+
+    /// Store a root map under an address the caller just *derived* from
+    /// the map itself (`verify::derive_address`) — consistency holds by
+    /// construction, so no verification round. The `.datamap` import path.
+    pub fn store_root_map(&self, addr: [u8; 32], root: &DataMap) {
         self.root_maps.lock().unwrap().insert(addr, root.clone());
         if let Some(store) = &self.map_store {
-            store.put(&addr, &root);
+            store.put(&addr, root);
         }
-        Ok(())
     }
 
     /// Stream the whole file as decrypted bytes (constant memory).

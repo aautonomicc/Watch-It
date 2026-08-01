@@ -8,7 +8,7 @@ poster art everywhere, minimal chrome.
 Colours, fonts, and type scale live in **[BRAND.md](BRAND.md)** — W@tch follows
 the etchit.io family design language (fetch>it / etch/it): warm near-black
 "ink" surfaces, bone-white text, blue `#42a5f5` accent (a deliberate divergence from the family copper — see BRAND.md), system UI fonts,
-mono for XOR addresses, the `W@tch` wordmark in Anton (since 2026-07-31; formerly lowercase mono `watch-it`).
+mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; formerly lowercase mono `watch-it`).
 
 - **Dark-first.** `--ink` (#0a0a0a) canvas, poster art provides the colour.
   Three themes (dark / dim / light), dark default.
@@ -39,15 +39,14 @@ mono for XOR addresses, the `W@tch` wordmark in Anton (since 2026-07-31; formerl
   (all fetched from TMDB by file name)
 - Big **Play / Resume** button + **Download** button (or Remove Download / progress)
 - For shows: season tabs → episode list with thumbnails and per-episode watched state
-- Autonomi address shown (copyable) with "share entry" action
+- Derived address shown (copyable; the entry's content identity)
 
 ### 4. Add / manage lists
-- **Add entry**: paste XOR address + file name → live metadata preview card → save to
-  a chosen list
-- **Import list**: one button, auto-detects plain `.txt` vs `.watch-list` bundle
-  by content sniff — never asks about format
-- **Export list**: one button, two-step dialog — "List only (.txt)" vs
-  "Full bundle (.watch-list)", then bundle-only checkboxes: watch history
+- **Add entry**: multi-select `.datamap` file picker (the file name carries the
+  media name → metadata matches automatically); no address is ever typed
+- **Import**: "Add .datamap files" or "Import .watch-list bundle" (local file
+  or by network address); zip magic sniffed, extension irrelevant
+- **Export**: `.watch-list` bundle only, with a watch-history checkbox
   (default off), root maps (default on); see
   [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md)
 - Reorder, rename, delete lists; re-run metadata match on an entry
@@ -85,7 +84,7 @@ mono for XOR addresses, the `W@tch` wordmark in Anton (since 2026-07-31; formerl
 
 TV notes: larger base type scale (readable at 3 m), no hover-only affordances, text
 entry kept to add/import flows only (paste via network share or a shown-on-TV import
-address is preferred over typing XOR addresses with a remote).
+address is preferred over typing addresses with a remote).
 
 ## Built so far (alpha.39)
 
@@ -94,8 +93,8 @@ Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings
 air dates, episode screenshots, Resume / Start over, Watched badge, Next
 episode), the player with buffering overlay, resume-from-saved-position and
 the end-of-episode Up-next auto-play card, the Media Lists management page
-(create/hide/rename/delete, import from file or Autonomi address with
-prefetch, per-list export), and Settings (network status, metadata key,
+(create/hide/rename/delete, datamap/bundle import — local or by network
+address — per-list bundle export), and Settings (network status, metadata key,
 Downloads queue page, size on disk + factory reset) are all live on Android
 and Linux. Downloads shipped in alpha.30/.31: a Download button with
 progress on detail pages, download badges on every card (accent check =
