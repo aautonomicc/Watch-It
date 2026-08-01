@@ -1,8 +1,12 @@
 //! Localhost HTTP server the media player streams from.
 //!
-//! `GET /xor/{address}` serves a public Autonomi file as decrypted bytes
-//! with byte-range support (`Accept-Ranges: bytes`), which is what libmpv
-//! needs for seeking. `GET /health` reports client connection state;
+//! `GET /xor/{address}` serves the content behind a locally stored root
+//! data map as decrypted bytes with byte-range support
+//! (`Accept-Ranges: bytes`), which is what libmpv needs for seeking; a
+//! missing map fast-fails (maps arrive at import time — datamap-first
+//! entry model). `POST /datamap` imports an ant-cli `.datamap` file and
+//! returns its derived address; `GET /datamap/{addr}` exports the stored
+//! map in the same format. `GET /health` reports client connection state;
 //! `POST /reconnect` nudges the reconnect supervisor (phone wake, cable
 //! replug) so recovery does not wait for the next poll interval.
 
@@ -31,6 +35,15 @@ pub fn router(engine: &'static Engine) -> Router {
         .route(
             "/resolve/{addr}",
             get(move |path: Path<String>| resolve_map(engine, path)),
+        )
+        .route(
+            "/datamap",
+            post(move |body: Bytes| import_datamap(engine, body))
+                .layer(DefaultBodyLimit::max(MAX_ROOTMAP_BYTES)),
+        )
+        .route(
+            "/datamap/{addr}",
+            get(move |path: Path<String>| get_datamap(engine, path)),
         )
         .route(
             "/rootmap/{addr}",
@@ -106,6 +119,63 @@ async fn resolve_map(engine: &'static Engine, Path(addr_hex): Path<String>) -> R
     }
 }
 
+/// Import a `.datamap` file (ant-cli private-upload output): parse the
+/// bare serialized root map — msgpack canonically, legacy ant-gui JSON
+/// when the first byte is `{` (the same sniff as ant-core's
+/// `read_datamap`) — derive its content address offline, and store it.
+/// The derived address is the entry's identity everywhere; for a file
+/// that was uploaded publicly it equals the public XOR address, so old
+/// entries and new imports of the same content coincide.
+async fn import_datamap(engine: &'static Engine, body: Bytes) -> Response {
+    let map: Result<DataMap, String> = if body.first() == Some(&b'{') {
+        serde_json::from_slice(&body).map_err(|e| format!("JSON decode failed: {e}"))
+    } else {
+        rmp_serde::from_slice(&body).map_err(|e| format!("msgpack decode failed: {e}"))
+    };
+    let map = match map {
+        Ok(m) => m,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("not a data map: {e}"))
+                .into_response()
+        }
+    };
+    let addr = match crate::verify::derive_address(&map) {
+        Ok(a) => a,
+        Err(e) => return (StatusCode::UNPROCESSABLE_ENTITY, e).into_response(),
+    };
+    engine.store_root_map(addr, &map);
+    let body = serde_json::json!({
+        "address": hex::encode(addr),
+        "size": map.original_file_size() as u64,
+        "chunks": map.len(),
+    });
+    ([(header::CONTENT_TYPE, "application/json")], body.to_string()).into_response()
+}
+
+/// Export side of `.datamap` bundle members: the locally stored root map
+/// in ant-cli's canonical wire format (bare msgpack), byte-usable as a
+/// standalone `.datamap` file. 404 when the map was never stored.
+async fn get_datamap(engine: &'static Engine, Path(addr_hex): Path<String>) -> Response {
+    let mut addr = [0u8; 32];
+    if hex::decode_to_slice(addr_hex.trim(), &mut addr).is_err() {
+        return (StatusCode::BAD_REQUEST, "address must be 64 hex chars").into_response();
+    }
+    match engine.stored_root_map(&addr) {
+        Some(map) => match rmp_serde::to_vec(&map) {
+            Ok(bytes) => (
+                [(header::CONTENT_TYPE, "application/octet-stream")],
+                bytes,
+            )
+                .into_response(),
+            Err(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("serialize failed: {e}"))
+                    .into_response()
+            }
+        },
+        None => (StatusCode::NOT_FOUND, "no stored data map").into_response(),
+    }
+}
+
 /// Export side of bundle root maps: the locally stored root map for an
 /// address in `DataMap::to_bytes` form, 404 when it was never resolved
 /// (the exporter then skips it — never a network resolve from here).
@@ -170,11 +240,21 @@ async fn serve_xor(
         return (StatusCode::BAD_REQUEST, "address must be 64 hex chars").into_response();
     }
 
-    let root = match engine.root_map(addr).await {
-        Ok(dm) => dm,
-        Err(e) => {
-            tracing::warn!("{addr_hex}: {e}");
-            return (StatusCode::BAD_GATEWAY, e).into_response();
+    // Local maps only — every entry's map arrives at import time (or via
+    // the one-time upgrade migration), so a miss here is a broken entry,
+    // not a resolvable one. Fast-fail beats the old doomed 20-30s network
+    // resolve. Import flows that legitimately need a network resolve
+    // (bundle download by address, v1 conversion, migration) call
+    // `GET /resolve/{addr}` first.
+    let root = match engine.stored_root_map(&addr) {
+        Some(dm) => dm,
+        None => {
+            tracing::warn!("{addr_hex}: no stored data map");
+            return (
+                StatusCode::NOT_FOUND,
+                "data map missing — re-import the list or bundle",
+            )
+                .into_response();
         }
     };
     let size = root.original_file_size() as u64;
@@ -349,6 +429,86 @@ mod rootmap_tests {
             send(&app, "GET", &format!("/rootmap/{hexaddr}"), vec![]).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(DataMap::from_bytes(&body).unwrap(), root);
+    }
+
+    #[tokio::test]
+    async fn datamap_import_derives_address_and_round_trips() {
+        let app = test_router("datamap-import");
+        let (addr, root) = upload();
+        let hexaddr = hex::encode(addr);
+
+        // ant-cli canonical wire format: bare msgpack.
+        let (status, body) = send(
+            &app,
+            "POST",
+            "/datamap",
+            rmp_serde::to_vec(&root).unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value =
+            serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["address"], serde_json::json!(hexaddr));
+        assert_eq!(json["chunks"], serde_json::json!(root.len()));
+
+        // Export returns the same canonical bytes; the map is now stored.
+        let (status, body) =
+            send(&app, "GET", &format!("/datamap/{hexaddr}"), vec![]).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(rmp_serde::from_slice::<DataMap>(&body).unwrap(), root);
+        let (status, _) =
+            send(&app, "GET", &format!("/rootmap/{hexaddr}"), vec![]).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn datamap_import_accepts_legacy_json() {
+        let app = test_router("datamap-json");
+        let (addr, root) = upload();
+        let (status, body) = send(
+            &app,
+            "POST",
+            "/datamap",
+            serde_json::to_vec(&root).unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["address"], serde_json::json!(hex::encode(addr)));
+    }
+
+    #[tokio::test]
+    async fn datamap_import_rejects_garbage_and_child_maps() {
+        let app = test_router("datamap-bad");
+        let (status, _) = send(&app, "POST", "/datamap", b"junk".to_vec()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let (_, root) = upload();
+        let child = DataMap::with_child(root.infos().to_vec(), 1);
+        let (status, _) = send(
+            &app,
+            "POST",
+            "/datamap",
+            rmp_serde::to_vec(&child).unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn xor_fast_fails_without_stored_map() {
+        // No stored map, no network client: the stream path must 404
+        // immediately instead of attempting a resolve.
+        let app = test_router("xor-fastfail");
+        let (status, body) = send(
+            &app,
+            "GET",
+            &format!("/xor/{}", hex::encode([7u8; 32])),
+            vec![],
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(String::from_utf8_lossy(&body).contains("re-import"));
     }
 
     #[tokio::test]

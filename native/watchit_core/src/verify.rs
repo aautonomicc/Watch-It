@@ -12,10 +12,12 @@
 
 use ant_core::data::DataMap;
 
-/// Check that `root` really is the resolved root data map published at
-/// `addr`. Any failure (shrink/serialize error or hash mismatch) means
-/// the map must be discarded.
-pub fn verify_root_map(addr: &[u8; 32], root: &DataMap) -> Result<(), String> {
+/// Derive the content address of a root data map — the same shrink →
+/// serialize → hash pipeline a public upload runs, computed fully
+/// offline. For a file that was uploaded publicly this equals its XOR
+/// address; for a private upload it is the entry's stable identity
+/// (nothing at this address exists on the network — that is the point).
+pub fn derive_address(root: &DataMap) -> Result<[u8; 32], String> {
     if root.is_child() {
         return Err("map is a shrunk child map, not a root map".to_string());
     }
@@ -25,7 +27,14 @@ pub fn verify_root_map(addr: &[u8; 32], root: &DataMap) -> Result<(), String> {
         .map_err(|e| format!("re-shrink failed: {e}"))?;
     let serialized = rmp_serde::to_vec(&shrunk)
         .map_err(|e| format!("serialize failed: {e}"))?;
-    if blake3::hash(&serialized).as_bytes() == addr {
+    Ok(*blake3::hash(&serialized).as_bytes())
+}
+
+/// Check that `root` really is the resolved root data map published at
+/// `addr`. Any failure (shrink/serialize error or hash mismatch) means
+/// the map must be discarded.
+pub fn verify_root_map(addr: &[u8; 32], root: &DataMap) -> Result<(), String> {
+    if derive_address(root)? == *addr {
         Ok(())
     } else {
         Err("content hash does not match the address".to_string())
@@ -86,6 +95,24 @@ mod tests {
         let (addr, root) = upload(14 * 1024 * 1024);
         assert!(!root.is_child());
         verify_root_map(&addr, &root).unwrap();
+    }
+
+    #[test]
+    fn derived_address_matches_public_upload_address() {
+        // Both sizes: shrink is a no-op for ≤3-chunk maps and a real
+        // re-shrink round for larger ones — the derived address must be
+        // the public upload's XOR address either way.
+        for len in [10 * 1024, 14 * 1024 * 1024] {
+            let (addr, root) = upload(len);
+            assert_eq!(derive_address(&root).unwrap(), addr);
+        }
+    }
+
+    #[test]
+    fn derive_rejects_child_map() {
+        let (_, root) = upload(14 * 1024 * 1024);
+        let child = DataMap::with_child(root.infos().to_vec(), 1);
+        assert!(derive_address(&child).is_err());
     }
 
     #[test]

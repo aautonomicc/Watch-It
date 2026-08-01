@@ -1,6 +1,14 @@
 # Roadmap
 
-**Status (2026-07-31):** rebranded **watch-it → W@tch** (display-only: Anton
+**Status (2026-08-01):** the **datamap-first privacy model** is implemented
+and ships in v0.1.0-alpha.40 (release 1 of the three-release schedule below):
+public XOR addresses are gone as an entry type — every entry is created from
+a `.datamap` file (private `ant file upload` output) or a `.watch-list`
+bundle, its address derived offline, its map required locally; the stream
+path no longer touches the network for maps, killing the 20–30 s cold
+resolve for good. Bundle spec v2 ([BUNDLE-FORMAT.md](BUNDLE-FORMAT.md)),
+v1 bundles convert at the import border, existing libraries migrate in a
+one-time background pass. Previously: rebranded **watch-it → W@tch** (display-only: Anton
 wordmark, launcher labels, window titles, user-facing strings; repo and all
 technical identifiers keep their names — see BRAND.md), shipped in
 v0.1.0-alpha.39 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
@@ -183,6 +191,64 @@ From the alpha.37 field reports — full plan in
       loss, waiting-for-Wi-Fi, Android timeout) resume automatically on
       reconnect/Wi-Fi/app-resume/next-launch; user pauses stay manual
 
+## Datamap-first privacy (planned 2026-08-01, three releases)
+
+Public Autonomi uploads store their root data map as a plaintext chunk on
+the network, so public content is discoverable and readable by any node
+operator — and an app keyed on public XOR addresses structurally nudges
+users into uploading their media libraries insecurely. The fix: the
+`.datamap` file (private-upload output) is the **only** way content enters
+the library; the entry's identity is the address *derived offline* from the
+map. Full plan in [PLAN-datamap-privacy.md](PLAN-datamap-privacy.md), spec
+in [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md).
+
+**Release 1 — v0.1.0-alpha.40 (implemented 2026-08-01): the whole feature.**
+- [x] Rust: offline address derivation (`verify.rs::derive_address`),
+      `POST /datamap` (import + derive, msgpack/legacy-JSON) and
+      `GET /datamap/{addr}` (ant-cli-compatible export); `/xor` stream path
+      serves locally stored maps only and fast-fails with "re-import"
+      instead of a doomed network resolve
+- [x] Entry model: one kind — `{derived address, name}`, map required in
+      the local store; XOR add-entry dialog, plain-text list import/export,
+      and the `<64-hex>` line grammar deleted
+- [x] Import: multi-select "Add .datamap files" (library page and list
+      editor), `.watch-list` bundle (local or by network address)
+- [x] Bundle spec v2: `datamaps/` members named by original filename (zip
+      root accepted — a hand-made `zip lib.watch-list *.datamap` is valid),
+      optional filename-line `list.txt`, unclaimed members → default list;
+      v1 bundles convert at the import border (`rootmaps/` member offline,
+      else one import-time network fetch; unresolvable entries skipped)
+- [x] Export: bundle only, members from the local store, no pre-resolve
+      pass (maps arrive at import by construction); history checkbox stays
+- [x] Migration: one-time background pass on first launch fills the map
+      store for pre-alpha.40 entries (public XOR addr == derived addr, so
+      rows/downloads/history/metadata are untouched); cancellable, retries
+      next launch; unresolved entries fast-fail at play with a re-import
+      hint
+- [x] DataMapPrefetcher, prefetch dialogs, and the tile-open map warm
+      deleted — nothing left to prefetch
+
+**Release 2 — deprecation window.** At least one release (more if testers
+need it) in which the three surviving network-map-fetch call sites —
+v1 bundle conversion, the upgrade migration pass, bundle-download by
+address — stay alive so old bundles and not-yet-migrated installs roll
+over. No new work beyond whatever else ships in it.
+
+**Release 3 — cleanup.** Delete `data_map_fetch` from the crate and
+`/resolve`'s network path; v1 bundles stop importing (re-export from an
+upgraded install instead). Open question to settle before then: importing
+a bundle *by network address* needs some fetch path — either keep a
+minimal one for that single flow or drop address-fetched bundles and share
+bundles as files only.
+
+Honest scope (also in the docs/UI): a datamap **is** full access — the gain
+is non-discoverability by third parties, not confidentiality against list
+recipients; privacy is transitive (publishing a bundle at a public address
+re-leaks every title); already-public uploads are immutable and stay
+public. Curators of genuinely public material (the NOTLD demo, PD
+pipelines) fetch the public file's datamap once and ship it in a bundle —
+consumers never see an address.
+
 ## Phase 3 — All desktop platforms
 - [ ] Windows + macOS builds and packaging (MSIX, .dmg)
 - [ ] Keyboard map, window polish, hover thumbnails on seek bar
@@ -201,7 +267,9 @@ From the alpha.37 field reports — full plan in
 - v1.0: all six platforms
 
 ## Later / ideas parking lot
-- Publish/subscribe community lists on Autonomi (curated "channels")
+- Publish/subscribe community lists on Autonomi (curated "channels") —
+  must default private (a datamap list published at a public address
+  re-leaks every title; see PLAN-datamap-privacy.md)
 - Watch-state + list sync between devices via Autonomi
 - tvOS (Apple TV) layout — Android TV is now in Phase 4
 - Trakt scrobbling

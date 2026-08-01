@@ -1,5 +1,9 @@
 /// Library model: a user-held list of media entries, each entry a
-/// `{XOR public file address, file name}` pair (see docs/ARCHITECTURE.md).
+/// `{derived address, file name}` pair whose root data map lives in the
+/// embedded client's local store (see docs/ARCHITECTURE.md). Entries are
+/// created by importing `.datamap` files or `.watch-list` bundles — an
+/// entry whose map is missing (interrupted upgrade migration) cannot
+/// play until re-imported.
 class MediaEntry {
   const MediaEntry({required this.name, required this.address, this.addedAt});
 
@@ -8,7 +12,10 @@ class MediaEntry {
   /// (`The.Movie.2024.1080p.mkv`) also parse. Fed to the metadata matcher.
   final String name;
 
-  /// XOR public file address on Autonomi (64 hex chars).
+  /// Derived address (64 hex chars): blake3 of the serialized shrunk root
+  /// data map, computed offline at import. For a file that was uploaded
+  /// publicly this equals its public XOR address, which is why entries
+  /// created by pre-alpha.40 versions keep working unchanged.
   final String address;
 
   /// When the entry entered the library (epoch ms). Null while unsaved
@@ -75,8 +82,8 @@ class MediaList {
       );
 }
 
-/// Loose sanity check for an Autonomi XOR address: 64 hex chars,
-/// optional 0x prefix. Kept permissive — the network is the real judge.
+/// Loose sanity check for a content address (derived or public XOR —
+/// same shape): 64 hex chars, optional 0x prefix.
 bool looksLikeXorAddress(String s) {
   final t = s.startsWith('0x') ? s.substring(2) : s;
   return RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(t);

@@ -6,30 +6,29 @@ import 'package:http/http.dart' as http;
 import '../models/media_list.dart';
 import 'embedded_client.dart';
 
-/// Import of media lists from a text file (local or fetched from
-/// Autonomi). Two formats:
+/// Parser for the `list.txt` inside a `.watch-list` bundle (spec:
+/// docs/BUNDLE-FORMAT.md). `ListName="..."` markers split lists (quotes
+/// optional, case-insensitive); entry lines come in two forms:
 ///
-/// Single list — the first line is the list name:
+/// - v2 (current): a line ending in `.datamap`, naming a bundle member —
+///   the entry's address is derived from that member at import:
 ///
-/// ```
-/// My Movie List
-/// <64-hex xor address> Some Movie (2024) [1080p].mkv
-/// <64-hex xor address> Another Movie (1999).mp4
-/// ```
+///   ```
+///   ListName="TV Series"
+///   Some Show S01E01 (2023) [1080p].mkv.datamap
+///   ListName="Movies"
+///   Some Movie (2024) [2160p].mp4.datamap
+///   ```
 ///
-/// Multiple lists — a `ListName="..."` marker starts each list (quotes
-/// optional, case-insensitive), so several lists can share one file:
+/// - v1 (legacy, read-only): `<64-hex address> <file name>` — a v2
+///   exporter never writes these; finding one marks the bundle as v1 and
+///   the importer converts the entry at the border (its map comes from a
+///   `rootmaps/` member or one import-time network fetch). Public
+///   address == derived address, so the converted entry is identical to
+///   a native one.
 ///
-/// ```
-/// ListName="TV Series"
-/// <64-hex xor address> Some Show S01E01.mkv
-/// ListName="Movies"
-/// <64-hex xor address> Some Movie (2024).mkv
-/// ```
-///
-/// A `ListName=` marker is also honoured after a single-list header, so a
-/// legacy file can grow extra lists by appending marker sections. Every
-/// other non-empty line must be one `<xor address> <file name>` entry.
+/// A bare first line is honoured as a single-list header (legacy files),
+/// and `ListName=` markers may follow it.
 class ListImportException implements Exception {
   const ListImportException(this.message);
   final String message;
@@ -40,10 +39,26 @@ class ListImportException implements Exception {
 
 /// One list parsed out of an import file.
 class ParsedMediaList {
-  const ParsedMediaList({required this.title, required this.entries});
+  const ParsedMediaList({
+    required this.title,
+    required this.entries,
+    this.datamapRefs = const [],
+  });
+
+  /// Mutable-list constructor used while parsing.
+  ParsedMediaList._building(this.title)
+      : entries = <MediaEntry>[],
+        datamapRefs = <String>[];
 
   final String title;
+
+  /// v1 hex-address entries — a bundle importer converts these at the
+  /// border (never imported as-is).
   final List<MediaEntry> entries;
+
+  /// v2 entry lines: `.datamap` member file names, resolved against the
+  /// bundle's members at import.
+  final List<String> datamapRefs;
 }
 
 class ParsedMediaListFile {
@@ -57,12 +72,20 @@ class ParsedMediaListFile {
   /// are dropped.
   final List<ParsedMediaList> lists;
 
-  /// 1-based numbers of non-empty lines that were not valid
-  /// `<xor address> <file name>` entries (reported, not fatal).
+  /// 1-based numbers of non-empty lines that were not valid entry lines
+  /// (reported, not fatal).
   final List<int> skippedLines;
 
-  int get entryCount =>
-      lists.fold(0, (sum, list) => sum + list.entries.length);
+  /// True when any section carries a v1 `<64-hex address>` line — the
+  /// bundle predates the datamap-first format and needs border
+  /// conversion.
+  bool get hasLegacyEntries =>
+      lists.any((list) => list.entries.isNotEmpty);
+
+  int get entryCount => lists.fold(
+      0,
+      (sum, list) =>
+          sum + list.entries.length + list.datamapRefs.length);
 }
 
 final RegExp _listNameMarker =
@@ -92,18 +115,18 @@ ParsedMediaListFile parseMediaListFile(String content) {
   final sections = <ParsedMediaList>[];
   final byLowerTitle = <String, ParsedMediaList>{};
   final skipped = <int>[];
-  List<MediaEntry>? current;
+  ParsedMediaList? current;
 
   void startList(String title) {
     final existing = byLowerTitle[title.toLowerCase()];
     if (existing != null) {
-      current = existing.entries;
+      current = existing;
       return;
     }
-    final section = ParsedMediaList(title: title, entries: <MediaEntry>[]);
+    final section = ParsedMediaList._building(title);
     sections.add(section);
     byLowerTitle[title.toLowerCase()] = section;
-    current = section.entries;
+    current = section;
   }
 
   for (var i = 0; i < lines.length; i++) {
@@ -118,6 +141,9 @@ ParsedMediaListFile parseMediaListFile(String content) {
       startList(marker);
       continue;
     }
+    // v1 legacy entry: `<64-hex address> <file name>`. Checked before the
+    // `.datamap` suffix so a hex line can never be misread as a member
+    // reference.
     final match = RegExp(r'^(\S+)\s+(.+)$').firstMatch(line);
     final address = match?.group(1) ?? '';
     if (match != null && looksLikeXorAddress(address)) {
@@ -126,10 +152,21 @@ ParsedMediaListFile parseMediaListFile(String content) {
             'The first line must be the list name, but this file starts '
             'with a media entry.');
       }
-      current!.add(MediaEntry(
+      current!.entries.add(MediaEntry(
         name: match.group(2)!.trim(),
         address: address.toLowerCase().replaceFirst('0x', ''),
       ));
+      continue;
+    }
+    // v2 entry: a `.datamap` member file name.
+    if (line.toLowerCase().endsWith('.datamap') &&
+        line.length > '.datamap'.length) {
+      if (current == null) {
+        throw const ListImportException(
+            'The first line must be the list name, but this file starts '
+            'with a media entry.');
+      }
+      current!.datamapRefs.add(line);
       continue;
     }
     if (current == null) {
@@ -148,26 +185,16 @@ ParsedMediaListFile parseMediaListFile(String content) {
     }
   }
 
-  final lists =
-      sections.where((section) => section.entries.isNotEmpty).toList();
+  final lists = sections
+      .where((section) =>
+          section.entries.isNotEmpty || section.datamapRefs.isNotEmpty)
+      .toList();
   if (lists.isEmpty) {
     throw const ListImportException(
-        'No "<xor address> <file name>" entries found below the list '
-        'name.');
+        'No entries found below the list name — expected '
+        '"<file name>.datamap" lines.');
   }
   return ParsedMediaListFile(lists: lists, skippedLines: skipped);
-}
-
-/// Serialize [list] in the plain-text format [parseMediaListFile] reads.
-/// Always the marker form — a `ListName="…"` line, then one
-/// `<xor address> <file name>` line per entry — so exported files can be
-/// concatenated into a multi-list file and still re-import losslessly.
-String serializeMediaList(MediaList list) {
-  final buffer = StringBuffer()..writeln('ListName="${list.title}"');
-  for (final entry in list.entries) {
-    buffer.writeln('${entry.address} ${entry.name}');
-  }
-  return buffer.toString();
 }
 
 /// Anything bigger than this is not a hand-written media list — refuse
@@ -193,10 +220,21 @@ Future<Uint8List> fetchBytesFromNetwork(
   final addr = address.trim().toLowerCase().replaceFirst('0x', '');
   if (!looksLikeXorAddress(addr)) {
     throw const ListImportException(
-        'That is not a valid XOR address (expected 64 hex characters).');
+        'That is not a valid address (expected 64 hex characters).');
   }
   final client = http.Client();
   try {
+    // `/xor` streams from locally stored maps only (datamap-first model);
+    // a shared bundle address is not in any list, so resolve its map over
+    // the network first. This is one of the few remaining network-resolve
+    // call sites (see docs/PLAN-datamap-privacy.md deprecation window).
+    final resolve =
+        await client.get(Uri.parse('$base/resolve/$addr'));
+    if (resolve.statusCode != 200) {
+      throw ListImportException(
+          'Could not find that address on the network '
+          '(HTTP ${resolve.statusCode}).');
+    }
     final res = await client
         .send(http.Request('GET', Uri.parse('$base/xor/$addr')));
     if (res.statusCode != 200) {

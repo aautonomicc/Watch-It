@@ -1,12 +1,15 @@
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
+import '../services/datamap_import.dart';
 import '../services/library_store.dart';
+import '../services/list_import.dart' show ListImportException;
 import '../theme/tokens.dart';
 import 'settings_screen.dart' show promptForText;
 
-/// Edit one media list: rename, delete, add/remove entries
-/// (file name + XOR address).
+/// Edit one media list: rename, delete, remove entries, add entries from
+/// `.datamap` files (the output of a private `ant file upload`).
 class ListEditScreen extends StatefulWidget {
   const ListEditScreen({super.key, required this.listId});
 
@@ -92,12 +95,55 @@ class _ListEditScreenState extends State<ListEditScreen> {
     if (mounted) Navigator.of(context).pop();
   }
 
+  /// Multi-select `.datamap` picker; each file becomes one entry (its
+  /// address derived offline by the embedded client). Duplicates of
+  /// addresses already in the list are skipped.
   Future<void> _addEntry() async {
     final list = _list;
     if (list == null) return;
-    final entry = await _promptForEntry(context);
-    if (entry == null) return;
-    await _update(list.copyWith(entries: [...list.entries, entry]));
+    final List<XFile> files;
+    try {
+      files = await openFiles(acceptedTypeGroups: [
+        const XTypeGroup(label: 'Data maps', extensions: ['datamap']),
+      ]);
+    } catch (e) {
+      _showSnack('Could not open the file picker: $e');
+      return;
+    }
+    if (files.isEmpty) return;
+    final entries = <MediaEntry>[];
+    var failed = 0;
+    for (final file in files) {
+      try {
+        entries.add(
+            await entryFromDatamapFile(file.name, await file.readAsBytes()));
+      } on ListImportException {
+        failed++;
+      } catch (_) {
+        failed++;
+      }
+    }
+    final have = list.entries.map((e) => e.address).toSet();
+    final fresh = entries.where((e) => have.add(e.address)).toList();
+    final duplicates = entries.length - fresh.length;
+    if (fresh.isNotEmpty) {
+      await _update(list.copyWith(entries: [...list.entries, ...fresh]));
+    }
+    final notes = [
+      if (fresh.isNotEmpty)
+        'Added ${fresh.length} ${fresh.length == 1 ? 'entry' : 'entries'}',
+      if (duplicates > 0) '$duplicates already in the list',
+      if (failed > 0)
+        '$failed ${failed == 1 ? 'file' : 'files'} not readable as a '
+            'data map',
+    ];
+    if (notes.isNotEmpty) _showSnack(notes.join(' · '));
+  }
+
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _removeEntry(int index) async {
@@ -135,14 +181,15 @@ class _ListEditScreenState extends State<ListEditScreen> {
         backgroundColor: t.accent,
         foregroundColor: t.ink,
         icon: const Icon(Icons.add),
-        label: const Text('Add entry'),
+        label: const Text('Add .datamap files'),
       ),
       body: list == null
           ? const Center(child: CircularProgressIndicator())
           : list.entries.isEmpty
               ? Center(
                   child: Text(
-                    'No entries yet.\nAdd a file name and its XOR address.',
+                    'No entries yet.\nAdd the .datamap files a private '
+                    '"ant file upload" produced.',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 13, color: t.ash),
                   ),
@@ -180,73 +227,3 @@ class _ListEditScreenState extends State<ListEditScreen> {
   }
 }
 
-Future<MediaEntry?> _promptForEntry(BuildContext context) {
-  final nameController = TextEditingController();
-  final addressController = TextEditingController();
-  return showDialog<MediaEntry>(
-    context: context,
-    builder: (context) {
-      final t = WiTokens.of(context);
-      return StatefulBuilder(
-        builder: (context, setState) {
-          final address = addressController.text.trim();
-          final addressOk = address.isEmpty || looksLikeXorAddress(address);
-          return AlertDialog(
-            backgroundColor: t.ink2,
-            title: Text('Add entry',
-                style: TextStyle(color: t.bone, fontSize: 16)),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameController,
-                  autofocus: true,
-                  style: TextStyle(color: t.bone),
-                  decoration: InputDecoration(
-                    labelText: 'File name',
-                    labelStyle: TextStyle(color: t.ash),
-                    hintText: 'The Movie (2024) {imdb-tt1234567} - [1080p].mkv',
-                    hintStyle: TextStyle(color: t.ash),
-                  ),
-                ),
-                TextField(
-                  controller: addressController,
-                  onChanged: (_) => setState(() {}),
-                  style: TextStyle(
-                    color: t.bone,
-                    fontFamily: wiMonoFamily,
-                    fontFamilyFallback: wiMonoFallback,
-                    fontSize: 13,
-                  ),
-                  decoration: InputDecoration(
-                    labelText: 'XOR address',
-                    labelStyle: TextStyle(color: t.ash),
-                    errorText:
-                        addressOk ? null : 'Expected 64 hex characters',
-                    errorStyle: TextStyle(color: t.rust),
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: Text('Cancel', style: TextStyle(color: t.ash)),
-              ),
-              TextButton(
-                onPressed: () {
-                  final name = nameController.text.trim();
-                  final addr = addressController.text.trim();
-                  if (name.isEmpty || !looksLikeXorAddress(addr)) return;
-                  Navigator.of(context)
-                      .pop(MediaEntry(name: name, address: addr));
-                },
-                child: Text('Add', style: TextStyle(color: t.accent)),
-              ),
-            ],
-          );
-        },
-      );
-    },
-  );
-}

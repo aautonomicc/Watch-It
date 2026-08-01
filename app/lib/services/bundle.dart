@@ -8,18 +8,22 @@ import 'package:path_provider/path_provider.dart';
 
 import '../db/app_database.dart';
 import '../models/media_list.dart';
+import 'datamap_import.dart';
 import 'embedded_client.dart';
 import 'library_store.dart';
 import 'list_import.dart';
 import 'metadata.dart';
 import 'watch_state.dart';
 
-/// `.watch-list` bundle: a zip that carries a media list plus everything
-/// needed to enjoy it instantly on another device — TMDB metadata rows,
-/// poster files, optionally resolved root data maps and watch history.
-/// Format spec: docs/BUNDLE-FORMAT.md. The inner `list.txt` is byte-
-/// identical to a plain export, so unzipping and importing it always
-/// works; every other member is optional and degrades gracefully.
+/// `.watch-list` bundle: a zip that carries the `.datamap` files of a
+/// media library plus everything needed to enjoy it instantly on another
+/// device — TMDB metadata rows, poster files, optionally watch history.
+/// Format spec v2: docs/BUNDLE-FORMAT.md. `datamaps/<file name>.datamap`
+/// members are raw ant-cli private-upload datamap files (also accepted at
+/// the zip root, so a hand-made `zip lib.watch-list *.datamap` is a valid
+/// bundle); the optional `list.txt` assigns members to named lists.
+/// v1 bundles (hex-address `list.txt` lines + `rootmaps/` members) are
+/// converted at the import border — no legacy entry type survives.
 
 /// Bundles bigger than this are refused outright.
 const int kMaxBundleBytes = 200 * 1024 * 1024;
@@ -48,6 +52,7 @@ final RegExp _rootMapMember = RegExp(r'^rootmaps/([0-9a-f]{64})\.map$');
 class ParsedBundle {
   const ParsedBundle({
     required this.listText,
+    required this.datamapMembers,
     required this.metadataRows,
     required this.posters,
     required this.rootMaps,
@@ -55,8 +60,13 @@ class ParsedBundle {
     required this.history,
   });
 
-  /// The inner plain-text list — feed to [parseMediaListFile] as usual.
-  final String listText;
+  /// The inner `list.txt` — optional since spec v2; null means every
+  /// datamap member goes to the importer's default list.
+  final String? listText;
+
+  /// `.datamap` member bytes by member file name (`datamaps/` directory
+  /// or zip root, base name only).
+  final Map<String, Uint8List> datamapMembers;
 
   /// metadata.json rows (validated maps), keyed by lookupKey.
   final Map<String, Map<String, dynamic>> metadataRows;
@@ -64,7 +74,8 @@ class ParsedBundle {
   /// Poster file bytes by (sanitized) file name.
   final Map<String, Uint8List> posters;
 
-  /// Serialized root data maps by normalized XOR address.
+  /// v1 only: serialized root data maps by normalized address, used to
+  /// convert hex entries offline at the import border.
   final Map<String, Uint8List> rootMaps;
 
   /// library.json per-list prefs by lowercased title.
@@ -74,18 +85,13 @@ class ParsedBundle {
   final Map<String, WatchState> history;
 
   bool get hasSeedableExtras =>
-      metadataRows.isNotEmpty ||
-      posters.isNotEmpty ||
-      rootMaps.isNotEmpty ||
-      history.isNotEmpty;
+      metadataRows.isNotEmpty || posters.isNotEmpty || history.isNotEmpty;
 }
 
 /// What [seedBundle] actually applied (for the import snackbar).
 class BundleSeedSummary {
   int metadataSeeded = 0;
   int postersSeeded = 0;
-  int mapsStored = 0;
-  int mapsRejected = 0;
   int historyMerged = 0;
 }
 
@@ -101,21 +107,16 @@ Future<Directory> _defaultPostersDir() async {
 // Export
 // ---------------------------------------------------------------------------
 
-/// Options from the export dialog's second step.
+/// Options from the export dialog.
 class BundleExportOptions {
   const BundleExportOptions({
     required this.includeHistory,
-    required this.includeRootMaps,
     this.includeLibrary = false,
   });
 
   /// Default OFF — shared lists shouldn't leak viewing habits; a
   /// migration backup opts in explicitly.
   final bool includeHistory;
-
-  /// Default ON — the addresses are already in list.txt, so bundling the
-  /// maps adds instant playback without a privacy delta.
-  final bool includeRootMaps;
 
   /// Library export only: add library.json (per-list order/visibility).
   final bool includeLibrary;
@@ -124,23 +125,42 @@ class BundleExportOptions {
 class BundleBuildResult {
   const BundleBuildResult({
     required this.bytes,
-    required this.rootMapsIncluded,
-    required this.rootMapsMissing,
+    required this.entriesIncluded,
+    required this.entriesMissingMap,
   });
 
   final Uint8List bytes;
-  final int rootMapsIncluded;
 
-  /// Addresses without a locally stored root map (pre-resolve cancelled
-  /// or failed) — the bundle still imports fine, those entries just
-  /// resolve over the network.
-  final int rootMapsMissing;
+  /// Entries whose `.datamap` member made it into the bundle.
+  final int entriesIncluded;
+
+  /// Entries skipped because their map is not in the local store (a
+  /// "map missing — re-import" entry). They are left out of `list.txt`
+  /// too, so the bundle stays internally consistent.
+  final int entriesMissingMap;
 }
 
-/// Assemble a `.watch-list` bundle for [lists]. Metadata, posters and
-/// root maps are whatever is cached locally right now — run the
-/// pre-resolve pass first so entries never browsed/played are covered;
-/// cancelling that pass simply leaves gaps that degrade gracefully.
+/// The `.datamap` member name for an entry: its media file name (path
+/// separators neutralized) plus `.datamap`. On a collision with an
+/// already-taken name, a short derived-address suffix goes before the
+/// extension — same trick as download file names.
+String datamapMemberName(
+    String entryName, String address, Set<String> taken) {
+  var safe = entryName.replaceAll(RegExp(r'[/\\]'), '_').trim();
+  if (safe.isEmpty) safe = 'entry';
+  var candidate = '$safe.datamap';
+  if (taken.contains(candidate.toLowerCase())) {
+    candidate = '$safe.${address.substring(0, 8)}.datamap';
+  }
+  taken.add(candidate.toLowerCase());
+  return candidate;
+}
+
+/// Assemble a `.watch-list` bundle (spec v2) for [lists]. Every entry's
+/// root map is in the local store by construction (maps arrive at import
+/// time), so members are written straight from `GET /datamap/<addr>`;
+/// the rare "map missing" entry is skipped and counted. Metadata and
+/// posters are whatever is cached locally right now.
 Future<BundleBuildResult> buildBundle(
   List<MediaList> lists,
   BundleExportOptions options, {
@@ -149,8 +169,49 @@ Future<BundleBuildResult> buildBundle(
 }) async {
   base ??= EmbeddedClient.baseUrl();
   final archive = Archive();
-  final listText = lists.map(serializeMediaList).join();
-  archive.addFile(ArchiveFile.string('list.txt', listText));
+
+  // datamaps/ members + list.txt, built together so the list only names
+  // members that exist. One member may be referenced by several lists
+  // (same address → first member name wins).
+  final listText = StringBuffer();
+  final memberNames = <String>{};
+  final memberByAddr = <String, String>{};
+  var included = 0, missingMap = 0;
+  final httpClient = HttpClient();
+  try {
+    for (final list in lists) {
+      listText.writeln('ListName="${list.title}"');
+      for (final e in list.entries) {
+        final addr = _normalizeAddr(e.address);
+        var member = memberByAddr[addr];
+        if (member == null) {
+          Uint8List? bytes;
+          if (base != null) {
+            try {
+              final req = await httpClient
+                  .getUrl(Uri.parse('$base/datamap/$addr'));
+              final res = await req.close();
+              final builder = BytesBuilder(copy: false);
+              await res.forEach(builder.add);
+              if (res.statusCode == 200) bytes = builder.takeBytes();
+            } catch (_) {}
+          }
+          if (bytes == null) {
+            missingMap++;
+            continue;
+          }
+          member = datamapMemberName(e.name, addr, memberNames);
+          memberByAddr[addr] = member;
+          archive.addFile(ArchiveFile.bytes('datamaps/$member', bytes));
+          included++;
+        }
+        listText.writeln(member);
+      }
+    }
+  } finally {
+    httpClient.close(force: true);
+  }
+  archive.addFile(ArchiveFile.string('list.txt', listText.toString()));
 
   final entries = [for (final list in lists) ...list.entries];
   final addresses = <String>{
@@ -213,33 +274,6 @@ Future<BundleBuildResult> buildBundle(
             await file.readAsBytes()));
   }
 
-  // rootmaps/ — only locally stored maps; never a network resolve here.
-  var mapsIncluded = 0, mapsMissing = 0;
-  if (options.includeRootMaps && base != null) {
-    final client = HttpClient();
-    try {
-      for (final addr in addresses) {
-        try {
-          final req = await client.getUrl(Uri.parse('$base/rootmap/$addr'));
-          final res = await req.close();
-          final builder = BytesBuilder(copy: false);
-          await res.forEach(builder.add);
-          if (res.statusCode == 200) {
-            archive.addFile(ArchiveFile.bytes(
-                'rootmaps/$addr.map', builder.takeBytes()));
-            mapsIncluded++;
-          } else {
-            mapsMissing++;
-          }
-        } catch (_) {
-          mapsMissing++;
-        }
-      }
-    } finally {
-      client.close(force: true);
-    }
-  }
-
   if (options.includeLibrary) {
     archive.addFile(ArchiveFile.string(
       'library.json',
@@ -284,8 +318,8 @@ Future<BundleBuildResult> buildBundle(
   final bytes = ZipEncoder().encode(archive);
   return BundleBuildResult(
     bytes: Uint8List.fromList(bytes),
-    rootMapsIncluded: mapsIncluded,
-    rootMapsMissing: mapsMissing,
+    entriesIncluded: included,
+    entriesMissingMap: missingMap,
   );
 }
 
@@ -293,9 +327,32 @@ Future<BundleBuildResult> buildBundle(
 // Import
 // ---------------------------------------------------------------------------
 
-/// Decode and size-check a bundle. Only `list.txt` is required; malformed
-/// or oversized optional members are dropped (import never fails on
-/// extras), but a decompressed-size lie big enough to matter throws.
+/// A safe `.datamap` member base name: no path separators or `..`
+/// segments (a hostile member must not escape anywhere), ends in
+/// `.datamap` with something before it.
+String? _datamapBaseName(String memberName) {
+  final base = memberName.startsWith('datamaps/')
+      ? memberName.substring('datamaps/'.length)
+      : memberName;
+  if (base.isEmpty ||
+      base.contains('/') ||
+      base.contains('\\') ||
+      base.contains('..')) {
+    return null;
+  }
+  final lower = base.toLowerCase();
+  if (!lower.endsWith('.datamap') || base.length == '.datamap'.length) {
+    return null;
+  }
+  return base;
+}
+
+/// Decode and size-check a bundle. Every member is optional — a zip of
+/// nothing but `.datamap` files is a valid bundle — but a bundle with
+/// neither `list.txt` nor datamap members has nothing to import and
+/// throws. Malformed or oversized optional members are dropped (import
+/// never fails on extras); a decompressed-size lie big enough to matter
+/// throws.
 ParsedBundle parseBundle(Uint8List bytes) {
   if (bytes.length > kMaxBundleBytes) {
     throw const ListImportException(
@@ -311,6 +368,7 @@ ParsedBundle parseBundle(Uint8List bytes) {
   }
 
   String? listText;
+  final datamapMembers = <String, Uint8List>{};
   final metadataRows = <String, Map<String, dynamic>>{};
   final posters = <String, Uint8List>{};
   final rootMaps = <String, Uint8List>{};
@@ -394,6 +452,19 @@ ParsedBundle parseBundle(Uint8List bytes) {
           }
         } catch (_) {}
       default:
+        // `.datamap` members: `datamaps/` directory canonically, zip root
+        // also accepted (the hand-made `zip lib.watch-list *.datamap`
+        // floor). The directory form wins on a duplicate base name.
+        final datamapBase = _datamapBaseName(name);
+        if (datamapBase != null) {
+          final data = readCapped(file, kMaxRootMapBytes);
+          if (data != null &&
+              (name.startsWith('datamaps/') ||
+                  !datamapMembers.containsKey(datamapBase))) {
+            datamapMembers[datamapBase] = data;
+          }
+          continue;
+        }
         final mapMatch = _rootMapMember.firstMatch(name);
         if (mapMatch != null) {
           final data = readCapped(file, kMaxRootMapBytes);
@@ -417,17 +488,211 @@ ParsedBundle parseBundle(Uint8List bytes) {
     }
   }
 
-  if (listText == null) {
+  if (listText == null && datamapMembers.isEmpty) {
     throw const ListImportException(
-        'This bundle has no list.txt inside — nothing to import.');
+        'This bundle has no .datamap files or list.txt inside — nothing '
+        'to import.');
   }
   return ParsedBundle(
     listText: listText,
+    datamapMembers: datamapMembers,
     metadataRows: metadataRows,
     posters: posters,
     rootMaps: rootMaps,
     libraryPrefs: libraryPrefs,
     history: history,
+  );
+}
+
+/// Lists ready to merge into the library after [importBundleEntries]
+/// turned every member and line into datamap-backed entries, plus the
+/// counts the import snackbar reports.
+class BundleImportResult {
+  BundleImportResult({
+    required this.lists,
+    required this.datamapsImported,
+    required this.datamapsInvalid,
+    required this.refsMissing,
+    required this.convertedOffline,
+    required this.convertedNetwork,
+    required this.convertFailed,
+    required this.skippedLines,
+  });
+
+  /// Final lists (title + entries; every entry's map is now in the local
+  /// store). Lists that ended up empty are dropped.
+  final List<ParsedMediaList> lists;
+
+  /// `.datamap` members imported (address derived, map stored).
+  final int datamapsImported;
+
+  /// Members that were not parseable data maps (skipped, warned).
+  final int datamapsInvalid;
+
+  /// list.txt lines referencing a member the bundle doesn't carry.
+  final int refsMissing;
+
+  /// v1 hex entries whose map came from a `rootmaps/` member (offline).
+  final int convertedOffline;
+
+  /// v1 hex entries whose map was fetched from the network at the border.
+  final int convertedNetwork;
+
+  /// v1 hex entries dropped because their map could not be obtained.
+  final int convertFailed;
+
+  /// Invalid list.txt lines (from the parser).
+  final List<int> skippedLines;
+
+  int get entryCount =>
+      lists.fold(0, (sum, list) => sum + list.entries.length);
+}
+
+/// Turn a parsed bundle into importable lists. Spec-v2 members become
+/// entries by deriving each `.datamap`'s address offline in the embedded
+/// client; members no list references (or all of them, when there is no
+/// `list.txt`) go to [defaultListTitle]. v1 hex lines are converted at
+/// this border: their map is seeded from a `rootmaps/` member when
+/// present, else fetched from the network once ([onConvertProgress]
+/// reports that pass) — an entry whose map cannot be obtained is skipped
+/// with a warning count, never imported map-less. Throws
+/// [ListImportException] only when nothing at all is importable.
+Future<BundleImportResult> importBundleEntries(
+  ParsedBundle bundle, {
+  String? base,
+  String defaultListTitle = 'Imported',
+  void Function(int current, int total, String name)? onConvertProgress,
+}) async {
+  base ??= EmbeddedClient.baseUrl();
+
+  // Every member becomes a stored map + prospective entry first.
+  final entriesByMember = <String, MediaEntry>{};
+  var invalid = 0;
+  for (final member in bundle.datamapMembers.entries) {
+    try {
+      entriesByMember[member.key] = await entryFromDatamapFile(
+        member.key,
+        member.value,
+        base: base,
+      );
+    } on ListImportException {
+      invalid++;
+    }
+  }
+
+  ParsedMediaListFile? parsed;
+  if (bundle.listText != null) {
+    try {
+      parsed = parseMediaListFile(bundle.listText!);
+    } on ListImportException {
+      // A malformed list.txt degrades to member-only import when the
+      // members can stand alone; with no members there is nothing left.
+      if (entriesByMember.isEmpty) rethrow;
+    }
+  }
+
+  final lists = <ParsedMediaList>[];
+  final referenced = <String>{};
+  var refsMissing = 0;
+  var convertedOffline = 0, convertedNetwork = 0, convertFailed = 0;
+  final legacyTotal = parsed == null
+      ? 0
+      : parsed.lists.fold(0, (sum, l) => sum + l.entries.length);
+  var legacyDone = 0;
+  final httpClient = HttpClient();
+  try {
+    for (final section in parsed?.lists ?? const <ParsedMediaList>[]) {
+      final entries = <MediaEntry>[];
+      for (final ref in section.datamapRefs) {
+        final entry = entriesByMember[ref];
+        if (entry == null) {
+          refsMissing++;
+          continue;
+        }
+        referenced.add(ref);
+        entries.add(entry);
+      }
+      // v1 border conversion. The hex address of a public upload *is*
+      // the derived address, so a converted entry is indistinguishable
+      // from a native import — only the map's route differs.
+      for (final legacy in section.entries) {
+        legacyDone++;
+        onConvertProgress?.call(legacyDone, legacyTotal, legacy.name);
+        final addr = _normalizeAddr(legacy.address);
+        var stored = false;
+        final mapBytes = bundle.rootMaps[addr];
+        if (mapBytes != null && base != null) {
+          try {
+            final req =
+                await httpClient.putUrl(Uri.parse('$base/rootmap/$addr'));
+            req.add(mapBytes);
+            final res = await req.close();
+            await res.drain<void>();
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              stored = true;
+              convertedOffline++;
+            }
+          } catch (_) {}
+        }
+        if (!stored && base != null) {
+          try {
+            final req = await httpClient
+                .getUrl(Uri.parse('$base/resolve/$addr'));
+            final res = await req.close();
+            await res.drain<void>();
+            if (res.statusCode == 200) {
+              stored = true;
+              convertedNetwork++;
+            }
+          } catch (_) {}
+        }
+        if (stored) {
+          entries.add(MediaEntry(name: legacy.name, address: addr));
+        } else {
+          convertFailed++;
+        }
+      }
+      if (entries.isNotEmpty) {
+        lists.add(ParsedMediaList(title: section.title, entries: entries));
+      }
+    }
+  } finally {
+    httpClient.close(force: true);
+  }
+
+  // Members no list claimed: the default list (named after the bundle
+  // file, or what the import prompt chose).
+  final unclaimed = [
+    for (final member in entriesByMember.entries)
+      if (!referenced.contains(member.key)) member.value,
+  ];
+  if (unclaimed.isNotEmpty) {
+    final i = lists.indexWhere(
+        (l) => l.title.toLowerCase() == defaultListTitle.toLowerCase());
+    if (i >= 0) {
+      lists[i] = ParsedMediaList(
+        title: lists[i].title,
+        entries: [...lists[i].entries, ...unclaimed],
+      );
+    } else {
+      lists.add(
+          ParsedMediaList(title: defaultListTitle, entries: unclaimed));
+    }
+  }
+
+  if (lists.isEmpty) {
+    throw const ListImportException(
+        'Nothing could be imported from this bundle.');
+  }
+  return BundleImportResult(
+    lists: lists,
+    datamapsImported: entriesByMember.length,
+    datamapsInvalid: invalid,
+    refsMissing: refsMissing,
+    convertedOffline: convertedOffline,
+    convertedNetwork: convertedNetwork,
+    convertFailed: convertFailed,
+    skippedLines: parsed?.skippedLines ?? const [],
   );
 }
 
@@ -467,16 +732,14 @@ List<MediaList> applyLibraryPrefs(
 
 /// Seed the local caches from a parsed bundle. Existing local state
 /// always wins — only gaps are filled (metadata rows and poster files
-/// that don't exist locally), history merges newer-updatedAt-wins, and
-/// root maps go through the embedded client's verify-then-store PUT
-/// (a tampered map is rejected there and simply resolves over the
-/// network later). [importRootMaps]/[importHistory] come from the
-/// import-side options dialog — a declined member is skipped entirely,
-/// as if the bundle never carried it.
+/// that don't exist locally), and history merges newer-updatedAt-wins.
+/// Data maps are not seeded here: v2 members and v1 `rootmaps/` members
+/// alike are handled by [importBundleEntries], where they define the
+/// entries themselves. [importHistory] comes from the import-side
+/// options dialog — declined history is skipped entirely, as if the
+/// bundle never carried it.
 Future<BundleSeedSummary> seedBundle(
   ParsedBundle bundle, {
-  String? base,
-  bool importRootMaps = true,
   bool importHistory = true,
   Future<Directory> Function()? postersDirProvider,
 }) async {
@@ -537,32 +800,6 @@ Future<BundleSeedSummary> seedBundle(
         await file.writeAsBytes(entry.value, flush: true);
         summary.postersSeeded++;
       } catch (_) {}
-    }
-  }
-
-  // Root maps: verified offline (in Rust) before storing.
-  base ??= EmbeddedClient.baseUrl();
-  if (importRootMaps && bundle.rootMaps.isNotEmpty && base != null) {
-    final client = HttpClient();
-    try {
-      for (final entry in bundle.rootMaps.entries) {
-        try {
-          final req = await client
-              .putUrl(Uri.parse('$base/rootmap/${entry.key}'));
-          req.add(entry.value);
-          final res = await req.close();
-          await res.drain<void>();
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            summary.mapsStored++;
-          } else {
-            summary.mapsRejected++;
-          }
-        } catch (_) {
-          summary.mapsRejected++;
-        }
-      }
-    } finally {
-      client.close(force: true);
     }
   }
 
