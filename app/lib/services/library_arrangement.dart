@@ -29,19 +29,27 @@ class ArrangementStore extends ChangeNotifier {
   static ArrangementStore instance = ArrangementStore();
 
   LibraryArrangement _value = LibraryArrangement.userLists;
+  Set<String> _hiddenAutoIds = {};
   bool _loaded = false;
 
   LibraryArrangement get value => _value;
   bool get isAuto => _value == LibraryArrangement.autoByType;
 
+  /// Virtual auto-mode lists hidden from home and the drawer (unchecked
+  /// on the Media page in Auto by type). Keyed independently of the user
+  /// lists' `enabled` flag — hiding TV Shows in auto mode leaves
+  /// My-lists mode untouched.
+  Set<String> get hiddenAutoIds => _hiddenAutoIds;
+
   Future<void> ensureLoaded() async {
     if (_loaded) return;
     _loaded = true;
     final stored = await AppSettings.libraryArrangement();
-    if (stored != _value) {
-      _value = stored;
-      notifyListeners();
-    }
+    final hidden = await AppSettings.autoHiddenLists();
+    final changed = stored != _value || hidden.isNotEmpty;
+    _value = stored;
+    _hiddenAutoIds = hidden;
+    if (changed) notifyListeners();
   }
 
   Future<void> set(LibraryArrangement value) async {
@@ -50,6 +58,12 @@ class ArrangementStore extends ChangeNotifier {
     _value = value;
     notifyListeners();
     await AppSettings.setLibraryArrangement(value);
+  }
+
+  Future<void> toggleAutoHidden(String id) async {
+    if (!_hiddenAutoIds.add(id)) _hiddenAutoIds.remove(id);
+    notifyListeners();
+    await AppSettings.setAutoHiddenLists(_hiddenAutoIds);
   }
 }
 
@@ -69,6 +83,12 @@ String autoListTitleForType(String? mediaType, String fileName) {
 String autoListTitleFor(MediaEntry entry) => autoListTitleForType(
     MetadataService.instance.metadataFor(entry).mediaType, entry.name);
 
+/// Which virtual auto-mode list [entry] belongs to — the id form of
+/// [autoListTitleFor], for filtering the home special rows.
+String autoIdForEntry(MediaEntry entry) => autoListTitleFor(entry) == 'TV Shows'
+    ? kAutoTvShowsListId
+    : kAutoMoviesListId;
+
 String _normalize(String address) =>
     address.toLowerCase().replaceFirst('0x', '');
 
@@ -83,7 +103,7 @@ List<MediaList> autoLists(List<MediaList> lists) {
     if (!list.enabled) continue;
     for (final entry in list.entries) {
       if (!seen.add(_normalize(entry.address))) continue;
-      (autoListTitleFor(entry) == 'TV Shows' ? tv : movies).add(entry);
+      (autoIdForEntry(entry) == kAutoTvShowsListId ? tv : movies).add(entry);
     }
   }
   return [
@@ -94,11 +114,23 @@ List<MediaList> autoLists(List<MediaList> lists) {
   ];
 }
 
+/// [autoLists] minus the ids in [hidden] — what auto mode actually shows
+/// on the home wall and in the drawer (the Media page keeps the full,
+/// unfiltered set so hidden rows stay visible there, unchecked).
+List<MediaList> visibleAutoLists(List<MediaList> lists, Set<String> hidden) => [
+      for (final l in autoLists(lists))
+        if (!hidden.contains(l.id)) l,
+    ];
+
 /// The lists a drawer/list page can browse under [arrangement]: enabled
-/// user lists, or the virtual Movies / TV Shows pair.
+/// user lists, or the virtual Movies / TV Shows pair minus
+/// [hiddenAutoIds].
 List<MediaList> browsableLists(
-    List<MediaList> lists, LibraryArrangement arrangement) {
-  if (arrangement == LibraryArrangement.autoByType) return autoLists(lists);
+    List<MediaList> lists, LibraryArrangement arrangement,
+    {Set<String> hiddenAutoIds = const {}}) {
+  if (arrangement == LibraryArrangement.autoByType) {
+    return visibleAutoLists(lists, hiddenAutoIds);
+  }
   return [
     for (final l in lists)
       if (l.enabled) l,

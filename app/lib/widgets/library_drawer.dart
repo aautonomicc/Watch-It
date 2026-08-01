@@ -79,7 +79,8 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
             final lists = _lists;
             final browsable = lists == null
                 ? null
-                : browsableLists(lists, ArrangementStore.instance.value);
+                : browsableLists(lists, ArrangementStore.instance.value,
+                    hiddenAutoIds: ArrangementStore.instance.hiddenAutoIds);
             return ListView(
               children: [
                 Padding(
@@ -105,7 +106,7 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                         horizontal: 16, vertical: 8),
                     child: Text(
                       'Nothing to browse yet — add media on the Media '
-                      'Lists page.',
+                      'page.',
                       style: TextStyle(fontSize: 12, color: t.boneDim),
                     ),
                   )
@@ -135,7 +136,7 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                   dense: true,
                   leading: Icon(Icons.playlist_add_check,
                       color: t.boneDim, size: 20),
-                  title: Text('Media Lists',
+                  title: Text('Media',
                       style: TextStyle(color: t.bone, fontSize: 14)),
                   onTap: () => _openPage(const MediaListsScreen()),
                 ),

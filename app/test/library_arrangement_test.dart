@@ -109,6 +109,53 @@ void main() {
     });
   });
 
+  test('autoIdForEntry classifies like the virtual lists', () {
+    expect(autoIdForEntry(MediaEntry(name: 'Show S01E01.mkv', address: _addr(4))),
+        kAutoTvShowsListId);
+    expect(autoIdForEntry(MediaEntry(name: 'Movie (2020).mkv', address: _addr(5))),
+        kAutoMoviesListId);
+  });
+
+  group('visibleAutoLists', () {
+    final lists = [
+      MediaList(id: 'l1', title: 'One', entries: [
+        MediaEntry(name: 'Alpha.2020.mkv', address: _addr(1)),
+        MediaEntry(name: 'Show.S01E01.mkv', address: _addr(2)),
+      ]),
+    ];
+
+    test('filters hidden ids', () {
+      expect(visibleAutoLists(lists, const {}).map((l) => l.id),
+          [kAutoMoviesListId, kAutoTvShowsListId]);
+      expect(visibleAutoLists(lists, {kAutoTvShowsListId}).map((l) => l.id),
+          [kAutoMoviesListId]);
+    });
+
+    test('both hidden yields an empty wall', () {
+      expect(
+          visibleAutoLists(lists, {kAutoMoviesListId, kAutoTvShowsListId}),
+          isEmpty);
+    });
+  });
+
+  test('browsableLists drops hidden virtual lists only in auto mode', () {
+    final lists = [
+      MediaList(id: 'l1', title: 'One', entries: [
+        MediaEntry(name: 'Alpha.2020.mkv', address: _addr(1)),
+        MediaEntry(name: 'Show.S01E01.mkv', address: _addr(2)),
+      ]),
+    ];
+    expect(
+        browsableLists(lists, LibraryArrangement.autoByType,
+            hiddenAutoIds: {kAutoTvShowsListId}).map((l) => l.id),
+        [kAutoMoviesListId]);
+    // User mode ignores the auto-mode hide set entirely.
+    expect(
+        browsableLists(lists, LibraryArrangement.userLists,
+            hiddenAutoIds: {kAutoTvShowsListId}).map((l) => l.id),
+        ['l1']);
+  });
+
   test('browsableLists follows the arrangement', () {
     final lists = [
       MediaList(id: 'l1', title: 'One', entries: [
@@ -143,5 +190,23 @@ void main() {
     final fresh = ArrangementStore();
     await fresh.ensureLoaded();
     expect(fresh.value, LibraryArrangement.autoByType);
+  });
+
+  test('ArrangementStore toggles and persists hidden virtual lists',
+      () async {
+    await ArrangementStore.instance.ensureLoaded();
+    expect(ArrangementStore.instance.hiddenAutoIds, isEmpty);
+
+    await ArrangementStore.instance.toggleAutoHidden(kAutoTvShowsListId);
+    expect(ArrangementStore.instance.hiddenAutoIds, {kAutoTvShowsListId});
+    expect(await AppSettings.autoHiddenLists(), {kAutoTvShowsListId});
+
+    // A fresh store reloads the persisted set; toggling again clears it.
+    final fresh = ArrangementStore();
+    await fresh.ensureLoaded();
+    expect(fresh.hiddenAutoIds, {kAutoTvShowsListId});
+    await fresh.toggleAutoHidden(kAutoTvShowsListId);
+    expect(fresh.hiddenAutoIds, isEmpty);
+    expect(await AppSettings.autoHiddenLists(), isEmpty);
   });
 }

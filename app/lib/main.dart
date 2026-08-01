@@ -200,7 +200,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
-    // Lists unchecked in Settings → Media Lists stay out of the wall.
+    // Lists unchecked in Settings → Media stay out of the wall.
     final visible = [
       for (final l in _lists)
         if (l.enabled) l,
@@ -262,7 +262,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           Expanded(
             child: visible.isEmpty
-                ? _EmptyState(tokens: t, allHidden: _lists.isNotEmpty)
+                ? _EmptyState(
+                    tokens: t,
+                    variant: _lists.isNotEmpty
+                        ? _EmptyVariant.allHidden
+                        : _EmptyVariant.empty)
                 : _libraryView(t, visible),
           ),
         ],
@@ -338,28 +342,51 @@ class _HomeScreenState extends State<HomeScreen> {
         ? _sections
         : reconcileHomeSections(const [], lists);
     // Auto mode: the list-backed rows collapse into the two virtual
-    // Movies / TV Shows rows (fixed order) at the first list slot; the
-    // special rows keep their configured order and visibility. The
-    // home-layout reorder/visibility of list rows applies to user mode.
+    // Movies / TV Shows rows (fixed order, minus hidden ones) at the
+    // first list slot; the special rows keep their configured order and
+    // visibility. The home-layout reorder/visibility of list rows
+    // applies to user mode.
     final auto = ArrangementStore.instance.isAuto;
+    final hidden = ArrangementStore.instance.hiddenAutoIds;
+    // Hidden virtual lists also drop their entries from Continue
+    // Watching and Recently Added (a hidden type resurfacing there would
+    // undercut the hide); Downloads is exempt — on-device files always
+    // show. Filtered here, not in _reload, so a checkbox flip on the
+    // Media page applies live (this builder re-runs on every
+    // ArrangementStore notification). Inert in user mode.
+    final continueItems = auto && hidden.isNotEmpty
+        ? [
+            for (final c in _continue)
+              if (!hidden.contains(autoIdForEntry(c.entry))) c,
+          ]
+        : _continue;
+    final recentItems = auto && hidden.isNotEmpty
+        ? [
+            for (final item in _recent)
+              if (!hidden.contains(_autoIdForItem(item))) item,
+          ]
+        : _recent;
     var autoEmitted = false;
     final children = <Widget>[];
     for (final section in sections) {
       if (section.isSpecial) {
         if (!section.visible) continue;
         children.addAll(switch (section.id) {
-          kSectionContinue => _continueSection(t),
+          kSectionContinue => _continueSection(t, continueItems),
           kSectionDownloads => downloads.isEmpty
               ? const <Widget>[]
               : [_sectionTitle(t, 'Downloads'), _itemsRow(t, downloads)],
-          _ => _recent.isEmpty
+          _ => recentItems.isEmpty
               ? const <Widget>[]
-              : [_sectionTitle(t, 'Recently Added'), _itemsRow(t, _recent)],
+              : [
+                  _sectionTitle(t, 'Recently Added'),
+                  _itemsRow(t, recentItems)
+                ],
         });
       } else if (auto) {
         if (autoEmitted) continue;
         autoEmitted = true;
-        for (final list in autoLists(lists)) {
+        for (final list in visibleAutoLists(lists, hidden)) {
           children.addAll(_listSection(t, list));
         }
       } else if (section.visible) {
@@ -368,14 +395,33 @@ class _HomeScreenState extends State<HomeScreen> {
         children.addAll(_listSection(t, listsById[section.listId]));
       }
     }
+    // Auto mode can hide everything (both virtual lists unchecked, no
+    // downloads) — show a way back to the checkboxes instead of a blank
+    // scroll view.
+    if (auto && children.isEmpty) {
+      final hasMedia = lists.any((l) => l.entries.isNotEmpty);
+      return _EmptyState(
+        tokens: t,
+        variant: hasMedia ? _EmptyVariant.autoHidden : _EmptyVariant.empty,
+      );
+    }
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: children,
     );
   }
 
-  List<Widget> _continueSection(WiTokens t) {
-    if (_continue.isEmpty) return const [];
+  /// The virtual auto-mode list a wall item belongs to — a show or
+  /// season card follows its first episode.
+  String _autoIdForItem(HomeItem item) => switch (item) {
+        HomeEntry(:final entry) => autoIdForEntry(entry),
+        HomeShow(:final seasons) =>
+          autoIdForEntry(seasons.first.episodes.first),
+        HomeSeason(:final episodes) => autoIdForEntry(episodes.first),
+      };
+
+  List<Widget> _continueSection(WiTokens t, List<ContinueItem> items) {
+    if (items.isEmpty) return const [];
     return [
       _sectionTitle(t, 'Continue Watching'),
       SizedBox(
@@ -383,12 +429,12 @@ class _HomeScreenState extends State<HomeScreen> {
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          itemCount: _continue.length,
+          itemCount: items.length,
           separatorBuilder: (_, _) => const SizedBox(width: 12),
           itemBuilder: (context, i) => _ContinueCard(
-            item: _continue[i],
+            item: items[i],
             tokens: t,
-            onTap: () => _openEntry(_continue[i].entry),
+            onTap: () => _openEntry(items[i].entry),
           ),
         ),
       ),
@@ -584,17 +630,41 @@ class _ContinueCard extends StatelessWidget {
   }
 }
 
+enum _EmptyVariant {
+  /// No media anywhere.
+  empty,
+
+  /// Lists exist but every one is unchecked in Settings → Media.
+  allHidden,
+
+  /// Auto mode, and every virtual list is hidden (or empty) with no
+  /// downloads — the enabled lists do hold media.
+  autoHidden,
+}
+
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.tokens, this.allHidden = false});
+  const _EmptyState({required this.tokens, this.variant = _EmptyVariant.empty});
 
   final WiTokens tokens;
-
-  /// Lists exist but every one is unchecked in Settings → Media Lists.
-  final bool allHidden;
+  final _EmptyVariant variant;
 
   @override
   Widget build(BuildContext context) {
     final t = tokens;
+    final (title, hint) = switch (variant) {
+      _EmptyVariant.empty => (
+          'Your library is empty',
+          'Create a media list in Settings to get started.',
+        ),
+      _EmptyVariant.allHidden => (
+          'All your lists are hidden',
+          'Enable a list in Settings → Media to show it here.',
+        ),
+      _EmptyVariant.autoHidden => (
+          'All media is hidden',
+          'Enable a list in Settings → Media to show it here.',
+        ),
+    };
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -602,7 +672,7 @@ class _EmptyState extends StatelessWidget {
           Icon(Icons.play_circle_outline, size: 64, color: t.accent),
           const SizedBox(height: 16),
           Text(
-            allHidden ? 'All your lists are hidden' : 'Your library is empty',
+            title,
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w600,
@@ -611,9 +681,7 @@ class _EmptyState extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            allHidden
-                ? 'Enable a list in Settings → Media Lists to show it here.'
-                : 'Create a media list in Settings to get started.',
+            hint,
             style: TextStyle(fontSize: 12, color: t.ash),
           ),
         ],

@@ -121,6 +121,22 @@ class AppSettings {
     await prefs.setString(_libraryArrangementKey, value.name);
   }
 
+  static const _autoHiddenListsKey = 'auto_hidden_lists_v1';
+
+  /// Ids of the virtual auto-mode lists hidden from home and the drawer
+  /// (Media page checkboxes in Auto by type). Independent of the user
+  /// lists' `enabled` flag. Most callers go through
+  /// [ArrangementStore.instance.hiddenAutoIds].
+  static Future<Set<String>> autoHiddenLists() async {
+    final prefs = await SharedPreferences.getInstance();
+    return (prefs.getStringList(_autoHiddenListsKey) ?? const []).toSet();
+  }
+
+  static Future<void> setAutoHiddenLists(Set<String> ids) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_autoHiddenListsKey, ids.toList()..sort());
+  }
+
   static const _downloadNetworkKey = 'download_network_v1';
 
   /// Which networks downloads may use (Settings → Network). Wi-Fi-only
