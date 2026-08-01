@@ -910,8 +910,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
-        title:
-            Text('Media Lists', style: TextStyle(color: t.bone, fontSize: 18)),
+        title: Text('Media', style: TextStyle(color: t.bone, fontSize: 18)),
         actions: [
           IconButton(
             tooltip: 'Add to library',
@@ -934,117 +933,181 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       ),
       body: lists == null
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.only(bottom: 88),
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                  child: ListenableBuilder(
-                    listenable: ArrangementStore.instance,
-                    builder: (context, _) =>
-                        SegmentedButton<LibraryArrangement>(
-                      style: SegmentedButton.styleFrom(
-                        foregroundColor: t.boneDim,
-                        selectedForegroundColor: t.ink,
-                        selectedBackgroundColor: t.accent,
-                        side: BorderSide(color: t.line),
-                        textStyle: const TextStyle(fontSize: 13),
-                      ),
-                      showSelectedIcon: false,
-                      segments: const [
-                        ButtonSegment(
-                          value: LibraryArrangement.userLists,
-                          label: Text('My lists'),
+          // The whole list follows the segmented mode; virtual-list
+          // counts refine as TMDB matches land.
+          : ListenableBuilder(
+              listenable: Listenable.merge(
+                  [ArrangementStore.instance, MetadataService.instance]),
+              builder: (context, _) {
+                final auto = ArrangementStore.instance.isAuto;
+                final hidden = ArrangementStore.instance.hiddenAutoIds;
+                return ListView(
+                  padding: const EdgeInsets.only(bottom: 88),
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                      child: SegmentedButton<LibraryArrangement>(
+                        style: SegmentedButton.styleFrom(
+                          foregroundColor: t.boneDim,
+                          selectedForegroundColor: t.ink,
+                          selectedBackgroundColor: t.accent,
+                          side: BorderSide(color: t.line),
+                          textStyle: const TextStyle(fontSize: 13),
                         ),
-                        ButtonSegment(
-                          value: LibraryArrangement.autoByType,
-                          label: Text('Auto by type'),
-                        ),
-                      ],
-                      selected: {ArrangementStore.instance.value},
-                      onSelectionChanged: (selection) =>
-                          ArrangementStore.instance.set(selection.single),
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: Text(
-                    'Auto arranges browsing into Movies and TV Shows; '
-                    'your lists are kept unchanged.',
-                    style: TextStyle(fontSize: 11.5, color: t.ash),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                  child: Text(
-                    'Checked lists appear in your home library. Tap a list '
-                    'to edit its entries.',
-                    style: TextStyle(fontSize: 11.5, color: t.ash),
-                  ),
-                ),
-                if (lists.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Text(
-                      'No lists yet. Create one to start adding media.',
-                      style: TextStyle(fontSize: 13, color: t.boneDim),
-                    ),
-                  ),
-                for (final list in lists)
-                  ListTile(
-                    leading: Checkbox(
-                      value: list.enabled,
-                      activeColor: t.accent,
-                      checkColor: t.ink,
-                      side: BorderSide(color: t.ash),
-                      onChanged: (v) => _setEnabled(list, v ?? true),
-                    ),
-                    title: Text(
-                      list.title,
-                      style: TextStyle(
-                        color: list.enabled ? t.bone : t.ash,
-                        fontSize: 15,
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(
+                            value: LibraryArrangement.userLists,
+                            label: Text('My lists'),
+                          ),
+                          ButtonSegment(
+                            value: LibraryArrangement.autoByType,
+                            label: Text('Auto by type'),
+                          ),
+                        ],
+                        selected: {ArrangementStore.instance.value},
+                        onSelectionChanged: (selection) =>
+                            ArrangementStore.instance.set(selection.single),
                       ),
                     ),
-                    subtitle: Text(
-                      '${list.entries.length} '
-                      '${list.entries.length == 1 ? 'entry' : 'entries'}'
-                      '${list.enabled ? '' : '  ·  hidden from home'}',
-                      style: TextStyle(color: t.ash, fontSize: 12),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                      child: Text(
+                        'Auto arranges browsing into Movies and TV Shows; '
+                        'your lists are kept unchanged.',
+                        style: TextStyle(fontSize: 11.5, color: t.ash),
+                      ),
                     ),
-                    trailing: PopupMenuButton<String>(
-                      tooltip: 'List options',
-                      icon: Icon(Icons.more_vert, color: t.ash),
-                      color: t.ink2,
-                      onSelected: (v) => switch (v) {
-                        'rename' => _rename(list),
-                        'export' => _export(list),
-                        'delete' => _delete(list),
-                        _ => null,
-                      },
-                      itemBuilder: (context) => [
-                        PopupMenuItem(
-                          value: 'rename',
-                          child: Text('Rename',
-                              style: TextStyle(color: t.bone, fontSize: 14)),
-                        ),
-                        PopupMenuItem(
-                          value: 'export',
-                          child: Text('Export',
-                              style: TextStyle(color: t.bone, fontSize: 14)),
-                        ),
-                        PopupMenuItem(
-                          value: 'delete',
-                          child: Text('Delete',
-                              style: TextStyle(color: t.rust, fontSize: 14)),
-                        ),
-                      ],
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                      child: Text(
+                        auto
+                            ? 'Checked lists appear in your home library. '
+                                'Auto lists are built from your enabled '
+                                'lists and can\'t be edited.'
+                            : 'Checked lists appear in your home library. '
+                                'Tap a list to edit its entries.',
+                        style: TextStyle(fontSize: 11.5, color: t.ash),
+                      ),
                     ),
-                    onTap: () => _openList(list),
-                  ),
-              ],
+                    if (auto)
+                      ..._autoRows(t, lists, hidden)
+                    else
+                      ..._userRows(t, lists),
+                  ],
+                );
+              },
             ),
     );
+  }
+
+  /// Auto by type: the virtual Movies / TV Shows rows with a
+  /// shown-in-auto-mode checkbox each — no tap, no 3-dot menu (virtual
+  /// lists can't be edited, renamed, or exported).
+  List<Widget> _autoRows(
+      WiTokens t, List<MediaList> lists, Set<String> hidden) {
+    final rows = autoLists(lists);
+    if (rows.isEmpty) {
+      return [
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            'Nothing to arrange yet — no media in your enabled lists.',
+            style: TextStyle(fontSize: 13, color: t.boneDim),
+          ),
+        ),
+      ];
+    }
+    return [
+      for (final list in rows)
+        ListTile(
+          leading: Checkbox(
+            value: !hidden.contains(list.id),
+            activeColor: t.accent,
+            checkColor: t.ink,
+            side: BorderSide(color: t.ash),
+            onChanged: (_) =>
+                ArrangementStore.instance.toggleAutoHidden(list.id),
+          ),
+          title: Text(
+            list.title,
+            style: TextStyle(
+              color: hidden.contains(list.id) ? t.ash : t.bone,
+              fontSize: 15,
+            ),
+          ),
+          subtitle: Text(
+            '${list.entries.length} '
+            '${list.entries.length == 1 ? 'entry' : 'entries'}'
+            '${hidden.contains(list.id) ? '  ·  hidden from home' : ''}',
+            style: TextStyle(color: t.ash, fontSize: 12),
+          ),
+        ),
+    ];
+  }
+
+  List<Widget> _userRows(WiTokens t, List<MediaList> lists) {
+    return [
+      if (lists.isEmpty)
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            'No lists yet. Create one to start adding media.',
+            style: TextStyle(fontSize: 13, color: t.boneDim),
+          ),
+        ),
+      for (final list in lists)
+        ListTile(
+          leading: Checkbox(
+            value: list.enabled,
+            activeColor: t.accent,
+            checkColor: t.ink,
+            side: BorderSide(color: t.ash),
+            onChanged: (v) => _setEnabled(list, v ?? true),
+          ),
+          title: Text(
+            list.title,
+            style: TextStyle(
+              color: list.enabled ? t.bone : t.ash,
+              fontSize: 15,
+            ),
+          ),
+          subtitle: Text(
+            '${list.entries.length} '
+            '${list.entries.length == 1 ? 'entry' : 'entries'}'
+            '${list.enabled ? '' : '  ·  hidden from home'}',
+            style: TextStyle(color: t.ash, fontSize: 12),
+          ),
+          trailing: PopupMenuButton<String>(
+            tooltip: 'List options',
+            icon: Icon(Icons.more_vert, color: t.ash),
+            color: t.ink2,
+            onSelected: (v) => switch (v) {
+              'rename' => _rename(list),
+              'export' => _export(list),
+              'delete' => _delete(list),
+              _ => null,
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'rename',
+                child: Text('Rename',
+                    style: TextStyle(color: t.bone, fontSize: 14)),
+              ),
+              PopupMenuItem(
+                value: 'export',
+                child: Text('Export',
+                    style: TextStyle(color: t.bone, fontSize: 14)),
+              ),
+              PopupMenuItem(
+                value: 'delete',
+                child: Text('Delete',
+                    style: TextStyle(color: t.rust, fontSize: 14)),
+              ),
+            ],
+          ),
+          onTap: () => _openList(list),
+        ),
+    ];
   }
 }

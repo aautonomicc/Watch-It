@@ -370,7 +370,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 ListTile(
                   leading: Icon(Icons.video_library_outlined, color: t.accent),
-                  title: Text('Media Lists',
+                  title: Text('Media',
                       style: TextStyle(color: t.bone, fontSize: 15)),
                   subtitle: Text(
                     lists.isEmpty

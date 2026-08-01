@@ -541,7 +541,7 @@ void main() {
       // Library section: a single tile that opens the Media Lists page
       // (list management moved there in alpha.25).
       expect(find.text('LIBRARY'), findsOneWidget);
-      expect(find.text('Media Lists'), findsOneWidget);
+      expect(find.text('Media'), findsOneWidget);
       expect(find.text('New list'), findsNothing);
 
       // Streaming section: buffer size tile showing the current value.
@@ -587,7 +587,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Lists are managed on their own page now.
-      await tester.tap(find.text('Media Lists'));
+      await tester.tap(find.text('Media'));
       await tester.pumpAndSettle();
 
       // Create list with a title.
@@ -644,7 +644,7 @@ void main() {
 
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Media Lists'));
+      await tester.tap(find.text('Media'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byType(Checkbox));
@@ -686,7 +686,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Media Lists'));
+      await tester.tap(find.text('Media'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byTooltip('List options'));
@@ -707,7 +707,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Media Lists'));
+      await tester.tap(find.text('Media'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byTooltip('List options'));
