@@ -1,18 +1,18 @@
 # Plan: datamap-first entries — remove public XOR addresses entirely
 
-**Status: RELEASE 1 IMPLEMENTED (2026-08-01), ships in v0.1.0-alpha.40.**
-The three-release schedule (1: whole feature · 2: deprecation window ·
-3: delete `data_map_fetch` + `/resolve` network path) is tracked in
-ROADMAP.md; the implemented container spec is BUNDLE-FORMAT.md (spec v2).
-Implementation notes vs this plan: the derived-address helper became
-`POST /datamap` / `GET /datamap/{addr}` HTTP endpoints (msgpack + legacy-
-JSON sniff, mirroring ant-core `read_datamap`); the migration pass surfaces
-as a cancellable snackbar; bundle-download-by-address now pre-resolves via
-`GET /resolve` because `/xor` is local-map-only — that flow is the release-3
-open question. The "confirm derivation against a real private upload" item
-remains open (verify.rs' shrink-then-hash equals the public-upload address
-by construction and by test; an on-network ant-cli cross-check is still
-worth one run before release 3 freezes anything).
+**Status: COMPLETE (2026-08-01). All three releases shipped** —
+v0.1.0-alpha.40 (whole feature) and v0.1.0-alpha.41 (deprecation window
+closed + cleanup, combined once every testing device had upgraded and
+migrated). `data_map_fetch` is deleted from the crate, `GET /resolve` is a
+local-store lookup (kept for the download manager's size pre-fill), v1
+bundles and the upgrade migration pass are retired, and
+bundle-download-by-address was dropped (a bundle's network address is a
+public XOR address — the removed concept — and re-leaks every datamap in
+it; bundles are shared as files). Schedule details in ROADMAP.md; container
+spec in BUNDLE-FORMAT.md (spec v2). Derivation validation: the real NOTLD
+root map POSTs back to its exact public address (live round-trip on
+alpha.40); a paid ant-cli private-upload cross-check remains optional —
+the sniff logic mirrors ant-core `read_datamap` byte-for-byte.
 **Rev 3 (2026-08-01): user decision — XOR support is REMOVED COMPLETELY, not
 demoted to a Legacy path. No XOR entry dialog, no `<64-hex>` list lines, no
 `source` flag, no beta deferral.**

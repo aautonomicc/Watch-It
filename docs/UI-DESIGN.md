@@ -44,8 +44,8 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 ### 4. Add / manage lists
 - **Add entry**: multi-select `.datamap` file picker (the file name carries the
   media name → metadata matches automatically); no address is ever typed
-- **Import**: "Add .datamap files" or "Import .watch-list bundle" (local file
-  or by network address); zip magic sniffed, extension irrelevant
+- **Import**: "Add .datamap files" or "Import .watch-list bundle" (local
+  file); zip magic sniffed, extension irrelevant
 - **Export**: `.watch-list` bundle only, with a watch-history checkbox
   (default off), root maps (default on); see
   [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md)

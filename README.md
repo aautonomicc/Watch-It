@@ -56,7 +56,7 @@ no TMDB key ships in the binaries — add your own free key (create one at
 Settings → Metadata, or skip it entirely: imported `.watch-list` bundles
 carry metadata and posters, so bundle-importing users never need a key. Media lists can be created and
 managed in-app; `.datamap` files import via a multi-select picker and
-bundles import from a local file or by network address. Playback position
+bundles import from a local file. Playback position
 is remembered per title: the home screen opens with Continue Watching and
 Recently Added rows, detail pages offer Resume / Start over with a Watched
 badge, and finishing an episode auto-plays the next one via an Up-next

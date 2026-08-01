@@ -1,23 +1,23 @@
 # Roadmap
 
-**Status (2026-08-01):** the **datamap-first privacy model** is implemented
-and ships in v0.1.0-alpha.40 (release 1 of the three-release schedule below):
+**Status (2026-08-01):** the **datamap-first privacy model** is COMPLETE —
+all three releases of the schedule below have shipped (v0.1.0-alpha.40 =
+the feature, v0.1.0-alpha.41 = deprecation window closed + cleanup):
 public XOR addresses are gone as an entry type — every entry is created from
 a `.datamap` file (private `ant file upload` output) or a `.watch-list`
-bundle, its address derived offline, its map required locally; the stream
-path no longer touches the network for maps, killing the 20–30 s cold
-resolve for good. Bundle spec v2 ([BUNDLE-FORMAT.md](BUNDLE-FORMAT.md)),
-v1 bundles convert at the import border, existing libraries migrate in a
-one-time background pass. Previously: rebranded **watch-it → W@tch** (display-only: Anton
+bundle, its address derived offline, its map required locally; nothing in
+the app fetches a data map from the network anymore (`data_map_fetch` is
+deleted from the crate), killing the 20–30 s cold resolve for good. Bundle
+spec v2 ([BUNDLE-FORMAT.md](BUNDLE-FORMAT.md)); v1 bundles and the upgrade
+migration pass retired in alpha.41 after all testers rolled over. Previously: rebranded **watch-it → W@tch** (display-only: Anton
 wordmark, launcher labels, window titles, user-facing strings; repo and all
 technical identifiers keep their names — see BRAND.md), shipped in
 v0.1.0-alpha.39 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases))
 — signed Android APK + Linux AppImage on every release. Phases 0, 1, and 2 are
 done: both platforms stream from the live Autonomi network via the embedded
 Rust client (`native/watchit_core`) with byte-exact seek, a chunk LRU cache with
-keep-ahead prefetch, and resolved root data maps persisted in SQLite (any title's
-map is fetched from the network at most once per device — cold ~30s, then ~7ms
-across restarts). The library is a full poster-wall experience: TMDB metadata from
+keep-ahead prefetch, and root data maps persisted in SQLite (imported once,
+looked up in ~7ms across restarts — never fetched from the network). The library is a full poster-wall experience: TMDB metadata from
 file names (bring your own free key — releases are keyless by design since
 alpha.34, and bundles carry metadata + posters so casual users need no key),
 show-level grouping on the home wall, big-artwork Show → Season → Detail pages with
@@ -212,7 +212,8 @@ in [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md).
       the local store; XOR add-entry dialog, plain-text list import/export,
       and the `<64-hex>` line grammar deleted
 - [x] Import: multi-select "Add .datamap files" (library page and list
-      editor), `.watch-list` bundle (local or by network address)
+      editor), `.watch-list` bundle (local file; by network address until
+      alpha.41 dropped it)
 - [x] Bundle spec v2: `datamaps/` members named by original filename (zip
       root accepted — a hand-made `zip lib.watch-list *.datamap` is valid),
       optional filename-line `list.txt`, unclaimed members → default list;
@@ -228,18 +229,26 @@ in [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md).
 - [x] DataMapPrefetcher, prefetch dialogs, and the tile-open map warm
       deleted — nothing left to prefetch
 
-**Release 2 — deprecation window.** At least one release (more if testers
-need it) in which the three surviving network-map-fetch call sites —
-v1 bundle conversion, the upgrade migration pass, bundle-download by
-address — stay alive so old bundles and not-yet-migrated installs roll
-over. No new work beyond whatever else ships in it.
+**Releases 2+3 — v0.1.0-alpha.41 (implemented 2026-08-01): deprecation
+window closed + cleanup, shipped together.** The window's condition was
+met early — every testing device upgraded and every library/bundle
+migrated — so the cleanup landed in one release:
 
-**Release 3 — cleanup.** Delete `data_map_fetch` from the crate and
-`/resolve`'s network path; v1 bundles stop importing (re-export from an
-upgraded install instead). Open question to settle before then: importing
-a bundle *by network address* needs some fetch path — either keep a
-minimal one for that single flow or drop address-fetched bundles and share
-bundles as files only.
+- [x] `data_map_fetch` deleted from the crate (`Engine::root_map` and the
+      child-map resolution went with it); `GET /resolve/{addr}` is now a
+      local-store lookup (size/chunks, 404 for a never-imported address) —
+      kept only for the download manager's size pre-fill
+- [x] v1 bundles no longer import: hex `list.txt` lines are skipped (an
+      all-v1 file gets a "re-export from 0.1.0-alpha.40+" error),
+      `rootmaps/` members are ignored, border conversion deleted
+- [x] The one-time upgrade migration pass deleted
+      (`services/library_migration.dart`) — all testers migrated
+- [x] Bundle-download by network address dropped; bundles are shared as
+      files only. This settled the open question the consistent way: a
+      bundle's network address *is* a public XOR address — the thing this
+      plan removed — and a publicly addressed bundle re-leaks every
+      datamap inside it anyway. Curated/PD libraries travel as
+      `.watch-list` files, which any channel can carry.
 
 Honest scope (also in the docs/UI): a datamap **is** full access — the gain
 is non-discoverability by third parties, not confidentiality against list
