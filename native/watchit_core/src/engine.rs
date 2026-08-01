@@ -306,47 +306,10 @@ impl Engine {
         }
     }
 
-    /// Root (non-child) data map for a public file address, cached in
-    /// memory and on disk. Data maps are content-addressed and immutable,
-    /// so a disk hit is valid forever — later plays of a title (across app
-    /// restarts) skip the network resolution entirely.
-    pub async fn root_map(&'static self, addr: [u8; 32]) -> Result<DataMap, String> {
-        if let Some(dm) = self.root_maps.lock().unwrap().get(&addr) {
-            return Ok(dm.clone());
-        }
-        if let Some(dm) = self.map_store.as_ref().and_then(|s| s.get(&addr)) {
-            self.root_maps.lock().unwrap().insert(addr, dm.clone());
-            return Ok(dm);
-        }
-        let client = self.client().await?;
-        let dm = client
-            .data_map_fetch(&addr)
-            .await
-            .map_err(|e| format!("data map fetch failed: {e}"))?;
-        let root = if dm.is_child() {
-            let handle = Handle::current();
-            tokio::task::spawn_blocking(move || {
-                let fetch = |batch: &[(usize, XorName)]| {
-                    handle.block_on(fetch_chunk_batch(&client, batch))
-                };
-                self_encryption::get_root_data_map_parallel(dm, &fetch)
-            })
-            .await
-            .map_err(|e| format!("data map resolve task failed: {e}"))?
-            .map_err(|e| format!("data map resolve failed: {e}"))?
-        } else {
-            dm
-        };
-        self.root_maps.lock().unwrap().insert(addr, root.clone());
-        if let Some(store) = &self.map_store {
-            store.put(&addr, &root);
-        }
-        Ok(root)
-    }
-
-    /// Root map already held locally (memory or disk) — never touches the
-    /// network. The bundle-export path uses this so exporting a list can
-    /// tell "resolved" from "would need a 20-30s network resolve".
+    /// Root map held locally (memory or disk). The only way a map exists
+    /// at all — since the datamap-first model, maps arrive exclusively via
+    /// import (`POST /datamap`, bundle members, the seeded demo asset);
+    /// there is no network fetch path.
     pub fn stored_root_map(&self, addr: &[u8; 32]) -> Option<DataMap> {
         if let Some(dm) = self.root_maps.lock().unwrap().get(addr) {
             return Some(dm.clone());
@@ -359,7 +322,7 @@ impl Engine {
     /// Verify an externally supplied root map (bundle import) fully
     /// offline and store it in the memory + disk caches. A map that fails
     /// verification is rejected so a tampered bundle cannot poison the
-    /// cache — the caller falls back to a normal network resolve.
+    /// cache — the caller skips that entry and reports it.
     pub fn import_root_map(&self, addr: [u8; 32], root: DataMap) -> Result<(), String> {
         crate::verify::verify_root_map(&addr, &root)?;
         self.store_root_map(addr, &root);

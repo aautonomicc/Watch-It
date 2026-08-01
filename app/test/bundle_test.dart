@@ -58,18 +58,11 @@ Future<void> _seedMetadataRow(String fileName, {String? posterFile}) async {
 ///   address is the first body byte spread over 64 hex chars, so tests
 ///   can predict it from the member bytes.
 /// - `GET /datamap/<addr>`: serves [datamaps], else 404.
-/// - `PUT /rootmap/<addr>`: body `[6, 6, 6]` → 422 (tampered), else 204;
-///   bodies recorded in [rootmapPuts].
-/// - `GET /resolve/<addr>`: 200 for [resolvable], else 502; calls
-///   recorded in [resolves].
 class _FakeEmbedded {
   _FakeEmbedded(this.server);
 
   final HttpServer server;
   final Map<String, List<int>> datamaps = {};
-  final Set<String> resolvable = {};
-  final Map<String, List<int>> rootmapPuts = {};
-  final List<String> resolves = [];
 
   String get base => 'http://127.0.0.1:${server.port}';
 
@@ -103,23 +96,6 @@ class _FakeEmbedded {
         } else {
           req.response.add(map);
         }
-      } else if (req.method == 'PUT' && path.startsWith('/rootmap/')) {
-        final addr = path.substring('/rootmap/'.length);
-        if (bytes.length == 3 && bytes.every((b) => b == 6)) {
-          req.response.statusCode = 422;
-        } else {
-          fake.rootmapPuts[addr] = bytes;
-          req.response.statusCode = 204;
-        }
-      } else if (req.method == 'GET' && path.startsWith('/resolve/')) {
-        final addr = path.substring('/resolve/'.length);
-        fake.resolves.add(addr);
-        if (fake.resolvable.contains(addr)) {
-          req.response.headers.contentType = ContentType.json;
-          req.response.write(jsonEncode({'size': 1, 'chunks': 1}));
-        } else {
-          req.response.statusCode = 502;
-        }
       } else {
         req.response.statusCode = 404;
       }
@@ -134,7 +110,6 @@ ParsedBundle _bundle({
   Map<String, Uint8List> datamapMembers = const {},
   Map<String, Map<String, dynamic>> metadataRows = const {},
   Map<String, Uint8List> posters = const {},
-  Map<String, Uint8List> rootMaps = const {},
   Map<String, ({bool enabled, int position})> libraryPrefs = const {},
   Map<String, WatchState> history = const {},
 }) =>
@@ -143,7 +118,6 @@ ParsedBundle _bundle({
       datamapMembers: datamapMembers,
       metadataRows: metadataRows,
       posters: posters,
-      rootMaps: rootMaps,
       libraryPrefs: libraryPrefs,
       history: history,
     );
@@ -358,7 +332,6 @@ void main() {
       expect(bundle.metadataRows.keys,
           [_lookupKey('Night of the Living Dead (1968).mp4')]);
       expect(bundle.posters['movie_10331.jpg'], [1, 2, 3, 4]);
-      expect(bundle.rootMaps, isEmpty);
       expect(bundle.history, isEmpty);
     });
 
@@ -399,9 +372,6 @@ void main() {
         'posters/../evil.jpg': [1],
         'posters/sub/dir.jpg': [2],
         'posters/ok.jpg': [3],
-        'rootmaps/nothexnothexnothexnothexnothexnothexnothexnothexnothexnothexnoth.map':
-            [4],
-        'rootmaps/$_addrA.map': [5],
         'datamaps/../escape.mkv.datamap': [6],
         'datamaps/sub/dir.mkv.datamap': [7],
         'datamaps/ok.mkv.datamap': [8],
@@ -410,7 +380,6 @@ void main() {
       });
       final bundle = parseBundle(bytes);
       expect(bundle.posters.keys, ['ok.jpg']);
-      expect(bundle.rootMaps.keys, [_addrA]);
       expect(bundle.datamapMembers.keys, ['ok.mkv.datamap']);
     });
 
@@ -504,51 +473,48 @@ void main() {
       expect(result.lists.single.entries.length, 2);
     });
 
-    test(
-        'v1 conversion: rootmaps/ member seeds offline, else network '
-        'resolve, else the entry is dropped', () async {
+    test('v1 hex lines are skipped — members still import', () async {
       final fake = await _FakeEmbedded.start();
       addTearDown(() => fake.server.close(force: true));
-      const addrC =
-          'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
-      fake.resolvable.add(_addrB);
       final bundle = _bundle(
-        listText: 'ListName="Legacy"\n'
-            '$_addrA Offline (1968).mp4\n'
-            '$_addrB Network (2024).mkv\n'
-            '$addrC Doomed (1999).mkv\n',
-        rootMaps: {
-          _addrA: Uint8List.fromList([7, 7]),
-        },
-      );
-      final progress = <(int, int)>[];
-      final result = await importBundleEntries(bundle,
-          base: fake.base,
-          onConvertProgress: (c, n, _) => progress.add((c, n)));
-      expect(result.convertedOffline, 1);
-      expect(result.convertedNetwork, 1);
-      expect(result.convertFailed, 1);
-      expect(fake.rootmapPuts[_addrA], [7, 7]);
-      expect(fake.resolves, containsAll([_addrB, addrC]));
-      expect(result.lists.single.entries.map((e) => e.address),
-          [_addrA, _addrB]); // doomed entry dropped, never map-less
-      expect(progress, [(1, 3), (2, 3), (3, 3)]);
-    });
-
-    test('rejected rootmaps/ member falls back to the network', () async {
-      final fake = await _FakeEmbedded.start();
-      addTearDown(() => fake.server.close(force: true));
-      fake.resolvable.add(_addrA);
-      final bundle = _bundle(
-        listText: 'ListName="Legacy"\n$_addrA Tampered (1968).mp4\n',
-        rootMaps: {
-          _addrA: Uint8List.fromList([6, 6, 6]), // fake server: 422
+        listText: 'ListName="Mixed"\n'
+            '$_addrA Legacy (1968).mp4\n'
+            'Movie (2024).mkv.datamap\n',
+        datamapMembers: {
+          'Movie (2024).mkv.datamap': Uint8List.fromList([9]),
         },
       );
       final result = await importBundleEntries(bundle, base: fake.base);
-      expect(result.convertedOffline, 0);
-      expect(result.convertedNetwork, 1);
-      expect(result.lists.single.entries.single.address, _addrA);
+      expect(result.lists.single.entries.single.address,
+          _FakeEmbedded.addrForByte(9));
+      expect(result.skippedLines, [2]); // the hex line
+    });
+
+    test('all-v1 bundle degrades to member-only, else throws re-export',
+        () async {
+      final fake = await _FakeEmbedded.start();
+      addTearDown(() => fake.server.close(force: true));
+      // Legacy list.txt but v2 members present: members win.
+      final withMembers = _bundle(
+        listText: 'ListName="Legacy"\n$_addrA Old (1968).mp4\n',
+        datamapMembers: {
+          'New.mkv.datamap': Uint8List.fromList([10]),
+        },
+      );
+      final result = await importBundleEntries(withMembers,
+          base: fake.base, defaultListTitle: 'Fallback');
+      expect(result.lists.single.title, 'Fallback');
+      expect(result.lists.single.entries.single.address,
+          _FakeEmbedded.addrForByte(10));
+
+      // Nothing but legacy lines: nothing importable.
+      final onlyLegacy = _bundle(
+        listText: 'ListName="Legacy"\n$_addrA Old (1968).mp4\n',
+      );
+      expect(
+        () => importBundleEntries(onlyLegacy, base: fake.base),
+        throwsA(isA<ListImportException>()),
+      );
     });
 
     test('malformed list.txt degrades to member-only import', () async {

@@ -3,9 +3,9 @@
 **Status: implemented 2026-08-01, ships in v0.1.0-alpha.40.** Spec v2 is the
 datamap-first container from docs/PLAN-datamap-privacy.md: the `.datamap`
 files *are* the entries, and the public-XOR-address line grammar is gone.
-v1 bundles (alpha.33–39 exports) still import — every legacy entry is
-converted at the import border (see "v1 bundles" below). Implementation:
-`app/lib/services/bundle.dart` (build/parse/convert/seed), the import/export
+v1 bundles (alpha.33–39 exports) no longer import as of v0.1.0-alpha.41 —
+see "v1 bundles" below. Implementation:
+`app/lib/services/bundle.dart` (build/parse/seed), the import/export
 flows in `app/lib/screens/media_lists_screen.dart`, and the address
 derivation in `native/watchit_core/src/verify.rs` + the `/datamap` endpoints
 in `server.rs`.
@@ -29,14 +29,14 @@ The format's floor is deliberate: a hand-made
 | Member | Required | Contents |
 |---|---|---|
 | `datamaps/<file name>.datamap` | no* | Raw ant-cli private-upload datamap files (bare msgpack root `DataMap`), byte-identical to what `ant file upload` wrote. The file name minus `.datamap` is the media file name, which feeds the NAMING.md parser / TMDB matcher. Members are **also accepted at the zip root** (the hand-made floor above); on a duplicate base name the `datamaps/` copy wins. |
-| `list.txt` | no* | Optional list assignment. `ListName="..."` markers split lists; entry lines are **only** the member-file-name form — a line ending in `.datamap`, referencing a member. One member may be referenced from several lists (no duplication). Members no list references land in a default list named after the bundle file (a network-fetched bundle has no file name — the importer prompts, fallback "Imported"). |
+| `list.txt` | no* | Optional list assignment. `ListName="..."` markers split lists; entry lines are **only** the member-file-name form — a line ending in `.datamap`, referencing a member. One member may be referenced from several lists (no duplication). Members no list references land in a default list named after the bundle file (fallback "Imported"). |
 | `metadata.json` | no | `metadata_cache` rows for the bundled entries, keyed by `lookupKey`, plus a top-level `attribution` field (see Attribution below). |
 | `posters/` | no | The cached w342 poster JPGs for the bundled entries, deduped. |
 | `library.json` | no | Library export only: per-list `{enabled, position}` so a fresh-device import restores home-screen order/visibility. |
 | `history.json` | no | Watch-history rows `{address, positionMs, durationMs, completed, updatedAt}`. Keyed by derived address — deterministic from the map, so device-independent with no remapping. |
 
-\* A bundle must carry at least one `.datamap` member or a `list.txt`
-(a v1 bundle has only the latter); otherwise there is nothing to import.
+\* A bundle must carry at least one `.datamap` member or a `list.txt`;
+otherwise there is nothing to import.
 
 Example `list.txt`:
 
@@ -100,25 +100,16 @@ that is the point: the map never leaves the devices you share it with.
   (a root map is ~100 bytes per chunk — NOTLD's 5.3 GB movie has a 108 KB
   map; a 100-title library ≈ 10 MB of maps).
 
-### v1 bundles (alpha.33–39): border conversion
+### v1 bundles (alpha.33–39): no longer import
 
-A v1 `list.txt` line is `<64-hex address> <file name>` — finding one marks
-the bundle as v1. **No legacy entry type exists anymore**; each hex entry is
-converted into a datamap entry at the import border:
-
-1. A `rootmaps/<addr>.map` member (Full-bundle v1 exports always carried
-   them) is imported under that address — offline and free. The map is
-   verified in Rust (re-shrink → serialize → hash must equal the address)
-   so a tampered bundle cannot poison the store.
-2. No member (or verification failed) → **one** network
-   `data_map_fetch` via `GET /resolve/{addr}` during the import, behind a
-   progress dialog. An entry whose map cannot be obtained is **skipped with
-   a warning** — it is never imported map-less.
-
-Public XOR address == derived address, so a converted entry is
-indistinguishable from a native v2 import. This conversion path (and the
-`/resolve` network fetch behind it) is scheduled for removal after the
-deprecation window — see ROADMAP.md.
+A v1 `list.txt` line is `<64-hex address> <file name>`. The border
+conversion that turned these into datamap entries needed a network map
+fetch, which was deleted in v0.1.0-alpha.41 (release 3 of the datamap-first
+plan, after the deprecation window closed). Today: hex lines are **skipped**
+(counted with the other invalid lines), `rootmaps/` members are ignored,
+and a bundle containing nothing else is refused with "re-export it as a
+bundle from Watch-It 0.1.0-alpha.40 or later" — an alpha.40+ install whose
+library came from that v1 bundle exports a fully self-contained v2 bundle.
 
 ## Export
 
@@ -148,11 +139,11 @@ The embedded server's map endpoints:
 - `GET /datamap/{addr}` — export; the stored root map as canonical msgpack
   (a byte-valid standalone `.datamap` file), 404 when not stored.
 - `GET /rootmap/{addr}` / `PUT /rootmap/{addr}` — bincode
-  (`DataMap::to_bytes`) variants kept for the NOTLD seeder asset and v1
-  `rootmaps/` members; PUT verifies-then-stores.
-- `GET /resolve/{addr}` — network map fetch + persist; **only** used by v1
-  border conversion, the upgrade migration pass, and bundle-download by
-  address. Scheduled for deletion (ROADMAP.md release 3).
+  (`DataMap::to_bytes`) variants kept for the NOTLD seeder asset; PUT
+  verifies-then-stores.
+- `GET /resolve/{addr}` — `{size, chunks}` of a **locally stored** map
+  (404 otherwise); the download manager's size pre-fill. The network fetch
+  this endpoint once performed was deleted in alpha.41.
 - `GET /xor/{addr}` — the stream path; serves **locally stored maps only**
   and fast-fails 404 ("data map missing — re-import the list or bundle")
   instead of the old doomed 20–30 s network resolve.

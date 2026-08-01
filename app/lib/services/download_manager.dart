@@ -519,8 +519,8 @@ class DownloadManager extends ChangeNotifier {
         '${addr.substring(0, 8)}-$safe';
   }
 
-  /// Fill in the total size from `/resolve` when the response headers
-  /// have not provided it yet.
+  /// Fill in the total size from `/resolve` (local map lookup) when the
+  /// response headers have not provided it yet.
   Future<void> _fillTotal(String addr) async {
     final base = _base;
     if (base == null) return;

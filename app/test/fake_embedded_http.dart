@@ -18,10 +18,8 @@ import 'dart:io';
 /// - `GET /datamap/<addr>`: serves [datamaps], else 404.
 /// - `PUT /rootmap/<addr>`: body `[6, 6, 6]` → 422 (tampered), else 204;
 ///   bodies recorded in [rootmapPuts].
-/// - `GET /resolve/<addr>`: 200 for [resolvable], else 502.
 class FakeEmbeddedHttp extends HttpOverrides {
   final Map<String, List<int>> datamaps = {};
-  final Set<String> resolvable = {};
   final Set<String> storedRootmaps = {};
   final Map<String, List<int>> rootmapPuts = {};
   final List<String> requests = [];
@@ -68,11 +66,6 @@ class FakeEmbeddedHttp extends HttpOverrides {
       }
       rootmapPuts[path.substring('/rootmap/'.length)] = body;
       return (204, const <int>[]);
-    }
-    if (method == 'GET' && path.startsWith('/resolve/')) {
-      return resolvable.contains(path.substring('/resolve/'.length))
-          ? (200, utf8.encode('{"size":1,"chunks":1}'))
-          : (502, const <int>[]);
     }
     return (404, const <int>[]);
   }

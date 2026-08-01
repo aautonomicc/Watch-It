@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watchit/services/list_import.dart';
 
@@ -7,71 +5,51 @@ const _addrA =
     '66cacd06ae5b02aeb0b4b8a463885bd7ec392b1b4291c1eda75253e831c1bcbb';
 const _addrB =
     '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-const _addrC =
-    'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
 
 void main() {
   group('parseMediaListFile (single list)', () {
-    test('parses name line plus entries', () {
+    test('parses name line plus member entries', () {
       final parsed = parseMediaListFile(
         'My Movies\n'
-        '$_addrA Some Movie (2024) [1080p].mkv\n'
-        '$_addrB Another Movie (1999).mp4\n',
+        'Some Movie (2024) [1080p].mkv.datamap\n'
+        'Another Movie (1999).mp4.datamap\n',
       );
       final list = parsed.lists.single;
       expect(list.title, 'My Movies');
-      expect(list.entries, hasLength(2));
-      expect(list.entries[0].name, 'Some Movie (2024) [1080p].mkv');
-      expect(list.entries[0].address, _addrA);
-      expect(list.entries[1].name, 'Another Movie (1999).mp4');
+      expect(list.datamapRefs, [
+        'Some Movie (2024) [1080p].mkv.datamap',
+        'Another Movie (1999).mp4.datamap',
+      ]);
+      expect(list.entries, isEmpty);
       expect(parsed.skippedLines, isEmpty);
       expect(parsed.entryCount, 2);
     });
 
-    test('handles CRLF, blank lines, surrounding whitespace and 0x prefix',
-        () {
+    test('handles CRLF, blank lines and surrounding whitespace', () {
       final parsed = parseMediaListFile(
         '  Weekend Watchlist \r\n'
         '\r\n'
-        '  0x${_addrA.toUpperCase()}   Spaced Out (2020).mkv  \r\n'
+        '  Spaced Out (2020).mkv.datamap  \r\n'
         '\r\n',
       );
       final list = parsed.lists.single;
       expect(list.title, 'Weekend Watchlist');
-      expect(list.entries, hasLength(1));
-      expect(list.entries.single.address, _addrA);
-      expect(list.entries.single.name, 'Spaced Out (2020).mkv');
+      expect(list.datamapRefs, ['Spaced Out (2020).mkv.datamap']);
     });
 
     test('skips malformed lines and reports their line numbers', () {
       final parsed = parseMediaListFile(
         'Mixed Bag\n'
-        'not-an-address Some Movie.mkv\n'
-        '$_addrA Good Movie.mkv\n'
-        '$_addrB\n', // address without a file name
+        'not a member line\n'
+        'Good Movie.mkv.datamap\n',
       );
       final list = parsed.lists.single;
-      expect(list.entries, hasLength(1));
-      expect(list.entries.single.name, 'Good Movie.mkv');
-      expect(parsed.skippedLines, [2, 4]);
+      expect(list.datamapRefs, ['Good Movie.mkv.datamap']);
+      expect(parsed.skippedLines, [2]);
     });
 
     test('rejects an empty file', () {
       expect(() => parseMediaListFile('  \n \n'),
-          throwsA(isA<ListImportException>()));
-    });
-
-    test('rejects a file whose first line is an entry (missing name line)',
-        () {
-      expect(
-        () => parseMediaListFile('$_addrA Some Movie.mkv\n'
-            '$_addrB Other Movie.mkv\n'),
-        throwsA(isA<ListImportException>()),
-      );
-    });
-
-    test('rejects a file whose first line is a bare address', () {
-      expect(() => parseMediaListFile('$_addrA\n$_addrB Movie.mkv\n'),
           throwsA(isA<ListImportException>()));
     });
 
@@ -85,16 +63,17 @@ void main() {
     test('splits lists on ListName= markers, quotes optional', () {
       final parsed = parseMediaListFile(
         'ListName="TV Series"\n'
-        '$_addrA Some Show S01E01.mkv\n'
-        '$_addrB Some Show S01E02.mkv\n'
+        'Some Show S01E01.mkv.datamap\n'
+        'Some Show S01E02.mkv.datamap\n'
         'ListName=Movies\n'
-        '$_addrC Some Movie (2024).mkv\n',
+        'Some Movie (2024).mkv.datamap\n',
       );
       expect(parsed.lists, hasLength(2));
       expect(parsed.lists[0].title, 'TV Series');
-      expect(parsed.lists[0].entries, hasLength(2));
+      expect(parsed.lists[0].datamapRefs, hasLength(2));
       expect(parsed.lists[1].title, 'Movies');
-      expect(parsed.lists[1].entries.single.address, _addrC);
+      expect(parsed.lists[1].datamapRefs,
+          ['Some Movie (2024).mkv.datamap']);
       expect(parsed.skippedLines, isEmpty);
       expect(parsed.entryCount, 3);
     });
@@ -102,7 +81,7 @@ void main() {
     test('marker keyword is case-insensitive and tolerates spacing', () {
       final parsed = parseMediaListFile(
         '  listname = "Late Night"  \n'
-        '$_addrA A Movie.mkv\n',
+        'A Movie.mkv.datamap\n',
       );
       expect(parsed.lists.single.title, 'Late Night');
     });
@@ -110,9 +89,9 @@ void main() {
     test('a legacy header file can append marker sections', () {
       final parsed = parseMediaListFile(
         'My Movies\n'
-        '$_addrA First.mkv\n'
+        'First.mkv.datamap\n'
         'ListName="TV Series"\n'
-        '$_addrB Pilot.mkv\n',
+        'Pilot.mkv.datamap\n',
       );
       expect(parsed.lists, hasLength(2));
       expect(parsed.lists[0].title, 'My Movies');
@@ -122,26 +101,26 @@ void main() {
     test('repeated list names in one file are folded together', () {
       final parsed = parseMediaListFile(
         'ListName="Movies"\n'
-        '$_addrA First.mkv\n'
+        'First.mkv.datamap\n'
         'ListName="TV Series"\n'
-        '$_addrB Pilot.mkv\n'
+        'Pilot.mkv.datamap\n'
         'ListName="movies"\n'
-        '$_addrC Second.mkv\n',
+        'Second.mkv.datamap\n',
       );
       expect(parsed.lists, hasLength(2));
       expect(parsed.lists[0].title, 'Movies');
-      expect(parsed.lists[0].entries, hasLength(2));
-      expect(parsed.lists[0].entries[1].address, _addrC);
+      expect(parsed.lists[0].datamapRefs,
+          ['First.mkv.datamap', 'Second.mkv.datamap']);
     });
 
     test('a marker with an empty name is skipped and reported', () {
       final parsed = parseMediaListFile(
         'ListName="Movies"\n'
-        '$_addrA First.mkv\n'
+        'First.mkv.datamap\n'
         'ListName=""\n'
-        '$_addrB Second.mkv\n',
+        'Second.mkv.datamap\n',
       );
-      expect(parsed.lists.single.entries, hasLength(2));
+      expect(parsed.lists.single.datamapRefs, hasLength(2));
       expect(parsed.skippedLines, [3]);
     });
 
@@ -149,7 +128,7 @@ void main() {
       final parsed = parseMediaListFile(
         'ListName="Empty"\n'
         'ListName="Movies"\n'
-        '$_addrA First.mkv\n',
+        'First.mkv.datamap\n',
       );
       expect(parsed.lists.single.title, 'Movies');
     });
@@ -164,6 +143,48 @@ void main() {
 
   test('list-file cap is 10MB', () {
     expect(kMaxListFileBytes, 10 * 1024 * 1024);
+  });
+
+  group('parseMediaListFile (v1 hex lines no longer import)', () {
+    test('hex lines are skipped, member lines still parse', () {
+      final parsed = parseMediaListFile(
+        'ListName="Mixed"\n'
+        '$_addrA Old Movie (1968).mp4\n'
+        'New Movie (2024).mkv.datamap\n',
+      );
+      final list = parsed.lists.single;
+      expect(list.entries, isEmpty);
+      expect(list.datamapRefs, ['New Movie (2024).mkv.datamap']);
+      expect(parsed.skippedLines, [2]);
+      expect(parsed.entryCount, 1);
+    });
+
+    test('an all-v1 file throws the re-export error', () {
+      expect(
+        () => parseMediaListFile('My Movies\n'
+            '$_addrA Some Movie (2024) [1080p].mkv\n'
+            '$_addrB Another Movie (1999).mp4\n'),
+        throwsA(isA<ListImportException>().having(
+            (e) => e.message, 'message', contains('Re-export'))),
+      );
+    });
+
+    test('a file starting with a hex entry throws the re-export error', () {
+      expect(
+        () => parseMediaListFile('$_addrA Some Movie.mkv\n'
+            '$_addrB Other Movie.mkv\n'),
+        throwsA(isA<ListImportException>().having(
+            (e) => e.message, 'message', contains('Re-export'))),
+      );
+    });
+
+    test('a bare address first line throws the re-export error', () {
+      expect(
+        () => parseMediaListFile('$_addrA\n$_addrB Movie.mkv\n'),
+        throwsA(isA<ListImportException>().having(
+            (e) => e.message, 'message', contains('Re-export'))),
+      );
+    });
   });
 
   group('parseMediaListFile (v2 .datamap member lines)', () {
@@ -183,21 +204,7 @@ void main() {
       expect(parsed.lists[0].entries, isEmpty);
       expect(parsed.lists[1].datamapRefs,
           ['Some Movie (2024) [2160p].mp4.datamap']);
-      expect(parsed.hasLegacyEntries, isFalse);
       expect(parsed.entryCount, 3);
-    });
-
-    test('v1 hex lines and v2 member lines coexist; legacy flagged', () {
-      final parsed = parseMediaListFile(
-        'ListName="Mixed"\n'
-        '$_addrA Old Movie (1968).mp4\n'
-        'New Movie (2024).mkv.datamap\n',
-      );
-      final list = parsed.lists.single;
-      expect(list.entries.single.address, _addrA);
-      expect(list.datamapRefs, ['New Movie (2024).mkv.datamap']);
-      expect(parsed.hasLegacyEntries, isTrue);
-      expect(parsed.entryCount, 2);
     });
 
     test('a bare .datamap suffix with nothing before it is skipped', () {
@@ -217,73 +224,6 @@ void main() {
         'A.mkv.datamap\n',
       );
       expect(parsed.lists.single.title, 'Only Refs');
-    });
-  });
-
-  group('fetchListFromNetwork', () {
-    late HttpServer server;
-    late String base;
-
-    setUp(() async {
-      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      base = 'http://127.0.0.1:${server.port}';
-      server.listen((req) async {
-        // The datamap-first /xor route is local-store-only, so the
-        // fetch helper resolves the address over the network first.
-        if (req.uri.path == '/resolve/$_addrA' ||
-            req.uri.path == '/resolve/$_addrB') {
-          req.response.write('{"size": 1, "chunks": 1}');
-        } else if (req.uri.path.startsWith('/resolve/')) {
-          req.response.statusCode = HttpStatus.badGateway;
-        } else if (req.uri.path == '/xor/$_addrA') {
-          req.response.write('List From Net\n$_addrB A Movie.mkv\n');
-        } else if (req.uri.path == '/xor/$_addrB') {
-          // Oversized (>10MB) response, no Content-Length up front.
-          req.response.bufferOutput = false;
-          final chunk = List<int>.filled(1024 * 1024, 0x61);
-          for (var i = 0; i < 12; i++) {
-            req.response.add(chunk);
-            try {
-              await req.response.flush();
-            } catch (_) {
-              break; // Client hung up after hitting its size cap.
-            }
-          }
-        } else {
-          req.response.statusCode = HttpStatus.notFound;
-        }
-        try {
-          await req.response.close();
-        } catch (_) {}
-      });
-    });
-
-    tearDown(() => server.close(force: true));
-
-    test('downloads and returns the list text', () async {
-      final text = await fetchListFromNetwork('0x$_addrA', base: base);
-      final parsed = parseMediaListFile(text);
-      expect(parsed.lists.single.title, 'List From Net');
-      expect(parsed.lists.single.entries.single.address, _addrB);
-    });
-
-    test('rejects an invalid address without touching the network', () {
-      expect(() => fetchListFromNetwork('nope', base: base),
-          throwsA(isA<ListImportException>()));
-    });
-
-    test('surfaces HTTP errors', () {
-      expect(
-        () => fetchListFromNetwork(
-            'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
-            base: base),
-        throwsA(isA<ListImportException>()),
-      );
-    });
-
-    test('refuses files larger than the list-file cap', () {
-      expect(() => fetchListFromNetwork(_addrB, base: base),
-          throwsA(isA<ListImportException>()));
     });
   });
 }

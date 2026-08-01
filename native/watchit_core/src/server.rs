@@ -95,16 +95,17 @@ async fn reconnect(engine: &'static Engine) -> Response {
     health(engine).await
 }
 
-/// Resolve (and persist) the root data map for an address without
-/// streaming any content — the prefetch path. Second-ever play of the
-/// title then skips resolution entirely, even across app restarts.
+/// Size/chunk-count of a locally stored root map (the download manager's
+/// pre-fill probe). Local only — the network map fetch was deleted with
+/// the datamap-first cleanup (docs/PLAN-datamap-privacy.md release 3);
+/// an address whose map was never imported is 404, not resolvable.
 async fn resolve_map(engine: &'static Engine, Path(addr_hex): Path<String>) -> Response {
     let mut addr = [0u8; 32];
     if hex::decode_to_slice(addr_hex.trim(), &mut addr).is_err() {
         return (StatusCode::BAD_REQUEST, "address must be 64 hex chars").into_response();
     }
-    match engine.root_map(addr).await {
-        Ok(root) => {
+    match engine.stored_root_map(&addr) {
+        Some(root) => {
             let body = serde_json::json!({
                 "size": root.original_file_size() as u64,
                 "chunks": root.len(),
@@ -112,10 +113,11 @@ async fn resolve_map(engine: &'static Engine, Path(addr_hex): Path<String>) -> R
             ([(header::CONTENT_TYPE, "application/json")], body.to_string())
                 .into_response()
         }
-        Err(e) => {
-            tracing::warn!("resolve {addr_hex}: {e}");
-            (StatusCode::BAD_GATEWAY, e).into_response()
-        }
+        None => (
+            StatusCode::NOT_FOUND,
+            "data map missing — re-import the list or bundle",
+        )
+            .into_response(),
     }
 }
 
@@ -240,12 +242,10 @@ async fn serve_xor(
         return (StatusCode::BAD_REQUEST, "address must be 64 hex chars").into_response();
     }
 
-    // Local maps only — every entry's map arrives at import time (or via
-    // the one-time upgrade migration), so a miss here is a broken entry,
-    // not a resolvable one. Fast-fail beats the old doomed 20-30s network
-    // resolve. Import flows that legitimately need a network resolve
-    // (bundle download by address, v1 conversion, migration) call
-    // `GET /resolve/{addr}` first.
+    // Local maps only — every entry's map arrives at import time, so a
+    // miss here is a broken entry, not a resolvable one. Fast-fail beats
+    // the old doomed 20-30s network resolve (the network fetch path no
+    // longer exists anywhere in the crate).
     let root = match engine.stored_root_map(&addr) {
         Some(dm) => dm,
         None => {

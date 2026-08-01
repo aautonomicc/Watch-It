@@ -87,9 +87,9 @@ unchanged.
   ability to watch, and publishing one at a public address re-leaks every
   title (privacy is transitive). Future publish/subscribe features must
   default private.
-- An entry whose map is missing locally (interrupted upgrade migration)
-  cannot play — the stream path fast-fails with a "re-import" message
-  rather than attempting a network resolve.
+- An entry whose map is missing locally cannot play — the stream path
+  fast-fails with a "re-import" message rather than attempting a network
+  resolve (no such resolve exists anymore).
 - On add, the **metadata matcher** parses the file name (title/year, `SxxEyy`) and
   queries TMDB for artwork, overview, and genre/category — exactly the pipeline
   Plex/Emby/Jellyfin servers run, but on-device. Results cached in SQLite; entries
@@ -116,10 +116,10 @@ Two layers of caching keep streaming fast:
   maps arrive **at import time** (`POST /datamap` derives the address
   offline and stores the map; `GET /datamap/{addr}` exports ant-cli-
   compatible bytes), and the `/xor` stream path serves locally stored maps
-  only — no cold first-play resolve exists anymore. `GET /resolve/{addr}`
-  (network fetch + persist) survives solely for v1-bundle conversion, the
-  one-time upgrade migration, and bundle-download by address; it is
-  scheduled for deletion (ROADMAP.md, datamap-first release 3).
+  only — no cold first-play resolve exists anymore. Since alpha.41 the
+  crate has no network map fetch at all (`data_map_fetch` deleted);
+  `GET /resolve/{addr}` remains as a local-store `{size, chunks}` lookup
+  for the download manager's size pre-fill.
 
 ### Downloads / offline
 
@@ -189,8 +189,7 @@ Watch-It/
 │   │   ├── db/                # drift database (lists, metadata cache)
 │   │   ├── services/          # embedded client FFI, library store, metadata
 │   │   │                      #   matcher, TMDB client, datamap/bundle
-│   │   │                      #   import/export, migration, downloads,
-│   │   │                      #   connectivity
+│   │   │                      #   import/export, downloads, connectivity
 │   │   ├── screens/           # home wall, show/season/detail, player,
 │   │   │                      #   media lists, settings
 │   │   ├── widgets/           # shared UI (detail header, …)

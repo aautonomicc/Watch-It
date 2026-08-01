@@ -1,31 +1,22 @@
-import 'dart:convert';
-import 'dart:typed_data';
-
-import 'package:http/http.dart' as http;
-
 import '../models/media_list.dart';
-import 'embedded_client.dart';
 
 /// Parser for the `list.txt` inside a `.watch-list` bundle (spec:
 /// docs/BUNDLE-FORMAT.md). `ListName="..."` markers split lists (quotes
-/// optional, case-insensitive); entry lines come in two forms:
+/// optional, case-insensitive); an entry line ends in `.datamap` and
+/// names a bundle member — the entry's address is derived from that
+/// member at import:
 ///
-/// - v2 (current): a line ending in `.datamap`, naming a bundle member —
-///   the entry's address is derived from that member at import:
+/// ```
+/// ListName="TV Series"
+/// Some Show S01E01 (2023) [1080p].mkv.datamap
+/// ListName="Movies"
+/// Some Movie (2024) [2160p].mp4.datamap
+/// ```
 ///
-///   ```
-///   ListName="TV Series"
-///   Some Show S01E01 (2023) [1080p].mkv.datamap
-///   ListName="Movies"
-///   Some Movie (2024) [2160p].mp4.datamap
-///   ```
-///
-/// - v1 (legacy, read-only): `<64-hex address> <file name>` — a v2
-///   exporter never writes these; finding one marks the bundle as v1 and
-///   the importer converts the entry at the border (its map comes from a
-///   `rootmaps/` member or one import-time network fetch). Public
-///   address == derived address, so the converted entry is identical to
-///   a native one.
+/// v1 `<64-hex address> <file name>` lines no longer import (the
+/// network map fetch they needed was deleted with release 3 of the
+/// datamap-first plan) — they are skipped, and a file containing only
+/// such lines gets a "re-export from a newer Watch-It" error.
 ///
 /// A bare first line is honoured as a single-list header (legacy files),
 /// and `ListName=` markers may follow it.
@@ -52,8 +43,9 @@ class ParsedMediaList {
 
   final String title;
 
-  /// v1 hex-address entries — a bundle importer converts these at the
-  /// border (never imported as-is).
+  /// Final imported entries — filled by the bundle importer when it
+  /// resolves [datamapRefs] against the bundle members (the list.txt
+  /// parser itself never produces any).
   final List<MediaEntry> entries;
 
   /// v2 entry lines: `.datamap` member file names, resolved against the
@@ -75,12 +67,6 @@ class ParsedMediaListFile {
   /// 1-based numbers of non-empty lines that were not valid entry lines
   /// (reported, not fatal).
   final List<int> skippedLines;
-
-  /// True when any section carries a v1 `<64-hex address>` line — the
-  /// bundle predates the datamap-first format and needs border
-  /// conversion.
-  bool get hasLegacyEntries =>
-      lists.any((list) => list.entries.isNotEmpty);
 
   int get entryCount => lists.fold(
       0,
@@ -115,6 +101,7 @@ ParsedMediaListFile parseMediaListFile(String content) {
   final sections = <ParsedMediaList>[];
   final byLowerTitle = <String, ParsedMediaList>{};
   final skipped = <int>[];
+  var sawLegacyLine = false;
   ParsedMediaList? current;
 
   void startList(String title) {
@@ -141,21 +128,17 @@ ParsedMediaListFile parseMediaListFile(String content) {
       startList(marker);
       continue;
     }
-    // v1 legacy entry: `<64-hex address> <file name>`. Checked before the
+    // v1 legacy entry: `<64-hex address> <file name>`. No longer
+    // importable (border conversion needed a network map fetch, deleted
+    // in release 3) — skipped, but remembered so an all-v1 file gets a
+    // pointed error instead of a generic one. Checked before the
     // `.datamap` suffix so a hex line can never be misread as a member
     // reference.
     final match = RegExp(r'^(\S+)\s+(.+)$').firstMatch(line);
     final address = match?.group(1) ?? '';
     if (match != null && looksLikeXorAddress(address)) {
-      if (current == null) {
-        throw const ListImportException(
-            'The first line must be the list name, but this file starts '
-            'with a media entry.');
-      }
-      current!.entries.add(MediaEntry(
-        name: match.group(2)!.trim(),
-        address: address.toLowerCase().replaceFirst('0x', ''),
-      ));
+      sawLegacyLine = true;
+      skipped.add(i + 1);
       continue;
     }
     // v2 entry: a `.datamap` member file name.
@@ -175,9 +158,9 @@ ParsedMediaListFile parseMediaListFile(String content) {
       final firstWord =
           RegExp(r'^(\S+)').firstMatch(line)?.group(1) ?? '';
       if (looksLikeXorAddress(firstWord)) {
-        throw const ListImportException(
-            'The first line must be the list name, but this file starts '
-            'with a media entry.');
+        sawLegacyLine = true;
+        skipped.add(i + 1);
+        continue;
       }
       startList(line);
     } else {
@@ -190,6 +173,12 @@ ParsedMediaListFile parseMediaListFile(String content) {
           section.entries.isNotEmpty || section.datamapRefs.isNotEmpty)
       .toList();
   if (lists.isEmpty) {
+    if (sawLegacyLine) {
+      throw const ListImportException(
+          'This list uses the old public-address format, which can no '
+          'longer be imported. Re-export it as a bundle from Watch-It '
+          '0.1.0-alpha.40 or later.');
+    }
     throw const ListImportException(
         'No entries found below the list name — expected '
         '"<file name>.datamap" lines.');
@@ -200,76 +189,3 @@ ParsedMediaListFile parseMediaListFile(String content) {
 /// Anything bigger than this is not a hand-written media list — refuse
 /// early instead of pulling a movie into memory.
 const int kMaxListFileBytes = 10 * 1024 * 1024;
-
-/// Download a list (or bundle) file from Autonomi via the embedded
-/// client and return its raw bytes — the caller sniffs zip-vs-text and
-/// applies the tighter plain-text cap. [maxBytes] bounds the download
-/// ([kMaxListFileBytes] for plain lists, the bundle cap for imports that
-/// may be a `.watch-list`). [base] overrides the embedded server URL
-/// (tests).
-Future<Uint8List> fetchBytesFromNetwork(
-  String address, {
-  String? base,
-  int maxBytes = kMaxListFileBytes,
-}) async {
-  base ??= EmbeddedClient.baseUrl();
-  if (base == null) {
-    throw const ListImportException(
-        'The network client is not available on this platform.');
-  }
-  final addr = address.trim().toLowerCase().replaceFirst('0x', '');
-  if (!looksLikeXorAddress(addr)) {
-    throw const ListImportException(
-        'That is not a valid address (expected 64 hex characters).');
-  }
-  final client = http.Client();
-  try {
-    // `/xor` streams from locally stored maps only (datamap-first model);
-    // a shared bundle address is not in any list, so resolve its map over
-    // the network first. This is one of the few remaining network-resolve
-    // call sites (see docs/PLAN-datamap-privacy.md deprecation window).
-    final resolve =
-        await client.get(Uri.parse('$base/resolve/$addr'));
-    if (resolve.statusCode != 200) {
-      throw ListImportException(
-          'Could not find that address on the network '
-          '(HTTP ${resolve.statusCode}).');
-    }
-    final res = await client
-        .send(http.Request('GET', Uri.parse('$base/xor/$addr')));
-    if (res.statusCode != 200) {
-      throw ListImportException(
-          'Download failed (HTTP ${res.statusCode}).');
-    }
-    if ((res.contentLength ?? 0) > maxBytes) {
-      throw const ListImportException(
-          'That file is too large to be a media list.');
-    }
-    final bytes = BytesBuilder(copy: false);
-    await for (final chunk in res.stream) {
-      bytes.add(chunk);
-      if (bytes.length > maxBytes) {
-        throw const ListImportException(
-            'That file is too large to be a media list.');
-      }
-    }
-    return bytes.takeBytes();
-  } on ListImportException {
-    rethrow;
-  } catch (e) {
-    throw ListImportException('Download failed: $e');
-  } finally {
-    client.close();
-  }
-}
-
-/// Download a plain-text list file and return its text (pre-bundle API,
-/// still used by tests and anything that wants text only).
-Future<String> fetchListFromNetwork(String address, {String? base}) async {
-  final bytes = await fetchBytesFromNetwork(address, base: base);
-  try {
-    return utf8.decode(bytes);
-  } on FormatException {
-    throw const ListImportException('That file is not a text file.');
-  }
-}
