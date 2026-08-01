@@ -1,6 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'home_sections.dart';
+import 'library_arrangement.dart';
 
 /// App-wide user preferences (playback tuning etc.), separate from the
 /// media library which lives in [LibraryStore].
@@ -101,6 +102,23 @@ class AppSettings {
   static Future<void> setHomeSections(List<HomeSection> sections) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_homeSectionsKey, encodeHomeSections(sections));
+  }
+
+  static const _libraryArrangementKey = 'library_arrangement_v1';
+
+  /// How the browsing surfaces arrange the library (Media Lists page).
+  /// Most callers go through [ArrangementStore.instance], which mirrors
+  /// this preference and notifies mounted surfaces on change.
+  static Future<LibraryArrangement> libraryArrangement() async {
+    final prefs = await SharedPreferences.getInstance();
+    final name = prefs.getString(_libraryArrangementKey);
+    return LibraryArrangement.values.asNameMap()[name] ??
+        LibraryArrangement.userLists;
+  }
+
+  static Future<void> setLibraryArrangement(LibraryArrangement value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_libraryArrangementKey, value.name);
   }
 
   static const _downloadNetworkKey = 'download_network_v1';

@@ -144,6 +144,7 @@ class MetadataService extends ChangeNotifier {
       airDate: row.airDate,
       stillFilePath: existingFile(row.stillFile),
       showPosterFilePath: existingFile(row.showPosterFile),
+      mediaType: row.mediaType,
     );
   }
 
@@ -237,6 +238,7 @@ class MetadataService extends ChangeNotifier {
         airDate: match.airDate,
         stillFilePath: still?.$2,
         showPosterFilePath: showPoster?.$2,
+        mediaType: match.mediaType,
       );
     } finally {
       // Only close clients we created — injected ones belong to the test.

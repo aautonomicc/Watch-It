@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart' show SharePlus, ShareParams;
 import '../models/media_list.dart';
 import '../services/bundle.dart';
 import '../services/datamap_import.dart';
+import '../services/library_arrangement.dart';
 import '../services/library_store.dart';
 import '../services/list_import.dart';
 import '../services/metadata_service.dart';
@@ -39,6 +40,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
   }
 
   Future<void> _reload() async {
+    await ArrangementStore.instance.ensureLoaded();
     final lists = await LibraryStore.load();
     if (mounted) setState(() => _lists = lists);
   }
@@ -935,6 +937,44 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           : ListView(
               padding: const EdgeInsets.only(bottom: 88),
               children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: ListenableBuilder(
+                    listenable: ArrangementStore.instance,
+                    builder: (context, _) =>
+                        SegmentedButton<LibraryArrangement>(
+                      style: SegmentedButton.styleFrom(
+                        foregroundColor: t.boneDim,
+                        selectedForegroundColor: t.ink,
+                        selectedBackgroundColor: t.accent,
+                        side: BorderSide(color: t.line),
+                        textStyle: const TextStyle(fontSize: 13),
+                      ),
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment(
+                          value: LibraryArrangement.userLists,
+                          label: Text('My lists'),
+                        ),
+                        ButtonSegment(
+                          value: LibraryArrangement.autoByType,
+                          label: Text('Auto by type'),
+                        ),
+                      ],
+                      selected: {ArrangementStore.instance.value},
+                      onSelectionChanged: (selection) =>
+                          ArrangementStore.instance.set(selection.single),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: Text(
+                    'Auto arranges browsing into Movies and TV Shows; '
+                    'your lists are kept unchanged.',
+                    style: TextStyle(fontSize: 11.5, color: t.ash),
+                  ),
+                ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                   child: Text(

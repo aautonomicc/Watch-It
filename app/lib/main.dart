@@ -16,6 +16,7 @@ import 'services/download_manager.dart';
 import 'services/embedded_client.dart';
 import 'services/home_rows.dart';
 import 'services/home_sections.dart';
+import 'services/library_arrangement.dart';
 import 'services/library_store.dart';
 import 'services/metadata.dart';
 import 'services/metadata_service.dart';
@@ -27,7 +28,9 @@ import 'theme/tokens.dart';
 import 'widgets/brand_mark.dart';
 import 'widgets/download_badge.dart';
 import 'widgets/downloads_indicator.dart';
+import 'widgets/library_drawer.dart';
 import 'widgets/messenger.dart';
+import 'widgets/poster_cards.dart';
 import 'widgets/tmdb_nudge.dart';
 import 'widgets/watch_progress.dart';
 
@@ -138,6 +141,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _reload() async {
     await LibraryStore.ensureDefaults();
+    // The wall reads the arrangement inside its ListenableBuilder; make
+    // sure the persisted choice is in before the first build settles.
+    await ArrangementStore.instance.ensureLoaded();
     final lists = await LibraryStore.load();
     final continueRow = await continueWatching(lists);
     // Re-checked on every reload so the banner disappears as soon as a
@@ -214,6 +220,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _scaffold(WiTokens t, List<MediaList> visible) {
     return Scaffold(
+      // Left drawer for hopping straight to a list's page; Flutter puts
+      // the hamburger in `leading`, the brand lockup stays in `title`.
+      drawer: const WiLibraryDrawer(),
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
@@ -265,8 +274,11 @@ class _HomeScreenState extends State<HomeScreen> {
     // Poster cards upgrade in place as TMDB matches land in the cache,
     // and re-badge as downloads progress.
     return ListenableBuilder(
-      listenable: Listenable.merge(
-          [MetadataService.instance, DownloadManager.instance]),
+      listenable: Listenable.merge([
+        MetadataService.instance,
+        DownloadManager.instance,
+        ArrangementStore.instance,
+      ]),
       builder: (context, _) => _posterWall(t, lists),
     );
   }
@@ -297,12 +309,12 @@ class _HomeScreenState extends State<HomeScreen> {
         itemCount: items.length,
         separatorBuilder: (_, _) => const SizedBox(width: 12),
         itemBuilder: (context, i) => switch (items[i]) {
-          HomeEntry(:final entry) => _PosterCard(
+          HomeEntry(:final entry) => PosterCard(
               entry: entry,
               tokens: t,
               onTap: () => _openEntry(entry),
             ),
-          HomeShow() && final group => _ShowCard(
+          HomeShow() && final group => ShowCard(
               group: group,
               tokens: t,
               onTap: () => _openShow(group),
@@ -325,24 +337,40 @@ class _HomeScreenState extends State<HomeScreen> {
     final sections = _sections.isNotEmpty
         ? _sections
         : reconcileHomeSections(const [], lists);
+    // Auto mode: the list-backed rows collapse into the two virtual
+    // Movies / TV Shows rows (fixed order) at the first list slot; the
+    // special rows keep their configured order and visibility. The
+    // home-layout reorder/visibility of list rows applies to user mode.
+    final auto = ArrangementStore.instance.isAuto;
+    var autoEmitted = false;
+    final children = <Widget>[];
+    for (final section in sections) {
+      if (section.isSpecial) {
+        if (!section.visible) continue;
+        children.addAll(switch (section.id) {
+          kSectionContinue => _continueSection(t),
+          kSectionDownloads => downloads.isEmpty
+              ? const <Widget>[]
+              : [_sectionTitle(t, 'Downloads'), _itemsRow(t, downloads)],
+          _ => _recent.isEmpty
+              ? const <Widget>[]
+              : [_sectionTitle(t, 'Recently Added'), _itemsRow(t, _recent)],
+        });
+      } else if (auto) {
+        if (autoEmitted) continue;
+        autoEmitted = true;
+        for (final list in autoLists(lists)) {
+          children.addAll(_listSection(t, list));
+        }
+      } else if (section.visible) {
+        // Sections whose list is hidden or was deleted after the last
+        // reconcile render nothing.
+        children.addAll(_listSection(t, listsById[section.listId]));
+      }
+    }
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      children: [
-        for (final section in sections)
-          if (section.visible)
-            ...switch (section.id) {
-              kSectionContinue => _continueSection(t),
-              kSectionDownloads => downloads.isEmpty
-                  ? const <Widget>[]
-                  : [_sectionTitle(t, 'Downloads'), _itemsRow(t, downloads)],
-              kSectionRecent => _recent.isEmpty
-                  ? const <Widget>[]
-                  : [_sectionTitle(t, 'Recently Added'), _itemsRow(t, _recent)],
-              // Sections whose list is hidden or was deleted after the
-              // last reconcile render nothing.
-              _ => _listSection(t, listsById[section.listId]),
-            },
-      ],
+      children: children,
     );
   }
 
@@ -469,64 +497,6 @@ class _NetworkStatusBarState extends State<NetworkStatusBar> {
   }
 }
 
-class _PosterCard extends StatelessWidget {
-  const _PosterCard({
-    required this.entry,
-    required this.tokens,
-    required this.onTap,
-  });
-
-  final MediaEntry entry;
-  final WiTokens tokens;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = tokens;
-    final meta = MetadataService.instance.metadataFor(entry);
-    final badge = entryDownloadBadge(t, entry);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
-      child: SizedBox(
-        width: 120,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: SizedBox(
-                width: 120,
-                height: 180,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    posterImage(meta, fit: BoxFit.cover) ??
-                        Container(
-                          color: t.ink2,
-                          child: Icon(Icons.movie_outlined,
-                              color: t.ash, size: 40),
-                        ),
-                    ?entryWatchBar(t, entry),
-                    ?badge,
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              meta.year != null ? '${meta.title} (${meta.year})' : meta.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.5, color: t.boneDim),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// Continue Watching card: the poster with a progress bar along its
 /// bottom edge for a partially watched file, or a "Next up" tag for the
 /// episode after a finished one. Tap opens the detail page (which offers
@@ -607,79 +577,6 @@ class _ContinueCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 10.5, color: t.ash),
               ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// A whole show folded into one wall card: the show's main poster with
-/// its name and season/episode counts underneath. Tap opens the show
-/// page, which lists the seasons.
-class _ShowCard extends StatelessWidget {
-  const _ShowCard({
-    required this.group,
-    required this.tokens,
-    required this.onTap,
-  });
-
-  final HomeShow group;
-  final WiTokens tokens;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = tokens;
-    // Any episode's match carries the show title and show artwork.
-    final meta = MetadataService.instance
-        .metadataFor(group.seasons.first.episodes.first);
-    final seasons = group.seasons.length;
-    final count = group.episodeCount;
-    final badge = groupDownloadBadge(
-        t, [for (final s in group.seasons) ...s.episodes]);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
-      child: SizedBox(
-        width: 120,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: SizedBox(
-                width: 120,
-                height: 180,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    showPosterImage(meta, fit: BoxFit.cover) ??
-                        Container(
-                          color: t.ink2,
-                          child: Icon(Icons.live_tv_outlined,
-                              color: t.ash, size: 40),
-                        ),
-                    ?badge,
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              meta.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.5, color: t.boneDim),
-            ),
-            Text(
-              seasons == 1
-                  ? 'Season ${group.seasons.single.season} · $count ep'
-                  : '$seasons seasons · $count ep',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10.5, color: t.ash),
-            ),
           ],
         ),
       ),
