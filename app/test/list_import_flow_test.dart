@@ -165,9 +165,8 @@ void main() {
       ]);
     });
 
-    testWidgets('a v1 bundle converts hex entries at the border: rootmaps '
-        'member offline, network resolve, or dropped', (tester) async {
-      fake.resolvable.add(_addrB);
+    testWidgets('a v1 bundle (hex entries only) is refused with the '
+        're-export pointer', (tester) async {
       FileSelectorPlatform.instance = _FakeFileSelector([
         XFile.fromData(
             _zipOf({
@@ -180,14 +179,11 @@ void main() {
             path: 'legacy.watch-list'),
       ]);
       await openMediaLists(tester);
+      final before = (await LibraryStore.load()).length;
       await importLocal(tester);
 
-      expect(find.textContaining('Imported "Legacy Pack"'), findsOneWidget);
-      expect(find.textContaining('1 legacy entry skipped'), findsOneWidget);
-      final list = (await LibraryStore.load())
-          .firstWhere((l) => l.title == 'Legacy Pack');
-      expect(list.entries.map((e) => e.address), [_addrA, _addrB]);
-      expect(fake.rootmapPuts[_addrA], [7, 7]);
+      expect(find.textContaining('Re-export'), findsOneWidget);
+      expect((await LibraryStore.load()).length, before);
     });
 
     testWidgets('a plain text list file is refused with a bundle pointer',

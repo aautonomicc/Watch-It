@@ -95,18 +95,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
               ),
             ]),
           ),
-          SimpleDialogOption(
-            onPressed: () => Navigator.of(context).pop('network'),
-            child: Row(children: [
-              Icon(Icons.cloud_download_outlined, color: t.accent, size: 20),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text('Download bundle from network\nBy its share '
-                    'address',
-                    style: TextStyle(color: t.bone, fontSize: 14)),
-              ),
-            ]),
-          ),
         ],
       ),
     );
@@ -115,8 +103,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         await _importDatamapFiles();
       case 'local':
         await _importFromLocalFile();
-      case 'network':
-        await _importFromNetwork();
     }
   }
 
@@ -211,33 +197,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     await _finishImportBytes(bytes, file.name);
   }
 
-  Future<void> _importFromNetwork() async {
-    final address = await promptForText(
-      context,
-      title: 'Download bundle',
-      hint: 'Share address of the bundle',
-    );
-    if (address == null || address.trim().isEmpty) return;
-    if (!mounted) return;
-    // Barrier while the file downloads; popped in the finally below.
-    unawaited(showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(child: CircularProgressIndicator()),
-    ));
-    Uint8List? bytes;
-    try {
-      bytes = await fetchBytesFromNetwork(address,
-          base: widget.importBase, maxBytes: kMaxBundleBytes);
-    } on ListImportException catch (e) {
-      _showError(e.message);
-    } finally {
-      if (mounted) Navigator.of(context, rootNavigator: true).pop();
-    }
-    // No file name: the default-list prompt asks instead.
-    if (bytes != null) await _finishImportBytes(bytes, null);
-  }
-
   /// Route picked/downloaded bytes: zip magic → bundle; a loose
   /// `.datamap` file still imports (the picker filter is advisory);
   /// anything else — including the removed plain-text list format — is
@@ -306,7 +265,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
 
     if (!mounted) return;
     final t = WiTokens.of(context);
-    final progress = ValueNotifier<(int, int)>((0, 0));
     unawaited(showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -319,15 +277,8 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
             children: [
               CircularProgressIndicator(color: t.accent),
               const SizedBox(height: 18),
-              ValueListenableBuilder(
-                valueListenable: progress,
-                builder: (context, (int, int) p, _) => Text(
-                  p.$2 == 0
-                      ? 'Importing…'
-                      : 'Converting legacy entries — ${p.$1} of ${p.$2}',
-                  style: TextStyle(fontSize: 13, color: t.boneDim),
-                ),
-              ),
+              Text('Importing…',
+                  style: TextStyle(fontSize: 13, color: t.boneDim)),
             ],
           ),
         ),
@@ -339,8 +290,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         bundle,
         base: widget.importBase,
         defaultListTitle: defaultTitle ?? 'Imported',
-        onConvertProgress: (current, total, _) =>
-            progress.value = (current, total),
       );
     } on ListImportException catch (e) {
       _showError(e.message);
@@ -360,10 +309,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         if (result.refsMissing > 0)
           '${result.refsMissing} listed ${result.refsMissing == 1 ? 'file' : 'files'} '
               'missing from the bundle',
-        if (result.convertFailed > 0)
-          '${result.convertFailed} legacy '
-              '${result.convertFailed == 1 ? 'entry' : 'entries'} skipped '
-              '(data map unavailable)',
         if (result.skippedLines.isNotEmpty)
           '${result.skippedLines.length} invalid '
               '${result.skippedLines.length == 1 ? 'line' : 'lines'} skipped',
