@@ -288,22 +288,33 @@ void main() {
   });
 
   group('Add .datamap files', () {
-    testWidgets('picked files become entries in the named list',
-        (tester) async {
-      FileSelectorPlatform.instance = _FakeFileSelector([
-        XFile.fromData(Uint8List.fromList([5]),
-            path: 'First Movie (2024).mkv.datamap'),
-        XFile.fromData(Uint8List.fromList([6]),
-            path: 'Second Movie (1999).mp4.datamap'),
-      ]);
-      await openMediaLists(tester);
+    List<XFile> twoDatamaps() => [
+          XFile.fromData(Uint8List.fromList([5]),
+              path: 'First Movie (2024).mkv.datamap'),
+          XFile.fromData(Uint8List.fromList([6]),
+              path: 'Second Movie (1999).mp4.datamap'),
+        ];
+
+    Future<void> pickDatamaps(WidgetTester tester) async {
       await tester.tap(find.byTooltip('Add to library'));
       await tester.pumpAndSettle();
       await tester.tap(find.textContaining('Add .datamap files'));
       await tester.pumpAndSettle();
+    }
 
-      // List-name prompt, prefilled "Imported".
-      expect(find.text('Add to which list?'), findsOneWidget);
+    // The screen behind the dialog shows the same titles and entry
+    // counts — scope finders to the dialog.
+    Finder inDialog(String text) => find.descendant(
+        of: find.byType(AlertDialog), matching: find.text(text));
+
+    testWidgets('empty library goes straight to the new-list prompt, '
+        'prefilled "Imported"', (tester) async {
+      FileSelectorPlatform.instance = _FakeFileSelector(twoDatamaps());
+      await openMediaLists(tester);
+      await pickDatamaps(tester);
+
+      expect(find.text('New media list'), findsOneWidget);
+      expect(find.text('Add to which lists?'), findsNothing);
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
@@ -318,6 +329,111 @@ void main() {
       ]);
     });
 
+    testWidgets('checking an existing list merges silently — no clash '
+        'dialog, duplicates skipped', (tester) async {
+      await LibraryStore.save([
+        MediaList(id: '1', title: 'Movies', entries: [
+          MediaEntry(
+              name: 'First Movie (2024).mkv',
+              address: FakeEmbeddedHttp.addrForByte(5)),
+        ]),
+      ]);
+      FileSelectorPlatform.instance = _FakeFileSelector(twoDatamaps());
+      await openMediaLists(tester);
+      await pickDatamaps(tester);
+
+      expect(find.text('Add to which lists?'), findsOneWidget);
+      expect(inDialog('1 entry'), findsOneWidget);
+      await tester.tap(inDialog('Movies'));
+      await tester.pump();
+      await tester.tap(find.text('Add'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('already exists'), findsNothing);
+      expect(find.textContaining('Merged into 1 existing list'),
+          findsOneWidget);
+      expect(find.textContaining('1 duplicate entry skipped'),
+          findsOneWidget);
+      final list = (await LibraryStore.load())
+          .firstWhere((l) => l.title == 'Movies');
+      expect(list.entries.map((e) => e.address), [
+        FakeEmbeddedHttp.addrForByte(5),
+        FakeEmbeddedHttp.addrForByte(6),
+      ]);
+    });
+
+    testWidgets('multi-select puts the entries in both lists',
+        (tester) async {
+      await LibraryStore.save([
+        MediaList(id: '1', title: 'Movies'),
+        MediaList(id: '2', title: 'Kids'),
+      ]);
+      FileSelectorPlatform.instance = _FakeFileSelector(twoDatamaps());
+      await openMediaLists(tester);
+      await pickDatamaps(tester);
+
+      await tester.tap(inDialog('Movies'));
+      await tester.pump();
+      await tester.tap(inDialog('Kids'));
+      await tester.pump();
+      await tester.tap(find.text('Add'));
+      await tester.pumpAndSettle();
+
+      final lists = await LibraryStore.load();
+      for (final title in ['Movies', 'Kids']) {
+        expect(
+            lists
+                .firstWhere((l) => l.title == title)
+                .entries
+                .map((e) => e.address),
+            [
+              FakeEmbeddedHttp.addrForByte(5),
+              FakeEmbeddedHttp.addrForByte(6),
+            ]);
+      }
+    });
+
+    testWidgets('"Create new list" adds a checked list saved only on '
+        'confirm', (tester) async {
+      await LibraryStore.save([MediaList(id: '1', title: 'Movies')]);
+      FileSelectorPlatform.instance = _FakeFileSelector(twoDatamaps());
+      await openMediaLists(tester);
+      await pickDatamaps(tester);
+
+      await tester.tap(find.text('Create new list'));
+      await tester.pumpAndSettle();
+      expect(find.text('New media list'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), 'Fresh');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Fresh'), findsOneWidget); // checked pseudo-row
+      await tester.tap(find.text('Add'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Imported "Fresh"'), findsOneWidget);
+      final lists = await LibraryStore.load();
+      expect(lists.firstWhere((l) => l.title == 'Fresh').entries,
+          hasLength(2));
+      expect(lists.firstWhere((l) => l.title == 'Movies').entries,
+          isEmpty);
+    });
+
+    testWidgets('cancelling the list picker imports nothing',
+        (tester) async {
+      await LibraryStore.save([MediaList(id: '1', title: 'Movies')]);
+      FileSelectorPlatform.instance = _FakeFileSelector(twoDatamaps());
+      await openMediaLists(tester);
+      await pickDatamaps(tester);
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      final lists = await LibraryStore.load();
+      expect(lists, hasLength(1));
+      expect(lists.single.entries, isEmpty);
+    });
+
     testWidgets('unreadable files are skipped and reported',
         (tester) async {
       FileSelectorPlatform.instance = _FakeFileSelector([
@@ -327,10 +443,8 @@ void main() {
             path: 'Bad.mkv.datamap'),
       ]);
       await openMediaLists(tester);
-      await tester.tap(find.byTooltip('Add to library'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.textContaining('Add .datamap files'));
-      await tester.pumpAndSettle();
+      await pickDatamaps(tester);
+      // Empty library → new-list prompt, prefilled "Imported".
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 

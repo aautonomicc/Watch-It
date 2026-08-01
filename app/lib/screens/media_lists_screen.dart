@@ -106,8 +106,8 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     }
   }
 
-  /// Multi-select `.datamap` picker → one entry per file, added to a
-  /// list the user names (existing titles merge via the clash dialog).
+  /// Multi-select `.datamap` picker → one entry per file, added to the
+  /// existing list(s) the user checks (or a list created on the spot).
   Future<void> _importDatamapFiles() async {
     final List<XFile> files;
     try {
@@ -119,13 +119,8 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       return;
     }
     if (files.isEmpty || !mounted) return;
-    final title = await promptForText(
-      context,
-      title: 'Add to which list?',
-      hint: 'List title',
-      initial: 'Imported',
-    );
-    if (title == null || title.trim().isEmpty) return;
+    final titles = await _pickTargetLists();
+    if (titles == null || titles.isEmpty) return;
     final named = <({String name, Uint8List bytes})>[];
     for (final file in files) {
       try {
@@ -134,15 +129,138 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         _showError('Could not read "${file.name}".');
       }
     }
-    await _importDatamaps(named, listTitle: title.trim());
+    await _importDatamaps(named, listTitles: titles);
   }
 
-  /// Import [files] as datamap entries into [listTitle]. Each file's
-  /// address is derived offline by the embedded client; unreadable files
-  /// are skipped and reported.
+  /// Checkbox picker over the existing lists — hidden ones included
+  /// (hidden ≠ deleted) — plus a "Create new list" button. Returns the
+  /// chosen titles, or null on cancel. New titles are only pseudo-rows
+  /// here; nothing is saved until the import confirms. An empty library
+  /// skips the checklist and goes straight to the new-list prompt.
+  Future<List<String>?> _pickTargetLists() async {
+    final existing = _lists ?? [];
+    if (existing.isEmpty) {
+      final title = await promptForText(
+        context,
+        title: 'New media list',
+        hint: 'List title',
+        initial: 'Imported',
+      );
+      final trimmed = title?.trim();
+      if (trimmed == null || trimmed.isEmpty) return null;
+      return [trimmed];
+    }
+    final t = WiTokens.of(context);
+    final rows = [
+      for (final l in existing) (title: l.title, count: l.entries.length),
+    ];
+    final checked = <String>{}; // lowercased titles
+    return showDialog<List<String>>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: t.ink2,
+          title: Text('Add to which lists?',
+              style: TextStyle(color: t.bone, fontSize: 16)),
+          contentPadding: const EdgeInsets.fromLTRB(8, 16, 8, 0),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      for (final row in rows)
+                        CheckboxListTile(
+                          value:
+                              checked.contains(row.title.toLowerCase()),
+                          activeColor: t.accent,
+                          checkColor: t.ink,
+                          controlAffinity:
+                              ListTileControlAffinity.leading,
+                          onChanged: (v) => setDialogState(() {
+                            final key = row.title.toLowerCase();
+                            v == true
+                                ? checked.add(key)
+                                : checked.remove(key);
+                          }),
+                          title: Text(row.title,
+                              style: TextStyle(
+                                  color: t.bone, fontSize: 14)),
+                          subtitle: Text(
+                              '${row.count} '
+                              '${row.count == 1 ? 'entry' : 'entries'}',
+                              style: TextStyle(
+                                  color: t.ash, fontSize: 11.5)),
+                        ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        final title = await promptForText(
+                          context,
+                          title: 'New media list',
+                          hint: 'List title',
+                        );
+                        final trimmed = title?.trim();
+                        if (trimmed == null || trimmed.isEmpty) return;
+                        setDialogState(() {
+                          // Duplicate of an existing or already-added
+                          // row → just check that row.
+                          if (!rows.any((r) =>
+                              r.title.toLowerCase() ==
+                              trimmed.toLowerCase())) {
+                            rows.add((title: trimmed, count: 0));
+                          }
+                          checked.add(trimmed.toLowerCase());
+                        });
+                      },
+                      child: Text('Create new list',
+                          style: TextStyle(color: t.bone)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('Cancel', style: TextStyle(color: t.ash)),
+            ),
+            TextButton(
+              onPressed: checked.isEmpty
+                  ? null
+                  : () => Navigator.of(context).pop([
+                        for (final row in rows)
+                          if (checked.contains(row.title.toLowerCase()))
+                            row.title,
+                      ]),
+              child: Text('Add',
+                  style: TextStyle(
+                      color: checked.isEmpty ? t.ash : t.accent)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Import [files] as datamap entries into every list in [listTitles].
+  /// Each file's address is derived offline by the embedded client;
+  /// unreadable files are skipped and reported. Titles the user checked
+  /// that already exist merge without the clash dialog — checking the
+  /// box already answered that question.
   Future<void> _importDatamaps(
     List<({String name, Uint8List bytes})> files, {
-    required String listTitle,
+    required List<String> listTitles,
   }) async {
     final entries = <MediaEntry>[];
     var failed = 0;
@@ -159,8 +277,19 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           '${failed > 0 ? ' ($failed unreadable)' : ''}.');
       return;
     }
+    final existing = {
+      for (final l in _lists ?? <MediaList>[]) l.title.toLowerCase()
+    };
     await _applyImportedLists(
-      [ParsedMediaList(title: listTitle, entries: entries)],
+      [
+        for (final title in listTitles)
+          ParsedMediaList(title: title, entries: entries),
+      ],
+      mergeExisting: {
+        for (final title in listTitles)
+          if (existing.contains(title.toLowerCase()))
+            title.toLowerCase(),
+      },
       extraNotes: [
         if (failed > 0)
           '$failed ${failed == 1 ? 'file' : 'files'} skipped (not a '
@@ -208,15 +337,10 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     }
     if (name != null && mediaNameFromDatamapFileName(name) != null) {
       if (!mounted) return;
-      final title = await promptForText(
-        context,
-        title: 'Add to which list?',
-        hint: 'List title',
-        initial: 'Imported',
-      );
-      if (title == null || title.trim().isEmpty) return;
+      final titles = await _pickTargetLists();
+      if (titles == null || titles.isEmpty) return;
       await _importDatamaps([(name: name, bytes: bytes)],
-          listTitle: title.trim());
+          listTitles: titles);
       return;
     }
     _showError('${name == null ? 'That file' : '"$name"'} is not a '
@@ -373,11 +497,13 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
 
   /// Merge freshly imported lists into the library (clash dialog per
   /// existing title), save, seed any bundle extras, and report what
-  /// happened in one snackbar.
+  /// happened in one snackbar. Titles in [mergeExisting] (lowercased)
+  /// merge without the dialog — the user already picked those lists.
   Future<void> _applyImportedLists(
     List<ParsedMediaList> parsed, {
     ParsedBundle? bundle,
     bool importHistory = true,
+    Set<String> mergeExisting = const {},
     List<String> extraNotes = const [],
   }) async {
     var lists = List<MediaList>.of(_lists ?? []);
@@ -401,7 +527,9 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         continue;
       }
       if (!mounted) return;
-      final action = await _resolveNameClash(list.title);
+      final action = mergeExisting.contains(list.title.toLowerCase())
+          ? 'merge'
+          : await _resolveNameClash(list.title);
       if (action == 'merge') {
         final existing = lists[i];
         final have = existing.entries.map((e) => e.address).toSet();
