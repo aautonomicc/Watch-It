@@ -89,8 +89,8 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
               Icon(Icons.folder_open, color: t.accent, size: 20),
               const SizedBox(width: 12),
               Expanded(
-                child: Text('Import .watch-list bundle\nLists with artwork '
-                    'and instant-play data',
+                child: Text('Import .watch-list bundle\nA file of .datamaps '
+                    '— may also contain lists, artwork and metadata',
                     style: TextStyle(color: t.bone, fontSize: 14)),
               ),
             ]),
