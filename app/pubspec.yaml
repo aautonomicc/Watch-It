@@ -91,6 +91,7 @@ flutter:
     - assets/rootmaps/
     - assets/tmdb_logo.png
     - assets/fonts/Anton-OFL.txt
+    - assets/licenses/gpl-3.0.txt
 
   # Wordmark only — the "W@tch" lockup uses Anton (SIL OFL, license bundled
   # above); all other UI text stays on system fonts per docs/BRAND.md.

@@ -108,4 +108,27 @@ Docs:
 
 ## License
 
-MIT
+W@tch's own source code is available under the **MIT License**
+(see [LICENSE](LICENSE)).
+
+The binaries we release (APK, AppImage) are a different matter: they
+statically link the Autonomi network's
+[self_encryption](https://crates.io/crates/self_encryption) crate, which is
+**GPL-3.0**. That makes each released binary a combined work distributed
+under the terms of the **GNU General Public License v3** — full text in
+[COPYING.GPL-3.0](COPYING.GPL-3.0); the complete corresponding source is
+this repository at the release tag. Every other bundled component is under
+a permissive license (MIT / Apache-2.0 / BSD / CC0 / OFL) or a
+GPLv3-compatible one (libmpv / FFmpeg). The full set of notices ships
+inside the app: **Settings → About → Open-source licenses**.
+
+In short: take the *source* under MIT; redistribute the *binaries* under
+GPLv3.
+
+### Demo movie
+
+The bundled demo, *Night of the Living Dead* (1968), is in the public
+domain **in the United States** (it was released without a copyright
+notice). Copyright terms differ elsewhere — in much of Europe protection
+runs for 70 years after the death of the last author — so outside the US,
+check your local rules before treating it as free.
