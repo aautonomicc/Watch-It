@@ -454,7 +454,8 @@ class _HomeScreenState extends State<HomeScreen> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(
-            'Empty list — add entries in Settings.',
+            'Empty list — fill it with "Add to library" in '
+            'Settings → Media.',
             style: TextStyle(fontSize: 12, color: t.ash),
           ),
         )
@@ -659,7 +660,7 @@ class _EmptyState extends StatelessWidget {
     final (title, hint) = switch (variant) {
       _EmptyVariant.empty => (
           'Your library is empty',
-          'Create a media list in Settings to get started.',
+          'Use "Add to library" in Settings → Media to get started.',
         ),
       _EmptyVariant.allHidden => (
           'All your lists are hidden',
