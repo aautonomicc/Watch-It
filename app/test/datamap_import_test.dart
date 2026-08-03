@@ -27,6 +27,18 @@ void main() {
     });
   });
 
+  group('isBundleDatamapName', () {
+    test('matches only the .watch-list.datamap double suffix', () {
+      expect(isBundleDatamapName('My Films.watch-list.datamap'), isTrue);
+      expect(isBundleDatamapName('/tmp/LIB.WATCH-LIST.DATAMAP'), isTrue);
+      // A plain media datamap, a bundle without a map suffix, and a
+      // renamed map all fall through to the other import routes.
+      expect(isBundleDatamapName('Movie (2020).mkv.datamap'), isFalse);
+      expect(isBundleDatamapName('My Films.watch-list'), isFalse);
+      expect(isBundleDatamapName('.datamap'), isFalse);
+    });
+  });
+
   group('importDatamapBytes / entryFromDatamapFile', () {
     late HttpServer server;
     late String base;

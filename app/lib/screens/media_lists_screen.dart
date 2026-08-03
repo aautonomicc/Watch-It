@@ -64,6 +64,8 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
   /// Add media to the library through one multi-select picker — the app
   /// works out what each picked file is instead of asking up front: zip
   /// content is a `.watch-list` bundle (extension never trusted), a
+  /// `<name>.watch-list.datamap` file is the map of a bundle stored on
+  /// the network (fetched, then imported like a local one), any other
   /// `<media file name>.datamap` file (private `ant file upload` output)
   /// becomes an entry, and anything else is skipped with a note. Mixed
   /// picks work; bundles import one by one, loose datamaps as one batch
@@ -83,6 +85,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     if (files.isEmpty || !mounted) return;
 
     final bundles = <({String name, Uint8List bytes})>[];
+    final netBundles = <({String name, Uint8List bytes})>[];
     final datamaps = <({String name, Uint8List bytes})>[];
     final skipped = <String>[];
     for (final file in files) {
@@ -106,6 +109,8 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         skipped.add(file.name);
       } else if (looksLikeZip(bytes)) {
         bundles.add((name: file.name, bytes: bytes));
+      } else if (isBundleDatamapName(file.name)) {
+        netBundles.add((name: file.name, bytes: bytes));
       } else if (mediaNameFromDatamapFileName(file.name) != null) {
         datamaps.add((name: file.name, bytes: bytes));
       } else {
@@ -113,7 +118,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       }
     }
 
-    if (bundles.isEmpty && datamaps.isEmpty) {
+    if (bundles.isEmpty && netBundles.isEmpty && datamaps.isEmpty) {
       if (skipped.isNotEmpty) {
         _showError(skipped.length == 1 && files.length == 1
             ? '"${skipped.single}" is not a .watch-list bundle or '
@@ -128,6 +133,10 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     for (final bundle in bundles) {
       if (!mounted) return;
       await _importBundle(bundle.bytes, fileName: bundle.name);
+    }
+    for (final bundle in netBundles) {
+      if (!mounted) return;
+      await _importNetworkBundle(bundle.name, bundle.bytes);
     }
     final skippedNotes = [
       if (skipped.isNotEmpty)
@@ -311,6 +320,74 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         ...extraNotes,
       ],
     );
+  }
+
+  /// A `<name>.watch-list.datamap` pick: download the bundle the map
+  /// points at through the embedded client (progress dialog with
+  /// Cancel), then run the normal bundle import under the bundle's own
+  /// file name — so its default list title and clash handling match a
+  /// local import of the same bundle.
+  Future<void> _importNetworkBundle(
+      String fileName, Uint8List datamapBytes) async {
+    final t = WiTokens.of(context);
+    var cancelled = false;
+    final progress = ValueNotifier<String>('Contacting the network…');
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Dialog(
+        backgroundColor: t.ink2,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: t.accent),
+              const SizedBox(height: 18),
+              Text('Fetching bundle…',
+                  style: TextStyle(fontSize: 13, color: t.boneDim)),
+              const SizedBox(height: 6),
+              ValueListenableBuilder<String>(
+                valueListenable: progress,
+                builder: (context, text, _) => Text(text,
+                    style: TextStyle(fontSize: 11.5, color: t.ash)),
+              ),
+              const SizedBox(height: 10),
+              TextButton(
+                onPressed: () => cancelled = true,
+                child: Text('Cancel', style: TextStyle(color: t.ash)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ));
+    String mb(int bytes) =>
+        (bytes / (1024 * 1024)).toStringAsFixed(1);
+    Uint8List? bytes;
+    try {
+      bytes = await fetchBundleByDatamap(
+        datamapBytes,
+        base: widget.importBase,
+        onProgress: (received, total) => progress.value =
+            '${mb(received)} of ${mb(total)} MB',
+        isCancelled: () => cancelled,
+      );
+    } on BundleFetchCancelled {
+      // User's choice — nothing to report.
+    } on ListImportException catch (e) {
+      _showError(e.message);
+    } finally {
+      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+    }
+    if (bytes == null || !mounted) return;
+    if (!looksLikeZip(bytes)) {
+      _showError('"$fileName" resolved, but the file it points at is '
+          'not a .watch-list bundle.');
+      return;
+    }
+    await _importBundle(bytes,
+        fileName: mediaNameFromDatamapFileName(fileName));
   }
 
   /// Full bundle import: parse, ask about history, then convert every

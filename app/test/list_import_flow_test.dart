@@ -528,6 +528,89 @@ void main() {
     });
   });
 
+  group('Network bundle (.watch-list.datamap)', () {
+    // The picked file is the data map OF a bundle stored on the network:
+    // POST /datamap derives its address, GET /xor/<addr> downloads the
+    // bundle bytes, then the normal bundle import runs.
+    testWidgets('fetches the bundle and imports it under the bundle '
+        'file name', (tester) async {
+      fake.xorContent[FakeEmbeddedHttp.addrForByte(9)] =
+          _zipOf({'A Movie (2020).mkv.datamap': [3]});
+      FileSelectorPlatform.instance = _FakeFileSelector([
+        XFile.fromData(Uint8List.fromList([9]),
+            path: 'My Films.watch-list.datamap'),
+      ]);
+      await openMediaLists(tester);
+      await importLocal(tester);
+
+      expect(fake.requests,
+          contains('GET /xor/${FakeEmbeddedHttp.addrForByte(9)}'));
+      expect(find.textContaining('Imported "My Films"'), findsOneWidget);
+      final list = (await LibraryStore.load())
+          .firstWhere((l) => l.title == 'My Films');
+      expect(list.entries.single.address, FakeEmbeddedHttp.addrForByte(3));
+    });
+
+    testWidgets('a failed download reports and imports nothing',
+        (tester) async {
+      // No xorContent seeded → GET /xor 404s.
+      FileSelectorPlatform.instance = _FakeFileSelector([
+        XFile.fromData(Uint8List.fromList([9]),
+            path: 'My Films.watch-list.datamap'),
+      ]);
+      await openMediaLists(tester);
+      final before = (await LibraryStore.load()).length;
+      await importLocal(tester);
+      expect(find.textContaining('could not be downloaded'),
+          findsOneWidget);
+      expect((await LibraryStore.load()).length, before);
+    });
+
+    testWidgets('downloaded content that is not a zip is refused',
+        (tester) async {
+      fake.xorContent[FakeEmbeddedHttp.addrForByte(9)] =
+          utf8.encode('definitely not a bundle');
+      FileSelectorPlatform.instance = _FakeFileSelector([
+        XFile.fromData(Uint8List.fromList([9]),
+            path: 'My Films.watch-list.datamap'),
+      ]);
+      await openMediaLists(tester);
+      await importLocal(tester);
+      expect(find.textContaining('not a .watch-list bundle'),
+          findsOneWidget);
+    });
+
+    testWidgets('a datamap pointing at something too large to be a '
+        'bundle is refused before downloading', (tester) async {
+      fake.datamapSize = kMaxBundleBytes + 1;
+      FileSelectorPlatform.instance = _FakeFileSelector([
+        XFile.fromData(Uint8List.fromList([9]),
+            path: 'My Films.watch-list.datamap'),
+      ]);
+      await openMediaLists(tester);
+      await importLocal(tester);
+      expect(find.textContaining('too large to be a .watch-list bundle'),
+          findsOneWidget);
+      expect(
+          fake.requests
+              .where((r) => r.startsWith('GET /xor/'))
+              .isEmpty,
+          isTrue);
+    });
+
+    testWidgets('an unreadable datamap named .watch-list.datamap reports '
+        'the datamap error', (tester) async {
+      FileSelectorPlatform.instance = _FakeFileSelector([
+        XFile.fromData(Uint8List.fromList([0xBA, 0xD1]),
+            path: 'My Films.watch-list.datamap'),
+      ]);
+      await openMediaLists(tester);
+      await importLocal(tester);
+      expect(find.textContaining('could not be read as a data map'),
+          findsOneWidget);
+    });
+  });
+
   group('Import when the list name already exists', () {
     Future<void> importTwice(WidgetTester tester,
         {required String secondAction}) async {
