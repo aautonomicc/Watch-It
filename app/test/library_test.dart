@@ -578,39 +578,31 @@ void main() {
       expect(await AppSettings.bufferSizeMb(), 128);
     });
 
-    testWidgets('create a titled list, then open its edit page',
-        (tester) async {
+    testWidgets('lists are created at import time only — no New list '
+        'button, and the edit page has no add button', (tester) async {
+      await LibraryStore.save([
+        const MediaList(id: '9', title: 'My Films'),
+      ]);
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
 
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-
-      // Lists are managed on their own page now.
       await tester.tap(find.text('Media'));
       await tester.pumpAndSettle();
 
-      // Create list with a title.
-      await tester.tap(find.text('New list'));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField), 'My Films');
-      await tester.tap(find.text('Save'));
-      await tester.pumpAndSettle();
+      // Creating lists moved into the import flow ("Add to library" →
+      // "Create new list", covered in list_import_flow_test.dart).
+      expect(find.text('New list'), findsNothing);
       expect(find.text('My Films'), findsOneWidget);
       expect(find.text('0 entries'), findsOneWidget);
 
-      // Open it: entries are added from .datamap files now (the picker
-      // flow is covered in list_import_flow_test.dart); the empty state
-      // points there.
+      // The edit page only curates entries; its empty state points back
+      // at the Media page import.
       await tester.tap(find.text('My Films'));
       await tester.pumpAndSettle();
-      expect(find.text('Add .datamap files'), findsOneWidget);
-      expect(find.textContaining('ant file upload'), findsOneWidget);
-
-      // Persisted alongside the seeded Movies list.
-      final lists = await LibraryStore.load();
-      final mine = lists.singleWhere((l) => l.title == 'My Films');
-      expect(mine.entries, isEmpty);
+      expect(find.text('Add .datamap files'), findsNothing);
+      expect(find.textContaining('Add to library'), findsOneWidget);
     });
 
     testWidgets('home shows the list after returning from settings',
