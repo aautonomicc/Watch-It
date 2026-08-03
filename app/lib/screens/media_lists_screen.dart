@@ -17,8 +17,9 @@ import '../theme/tokens.dart';
 import 'list_edit_screen.dart';
 import 'settings_screen.dart' show promptForText;
 
-/// Manage media lists: create, show/hide on the home screen, open for
-/// editing, rename, delete.
+/// Manage media lists: show/hide on the home screen, open for editing,
+/// rename, delete. Lists are created inside the import flow ("Add to
+/// library" → "Create new list") — the one place media enters the app.
 class MediaListsScreen extends StatefulWidget {
   const MediaListsScreen({super.key, this.importBase});
 
@@ -42,22 +43,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
   Future<void> _reload() async {
     await ArrangementStore.instance.ensureLoaded();
     final lists = await LibraryStore.load();
-    if (mounted) setState(() => _lists = lists);
-  }
-
-  Future<void> _createList() async {
-    final title = await promptForText(
-      context,
-      title: 'New media list',
-      hint: 'List title',
-    );
-    if (title == null || title.trim().isEmpty) return;
-    final lists = List<MediaList>.of(_lists ?? []);
-    lists.add(MediaList(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
-      title: title.trim(),
-    ));
-    await LibraryStore.save(lists);
     if (mounted) setState(() => _lists = lists);
   }
 
@@ -976,13 +961,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _createList,
-        backgroundColor: t.accent,
-        foregroundColor: t.ink,
-        icon: const Icon(Icons.add),
-        label: const Text('New list'),
-      ),
       body: lists == null
           ? const Center(child: CircularProgressIndicator())
           // The whole list follows the segmented mode; virtual-list
@@ -994,7 +972,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
                 final auto = ArrangementStore.instance.isAuto;
                 final hidden = ArrangementStore.instance.hiddenAutoIds;
                 return ListView(
-                  padding: const EdgeInsets.only(bottom: 88),
+                  padding: const EdgeInsets.only(bottom: 24),
                   children: [
                     // Plain-English pointer at the point of import — the
                     // picker itself can't explain what it accepts.
@@ -1118,7 +1096,8 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         Padding(
           padding: const EdgeInsets.all(16),
           child: Text(
-            'No lists yet. Create one to start adding media.',
+            'No lists yet. Use "Add to library" above — it creates '
+            'lists as part of the import.',
             style: TextStyle(fontSize: 13, color: t.boneDim),
           ),
         ),
