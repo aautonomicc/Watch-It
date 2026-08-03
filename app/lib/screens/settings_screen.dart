@@ -633,6 +633,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 ListTile(
+                  leading: Icon(Icons.gavel_outlined, color: t.accent),
+                  title: Text('Open-source licenses',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    'W@tch code is MIT; the app as a whole is '
+                    'distributed under GPLv3',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  trailing: Icon(Icons.chevron_right, color: t.ash),
+                  onTap: () => showLicensePage(
+                    context: context,
+                    applicationName: 'W@tch',
+                    applicationVersion: _version,
+                  ),
+                ),
+                ListTile(
                   leading: Icon(Icons.sd_storage_outlined, color: t.accent),
                   title: Text('Size on disk',
                       style: TextStyle(color: t.bone, fontSize: 15)),

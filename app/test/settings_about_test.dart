@@ -6,10 +6,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:flutter/foundation.dart' show LicenseRegistry;
+
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/screens/settings_screen.dart';
 import 'package:watchit/services/bundle.dart' show kTmdbAttributionNotice;
 import 'package:watchit/services/library_store.dart';
+import 'package:watchit/services/licenses.dart';
 import 'package:watchit/services/storage_usage.dart';
 import 'package:watchit/theme/tokens.dart';
 
@@ -68,6 +71,48 @@ void main() {
           w.image is AssetImage &&
           (w.image as AssetImage).assetName == 'assets/tmdb_logo.png'),
       findsOneWidget,
+    );
+  });
+
+  testWidgets('About shows the open-source licenses tile and opens the '
+      'license page', (tester) async {
+    await pumpSettings(tester);
+    expect(find.text('Open-source licenses'), findsOneWidget);
+    expect(find.textContaining('distributed under GPLv3'), findsOneWidget);
+    await tester.tap(find.text('Open-source licenses'));
+    // No pumpAndSettle: the page's loading spinner animates forever until
+    // the license collectors finish, which they never do in fake-async.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(LicensePage), findsOneWidget);
+  });
+
+  testWidgets('registered native licenses carry the GPL text for '
+      'self_encryption plus the media and font notices', (tester) async {
+    registerNativeLicenses();
+    // runAsync: the collector loads the GPL/OFL texts from the asset
+    // bundle, which is real async I/O the fake-async zone would deadlock.
+    final entries = await tester.runAsync(
+        () => LicenseRegistry.licenses.toList());
+    final byPackage = {
+      for (final e in entries!)
+        for (final p in e.packages) p: e.paragraphs.toList(),
+    };
+    expect(byPackage, contains('self_encryption'));
+    expect(
+      byPackage['self_encryption']!
+          .any((p) => p.text.contains('GNU GENERAL PUBLIC LICENSE')),
+      isTrue,
+    );
+    expect(byPackage, contains('W@tch'));
+    expect(byPackage, contains('libmpv'));
+    expect(byPackage, contains('FFmpeg'));
+    expect(byPackage, contains('watchit_core Rust crates'));
+    expect(byPackage, contains('Anton font'));
+    expect(
+      byPackage['Anton font']!
+          .any((p) => p.text.contains('SIL OPEN FONT LICENSE')),
+      isTrue,
     );
   });
 
