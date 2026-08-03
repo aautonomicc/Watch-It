@@ -750,6 +750,18 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
                   style: TextStyle(color: t.boneDim, fontSize: 12.5),
                 ),
               ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                child: Text(
+                  'Send the bundle like any file, or store it on '
+                  'Autonomi: upload it with the ant app — ant file '
+                  'upload "$safe.watch-list" — and share the small '
+                  '.watch-list.datamap file that upload creates. Others '
+                  'import that file straight into W@tch (don\'t rename '
+                  'it).',
+                  style: TextStyle(color: t.boneDim, fontSize: 12.5),
+                ),
+              ),
               CheckboxListTile(
                 value: includeHistory,
                 activeColor: t.accent,
@@ -984,6 +996,20 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
                 return ListView(
                   padding: const EdgeInsets.only(bottom: 88),
                   children: [
+                    // Plain-English pointer at the point of import — the
+                    // picker itself can't explain what it accepts.
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                      child: Text(
+                        'Add to library (the download button above) takes '
+                        'any mix of: .datamap files made by uploading a '
+                        'video with the ant app, .watch-list bundles '
+                        'exported from W@tch, and a bundle\'s own '
+                        '.watch-list.datamap when the bundle is stored on '
+                        'Autonomi. The app works out which is which.',
+                        style: TextStyle(fontSize: 11.5, color: t.ash),
+                      ),
+                    ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                       child: SegmentedButton<LibraryArrangement>(
