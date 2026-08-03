@@ -680,4 +680,40 @@ void main() {
           hasLength(2));
     });
   });
+
+  group('Plain-English flow info', () {
+    testWidgets('Media page explains what Add to library accepts',
+        (tester) async {
+      await openMediaLists(tester);
+      final hint = tester.widget<Text>(find.textContaining(
+          'Add to library (the download button above) takes any mix'));
+      expect(hint.data, contains('.datamap files'));
+      expect(hint.data, contains('.watch-list bundles'));
+      expect(hint.data, contains('.watch-list.datamap'));
+    });
+
+    testWidgets('export dialog explains the ant upload share flow',
+        (tester) async {
+      await LibraryStore.save([
+        MediaList(id: '1', title: 'My Films', entries: [
+          MediaEntry(
+              name: 'First Movie (2024).mkv',
+              address: FakeEmbeddedHttp.addrForByte(5)),
+        ]),
+      ]);
+      await openMediaLists(tester);
+      await tester.tap(find.byTooltip('Export library'));
+      await tester.pumpAndSettle();
+
+      // Command is copy-ready with the actual export file name.
+      expect(
+          find.textContaining(
+              'ant file upload "W@tch library.watch-list"'),
+          findsOneWidget);
+      expect(find.textContaining('.watch-list.datamap file'),
+          findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+    });
+  });
 }
