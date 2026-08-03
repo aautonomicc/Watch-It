@@ -63,6 +63,7 @@ class _FakeEmbedded {
 
   final HttpServer server;
   final Map<String, List<int>> datamaps = {};
+  final Map<String, List<int>> xorContent = {};
 
   String get base => 'http://127.0.0.1:${server.port}';
 
@@ -95,6 +96,13 @@ class _FakeEmbedded {
           req.response.statusCode = 404;
         } else {
           req.response.add(map);
+        }
+      } else if (req.method == 'GET' && path.startsWith('/xor/')) {
+        final content = fake.xorContent[path.substring('/xor/'.length)];
+        if (content == null) {
+          req.response.statusCode = 404;
+        } else {
+          req.response.add(content);
         }
       } else {
         req.response.statusCode = 404;
@@ -396,6 +404,52 @@ void main() {
       expect(
         () => parseBundle(zipOf({'list.txt': bigList})),
         throwsA(isA<ListImportException>()),
+      );
+    });
+  });
+
+  group('fetchBundleByDatamap', () {
+    test('stores the map, downloads the bundle bytes, reports progress',
+        () async {
+      final fake = await _FakeEmbedded.start();
+      addTearDown(() => fake.server.close(force: true));
+      final archive = Archive()
+        ..addFile(ArchiveFile.bytes('Movie.mkv.datamap', [1]));
+      final bundleBytes = Uint8List.fromList(ZipEncoder().encode(archive));
+      fake.xorContent[_FakeEmbedded.addrForByte(9)] = bundleBytes;
+      final progress = <(int, int)>[];
+      final got = await fetchBundleByDatamap(
+        Uint8List.fromList([9]),
+        base: fake.base,
+        onProgress: (received, total) => progress.add((received, total)),
+      );
+      expect(got, bundleBytes);
+      expect(progress.last, (bundleBytes.length, 100));
+    });
+
+    test('a missing bundle and a bad datamap both surface import errors',
+        () async {
+      final fake = await _FakeEmbedded.start();
+      addTearDown(() => fake.server.close(force: true));
+      await expectLater(
+        fetchBundleByDatamap(Uint8List.fromList([9]), base: fake.base),
+        throwsA(isA<ListImportException>()), // /xor 404
+      );
+      await expectLater(
+        fetchBundleByDatamap(Uint8List.fromList([0xBA, 0xD1]),
+            base: fake.base),
+        throwsA(isA<ListImportException>()), // POST /datamap 400
+      );
+    });
+
+    test('cancellation aborts with BundleFetchCancelled', () async {
+      final fake = await _FakeEmbedded.start();
+      addTearDown(() => fake.server.close(force: true));
+      fake.xorContent[_FakeEmbedded.addrForByte(9)] = List.filled(64, 7);
+      await expectLater(
+        fetchBundleByDatamap(Uint8List.fromList([9]),
+            base: fake.base, isCancelled: () => true),
+        throwsA(isA<BundleFetchCancelled>()),
       );
     });
   });

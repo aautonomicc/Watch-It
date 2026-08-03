@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:drift/drift.dart' hide Column;
+import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import '../db/app_database.dart';
@@ -47,6 +48,67 @@ const String kTmdbAttributionNotice =
 /// Zip magic sniff — import routing never looks at the file extension.
 bool looksLikeZip(List<int> bytes) =>
     bytes.length >= 2 && bytes[0] == 0x50 && bytes[1] == 0x4B;
+
+/// The user cancelled a network bundle fetch — flow control, not an
+/// error; the import aborts silently.
+class BundleFetchCancelled implements Exception {
+  const BundleFetchCancelled();
+}
+
+/// Fetch a `.watch-list` bundle stored on the network from its
+/// `.datamap` file: store the map via the embedded client (which also
+/// derives the bundle's address and total size offline), then download
+/// the bundle bytes over `GET /xor/{addr}`. [onProgress] reports
+/// (received, total) bytes per chunk; [isCancelled] is polled per chunk
+/// and throws [BundleFetchCancelled] when it turns true. Throws
+/// [ListImportException] with a user-facing message on any failure.
+Future<Uint8List> fetchBundleByDatamap(
+  Uint8List datamapBytes, {
+  String? base,
+  void Function(int received, int total)? onProgress,
+  bool Function()? isCancelled,
+}) async {
+  base ??= EmbeddedClient.baseUrl();
+  if (base == null) {
+    throw const ListImportException(
+        'The built-in Autonomi client is not available on this platform.');
+  }
+  final imported = await importDatamapBytes(datamapBytes, base: base);
+  if (imported.size > kMaxBundleBytes) {
+    throw ListImportException(
+        'That data map points at a ${imported.size ~/ (1024 * 1024)} MB '
+        'file — too large to be a .watch-list bundle.');
+  }
+  final client = http.Client();
+  try {
+    final res = await client
+        .send(http.Request('GET', Uri.parse('$base/xor/${imported.address}')));
+    if (res.statusCode != 200) {
+      throw const ListImportException(
+          'The bundle could not be downloaded — check the connection and '
+          'that the bundle is still on the network.');
+    }
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in res.stream) {
+      if (isCancelled?.call() ?? false) throw const BundleFetchCancelled();
+      builder.add(chunk);
+      if (builder.length > kMaxBundleBytes) {
+        throw const ListImportException(
+            'That bundle is larger than the 200 MB limit.');
+      }
+      onProgress?.call(builder.length, imported.size);
+    }
+    return builder.takeBytes();
+  } on ListImportException {
+    rethrow;
+  } on BundleFetchCancelled {
+    rethrow;
+  } catch (e) {
+    throw ListImportException('Bundle download failed: $e');
+  } finally {
+    client.close();
+  }
+}
 
 /// One bundle, parsed and size-checked but not yet applied.
 class ParsedBundle {
