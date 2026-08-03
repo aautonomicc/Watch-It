@@ -144,17 +144,6 @@ class _ListEditScreenState extends State<ListEditScreen> {
                     return ListTile(
                       title: Text(e.name,
                           style: TextStyle(color: t.bone, fontSize: 14)),
-                      subtitle: Text(
-                        e.address,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontFamily: wiMonoFamily,
-                          fontFamilyFallback: wiMonoFallback,
-                          fontSize: 11,
-                          color: t.ash,
-                        ),
-                      ),
                       trailing: IconButton(
                         tooltip: 'Remove entry',
                         icon: Icon(Icons.close, size: 18, color: t.ash),

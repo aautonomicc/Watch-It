@@ -33,7 +33,7 @@ The format's floor is deliberate: a hand-made
 | `metadata.json` | no | `metadata_cache` rows for the bundled entries, keyed by `lookupKey`, plus a top-level `attribution` field (see Attribution below). |
 | `posters/` | no | The cached w342 poster JPGs for the bundled entries, deduped. |
 | `library.json` | no | Library export only: per-list `{enabled, position}` so a fresh-device import restores home-screen order/visibility. |
-| `history.json` | no | Watch-history rows `{address, positionMs, durationMs, completed, updatedAt}`. Keyed by derived address — deterministic from the map, so device-independent with no remapping. |
+| `history.json` | no | Watch-history rows `{member, positionMs, durationMs, completed, updatedAt}` (`version: 2`). Keyed by `.datamap` member name, exactly like `list.txt` — the importer resolves each member to its derived address, so the file never carries a bare address. An entry whose map is missing from the exporter's store has no member and its history stays out. Legacy `{address, ...}` rows (old exporters) are still accepted read-side. |
 
 \* A bundle must carry at least one `.datamap` member or a `list.txt`;
 otherwise there is nothing to import.
@@ -62,7 +62,8 @@ a *public* upload of the same file would have had, which is why:
 
 - entries created from XOR addresses by pre-alpha.40 versions keep their
   identity unchanged after conversion;
-- `history.json`, `metadata.json` and poster references need no migration;
+- legacy address-keyed `history.json` rows, `metadata.json` and poster
+  references need no migration;
 - importing the same content twice (any route) dedupes naturally.
 
 Nothing exists *on the network* at a private upload's derived address —
@@ -100,7 +101,9 @@ that is the point: the map never leaves the devices you share it with.
   post-import resolve step and no cold first-play resolve.
 - **Watch history is opt-out at import.** A bundle carrying `history.json`
   shows the "This bundle also contains" dialog (pre-checked checkbox,
-  Cancel aborts the whole import). History merges
+  Cancel aborts the whole import). Member-keyed rows resolve to the
+  address the member's import derived; rows naming a member that didn't
+  import are dropped. History merges
   newer-`updatedAt`-wins — an import never regresses local progress.
 - **Metadata and posters always seed, gaps only.** Existing local rows and
   files win. Keyless installs get full posters/overviews/episode names with

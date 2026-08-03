@@ -538,18 +538,6 @@ class _DetailScreenState extends State<DetailScreen> {
               style: TextStyle(fontSize: 12.5, color: t.ash),
             ),
           const SizedBox(height: 24),
-          sectionLabel(t, 'ADDRESS'),
-          const SizedBox(height: 6),
-          SelectableText(
-            entry.address,
-            style: TextStyle(
-              fontFamily: wiMonoFamily,
-              fontFamilyFallback: wiMonoFallback,
-              fontSize: 11.5,
-              color: t.boneDim,
-            ),
-          ),
-          const SizedBox(height: 12),
           sectionLabel(t, 'FILE NAME'),
           const SizedBox(height: 6),
           Text(entry.name,
