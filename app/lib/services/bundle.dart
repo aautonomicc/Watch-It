@@ -110,6 +110,15 @@ Future<Uint8List> fetchBundleByDatamap(
   }
 }
 
+/// One history.json row's playback fields — the address they belong to
+/// is only known once the member's data map has been imported.
+typedef BundleHistoryRow = ({
+  int positionMs,
+  int durationMs,
+  bool completed,
+  int updatedAt,
+});
+
 /// One bundle, parsed and size-checked but not yet applied.
 class ParsedBundle {
   const ParsedBundle({
@@ -119,6 +128,7 @@ class ParsedBundle {
     required this.posters,
     required this.libraryPrefs,
     required this.history,
+    this.historyByMember = const {},
   });
 
   /// The inner `list.txt` — optional since spec v2; null means every
@@ -138,11 +148,19 @@ class ParsedBundle {
   /// library.json per-list prefs by lowercased title.
   final Map<String, ({bool enabled, int position})> libraryPrefs;
 
-  /// history.json rows keyed by normalized address.
+  /// Legacy (spec v1) history.json rows keyed by normalized address —
+  /// still accepted read-side so old bundles keep their history.
   final Map<String, WatchState> history;
 
+  /// Spec-v2 history.json rows keyed by `.datamap` member name; their
+  /// addresses resolve through [BundleImportResult.addressByMember] at
+  /// seed time, so history never carries a bare address.
+  final Map<String, BundleHistoryRow> historyByMember;
+
+  int get historyCount => history.length + historyByMember.length;
+
   bool get hasSeedableExtras =>
-      metadataRows.isNotEmpty || posters.isNotEmpty || history.isNotEmpty;
+      metadataRows.isNotEmpty || posters.isNotEmpty || historyCount > 0;
 }
 
 /// What [seedBundle] actually applied (for the import snackbar).
@@ -271,9 +289,6 @@ Future<BundleBuildResult> buildBundle(
   archive.addFile(ArchiveFile.string('list.txt', listText.toString()));
 
   final entries = [for (final list in lists) ...list.entries];
-  final addresses = <String>{
-    for (final e in entries) _normalizeAddr(e.address),
-  };
 
   // metadata.json + posters/ — cached rows for the bundled entries.
   final keys = <String>{
@@ -348,19 +363,22 @@ Future<BundleBuildResult> buildBundle(
     ));
   }
 
-  if (options.includeHistory) {
+  // History rows are keyed by `.datamap` member name (spec v2), never by
+  // address — an entry whose map is missing has no member, so its state
+  // stays out rather than leaking a bare address.
+  if (options.includeHistory && memberByAddr.isNotEmpty) {
     final states = await (db.select(db.watchStates)
-          ..where((t) => t.address.isIn(addresses)))
+          ..where((t) => t.address.isIn(memberByAddr.keys)))
         .get();
     if (states.isNotEmpty) {
       archive.addFile(ArchiveFile.string(
         'history.json',
         jsonEncode({
-          'version': 1,
+          'version': 2,
           'entries': [
             for (final s in states)
               {
-                'address': s.address,
+                'member': memberByAddr[s.address],
                 'positionMs': s.positionMs,
                 'durationMs': s.durationMs,
                 'completed': s.completed,
@@ -430,6 +448,7 @@ ParsedBundle parseBundle(Uint8List bytes) {
   final posters = <String, Uint8List>{};
   final libraryPrefs = <String, ({bool enabled, int position})>{};
   final history = <String, WatchState>{};
+  final historyByMember = <String, BundleHistoryRow>{};
 
   Uint8List? readCapped(ArchiveFile file, int cap) {
     if (file.size > cap) return null;
@@ -496,6 +515,19 @@ ParsedBundle parseBundle(Uint8List bytes) {
           final entries = (decoded as Map<String, dynamic>)['entries'];
           for (final raw in entries as List<dynamic>) {
             final row = raw as Map<String, dynamic>;
+            // Spec v2: rows name their `.datamap` member; the address
+            // comes from importing that member, never from the file.
+            final member = row['member'];
+            if (member is String && member.isNotEmpty) {
+              historyByMember[member] = (
+                positionMs: row['positionMs'] as int? ?? 0,
+                durationMs: row['durationMs'] as int? ?? 0,
+                completed: row['completed'] as bool? ?? false,
+                updatedAt: row['updatedAt'] as int? ?? 0,
+              );
+              continue;
+            }
+            // Spec v1 rows carried the derived address directly.
             final addr = row['address'];
             if (addr is! String || !looksLikeXorAddress(addr)) continue;
             history[_normalizeAddr(addr)] = WatchState(
@@ -550,6 +582,7 @@ ParsedBundle parseBundle(Uint8List bytes) {
     posters: posters,
     libraryPrefs: libraryPrefs,
     history: history,
+    historyByMember: historyByMember,
   );
 }
 
@@ -563,6 +596,7 @@ class BundleImportResult {
     required this.datamapsInvalid,
     required this.refsMissing,
     required this.skippedLines,
+    this.addressByMember = const {},
   });
 
   /// Final lists (title + entries; every entry's map is now in the local
@@ -581,6 +615,10 @@ class BundleImportResult {
   /// Invalid list.txt lines (from the parser), including v1 hex-address
   /// entries — those no longer import.
   final List<int> skippedLines;
+
+  /// Member name → derived (normalized) address for every imported
+  /// member — what [seedBundle] uses to resolve member-keyed history.
+  final Map<String, String> addressByMember;
 
   int get entryCount =>
       lists.fold(0, (sum, list) => sum + list.entries.length);
@@ -673,6 +711,10 @@ Future<BundleImportResult> importBundleEntries(
     datamapsInvalid: invalid,
     refsMissing: refsMissing,
     skippedLines: parsed?.skippedLines ?? const [],
+    addressByMember: {
+      for (final e in entriesByMember.entries)
+        e.key: _normalizeAddr(e.value.address),
+    },
   );
 }
 
@@ -717,10 +759,14 @@ List<MediaList> applyLibraryPrefs(
 /// [importBundleEntries], where they define the entries themselves.
 /// [importHistory] comes from the import-side
 /// options dialog — declined history is skipped entirely, as if the
-/// bundle never carried it.
+/// bundle never carried it. Member-keyed (spec v2) history rows resolve
+/// their addresses through [addressByMember] (from
+/// [BundleImportResult]); rows naming a member that didn't import are
+/// dropped.
 Future<BundleSeedSummary> seedBundle(
   ParsedBundle bundle, {
   bool importHistory = true,
+  Map<String, String> addressByMember = const {},
   Future<Directory> Function()? postersDirProvider,
 }) async {
   final summary = BundleSeedSummary();
@@ -784,9 +830,23 @@ Future<BundleSeedSummary> seedBundle(
   }
 
   // Watch history: newer-updatedAt-wins, never regresses local progress.
-  if (importHistory && bundle.history.isNotEmpty) {
-    summary.historyMerged =
-        await WatchStateStore.instance.mergeAll(bundle.history.values);
+  if (importHistory) {
+    final states = <WatchState>[
+      ...bundle.history.values,
+      for (final e in bundle.historyByMember.entries)
+        if (addressByMember[e.key] != null)
+          WatchState(
+            address: addressByMember[e.key]!,
+            positionMs: e.value.positionMs,
+            durationMs: e.value.durationMs,
+            completed: e.value.completed,
+            updatedAt: e.value.updatedAt,
+          ),
+    ];
+    if (states.isNotEmpty) {
+      summary.historyMerged =
+          await WatchStateStore.instance.mergeAll(states);
+    }
   }
 
   return summary;

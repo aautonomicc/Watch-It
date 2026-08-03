@@ -407,7 +407,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     }
 
     var importHistory = true;
-    if (bundle.history.isNotEmpty) {
+    if (bundle.historyCount > 0) {
       if (!mounted) return;
       final choice = await _promptBundleImportOptions(bundle);
       if (choice == null) return; // whole import cancelled
@@ -453,6 +453,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       result.lists,
       bundle: bundle,
       importHistory: importHistory,
+      memberAddresses: result.addressByMember,
       extraNotes: [
         if (result.datamapsInvalid > 0)
           '${result.datamapsInvalid} unreadable data '
@@ -475,7 +476,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     // Default ON: the exporter included it deliberately, and this dialog
     // is the explicit chance to opt out.
     var history = true;
-    final entries = bundle.history.length;
+    final entries = bundle.historyCount;
     final go = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -530,6 +531,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     List<ParsedMediaList> parsed, {
     ParsedBundle? bundle,
     bool importHistory = true,
+    Map<String, String> memberAddresses = const {},
     Set<String> mergeExisting = const {},
     List<String> extraNotes = const [],
   }) async {
@@ -622,8 +624,8 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     // Seed the caches from the bundle's optional members. Existing local
     // state wins throughout.
     if (bundle.hasSeedableExtras) {
-      final seeded =
-          await seedBundle(bundle, importHistory: importHistory);
+      final seeded = await seedBundle(bundle,
+          importHistory: importHistory, addressByMember: memberAddresses);
       final parts = [
         if (seeded.metadataSeeded > 0)
           '${seeded.metadataSeeded} metadata '

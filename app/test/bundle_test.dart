@@ -120,6 +120,7 @@ ParsedBundle _bundle({
   Map<String, Uint8List> posters = const {},
   Map<String, ({bool enabled, int position})> libraryPrefs = const {},
   Map<String, WatchState> history = const {},
+  Map<String, BundleHistoryRow> historyByMember = const {},
 }) =>
     ParsedBundle(
       listText: listText,
@@ -128,6 +129,7 @@ ParsedBundle _bundle({
       posters: posters,
       libraryPrefs: libraryPrefs,
       history: history,
+      historyByMember: historyByMember,
     );
 
 void main() {
@@ -232,6 +234,11 @@ void main() {
 
     test('bundles cached metadata, posters, history and attribution',
         () async {
+      final fake = await _FakeEmbedded.start();
+      addTearDown(() => fake.server.close(force: true));
+      fake.datamaps[_addrA] = [9, 9, 9];
+      // addrB has no stored map: its history must stay out too — a
+      // member-less row would have to fall back to a bare address.
       await _seedMetadataRow('Night of the Living Dead (1968).mp4',
           posterFile: 'movie_10331.jpg');
       File('${postersDir.path}/movie_10331.jpg')
@@ -244,15 +251,22 @@ void main() {
           completed: false,
           updatedAt: 5000,
         ),
+        const WatchState(
+          address: _addrB,
+          positionMs: 30000,
+          durationMs: 120000,
+          completed: false,
+          updatedAt: 5000,
+        ),
       ]);
 
       final result = await buildBundle(
         [_list],
         const BundleExportOptions(includeHistory: true),
-        base: null, // no embedded server: members skipped, extras still in
+        base: fake.base,
         postersDirProvider: postersDirProvider,
       );
-      expect(result.entriesMissingMap, 2);
+      expect(result.entriesMissingMap, 1);
       final archive = ZipDecoder().decodeBytes(result.bytes);
       final names = archive.files.map((f) => f.name).toSet();
       expect(
@@ -271,10 +285,43 @@ void main() {
       expect((meta['entries'] as List).single['title'],
           'Night of the Living Dead');
 
-      final history = jsonDecode(utf8.decode(archive.files
+      final historyBytes = archive.files
           .firstWhere((f) => f.name == 'history.json')
-          .readBytes()!)) as Map<String, dynamic>;
-      expect((history['entries'] as List).single['address'], _addrA);
+          .readBytes()!;
+      final history =
+          jsonDecode(utf8.decode(historyBytes)) as Map<String, dynamic>;
+      expect(history['version'], 2);
+      final row = (history['entries'] as List).single as Map;
+      expect(row['member'],
+          'Night of the Living Dead (1968).mp4.datamap');
+      expect(row['positionMs'], 60000);
+      expect(row.containsKey('address'), isFalse);
+      // No derived address anywhere in the file — the whole point of v2.
+      expect(utf8.decode(historyBytes), isNot(contains(_addrA)));
+      expect(utf8.decode(historyBytes), isNot(contains(_addrB)));
+    });
+
+    test('no member exported means no history.json at all — an address '
+        'never leaks for a missing-map entry', () async {
+      await WatchStateStore.instance.mergeAll([
+        const WatchState(
+          address: _addrA,
+          positionMs: 60000,
+          durationMs: 120000,
+          completed: false,
+          updatedAt: 5000,
+        ),
+      ]);
+      final result = await buildBundle(
+        [_list],
+        const BundleExportOptions(includeHistory: true),
+        base: null, // no embedded server: every member is skipped
+        postersDirProvider: postersDirProvider,
+      );
+      expect(result.entriesMissingMap, 2);
+      final archive = ZipDecoder().decodeBytes(result.bytes);
+      expect(archive.files.map((f) => f.name).contains('history.json'),
+          isFalse);
     });
 
     test('history stays out unless opted in; library.json on request',
@@ -341,6 +388,42 @@ void main() {
           [_lookupKey('Night of the Living Dead (1968).mp4')]);
       expect(bundle.posters['movie_10331.jpg'], [1, 2, 3, 4]);
       expect(bundle.history, isEmpty);
+    });
+
+    test('history rows: v2 member-keyed parsed, v1 address rows still '
+        'accepted', () {
+      final bundle = parseBundle(zipOf({
+        'Movie.mkv.datamap': [1],
+        'history.json': utf8.encode(jsonEncode({
+          'version': 2,
+          'entries': [
+            {
+              'member': 'Movie.mkv.datamap',
+              'positionMs': 60000,
+              'durationMs': 120000,
+              'completed': false,
+              'updatedAt': 5000,
+            },
+            {
+              // A v1 row (old exporter): keeps working read-side.
+              'address': _addrA,
+              'positionMs': 30000,
+              'durationMs': 120000,
+              'completed': true,
+              'updatedAt': 4000,
+            },
+            {'member': '', 'positionMs': 1}, // empty member: dropped
+            {'positionMs': 1}, // neither key: dropped
+          ],
+        })),
+      }));
+      expect(bundle.historyByMember.keys, ['Movie.mkv.datamap']);
+      expect(bundle.historyByMember['Movie.mkv.datamap']!.positionMs,
+          60000);
+      expect(bundle.history.keys, [_addrA]);
+      expect(bundle.history[_addrA]!.completed, isTrue);
+      expect(bundle.historyCount, 2);
+      expect(bundle.hasSeedableExtras, isTrue);
     });
 
     test('accepts a hand-made zip of loose .datamap files (no list.txt)',
@@ -685,6 +768,36 @@ void main() {
       final b = await WatchStateStore.instance
           .stateFor(const MediaEntry(name: 'b', address: _addrB));
       expect(b!.completed, isTrue);
+    });
+
+    test('member-keyed history resolves through addressByMember; '
+        'unresolved members are dropped', () async {
+      final bundle = _bundle(
+        listText: '',
+        historyByMember: {
+          'Movie.mkv.datamap': (
+            positionMs: 60000,
+            durationMs: 120000,
+            completed: false,
+            updatedAt: 5000,
+          ),
+          'Never Imported.mkv.datamap': (
+            positionMs: 1000,
+            durationMs: 120000,
+            completed: false,
+            updatedAt: 5000,
+          ),
+        },
+      );
+      final summary = await seedBundle(
+        bundle,
+        addressByMember: {'Movie.mkv.datamap': _addrA},
+        postersDirProvider: postersDirProvider,
+      );
+      expect(summary.historyMerged, 1);
+      final a = await WatchStateStore.instance
+          .stateFor(const MediaEntry(name: 'a', address: _addrA));
+      expect(a!.positionMs, 60000);
     });
 
     test('importHistory: false skips the merge entirely', () async {

@@ -269,6 +269,39 @@ void main() {
           isNull);
     });
 
+    testWidgets('v2 member-keyed history resolves to the imported '
+        "member's derived address", (tester) async {
+      final v2Bundle = _zipOf({
+        'datamaps/Watched Movie (2024).mkv.datamap': [0x66],
+        'history.json': utf8.encode(jsonEncode({
+          'version': 2,
+          'entries': [
+            {
+              'member': 'Watched Movie (2024).mkv.datamap',
+              'positionMs': 75000,
+              'durationMs': 120000,
+              'completed': false,
+              'updatedAt': 5000,
+            },
+          ],
+        })),
+      });
+      FileSelectorPlatform.instance = _FakeFileSelector([
+        XFile.fromData(v2Bundle, path: 'pack.watch-list'),
+      ]);
+      await openMediaLists(tester);
+      await importLocal(tester);
+
+      expect(find.textContaining('Watch history (1 entry)'), findsOneWidget);
+      await tester.tap(find.text('Import'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Imported "pack"'), findsOneWidget);
+      final state =
+          await WatchStateStore.instance.stateFor(historyEntry());
+      expect(state!.positionMs, 75000);
+    });
+
     testWidgets('cancelling the dialog aborts the whole import',
         (tester) async {
       FileSelectorPlatform.instance = _FakeFileSelector([
