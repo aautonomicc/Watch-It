@@ -86,10 +86,10 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  // "Add to library" opens the picker directly — no source dialog; the
+  // app routes each picked file by content and name.
   Future<void> importLocal(WidgetTester tester) async {
     await tester.tap(find.byTooltip('Add to library'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('Import .watch-list bundle'));
     await tester.pumpAndSettle();
   }
 
@@ -295,12 +295,8 @@ void main() {
               path: 'Second Movie (1999).mp4.datamap'),
         ];
 
-    Future<void> pickDatamaps(WidgetTester tester) async {
-      await tester.tap(find.byTooltip('Add to library'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.textContaining('Add .datamap files'));
-      await tester.pumpAndSettle();
-    }
+    Future<void> pickDatamaps(WidgetTester tester) =>
+        importLocal(tester);
 
     // The screen behind the dialog shows the same titles and entry
     // counts — scope finders to the dialog.
@@ -453,6 +449,82 @@ void main() {
       final list = (await LibraryStore.load())
           .firstWhere((l) => l.title == 'Imported');
       expect(list.entries.single.name, 'Good Movie (2024).mkv');
+    });
+  });
+
+  group('Combined import routing', () {
+    testWidgets('a mixed pick imports the bundle and batches the loose '
+        'datamaps', (tester) async {
+      await LibraryStore.save([MediaList(id: '1', title: 'Movies')]);
+      FileSelectorPlatform.instance = _FakeFileSelector([
+        XFile.fromData(
+            _zipOf({'Bundled Movie (2024).mkv.datamap': [1]}),
+            path: 'My Films.watch-list'),
+        XFile.fromData(Uint8List.fromList([5]),
+            path: 'Loose Movie (2020).mkv.datamap'),
+      ]);
+      await openMediaLists(tester);
+      await importLocal(tester);
+
+      // The bundle imported first; the loose datamap batch now asks for
+      // its target lists.
+      expect(find.text('Add to which lists?'), findsOneWidget);
+      await tester.tap(find.descendant(
+          of: find.byType(AlertDialog), matching: find.text('Movies')));
+      await tester.pump();
+      await tester.tap(find.text('Add'));
+      await tester.pumpAndSettle();
+
+      final lists = await LibraryStore.load();
+      expect(
+          lists
+              .firstWhere((l) => l.title == 'My Films')
+              .entries
+              .single
+              .address,
+          FakeEmbeddedHttp.addrForByte(1));
+      expect(
+          lists
+              .firstWhere((l) => l.title == 'Movies')
+              .entries
+              .single
+              .address,
+          FakeEmbeddedHttp.addrForByte(5));
+    });
+
+    testWidgets('unrecognised files in a mixed pick are counted in the '
+        'snackbar', (tester) async {
+      FileSelectorPlatform.instance = _FakeFileSelector([
+        XFile.fromData(Uint8List.fromList([5]),
+            path: 'Good Movie (2024).mkv.datamap'),
+        XFile.fromData(utf8.encode('$_addrA Old Movie.mkv\n'),
+            path: 'movies.list'),
+      ]);
+      await openMediaLists(tester);
+      await importLocal(tester);
+      // Empty library → new-list prompt.
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('1 file skipped (not recognised)'),
+          findsOneWidget);
+      final list = (await LibraryStore.load())
+          .firstWhere((l) => l.title == 'Imported');
+      expect(list.entries.single.name, 'Good Movie (2024).mkv');
+    });
+
+    testWidgets('a pick of only unrecognised files is refused',
+        (tester) async {
+      FileSelectorPlatform.instance = _FakeFileSelector([
+        XFile.fromData(utf8.encode('not a datamap'), path: 'a.txt'),
+        XFile.fromData(utf8.encode('also not one'), path: 'b.txt'),
+      ]);
+      await openMediaLists(tester);
+      final before = (await LibraryStore.load()).length;
+      await importLocal(tester);
+      expect(find.textContaining('None of the picked files'),
+          findsOneWidget);
+      expect((await LibraryStore.load()).length, before);
     });
   });
 

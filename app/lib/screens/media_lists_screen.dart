@@ -61,77 +61,88 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     if (mounted) setState(() => _lists = lists);
   }
 
-  /// Add media to the library: loose `.datamap` files (a private
-  /// `ant file upload` writes one per file) or a `.watch-list` bundle,
-  /// local or downloaded from the network by address.
+  /// Add media to the library through one multi-select picker — the app
+  /// works out what each picked file is instead of asking up front: zip
+  /// content is a `.watch-list` bundle (extension never trusted), a
+  /// `<media file name>.datamap` file (private `ant file upload` output)
+  /// becomes an entry, and anything else is skipped with a note. Mixed
+  /// picks work; bundles import one by one, loose datamaps as one batch
+  /// into the list(s) the user checks.
   Future<void> _importList() async {
-    final t = WiTokens.of(context);
-    final source = await showDialog<String>(
-      context: context,
-      builder: (context) => SimpleDialog(
-        backgroundColor: t.ink2,
-        title: Text('Add to library',
-            style: TextStyle(color: t.bone, fontSize: 16)),
-        children: [
-          SimpleDialogOption(
-            onPressed: () => Navigator.of(context).pop('datamaps'),
-            child: Row(children: [
-              Icon(Icons.note_add_outlined, color: t.accent, size: 20),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                    'Add .datamap files\nFrom a private "ant file upload"',
-                    style: TextStyle(color: t.bone, fontSize: 14)),
-              ),
-            ]),
-          ),
-          SimpleDialogOption(
-            onPressed: () => Navigator.of(context).pop('local'),
-            child: Row(children: [
-              Icon(Icons.folder_open, color: t.accent, size: 20),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text('Import .watch-list bundle\nA file of .datamaps '
-                    '— may also contain lists, artwork and metadata',
-                    style: TextStyle(color: t.bone, fontSize: 14)),
-              ),
-            ]),
-          ),
-        ],
-      ),
-    );
-    switch (source) {
-      case 'datamaps':
-        await _importDatamapFiles();
-      case 'local':
-        await _importFromLocalFile();
-    }
-  }
-
-  /// Multi-select `.datamap` picker → one entry per file, added to the
-  /// existing list(s) the user checks (or a list created on the spot).
-  Future<void> _importDatamapFiles() async {
     final List<XFile> files;
     try {
       files = await openFiles(acceptedTypeGroups: [
-        const XTypeGroup(label: 'Data maps', extensions: ['datamap']),
+        const XTypeGroup(
+            label: 'Library files', extensions: ['datamap', 'watch-list']),
+        const XTypeGroup(label: 'All files'),
       ]);
     } catch (e) {
       _showError('Could not open the file picker: $e');
       return;
     }
     if (files.isEmpty || !mounted) return;
-    final titles = await _pickTargetLists();
-    if (titles == null || titles.isEmpty) return;
-    final named = <({String name, Uint8List bytes})>[];
+
+    final bundles = <({String name, Uint8List bytes})>[];
+    final datamaps = <({String name, Uint8List bytes})>[];
+    final skipped = <String>[];
     for (final file in files) {
       try {
-        named.add((name: file.name, bytes: await file.readAsBytes()));
+        if (await file.length() > kMaxBundleBytes) {
+          skipped.add(file.name);
+          continue;
+        }
+      } catch (_) {
+        // Some pickers cannot report a size up front; the post-read
+        // check below is the real gate then.
+      }
+      final Uint8List bytes;
+      try {
+        bytes = await file.readAsBytes();
       } catch (_) {
         _showError('Could not read "${file.name}".');
+        continue;
+      }
+      if (bytes.length > kMaxBundleBytes) {
+        skipped.add(file.name);
+      } else if (looksLikeZip(bytes)) {
+        bundles.add((name: file.name, bytes: bytes));
+      } else if (mediaNameFromDatamapFileName(file.name) != null) {
+        datamaps.add((name: file.name, bytes: bytes));
+      } else {
+        skipped.add(file.name);
       }
     }
-    await _importDatamaps(named, listTitles: titles);
+
+    if (bundles.isEmpty && datamaps.isEmpty) {
+      if (skipped.isNotEmpty) {
+        _showError(skipped.length == 1 && files.length == 1
+            ? '"${skipped.single}" is not a .watch-list bundle or '
+                '.datamap file. Plain-text lists are no longer supported '
+                '— ask for a bundle instead.'
+            : 'None of the picked files are .watch-list bundles or '
+                '.datamap files.');
+      }
+      return;
+    }
+
+    for (final bundle in bundles) {
+      if (!mounted) return;
+      await _importBundle(bundle.bytes, fileName: bundle.name);
+    }
+    final skippedNotes = [
+      if (skipped.isNotEmpty)
+        '${skipped.length} ${skipped.length == 1 ? 'file' : 'files'} '
+            'skipped (not recognised)',
+    ];
+    if (datamaps.isNotEmpty) {
+      if (!mounted) return;
+      final titles = await _pickTargetLists();
+      if (titles == null || titles.isEmpty) return;
+      await _importDatamaps(datamaps,
+          listTitles: titles, extraNotes: skippedNotes);
+    } else if (skippedNotes.isNotEmpty) {
+      _showError('Done, but ${skippedNotes.single}.');
+    }
   }
 
   /// Checkbox picker over the existing lists — hidden ones included
@@ -263,6 +274,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
   Future<void> _importDatamaps(
     List<({String name, Uint8List bytes})> files, {
     required List<String> listTitles,
+    List<String> extraNotes = const [],
   }) async {
     final entries = <MediaEntry>[];
     var failed = 0;
@@ -296,58 +308,9 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         if (failed > 0)
           '$failed ${failed == 1 ? 'file' : 'files'} skipped (not a '
               'data map)',
+        ...extraNotes,
       ],
     );
-  }
-
-  Future<void> _importFromLocalFile() async {
-    final XFile? file;
-    try {
-      file = await openFile();
-    } catch (e) {
-      _showError('Could not open the file picker: $e');
-      return;
-    }
-    if (file == null) return;
-    try {
-      if (await file.length() > kMaxBundleBytes) {
-        _showError('"${file.name}" is too large to be a bundle.');
-        return;
-      }
-    } catch (_) {
-      // Some pickers cannot report a size up front; readAsBytes below
-      // is the real gate then.
-    }
-    final Uint8List bytes;
-    try {
-      bytes = await file.readAsBytes();
-    } catch (_) {
-      _showError('Could not read "${file.name}".');
-      return;
-    }
-    await _finishImportBytes(bytes, file.name);
-  }
-
-  /// Route picked/downloaded bytes: zip magic → bundle; a loose
-  /// `.datamap` file still imports (the picker filter is advisory);
-  /// anything else — including the removed plain-text list format — is
-  /// refused with a pointer at bundles.
-  Future<void> _finishImportBytes(Uint8List bytes, String? name) async {
-    if (looksLikeZip(bytes)) {
-      await _importBundle(bytes, fileName: name);
-      return;
-    }
-    if (name != null && mediaNameFromDatamapFileName(name) != null) {
-      if (!mounted) return;
-      final titles = await _pickTargetLists();
-      if (titles == null || titles.isEmpty) return;
-      await _importDatamaps([(name: name, bytes: bytes)],
-          listTitles: titles);
-      return;
-    }
-    _showError('${name == null ? 'That file' : '"$name"'} is not a '
-        '.watch-list bundle or .datamap file. Plain-text lists are no '
-        'longer supported — ask for a bundle instead.');
   }
 
   /// Full bundle import: parse, ask about history, then convert every
