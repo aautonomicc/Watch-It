@@ -1,8 +1,15 @@
 # Roadmap
 
-**Status (2026-08-03):** latest release is **v0.1.0-alpha.43**
+**Status (2026-08-03):** latest release is **v0.1.0-alpha.44**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)).
-Alpha.42 added library arrangement: a "My lists | Auto by type" toggle on
+Alpha.44 made "Add to library" a single multi-select picker that works
+out what each file is — media `.datamap` files, `.watch-list` bundles,
+or a bundle's own `.watch-list.datamap` fetched straight from the
+network (progress + cancel, 200MB cap) — added plain-English
+import/share guidance on the Media page and export dialog, and fixed
+licensing for FOSS distribution (source MIT, binaries GPLv3 via the
+statically linked self_encryption crate; new Settings → About →
+Open-source licenses page). Alpha.42 added library arrangement: a "My lists | Auto by type" toggle on
 the Media page that swaps the home wall and the new left library drawer to
 virtual Movies / TV Shows lists (derived from cached TMDB media types,
 never stored), per-list browse pages with multi-select genre filter chips,
