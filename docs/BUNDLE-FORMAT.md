@@ -70,10 +70,28 @@ that is the point: the map never leaves the devices you share it with.
 
 ## Import
 
-- **Routing sniffs bytes, not extensions.** Zip magic (`PK`) → bundle;
-  a loose `.datamap` file imports as a single entry; anything else —
-  including the removed plain-text list format — is refused with a pointer
-  at bundles.
+- **One picker, routing sniffs bytes and names.** Since the combined
+  importer (post-alpha.43) "Add to library" opens a single multi-select
+  picker; per picked file: zip magic (`PK`) → bundle;
+  `<name>.watch-list.datamap` → the map of a bundle *stored on the
+  network* (fetched over `GET /xor/{addr}`, then imported like a local
+  bundle — see below); any other `.datamap` file imports as an entry;
+  anything else — including the removed plain-text list format — is
+  skipped with a note (or refused with a pointer at bundles when it was
+  the only pick). Mixed picks work; loose datamaps import as one batch.
+- **Network-stored bundles travel as their datamap.** Upload a bundle
+  privately (`ant file upload "My Library.watch-list"`) and share the
+  resulting `My Library.watch-list.datamap` file — ant-cli names the map
+  after the uploaded file, so the double suffix survives on its own and
+  is the routing signal (a renamed map falls through to the loose-entry
+  route). Import stores the bundle's map, refuses anything whose declared
+  size exceeds the 200 MB bundle cap *before* downloading, streams the
+  bundle through the embedded client behind a progress dialog with
+  Cancel, and then runs the normal bundle import under the bundle's file
+  name. This shares only a ~KB map file instead of the whole bundle — and
+  unlike the deleted bundle-download-by-public-address (alpha.41), no
+  public address is ever typed or published; privacy stays transitive
+  (whoever holds the bundle's map can fetch every map inside it).
 - **Members become entries first.** Each `.datamap` member is parsed
   (msgpack canonically; legacy ant-gui JSON accepted via the same first-byte
   sniff as ant-core's `read_datamap`), its address derived offline, and the

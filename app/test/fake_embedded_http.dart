@@ -16,13 +16,19 @@ import 'dart:io';
 ///   "derived address" is the first body byte spread over 64 hex chars,
 ///   so tests can predict it from the member bytes.
 /// - `GET /datamap/<addr>`: serves [datamaps], else 404.
+/// - `GET /xor/<addr>`: serves [xorContent], else 404.
 /// - `PUT /rootmap/<addr>`: body `[6, 6, 6]` → 422 (tampered), else 204;
 ///   bodies recorded in [rootmapPuts].
 class FakeEmbeddedHttp extends HttpOverrides {
   final Map<String, List<int>> datamaps = {};
+  final Map<String, List<int>> xorContent = {};
   final Set<String> storedRootmaps = {};
   final Map<String, List<int>> rootmapPuts = {};
   final List<String> requests = [];
+
+  /// The `size` every `POST /datamap` reports — tests override it to
+  /// exercise size limits.
+  int datamapSize = 100;
 
   /// Any base URL works — routing only looks at the path.
   static const String base = 'http://127.0.0.1:9';
@@ -45,7 +51,7 @@ class FakeEmbeddedHttp extends HttpOverrides {
         200,
         utf8.encode(jsonEncode({
           'address': addrForByte(body.isEmpty ? 0 : body.first),
-          'size': 100,
+          'size': datamapSize,
           'chunks': 1,
         }))
       );
@@ -53,6 +59,10 @@ class FakeEmbeddedHttp extends HttpOverrides {
     if (method == 'GET' && path.startsWith('/datamap/')) {
       final map = datamaps[path.substring('/datamap/'.length)];
       return map == null ? (404, const <int>[]) : (200, map);
+    }
+    if (method == 'GET' && path.startsWith('/xor/')) {
+      final content = xorContent[path.substring('/xor/'.length)];
+      return content == null ? (404, const <int>[]) : (200, content);
     }
     if (method == 'GET' && path.startsWith('/rootmap/')) {
       final addr = path.substring('/rootmap/'.length);

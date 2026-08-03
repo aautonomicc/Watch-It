@@ -31,6 +31,16 @@ String? mediaNameFromDatamapFileName(String fileName) {
   return name.isEmpty ? null : name;
 }
 
+/// True when [fileName] names the data map OF a `.watch-list` bundle
+/// stored on the network — `ant file upload lib.watch-list` writes
+/// `lib.watch-list.datamap`, so the convention survives the upload
+/// round-trip on its own. Import routes such a file to the network
+/// bundle fetch instead of making a media entry of it.
+bool isBundleDatamapName(String fileName) {
+  final media = mediaNameFromDatamapFileName(fileName);
+  return media != null && media.toLowerCase().endsWith('.watch-list');
+}
+
 /// What `POST /datamap` returned for one imported map.
 class ImportedDatamap {
   const ImportedDatamap({
