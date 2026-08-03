@@ -18,6 +18,7 @@ import 'services/home_rows.dart';
 import 'services/home_sections.dart';
 import 'services/library_arrangement.dart';
 import 'services/library_store.dart';
+import 'services/licenses.dart';
 import 'services/metadata.dart';
 import 'services/metadata_service.dart';
 import 'services/network_events.dart';
@@ -37,6 +38,10 @@ import 'widgets/watch_progress.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  // Statically linked Rust crates (self_encryption is GPL-3.0) and the
+  // native media libs aren't in Flutter's registry — add them so the
+  // Settings licenses page is the complete combined-work notice.
+  registerNativeLicenses();
   // Start the embedded Autonomi client early so the network bootstrap
   // (tens of seconds) overlaps with browsing instead of delaying playback.
   // Awaited: it must receive the app data dir (ant-core's $HOME on
