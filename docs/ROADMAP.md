@@ -1,6 +1,19 @@
 # Roadmap
 
-**Status (2026-08-01):** the **datamap-first privacy model** is COMPLETE —
+**Status (2026-08-03):** latest release is **v0.1.0-alpha.43**
+([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)).
+Alpha.42 added library arrangement: a "My lists | Auto by type" toggle on
+the Media page that swaps the home wall and the new left library drawer to
+virtual Movies / TV Shows lists (derived from cached TMDB media types,
+never stored), per-list browse pages with multi-select genre filter chips,
+and a checkbox list-picker on `.datamap` import (multi-select into
+existing lists or create-new, silent merge). Alpha.43 refined auto mode:
+the Settings section is now just "Media", the checkbox rows follow the
+arrangement mode so the virtual lists can be hidden (wall + drawer;
+hidden lists also filter Continue Watching / Recently Added, while the
+Downloads row always shows on-device files), and an all-hidden home shows
+a small prompt to re-enable a list. Before that, the
+**datamap-first privacy model** was completed —
 all three releases of the schedule below have shipped (v0.1.0-alpha.40 =
 the feature, v0.1.0-alpha.41 = deprecation window closed + cleanup):
 public XOR addresses are gone as an entry type — every entry is created from
