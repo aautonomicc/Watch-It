@@ -1,7 +1,14 @@
 # Roadmap
 
-**Status (2026-08-04):** latest release is **v0.1.0-alpha.46**
+**Status (2026-08-04):** latest release is **v0.1.0-alpha.47**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)).
+Alpha.47 fixes `.datamap` import on Android: the system file picker
+copies picked files into cache and renames unknown extensions to the
+MIME-derived `.bin`, so every `X.datamap` reached the app as `X.bin`
+and was rejected by name. `.bin` is now accepted as an alias of
+`.datamap` (media maps and `*.watch-list.bin` bundle maps both route
+correctly, recovering the exact original name); content verification
+still gates every import, so the name was never a safety check.
 Alpha.46 fixes importing real `ant` uploads — the `.datamap` a private
 `ant file upload` writes for any file over ~12 MiB is a shrunk (child)
 map, which the app now expands over the network to the full root map
