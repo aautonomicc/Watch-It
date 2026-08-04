@@ -23,11 +23,23 @@ const int kMaxDatamapBytes = 32 * 1024 * 1024;
 /// The file name a `.datamap` file's media entry gets: the base name
 /// minus the `.datamap` suffix. Null when [fileName] does not end in
 /// `.datamap` (case-insensitive) or nothing would remain.
+///
+/// `.bin` is accepted as an alias: Android's file picker plugin copies
+/// every picked file into cache and renames unknown extensions to the
+/// MIME-derived one, so `X.datamap` reaches Dart as `X.bin` — stripping
+/// `.bin` recovers the exact original media name. The name is only a
+/// routing hint; the embedded client's content verification is what
+/// actually gates the import.
 String? mediaNameFromDatamapFileName(String fileName) {
   final base = fileName.split(RegExp(r'[/\\]')).last;
   final lower = base.toLowerCase();
-  if (!lower.endsWith('.datamap')) return null;
-  final name = base.substring(0, base.length - '.datamap'.length);
+  final suffix = lower.endsWith('.datamap')
+      ? '.datamap'
+      : lower.endsWith('.bin')
+          ? '.bin'
+          : null;
+  if (suffix == null) return null;
+  final name = base.substring(0, base.length - suffix.length);
   return name.isEmpty ? null : name;
 }
 
@@ -35,7 +47,9 @@ String? mediaNameFromDatamapFileName(String fileName) {
 /// stored on the network — `ant file upload lib.watch-list` writes
 /// `lib.watch-list.datamap`, so the convention survives the upload
 /// round-trip on its own. Import routes such a file to the network
-/// bundle fetch instead of making a media entry of it.
+/// bundle fetch instead of making a media entry of it. Android's picker
+/// rename to `lib.watch-list.bin` is caught too, via the `.bin` alias
+/// in [mediaNameFromDatamapFileName].
 bool isBundleDatamapName(String fileName) {
   final media = mediaNameFromDatamapFileName(fileName);
   return media != null && media.toLowerCase().endsWith('.watch-list');
