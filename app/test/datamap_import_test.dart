@@ -25,12 +25,26 @@ void main() {
       expect(mediaNameFromDatamapFileName('.datamap'), isNull);
       expect(mediaNameFromDatamapFileName(''), isNull);
     });
+
+    test('accepts .bin as the Android picker-mangled .datamap alias', () {
+      // file_selector_android copies the picked file to cache and swaps
+      // the unknown .datamap extension for the MIME-derived .bin —
+      // stripping .bin recovers the original media name exactly.
+      expect(mediaNameFromDatamapFileName('Nosferatu(1922).mp4.bin'),
+          'Nosferatu(1922).mp4');
+      expect(mediaNameFromDatamapFileName('/tmp/cache/Movie.mkv.BIN'),
+          'Movie.mkv');
+      expect(mediaNameFromDatamapFileName('.bin'), isNull);
+    });
   });
 
   group('isBundleDatamapName', () {
     test('matches only the .watch-list.datamap double suffix', () {
       expect(isBundleDatamapName('My Films.watch-list.datamap'), isTrue);
       expect(isBundleDatamapName('/tmp/LIB.WATCH-LIST.DATAMAP'), isTrue);
+      // The Android picker rename keeps the .watch-list part, so the
+      // network-bundle route still catches it via the .bin alias.
+      expect(isBundleDatamapName('My Films.watch-list.bin'), isTrue);
       // A plain media datamap, a bundle without a map suffix, and a
       // renamed map all fall through to the other import routes.
       expect(isBundleDatamapName('Movie (2020).mkv.datamap'), isFalse);
