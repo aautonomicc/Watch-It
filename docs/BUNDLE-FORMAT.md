@@ -33,7 +33,7 @@ The format's floor is deliberate: a hand-made
 | `metadata.json` | no | `metadata_cache` rows for the bundled entries, keyed by `lookupKey`, plus a top-level `attribution` field (see Attribution below). |
 | `posters/` | no | The cached w342 poster JPGs for the bundled entries, deduped. |
 | `library.json` | no | Library export only: per-list `{enabled, position}` so a fresh-device import restores home-screen order/visibility. |
-| `history.json` | no | Watch-history rows `{member, positionMs, durationMs, completed, updatedAt}` (`version: 2`). Keyed by `.datamap` member name, exactly like `list.txt` — the importer resolves each member to its derived address, so the file never carries a bare address. An entry whose map is missing from the exporter's store has no member and its history stays out. Legacy `{address, ...}` rows (old exporters) are still accepted read-side. |
+| `history.json` | no | Watch-history rows `{member, positionMs, durationMs, completed, updatedAt}` (`version: 2`). Keyed by `.datamap` member name, exactly like `list.txt` — the importer resolves each member to its derived address, so the file never carries a bare address. An entry whose map is missing from the exporter's store has no member and its history stays out. Legacy `{address, ...}` rows (old exporters) are still accepted read-side — removal planned for the release after alpha.45 ([PLAN-drop-v1-history-rows.md](PLAN-drop-v1-history-rows.md)). |
 
 \* A bundle must carry at least one `.datamap` member or a `list.txt`;
 otherwise there is nothing to import.
