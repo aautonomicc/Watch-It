@@ -271,10 +271,10 @@ migrated — so the cleanup landed in one release:
       `rootmaps/` members are ignored, border conversion deleted
 - [x] The one-time upgrade migration pass deleted
       (`services/library_migration.dart`) — all testers migrated
-- [ ] Planned for the release after alpha.45 (decided 2026-08-04): drop
-      read-side acceptance of v1 address-keyed `history.json` rows —
-      alpha.45's spec-v2 (member-keyed) rows are the only format the
-      exporter writes; the test group is small enough to just re-export.
+- [x] Read-side acceptance of v1 address-keyed `history.json` rows
+      dropped (implemented 2026-08-04, ships in the release after
+      alpha.45) — spec-v2 (member-keyed) rows are now the only format
+      read or written; the test group is small enough to just re-export.
       See [PLAN-drop-v1-history-rows.md](PLAN-drop-v1-history-rows.md).
 - [x] Bundle-download by network address dropped; bundles are shared as
       files only. This settled the open question the consistent way: a
