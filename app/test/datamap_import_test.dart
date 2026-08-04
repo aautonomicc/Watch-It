@@ -53,6 +53,14 @@ void main() {
         if (req.method == 'POST' && req.uri.path == '/datamap') {
           if (bytes.length == 1 && bytes.first == 0xFF) {
             req.response.statusCode = 400;
+          } else if (bytes.length == 1 && bytes.first == 0xEE) {
+            // The offline shrunk-map case: the embedded client explains
+            // that expanding this map needs the network.
+            req.response.statusCode = 503;
+            req.response.write(
+                'this data map needs a one-time network lookup to finish '
+                'importing, and the Autonomi client is not connected yet '
+                '— try again once connected');
           } else {
             req.response.write(jsonEncode({
               'address': 'ab' * 32,
@@ -84,6 +92,20 @@ void main() {
           base: base);
       expect(entry.name, 'The Movie (2024).mkv');
       expect(entry.address, 'ab' * 32);
+    });
+
+    test('surfaces the server error text when the client sends one',
+        () async {
+      // A shrunk (child) map while offline: the embedded client returns
+      // 503 with an actionable message — shown to the user instead of
+      // the generic "could not be read" guess.
+      try {
+        await importDatamapBytes(Uint8List.fromList([0xEE]), base: base);
+        fail('expected ListImportException');
+      } on ListImportException catch (e) {
+        expect(e.message, contains('one-time network lookup'));
+        expect(e.message, contains('not connected'));
+      }
     });
 
     test('surfaces server rejection and bad names as import errors', () {

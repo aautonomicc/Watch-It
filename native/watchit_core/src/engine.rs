@@ -339,6 +339,29 @@ impl Engine {
         }
     }
 
+    /// Expand a shrunk (child) data map back to its root over the
+    /// network: fetch the wrapper chunks the upload stored (through the
+    /// chunk cache) and unwrap level by level — exactly reversing the
+    /// shrink the uploader ran. In practice one level of ≤3 small chunks,
+    /// and only ever needed once per map (the root is stored after).
+    pub async fn expand_child_map(
+        &'static self,
+        map: DataMap,
+    ) -> Result<DataMap, String> {
+        let client = self.client().await?;
+        let handle = Handle::current();
+        let task = tokio::task::spawn_blocking(move || {
+            let mut fetch = |name: XorName| {
+                handle
+                    .block_on(cached_chunk_get(&client, name))
+                    .map_err(self_encryption::Error::Generic)
+            };
+            self_encryption::get_root_data_map(map, &mut fetch)
+                .map_err(|e| format!("wrapper chunk fetch failed: {e}"))
+        });
+        task.await.map_err(|e| format!("expand task failed: {e}"))?
+    }
+
     /// Stream the whole file as decrypted bytes (constant memory).
     pub fn stream_full(
         &'static self,
