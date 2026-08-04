@@ -1,7 +1,12 @@
 # Roadmap
 
-**Status (2026-08-04):** latest release is **v0.1.0-alpha.45**
+**Status (2026-08-04):** latest release is **v0.1.0-alpha.46**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)).
+Alpha.46 fixes importing real `ant` uploads — the `.datamap` a private
+`ant file upload` writes for any file over ~12 MiB is a shrunk (child)
+map, which the app now expands over the network to the full root map
+at import — and drops v1 address-keyed `history.json` rows (spec-v2
+member-keyed rows are now the only accepted format).
 Alpha.45 ships the single import entry point (the list editor's
 "Add .datamap files" button and the Media page's "New list" button are
 gone — all importing goes through Add to library, which routes each
