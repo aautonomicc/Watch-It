@@ -1,7 +1,8 @@
 # Plan: drop v1 address-keyed history.json rows (next release after alpha.45)
 
-Planned 2026-08-04. **Not implemented yet** — lands in the first release
-after v0.1.0-alpha.45 ships (alpha.46 unless renumbered).
+Planned 2026-08-04. **IMPLEMENTED 2026-08-04** exactly as scoped below —
+ships in the first release after v0.1.0-alpha.45 (alpha.46 unless
+renumbered).
 
 ## Context
 

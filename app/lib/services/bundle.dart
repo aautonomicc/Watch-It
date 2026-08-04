@@ -127,7 +127,6 @@ class ParsedBundle {
     required this.metadataRows,
     required this.posters,
     required this.libraryPrefs,
-    required this.history,
     this.historyByMember = const {},
   });
 
@@ -148,16 +147,14 @@ class ParsedBundle {
   /// library.json per-list prefs by lowercased title.
   final Map<String, ({bool enabled, int position})> libraryPrefs;
 
-  /// Legacy (spec v1) history.json rows keyed by normalized address —
-  /// still accepted read-side so old bundles keep their history.
-  final Map<String, WatchState> history;
-
-  /// Spec-v2 history.json rows keyed by `.datamap` member name; their
+  /// history.json rows keyed by `.datamap` member name (spec v2); their
   /// addresses resolve through [BundleImportResult.addressByMember] at
-  /// seed time, so history never carries a bare address.
+  /// seed time, so history never carries a bare address. Legacy spec-v1
+  /// address-keyed rows are ignored on read since alpha.46 (test-group
+  /// decision — re-export on alpha.45+ restores dropped history).
   final Map<String, BundleHistoryRow> historyByMember;
 
-  int get historyCount => history.length + historyByMember.length;
+  int get historyCount => historyByMember.length;
 
   bool get hasSeedableExtras =>
       metadataRows.isNotEmpty || posters.isNotEmpty || historyCount > 0;
@@ -447,7 +444,6 @@ ParsedBundle parseBundle(Uint8List bytes) {
   final metadataRows = <String, Map<String, dynamic>>{};
   final posters = <String, Uint8List>{};
   final libraryPrefs = <String, ({bool enabled, int position})>{};
-  final history = <String, WatchState>{};
   final historyByMember = <String, BundleHistoryRow>{};
 
   Uint8List? readCapped(ArchiveFile file, int cap) {
@@ -515,8 +511,10 @@ ParsedBundle parseBundle(Uint8List bytes) {
           final entries = (decoded as Map<String, dynamic>)['entries'];
           for (final raw in entries as List<dynamic>) {
             final row = raw as Map<String, dynamic>;
-            // Spec v2: rows name their `.datamap` member; the address
+            // Rows name their `.datamap` member (spec v2); the address
             // comes from importing that member, never from the file.
+            // Rows without a member — including spec-v1 address-keyed
+            // ones — are silently skipped.
             final member = row['member'];
             if (member is String && member.isNotEmpty) {
               historyByMember[member] = (
@@ -525,18 +523,7 @@ ParsedBundle parseBundle(Uint8List bytes) {
                 completed: row['completed'] as bool? ?? false,
                 updatedAt: row['updatedAt'] as int? ?? 0,
               );
-              continue;
             }
-            // Spec v1 rows carried the derived address directly.
-            final addr = row['address'];
-            if (addr is! String || !looksLikeXorAddress(addr)) continue;
-            history[_normalizeAddr(addr)] = WatchState(
-              address: _normalizeAddr(addr),
-              positionMs: row['positionMs'] as int? ?? 0,
-              durationMs: row['durationMs'] as int? ?? 0,
-              completed: row['completed'] as bool? ?? false,
-              updatedAt: row['updatedAt'] as int? ?? 0,
-            );
           }
         } catch (_) {}
       default:
@@ -581,7 +568,6 @@ ParsedBundle parseBundle(Uint8List bytes) {
     metadataRows: metadataRows,
     posters: posters,
     libraryPrefs: libraryPrefs,
-    history: history,
     historyByMember: historyByMember,
   );
 }
@@ -832,7 +818,6 @@ Future<BundleSeedSummary> seedBundle(
   // Watch history: newer-updatedAt-wins, never regresses local progress.
   if (importHistory) {
     final states = <WatchState>[
-      ...bundle.history.values,
       for (final e in bundle.historyByMember.entries)
         if (addressByMember[e.key] != null)
           WatchState(

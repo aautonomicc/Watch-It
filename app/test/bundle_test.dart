@@ -119,7 +119,6 @@ ParsedBundle _bundle({
   Map<String, Map<String, dynamic>> metadataRows = const {},
   Map<String, Uint8List> posters = const {},
   Map<String, ({bool enabled, int position})> libraryPrefs = const {},
-  Map<String, WatchState> history = const {},
   Map<String, BundleHistoryRow> historyByMember = const {},
 }) =>
     ParsedBundle(
@@ -128,7 +127,6 @@ ParsedBundle _bundle({
       metadataRows: metadataRows,
       posters: posters,
       libraryPrefs: libraryPrefs,
-      history: history,
       historyByMember: historyByMember,
     );
 
@@ -387,11 +385,11 @@ void main() {
       expect(bundle.metadataRows.keys,
           [_lookupKey('Night of the Living Dead (1968).mp4')]);
       expect(bundle.posters['movie_10331.jpg'], [1, 2, 3, 4]);
-      expect(bundle.history, isEmpty);
+      expect(bundle.historyByMember, isEmpty);
     });
 
-    test('history rows: v2 member-keyed parsed, v1 address rows still '
-        'accepted', () {
+    test('history rows: v2 member-keyed parsed, v1 address rows ignored '
+        '(acceptance removed)', () {
       final bundle = parseBundle(zipOf({
         'Movie.mkv.datamap': [1],
         'history.json': utf8.encode(jsonEncode({
@@ -405,7 +403,8 @@ void main() {
               'updatedAt': 5000,
             },
             {
-              // A v1 row (old exporter): keeps working read-side.
+              // A v1 row (alpha.33–44 exporter): dropped silently — the
+              // import itself still succeeds.
               'address': _addrA,
               'positionMs': 30000,
               'durationMs': 120000,
@@ -420,9 +419,7 @@ void main() {
       expect(bundle.historyByMember.keys, ['Movie.mkv.datamap']);
       expect(bundle.historyByMember['Movie.mkv.datamap']!.positionMs,
           60000);
-      expect(bundle.history.keys, [_addrA]);
-      expect(bundle.history[_addrA]!.completed, isTrue);
-      expect(bundle.historyCount, 2);
+      expect(bundle.historyCount, 1);
       expect(bundle.hasSeedableExtras, isTrue);
     });
 
@@ -742,16 +739,14 @@ void main() {
       ]);
       final bundle = _bundle(
         listText: '',
-        history: {
-          _addrA: const WatchState(
-            address: _addrA,
+        historyByMember: {
+          'a.mkv.datamap': (
             positionMs: 30000,
             durationMs: 120000,
             completed: false,
             updatedAt: 100, // older: must not regress local progress
           ),
-          _addrB: const WatchState(
-            address: _addrB,
+          'b.mkv.datamap': (
             positionMs: 110000,
             durationMs: 120000,
             completed: true,
@@ -760,6 +755,10 @@ void main() {
         },
       );
       final summary = await seedBundle(bundle,
+          addressByMember: {
+            'a.mkv.datamap': _addrA,
+            'b.mkv.datamap': _addrB,
+          },
           postersDirProvider: postersDirProvider);
       expect(summary.historyMerged, 1);
       final a = await WatchStateStore.instance
@@ -809,9 +808,8 @@ void main() {
             'title': 'The Movie',
           },
         },
-        history: {
-          _addrA: const WatchState(
-            address: _addrA,
+        historyByMember: {
+          'a.mkv.datamap': (
             positionMs: 30000,
             durationMs: 120000,
             completed: false,
@@ -820,7 +818,9 @@ void main() {
         },
       );
       final summary = await seedBundle(bundle,
-          importHistory: false, postersDirProvider: postersDirProvider);
+          importHistory: false,
+          addressByMember: {'a.mkv.datamap': _addrA},
+          postersDirProvider: postersDirProvider);
       expect(summary.historyMerged, 0);
       final a = await WatchStateStore.instance
           .stateFor(const MediaEntry(name: 'a', address: _addrA));

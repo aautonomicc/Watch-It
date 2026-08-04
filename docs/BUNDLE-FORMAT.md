@@ -33,7 +33,7 @@ The format's floor is deliberate: a hand-made
 | `metadata.json` | no | `metadata_cache` rows for the bundled entries, keyed by `lookupKey`, plus a top-level `attribution` field (see Attribution below). |
 | `posters/` | no | The cached w342 poster JPGs for the bundled entries, deduped. |
 | `library.json` | no | Library export only: per-list `{enabled, position}` so a fresh-device import restores home-screen order/visibility. |
-| `history.json` | no | Watch-history rows `{member, positionMs, durationMs, completed, updatedAt}` (`version: 2`). Keyed by `.datamap` member name, exactly like `list.txt` — the importer resolves each member to its derived address, so the file never carries a bare address. An entry whose map is missing from the exporter's store has no member and its history stays out. Legacy `{address, ...}` rows (old exporters) are still accepted read-side — removal planned for the release after alpha.45 ([PLAN-drop-v1-history-rows.md](PLAN-drop-v1-history-rows.md)). |
+| `history.json` | no | Watch-history rows `{member, positionMs, durationMs, completed, updatedAt}` (`version: 2`). Keyed by `.datamap` member name, exactly like `list.txt` — the importer resolves each member to its derived address, so the file never carries a bare address. An entry whose map is missing from the exporter's store has no member and its history stays out. Rows without a `member` — including the legacy `{address, ...}` rows alpha.33–44 exporters wrote — are ignored (v1 acceptance removed after alpha.45, [PLAN-drop-v1-history-rows.md](PLAN-drop-v1-history-rows.md)); re-export on alpha.45+ to restore dropped history. |
 
 \* A bundle must carry at least one `.datamap` member or a `list.txt`;
 otherwise there is nothing to import.
@@ -62,8 +62,9 @@ a *public* upload of the same file would have had, which is why:
 
 - entries created from XOR addresses by pre-alpha.40 versions keep their
   identity unchanged after conversion;
-- legacy address-keyed `history.json` rows, `metadata.json` and poster
-  references need no migration;
+- `metadata.json` and poster references need no migration (legacy
+  address-keyed `history.json` rows did — their read-side acceptance was
+  removed after alpha.45; re-export to carry history in spec v2);
 - importing the same content twice (any route) dedupes naturally.
 
 Nothing exists *on the network* at a private upload's derived address —
