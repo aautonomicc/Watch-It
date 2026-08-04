@@ -1,7 +1,15 @@
 # Roadmap
 
-**Status (2026-08-03):** latest release is **v0.1.0-alpha.44**
+**Status (2026-08-04):** latest release is **v0.1.0-alpha.45**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)).
+Alpha.45 ships the single import entry point (the list editor's
+"Add .datamap files" button and the Media page's "New list" button are
+gone — all importing goes through Add to library, which routes each
+file correctly and creates lists) and address hygiene (bundle
+`history.json` is spec v2, keyed by `.datamap` member names instead of
+derived addresses, with a missing-map entry's history kept out of the
+bundle entirely; the ADDRESS section on detail pages and the
+list-editor address subtitle are deleted).
 Alpha.44 made "Add to library" a single multi-select picker that works
 out what each file is — media `.datamap` files, `.watch-list` bundles,
 or a bundle's own `.watch-list.datamap` fetched straight from the
