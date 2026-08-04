@@ -25,8 +25,17 @@ pub fn derive_address(root: &DataMap) -> Result<[u8; 32], String> {
     // not the wrapper chunks themselves.
     let (shrunk, _) = self_encryption::shrink_data_map(root.clone(), |_, _| Ok(()))
         .map_err(|e| format!("re-shrink failed: {e}"))?;
-    let serialized = rmp_serde::to_vec(&shrunk)
-        .map_err(|e| format!("serialize failed: {e}"))?;
+    shrunk_map_address(&shrunk)
+}
+
+/// Address of an already-shrunk map — the hash of its own serialization,
+/// no shrink round. This is what ant-cli's private upload wrote to the
+/// `.datamap` file (it persists the shrunk result verbatim), so for a
+/// child map the file itself carries the address; the root map is then
+/// recovered from the wrapper chunks the upload stored on the network.
+pub fn shrunk_map_address(map: &DataMap) -> Result<[u8; 32], String> {
+    let serialized =
+        rmp_serde::to_vec(map).map_err(|e| format!("serialize failed: {e}"))?;
     Ok(*blake3::hash(&serialized).as_bytes())
 }
 
@@ -113,6 +122,17 @@ mod tests {
         let (_, root) = upload(14 * 1024 * 1024);
         let child = DataMap::with_child(root.infos().to_vec(), 1);
         assert!(derive_address(&child).is_err());
+    }
+
+    #[test]
+    fn shrunk_map_address_matches_upload_address() {
+        // What ant-cli writes for a >3-chunk file is the shrunk child map;
+        // its own hash must be the upload's address.
+        let (addr, root) = upload(14 * 1024 * 1024);
+        let (shrunk, _) =
+            self_encryption::shrink_data_map(root, |_, _| Ok(())).unwrap();
+        assert!(shrunk.is_child());
+        assert_eq!(shrunk_map_address(&shrunk).unwrap(), addr);
     }
 
     #[test]

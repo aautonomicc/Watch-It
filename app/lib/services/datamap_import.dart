@@ -75,8 +75,16 @@ Future<ImportedDatamap> importDatamapBytes(
   try {
     final res = await client.post(Uri.parse('$base/datamap'), body: bytes);
     if (res.statusCode != 200) {
-      throw const ListImportException(
-          'That file could not be read as a data map.');
+      // The embedded client's error text says what actually went wrong
+      // (shrunk-map expansion needs the network, decode failure, …) —
+      // show it rather than a generic guess.
+      final detail = res.body.trim();
+      if (detail.isEmpty || detail.length > 300) {
+        throw const ListImportException(
+            'That file could not be read as a data map.');
+      }
+      throw ListImportException(
+          'That data map could not be imported — $detail.');
     }
     final json = jsonDecode(res.body) as Map<String, dynamic>;
     final address = json['address'] as String?;
