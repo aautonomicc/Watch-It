@@ -122,12 +122,20 @@ async fn resolve_map(engine: &'static Engine, Path(addr_hex): Path<String>) -> R
 }
 
 /// Import a `.datamap` file (ant-cli private-upload output): parse the
-/// bare serialized root map — msgpack canonically, legacy ant-gui JSON
+/// bare serialized map — msgpack canonically, legacy ant-gui JSON
 /// when the first byte is `{` (the same sniff as ant-core's
-/// `read_datamap`) — derive its content address offline, and store it.
+/// `read_datamap`) — derive its content address, and store the root map.
 /// The derived address is the entry's identity everywhere; for a file
 /// that was uploaded publicly it equals the public XOR address, so old
 /// entries and new imports of the same content coincide.
+///
+/// ant-cli persists the SHRUNK map, so for any file over 3 chunks
+/// (~12 MiB) the file carries a child map — the normal case for real
+/// media, not an error. Its own hash is the address (that is exactly
+/// what the uploader computed); the root map is recovered by fetching
+/// the few wrapper chunks the upload stored — the only import path that
+/// touches the network, once per map, then verified against the address
+/// before storing.
 async fn import_datamap(engine: &'static Engine, body: Bytes) -> Response {
     let map: Result<DataMap, String> = if body.first() == Some(&b'{') {
         serde_json::from_slice(&body).map_err(|e| format!("JSON decode failed: {e}"))
@@ -141,15 +149,51 @@ async fn import_datamap(engine: &'static Engine, body: Bytes) -> Response {
                 .into_response()
         }
     };
-    let addr = match crate::verify::derive_address(&map) {
-        Ok(a) => a,
-        Err(e) => return (StatusCode::UNPROCESSABLE_ENTITY, e).into_response(),
+    let (addr, root) = if map.is_child() {
+        let addr = match crate::verify::shrunk_map_address(&map) {
+            Ok(a) => a,
+            Err(e) => return (StatusCode::UNPROCESSABLE_ENTITY, e).into_response(),
+        };
+        // Re-import of a known map: the stored root already went through
+        // expand+verify — succeed offline instead of re-fetching.
+        if let Some(root) = engine.stored_root_map(&addr) {
+            (addr, root)
+        } else {
+            if !engine.is_ready() {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "this data map needs a one-time network lookup to finish \
+                     importing, and the Autonomi client is not connected yet \
+                     — try again once connected",
+                )
+                    .into_response();
+            }
+            let root = match engine.expand_child_map(map).await {
+                Ok(r) => r,
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        format!("the network lookup for this data map failed: {e}"),
+                    )
+                        .into_response()
+                }
+            };
+            if let Err(e) = crate::verify::verify_root_map(&addr, &root) {
+                return (StatusCode::UNPROCESSABLE_ENTITY, e).into_response();
+            }
+            (addr, root)
+        }
+    } else {
+        match crate::verify::derive_address(&map) {
+            Ok(a) => (a, map),
+            Err(e) => return (StatusCode::UNPROCESSABLE_ENTITY, e).into_response(),
+        }
     };
-    engine.store_root_map(addr, &map);
+    engine.store_root_map(addr, &root);
     let body = serde_json::json!({
         "address": hex::encode(addr),
-        "size": map.original_file_size() as u64,
-        "chunks": map.len(),
+        "size": root.original_file_size() as u64,
+        "chunks": root.len(),
     });
     ([(header::CONTENT_TYPE, "application/json")], body.to_string()).into_response()
 }
@@ -478,13 +522,45 @@ mod rootmap_tests {
     }
 
     #[tokio::test]
-    async fn datamap_import_rejects_garbage_and_child_maps() {
+    async fn datamap_import_rejects_garbage() {
         let app = test_router("datamap-bad");
         let (status, _) = send(&app, "POST", "/datamap", b"junk".to_vec()).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
 
+    #[tokio::test]
+    async fn child_datamap_offline_gets_clear_retry_error() {
+        // A shrunk (child) map is what ant-cli writes for any >3-chunk
+        // file. Expanding it needs the network; with no client connected
+        // the import must fail fast with an actionable message, not 422.
+        let app = test_router("datamap-child-offline");
         let (_, root) = upload();
         let child = DataMap::with_child(root.infos().to_vec(), 1);
+        let (status, body) = send(
+            &app,
+            "POST",
+            "/datamap",
+            rmp_serde::to_vec(&child).unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(String::from_utf8_lossy(&body).contains("not connected"));
+    }
+
+    #[tokio::test]
+    async fn child_datamap_reimport_succeeds_offline_once_root_is_stored() {
+        // First import expanded and stored the root (simulated here via
+        // the root-map PUT); re-posting the same child map must succeed
+        // without touching the network — duplicate imports stay offline.
+        let app = test_router("datamap-child-reimport");
+        // A ≤3-chunk root shrinks to itself, so hand-build the shrunk
+        // form ant-cli would have written for a bigger file: mark the
+        // stored root's own map as the child level. shrunk_map_address
+        // of that child is then the address the root must live under.
+        let (_, root) = upload();
+        let child = DataMap::with_child(root.infos().to_vec(), 1);
+        let addr = crate::verify::shrunk_map_address(&child).unwrap();
+        // No stored root yet: offline import fails.
         let (status, _) = send(
             &app,
             "POST",
@@ -492,7 +568,29 @@ mod rootmap_tests {
             rmp_serde::to_vec(&child).unwrap(),
         )
         .await;
-        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        // Pretend the one-time expand happened: store a root at that
+        // address directly through the engine (PUT /rootmap verifies the
+        // derived address, which a hand-built child can't satisfy).
+        let dir = std::env::temp_dir().join(format!(
+            "wi-rootmap-api-datamap-child-reimport-{}",
+            std::process::id()
+        ));
+        let engine: &'static Engine =
+            Box::leak(Box::new(Engine::new(None, dir.to_str())));
+        engine.store_root_map(addr, &root);
+        let app = router(engine);
+        let (status, body) = send(
+            &app,
+            "POST",
+            "/datamap",
+            rmp_serde::to_vec(&child).unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["address"], serde_json::json!(hex::encode(addr)));
+        assert_eq!(json["chunks"], serde_json::json!(root.len()));
     }
 
     #[tokio::test]

@@ -216,10 +216,10 @@ void main() {
             0x66 // derived address = _addrA's first byte spread = matches
           ],
           'history.json': utf8.encode(jsonEncode({
-            'version': 1,
+            'version': 2,
             'entries': [
               {
-                'address': FakeEmbeddedHttp.addrForByte(0x66),
+                'member': 'Watched Movie (2024).mkv.datamap',
                 'positionMs': 90000,
                 'durationMs': 120000,
                 'completed': false,
@@ -639,7 +639,9 @@ void main() {
       ]);
       await openMediaLists(tester);
       await importLocal(tester);
-      expect(find.textContaining('could not be read as a data map'),
+      // The embedded client's own error text is surfaced verbatim.
+      expect(
+          find.textContaining('could not be imported — not a data map'),
           findsOneWidget);
     });
   });
