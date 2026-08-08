@@ -12,9 +12,11 @@ import 'dart:io';
 /// the same override).
 ///
 /// Routes, mirroring the Rust server:
-/// - `POST /datamap`: body starting `0xBA 0xD1` → 400; otherwise the
-///   "derived address" is the first body byte spread over 64 hex chars,
-///   so tests can predict it from the member bytes.
+/// - `POST /datamap`: body starting `0xBA 0xD1` → 400; body starting
+///   `0xBA 0xD5` → 503 (a shrunk map that needs the network while not
+///   connected); otherwise the "derived address" is the first body byte
+///   spread over 64 hex chars, so tests can predict it from the member
+///   bytes.
 /// - `GET /datamap/<addr>`: serves [datamaps], else 404.
 /// - `GET /xor/<addr>`: serves [xorContent], else 404.
 /// - `PUT /rootmap/<addr>`: body `[6, 6, 6]` → 422 (tampered), else 204;
@@ -46,6 +48,13 @@ class FakeEmbeddedHttp extends HttpOverrides {
     if (method == 'POST' && path == '/datamap') {
       if (body.length >= 2 && body[0] == 0xBA && body[1] == 0xD1) {
         return (400, utf8.encode('not a data map'));
+      }
+      if (body.length >= 2 && body[0] == 0xBA && body[1] == 0xD5) {
+        return (
+          503,
+          utf8.encode('not connected to the network — this shrunk data '
+              'map needs the network to expand')
+        );
       }
       return (
         200,

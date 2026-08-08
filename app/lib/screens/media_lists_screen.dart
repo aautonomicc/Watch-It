@@ -4,10 +4,13 @@ import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:share_plus/share_plus.dart' show SharePlus, ShareParams;
 
 import '../models/media_list.dart';
+import '../services/android_saf.dart';
 import '../services/bundle.dart';
+import '../services/connectivity.dart';
 import '../services/datamap_import.dart';
 import '../services/library_arrangement.dart';
 import '../services/library_store.dart';
@@ -115,13 +118,33 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       return;
     }
 
+    // Importing can need the network: a real ant upload of a file over
+    // ~12 MB writes a shrunk map that expands over the network, and a
+    // network-stored bundle always fetches. Warn up front while offline
+    // instead of failing file by file — but don't block: local bundles
+    // and previously imported maps work fully offline.
+    if (netBundles.isNotEmpty || datamaps.isNotEmpty) {
+      if (await ConnectivityMonitor.instance.refresh()) {
+        if (!mounted) return;
+        if (await _confirmOfflineImport() != true) return;
+      }
+    }
+
+    final totalBundles = bundles.length + netBundles.length;
+    var bundleN = 0;
+    String? bundleLabel() =>
+        totalBundles > 1 ? 'Bundle $bundleN of $totalBundles' : null;
     for (final bundle in bundles) {
       if (!mounted) return;
-      await _importBundle(bundle.bytes, fileName: bundle.name);
+      bundleN++;
+      await _importBundle(bundle.bytes,
+          fileName: bundle.name, progressLabel: bundleLabel());
     }
     for (final bundle in netBundles) {
       if (!mounted) return;
-      await _importNetworkBundle(bundle.name, bundle.bytes);
+      bundleN++;
+      await _importNetworkBundle(bundle.name, bundle.bytes,
+          progressLabel: bundleLabel());
     }
     final skippedNotes = [
       if (skipped.isNotEmpty)
@@ -260,9 +283,44 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     );
   }
 
-  /// Import [files] as datamap entries into every list in [listTitles].
-  /// Each file's address is derived offline by the embedded client;
-  /// unreadable files are skipped and reported. Titles the user checked
+  /// Info dialog when an import that may need the network starts while
+  /// the embedded client is offline. Warn, don't block: only shrunk maps
+  /// (real ant uploads over ~12 MB) and network-stored bundles need
+  /// peers; everything else imports offline. Returns true to continue.
+  Future<bool?> _confirmOfflineImport() {
+    final t = WiTokens.of(context);
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text('Not connected',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        content: Text(
+          'The Autonomi network is not connected. Data maps of files '
+          'over ~12 MB and network-stored bundles need the network to '
+          'import, so those will fail until the connection is back. '
+          'Small or previously imported maps still work offline.',
+          style: TextStyle(color: t.boneDim, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel', style: TextStyle(color: t.ash)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Import anyway', style: TextStyle(color: t.accent)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Import [files] as datamap entries into every list in [listTitles],
+  /// behind a "File X of Y" progress dialog with Cancel (a shrunk map
+  /// expands over the network, ~20s each). Failed files are skipped and
+  /// reported — when every file fails, the first failure's own message
+  /// says why (offline, not a data map, …). Titles the user checked
   /// that already exist merge without the clash dialog — checking the
   /// box already answered that question.
   Future<void> _importDatamaps(
@@ -270,19 +328,67 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     required List<String> listTitles,
     List<String> extraNotes = const [],
   }) async {
+    final t = WiTokens.of(context);
+    var cancelled = false;
+    final progress = ValueNotifier<String>('');
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Dialog(
+        backgroundColor: t.ink2,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: t.accent),
+              const SizedBox(height: 18),
+              Text('Importing data maps…',
+                  style: TextStyle(fontSize: 13, color: t.boneDim)),
+              const SizedBox(height: 6),
+              ValueListenableBuilder<String>(
+                valueListenable: progress,
+                builder: (context, text, _) => Text(text,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 11.5, color: t.ash)),
+              ),
+              const SizedBox(height: 10),
+              TextButton(
+                onPressed: () => cancelled = true,
+                child: Text('Cancel', style: TextStyle(color: t.ash)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ));
     final entries = <MediaEntry>[];
     var failed = 0;
-    for (final file in files) {
-      try {
-        entries.add(await entryFromDatamapFile(file.name, file.bytes,
-            base: widget.importBase));
-      } on ListImportException {
-        failed++;
+    var attempted = 0;
+    String? firstError;
+    try {
+      for (final file in files) {
+        if (cancelled) break;
+        attempted++;
+        progress.value = 'File $attempted of ${files.length}\n${file.name}';
+        try {
+          entries.add(await entryFromDatamapFile(file.name, file.bytes,
+              base: widget.importBase));
+        } on ListImportException catch (e) {
+          failed++;
+          firstError ??= e.message;
+        }
       }
+    } finally {
+      if (mounted) Navigator.of(context, rootNavigator: true).pop();
     }
+    if (!mounted) return;
     if (entries.isEmpty) {
-      _showError('No data maps could be imported'
-          '${failed > 0 ? ' ($failed unreadable)' : ''}.');
+      if (cancelled) return; // user's choice, nothing imported yet
+      _showError(files.length == 1
+          ? (firstError ?? 'No data maps could be imported.')
+          : 'None of the ${files.length} data maps could be imported. '
+              '${firstError ?? ''}');
       return;
     }
     final existing = {
@@ -302,6 +408,10 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         if (failed > 0)
           '$failed ${failed == 1 ? 'file' : 'files'} skipped (not a '
               'data map)',
+        if (cancelled && attempted < files.length)
+          '${files.length - attempted} '
+              '${files.length - attempted == 1 ? 'file' : 'files'} '
+              'not imported (cancelled)',
         ...extraNotes,
       ],
     );
@@ -313,7 +423,8 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
   /// file name — so its default list title and clash handling match a
   /// local import of the same bundle.
   Future<void> _importNetworkBundle(
-      String fileName, Uint8List datamapBytes) async {
+      String fileName, Uint8List datamapBytes,
+      {String? progressLabel}) async {
     final t = WiTokens.of(context);
     var cancelled = false;
     final progress = ValueNotifier<String>('Contacting the network…');
@@ -331,6 +442,11 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
               const SizedBox(height: 18),
               Text('Fetching bundle…',
                   style: TextStyle(fontSize: 13, color: t.boneDim)),
+              if (progressLabel != null) ...[
+                const SizedBox(height: 6),
+                Text(progressLabel,
+                    style: TextStyle(fontSize: 11.5, color: t.ash)),
+              ],
               const SizedBox(height: 6),
               ValueListenableBuilder<String>(
                 valueListenable: progress,
@@ -379,7 +495,8 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
   /// member and line into datamap-backed entries (a v1 bundle's legacy
   /// entries fetch their maps here, behind a progress dialog) and merge
   /// the resulting lists into the library.
-  Future<void> _importBundle(Uint8List bytes, {String? fileName}) async {
+  Future<void> _importBundle(Uint8List bytes,
+      {String? fileName, String? progressLabel}) async {
     final ParsedBundle bundle;
     try {
       bundle = parseBundle(bytes);
@@ -430,6 +547,11 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
               const SizedBox(height: 18),
               Text('Importing…',
                   style: TextStyle(fontSize: 13, color: t.boneDim)),
+              if (progressLabel != null) ...[
+                const SizedBox(height: 6),
+                Text(progressLabel,
+                    style: TextStyle(fontSize: 11.5, color: t.ash)),
+              ],
             ],
           ),
         ),
@@ -809,8 +931,9 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       typeLabel: 'W@tch bundle',
       extension: 'watch-list',
       entryCount: entries.length,
-      // ~200MB through the share sheet is unreliable; the SAF save
-      // dialog handles it, so bundles use it on every platform.
+      // ~200MB through the share sheet is unreliable; a save dialog
+      // (SAF Create-Document on Android, file_selector elsewhere)
+      // handles it, so bundles use one on every platform.
       shareOnMobile: false,
       note: result.entriesMissingMap > 0
           ? '${result.entriesMissingMap} '
@@ -820,9 +943,11 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     );
   }
 
-  /// Hand the exported bytes to the user: the system share sheet on
-  /// mobile when [shareOnMobile] (plain text lists), else a save-file
-  /// dialog (SAF on mobile — reliable for large bundles).
+  /// Hand the exported bytes to the user: on Android the system's own
+  /// Create-Document (SAF) dialog via [AndroidSaf] (file_selector_android
+  /// implements no save dialog — getSaveLocation throws), the share
+  /// sheet on mobile when [shareOnMobile] (small files only), else the
+  /// file_selector save dialog.
   Future<void> _deliverExport(
     Uint8List bytes, {
     required String fileName,
@@ -834,7 +959,18 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     String? note,
   }) async {
     try {
-      if (shareOnMobile && (Platform.isAndroid || Platform.isIOS)) {
+      if (Platform.isAndroid) {
+        final saved = await AndroidSaf.saveFile(bytes,
+            fileName: fileName, mimeType: mimeType);
+        if (saved == null || !mounted) return; // dialog cancelled
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Exported $entryCount '
+              '${entryCount == 1 ? 'entry' : 'entries'} to '
+              '"$saved"${note == null ? '' : ' ($note)'}'),
+        ));
+        return;
+      }
+      if (shareOnMobile && Platform.isIOS) {
         await SharePlus.instance.share(ShareParams(
           files: [XFile.fromData(bytes, mimeType: mimeType)],
           fileNameOverrides: [fileName],
@@ -856,6 +992,9 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
             '${entryCount == 1 ? 'entry' : 'entries'} to '
             '${location.path}${note == null ? '' : ' ($note)'}'),
       ));
+    } on PlatformException catch (e) {
+      // The Android SAF channel's error carries a readable message.
+      _showError('Export failed: ${e.message ?? e.code}');
     } catch (e) {
       _showError('Export failed: $e');
     }

@@ -15,6 +15,8 @@ import 'package:watchit/db/app_database.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/screens/media_lists_screen.dart';
 import 'package:watchit/services/bundle.dart';
+import 'package:watchit/services/connectivity.dart';
+import 'package:watchit/services/embedded_client.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata.dart';
 import 'package:watchit/services/watch_state.dart';
@@ -76,6 +78,7 @@ void main() {
 
   tearDown(() {
     HttpOverrides.global = null;
+    ConnectivityMonitor.instance = ConnectivityMonitor();
   });
 
   Future<void> openMediaLists(WidgetTester tester) async {
@@ -749,6 +752,106 @@ void main() {
           findsOneWidget);
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
+    });
+  });
+
+  group('Import failure surfacing', () {
+    // The 0xBA 0xD5 body makes the fake POST /datamap answer 503 with
+    // the embedded client's own not-connected text — the message the
+    // user must actually see instead of a generic "unreadable".
+    testWidgets("a single failing datamap shows the server's own error",
+        (tester) async {
+      FileSelectorPlatform.instance = _FakeFileSelector([
+        XFile.fromData(Uint8List.fromList([0xBA, 0xD5]),
+            path: 'Big Movie (2024).mkv.datamap'),
+      ]);
+      await openMediaLists(tester);
+      await importLocal(tester);
+      // Empty library → new-list prompt.
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('not connected to the network'),
+          findsOneWidget);
+      expect(find.textContaining('unreadable'), findsNothing);
+    });
+
+    testWidgets('when every file fails, the count and the first error '
+        'show together', (tester) async {
+      FileSelectorPlatform.instance = _FakeFileSelector([
+        XFile.fromData(Uint8List.fromList([0xBA, 0xD5]),
+            path: 'Big Movie (2024).mkv.datamap'),
+        XFile.fromData(Uint8List.fromList([0xBA, 0xD1]),
+            path: 'Bad.mkv.datamap'),
+      ]);
+      await openMediaLists(tester);
+      await importLocal(tester);
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(
+          find.textContaining(
+              'None of the 2 data maps could be imported'),
+          findsOneWidget);
+      expect(find.textContaining('not connected to the network'),
+          findsOneWidget);
+    });
+  });
+
+  group('Offline import pre-flight', () {
+    setUp(() {
+      ConnectivityMonitor.instance = ConnectivityMonitor(
+          probe: () async => const ClientHealth(state: 'ready', peers: 0));
+    });
+
+    List<XFile> datamapPick() => [
+          XFile.fromData(Uint8List.fromList([5]),
+              path: 'First Movie (2024).mkv.datamap'),
+        ];
+
+    testWidgets('warns while offline; Cancel aborts the whole import',
+        (tester) async {
+      FileSelectorPlatform.instance = _FakeFileSelector(datamapPick());
+      await openMediaLists(tester);
+      final before = (await LibraryStore.load()).length;
+      await importLocal(tester);
+
+      expect(find.text('Not connected'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('New media list'), findsNothing);
+      expect((await LibraryStore.load()).length, before);
+    });
+
+    testWidgets('Import anyway continues to the normal flow',
+        (tester) async {
+      FileSelectorPlatform.instance = _FakeFileSelector(datamapPick());
+      await openMediaLists(tester);
+      await importLocal(tester);
+
+      await tester.tap(find.text('Import anyway'));
+      await tester.pumpAndSettle();
+      // Empty library → new-list prompt; the import itself succeeds
+      // (the fake serves this map without the network).
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Imported "Imported"'), findsOneWidget);
+    });
+
+    testWidgets('a local bundle-only pick imports without the warning',
+        (tester) async {
+      FileSelectorPlatform.instance = _FakeFileSelector([
+        XFile.fromData(
+            _zipOf({'A Movie (2020).mkv.datamap': [3]}),
+            path: 'My Films.watch-list'),
+      ]);
+      await openMediaLists(tester);
+      await importLocal(tester);
+
+      expect(find.text('Not connected'), findsNothing);
+      expect(find.textContaining('Imported "My Films"'), findsOneWidget);
     });
   });
 }
