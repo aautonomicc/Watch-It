@@ -65,13 +65,13 @@ class MediaMetadata {
   final String? showPosterFilePath;
 }
 
-/// XOR address of the built-in test movie seeded on first run.
-/// H.264 8-bit 1080p re-encode — plays with hardware decoding on phones and
-/// older desktops, unlike the AV1 10-bit original it replaces.
+/// XOR address of the built-in default movie seeded on first run — the
+/// public-domain catalog's NOTLD upload (H.264 8-bit archive.org source,
+/// uploaded 2026-08-07; part of kSeedLists in seed_catalog.dart).
 const kDefaultMovieAddress =
-    '66cacd0604b01b2c2f1da1c1c3c05609d3b4cc448cff3b6cdd868e6b7eebcb13';
+    '442180e7d60e9a16bfaeb7f00aff6e47c754934986b9010f5f75e101ef4da20e';
 
-/// File name of the built-in test movie as stored on the network.
+/// File name of the built-in default movie as stored on the network.
 /// Follows the Plex/Jellyfin naming convention
 /// (`Title (Year) {imdb-ttXXXXXXX} - [quality].ext`) — see docs/NAMING.md.
 const kDefaultMovieName =
@@ -79,11 +79,13 @@ const kDefaultMovieName =
 
 /// Stale addresses the default movie was seeded under in older releases;
 /// migrated to [kDefaultMovieAddress] by [LibraryStore.ensureDefaults].
-/// In order: up to v0.1.0-alpha.4 (dead upload), and the AV1 10-bit webm
-/// used up to v0.1.0-alpha.15.
+/// In order: up to v0.1.0-alpha.4 (dead upload), the AV1 10-bit webm
+/// used up to v0.1.0-alpha.15, and the 5.68GB 1080p re-encode used up to
+/// v0.1.0-alpha.47 (replaced by the seed catalog's smaller upload).
 const kLegacyDefaultMovieAddresses = [
   'ac855e1e8b17cb4ba0884a4e7025bd5f51d95ed69e4fa15ca37290496a400ea0',
   'cebd7965268b61d98907378670f13e55a2694064d0eed7ef4be9c19eaaf03988',
+  '66cacd0604b01b2c2f1da1c1c3c05609d3b4cc448cff3b6cdd868e6b7eebcb13',
 ];
 
 const _notld = MediaMetadata(

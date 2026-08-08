@@ -28,7 +28,7 @@ void main() {
 
   setUp(() async {
     // Skip default seeding so the rows only hold what each test stores.
-    SharedPreferences.setMockInitialValues({'defaults_seeded_v3': true});
+    SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
     await LibraryStore.useForTesting(
         AppDatabase.forTesting(NativeDatabase.memory()));
     // Offline: no API key, so screens render from parsed file names.
