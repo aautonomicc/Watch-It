@@ -34,7 +34,19 @@ class DetailScreen extends StatefulWidget {
 }
 
 class _DetailScreenState extends State<DetailScreen> {
-  MediaEntry get entry => widget.entry;
+  /// The version currently shown: the picker's selection, else the entry
+  /// the navigation passed in. Everything on the page — play, resume
+  /// point, download, file info — keys off this.
+  MediaEntry get entry => _selected ?? widget.entry;
+
+  MediaEntry? _selected;
+
+  /// Every upload of this title held in the library (same parsed lookup
+  /// key, different addresses), in library order — the version picker's
+  /// options. Length < 2 hides the picker. Discovered from the loaded
+  /// library so every navigation path (wall card, search, Continue
+  /// Watching) gets the picker without passing versions around.
+  List<MediaEntry> _versions = const [];
 
   WatchState? _state;
   MediaEntry? _next;
@@ -55,6 +67,31 @@ class _DetailScreenState extends State<DetailScreen> {
     unawaited(_loadState());
   }
 
+  static String _normalize(String address) =>
+      address.toLowerCase().replaceFirst('0x', '');
+
+  /// All uploads of [entry]'s title across the enabled lists (same
+  /// parsed lookup key, duplicate addresses dropped), in library order.
+  /// [entry] itself is prepended when the library no longer holds it.
+  /// Empty for episodes — shows fold by season, not by version.
+  List<MediaEntry> _versionsFor(List<MediaList> lists) {
+    final parsed = parseMediaName(entry.name);
+    if (parsed.isEpisode) return const [];
+    final key = parsed.lookupKey;
+    final seen = <String>{};
+    final found = <MediaEntry>[];
+    for (final l in lists) {
+      if (!l.enabled) continue;
+      for (final e in l.entries) {
+        final p = parseMediaName(e.name);
+        if (p.isEpisode || p.lookupKey != key) continue;
+        if (seen.add(_normalize(e.address))) found.add(e);
+      }
+    }
+    if (!seen.contains(_normalize(entry.address))) found.insert(0, entry);
+    return found;
+  }
+
   /// Load the entry's resume point and, for episodes, the show's next
   /// episode (needs the library to know the sibling files).
   Future<void> _loadState() async {
@@ -65,6 +102,7 @@ class _DetailScreenState extends State<DetailScreen> {
       _lists = lists;
       _state = state;
       _next = nextEpisode(lists, entry);
+      _versions = _versionsFor(lists);
       // The library's copy of this entry may know more than the object
       // the navigation passed in (size backfilled earlier, format
       // learned on a previous playback).
@@ -112,6 +150,24 @@ class _DetailScreenState extends State<DetailScreen> {
         sizeBytes: _sizeBytes,
         videoInfo: _videoInfo,
       ));
+
+  /// Switch the page to another upload of the same title: resume point,
+  /// download state, and file info all reload for the picked version.
+  void _selectVersion(MediaEntry version) {
+    if (_normalize(version.address) == _normalize(entry.address)) return;
+    setState(() {
+      _selected = version;
+      _state = null;
+      _sizeBytes = version.sizeBytes;
+      _videoInfo = version.videoInfo;
+    });
+    unawaited(_loadState());
+  }
+
+  /// The picker option label for a version: its format/size line, else a
+  /// positional fallback for entries nothing is known about yet.
+  String _versionLabel(MediaEntry version, int index) =>
+      formatInfoLine(version) ?? 'Version ${index + 1}';
 
   /// Playback source for [e]: the downloaded file when one is complete
   /// on disk, else the embedded client's stream URL. Also used for
@@ -352,6 +408,43 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
+  /// Dropdown over [_versions], labeled by each upload's format/size
+  /// line (`480p H.264 · 570 MB`). Only rendered with 2+ versions.
+  Widget _versionPicker(WiTokens t) {
+    final current = _normalize(entry.address);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.video_file_outlined, size: 15, color: t.ash),
+        const SizedBox(width: 6),
+        DropdownButton<String>(
+          value: current,
+          isDense: true,
+          underline: const SizedBox.shrink(),
+          dropdownColor: t.ink2,
+          iconEnabledColor: t.boneDim,
+          style: TextStyle(fontSize: 12.5, color: t.boneDim),
+          items: [
+            for (final (i, v) in _versions.indexed)
+              DropdownMenuItem(
+                value: _normalize(v.address),
+                child: Text(_versionLabel(v, i)),
+              ),
+          ],
+          onChanged: (addr) {
+            if (addr == null) return;
+            for (final v in _versions) {
+              if (_normalize(v.address) == addr) {
+                _selectVersion(v);
+                return;
+              }
+            }
+          },
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Rebuild when the TMDB match for this entry lands in the cache,
@@ -445,8 +538,13 @@ class _DetailScreenState extends State<DetailScreen> {
                       style: TextStyle(fontSize: 12, color: t.ash)),
                 ],
                 // Format and exact size of this specific upload — what
-                // tells two copies of the same title apart.
-                if (_fileInfoLine != null) ...[
+                // tells two copies of the same title apart. With more
+                // than one upload of the title in the library the line
+                // becomes a dropdown that switches the page between them.
+                if (_versions.length > 1) ...[
+                  const SizedBox(height: 6),
+                  _versionPicker(t),
+                ] else if (_fileInfoLine != null) ...[
                   const SizedBox(height: 4),
                   Text(_fileInfoLine!,
                       style: TextStyle(fontSize: 12, color: t.ash)),
