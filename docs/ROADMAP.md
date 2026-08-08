@@ -1,7 +1,27 @@
 # Roadmap
 
-**Status (2026-08-04):** latest release is **v0.1.0-alpha.47**
+**Status (2026-08-08):** latest release is **v0.1.0-alpha.50**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)).
+Alpha.50 relays out the home app bar: the search icon moves to the far
+left, the library-drawer hamburger to the far right, and the top-right
+settings icon is gone (the drawer's Settings tile covers it); the home
+screen now also reloads after *any* pushed page pops, so changes made
+via drawer-opened pages apply on return.
+Alpha.49 ships the same-title version picker: uploads of the same title
+share one wall card (info line "2 versions") and the detail page grows a
+version dropdown ("480p H.264 · 570 MB" / "1080p H.264 · 5.29 GB") that
+switches play/resume/download and the FILE section to the picked
+version; both Night of the Living Dead uploads (480p archive.org + the
+genuine-1080p re-encode) are bundled to demonstrate it.
+Alpha.48 is the seed-catalog release — the fresh-install experience is
+now a full library (see the section below and
+[SEED-CATALOG.md](SEED-CATALOG.md)): first run seeds all 48
+verified-public-domain uploads as three lists with bundled root maps
+(instant play) and bundled TMDB metadata + posters (full poster wall
+offline, no key needed), every entry shows file size + video format,
+and import/export gets UX fixes (Android bundle export via the system
+save dialog, offline-import warning, real error messages, File X of Y
+progress).
 Alpha.47 fixes `.datamap` import on Android: the system file picker
 copies picked files into cache and renames unknown extensions to the
 MIME-derived `.bin`, so every `X.datamap` reached the app as `X.bin`
@@ -302,6 +322,45 @@ re-leaks every title); already-public uploads are immutable and stay
 public. Curators of genuinely public material (the NOTLD demo, PD
 pipelines) fetch the public file's datamap once and ship it in a bundle —
 consumers never see an address.
+
+## Seed catalog & same-title versions (shipped 2026-08-08, v0.1.0-alpha.48/.49/.50)
+
+The fresh-install experience became a full library. Catalog contents,
+upgrade-flag rules, and the regeneration procedure live in
+[SEED-CATALOG.md](SEED-CATALOG.md).
+
+- [x] Full PD seed catalog (alpha.48): first run seeds all 48
+      verified-public-domain uploads as three lists (10 Movies +
+      Petticoat Junction S1's 21 episodes + One Step Beyond's 17
+      episodes) from generated `seed_catalog.dart`, with every root map
+      bundled as an app asset so seeded titles play instantly; upgrade
+      paths merge without duplicating entries or resurrecting user
+      deletions (`defaults_seeded_v4`, additions via
+      `ensureSeedAdditions`/`seed_additions_v1`)
+- [x] Bundled TMDB metadata (alpha.48): 48 metadata rows + 53 images
+      (~1.5MB) harvested with the app's own matcher — fresh keyless
+      installs show posters, descriptions, ratings, and episode
+      names/stills fully offline; an asset-coverage test fails CI if
+      the catalog changes without a re-harvest
+- [x] Per-entry file size + video format (alpha.48): `sizeBytes` +
+      `videoInfo` ("480p H.264") on wall cards, list-editor subtitles,
+      and detail pages; size comes free from the datamap at import,
+      legacy entries backfill from the local `/resolve`, and the player
+      persists mpv-reported resolution on first play
+- [x] Import/export UX fixes (alpha.48): Android bundle export via the
+      system SAF save dialog (was broken — file_selector never
+      implemented getSavePath on Android), offline-import pre-flight
+      warning, import errors surfaced verbatim instead of a generic
+      "unreadable" count, File/Bundle X of Y progress dialogs with
+      Cancel
+- [x] Same-title version picker (alpha.49): uploads sharing a parsed
+      title fold into one card everywhere (wall, browse grids, Recently
+      Added, Downloads, search) with an "N versions" line; the detail
+      page's file-info line becomes a dropdown that re-keys
+      play/resume/download/FILE to the picked version
+- [x] Home app bar relayout (alpha.50): search far left, library-drawer
+      hamburger far right, top-right settings icon removed; home
+      reloads after any pushed page pops (route-observer fix)
 
 ## Phase 3 — All desktop platforms
 - [ ] Windows + macOS builds and packaging (MSIX, .dmg)

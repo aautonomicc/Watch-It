@@ -119,6 +119,16 @@ logo stripe and the app accent blue (#42a5f5). Alpha.38 adds Settings →
 Network (downloads Wi-Fi-only by default, ask-before-streaming on
 cellular), automatic reconnection after network loss on both platforms,
 an Android background-download progress notification, and the bundled
-demo-movie data map for a fast first play. Still to
+demo-movie data map for a fast first play. Alpha.42/.43 add the left
+library drawer and the "My lists | Auto by type" arrangement toggle
+(virtual Movies / TV Shows lists) plus per-list browse pages with
+multi-select genre filter chips. Alpha.48 seeds a full public-domain
+poster wall (three rows with bundled artwork) on first run and adds a
+file-size/format line ("480p H.264 · 570 MB") to cards and detail
+pages; alpha.49 folds same-title uploads into one card with an
+"N versions" line and a detail-page version dropdown. Alpha.50 settles
+the home app bar layout: search icon far left, library-drawer hamburger
+far right, and the settings icon removed from the bar (Settings lives
+in the drawer). Still to
 come from this document: filter/sort + fast-scroller on
 the grid, the full desktop keyboard map, mobile gestures, and the TV layout.
