@@ -97,6 +97,23 @@ raw datamap members named by original filename, so even a hand-made
 `zip lib.watch-list *.datamap` imports), the plain-text address list format
 is gone, old bundles convert on import, and existing libraries migrate
 automatically in a one-time background pass on first launch.
+Alpha.42/.43 add library arrangement: an "Auto by type" mode that groups
+the wall into virtual Movies / TV Shows lists, a left library drawer,
+and per-list browse pages with genre filter chips. Alpha.44–.47
+consolidate importing into a single multi-select "Add to library"
+picker that works out what each file is, and fix importing real
+`ant file upload` output (shrunk datamaps for files over ~12 MiB) and
+the Android file picker's `.bin` rename. Alpha.48 turns the first run
+into a full library: 48 verified-public-domain movies and episodes
+(10 films, Petticoat Junction season 1, One Step Beyond) are seeded
+with their data maps, artwork, and descriptions bundled in the app — a
+fresh install shows a complete streamable poster wall, fully offline
+metadata, no TMDB key needed — and every entry now shows its file size
+and video format. Alpha.49 folds multiple uploads of the same title
+into one card with a version picker on the detail page (e.g.
+"480p H.264 · 570 MB" vs "1080p H.264 · 5.29 GB"), and alpha.50 puts
+the search icon on the far left of the home app bar and the library
+drawer button on the far right.
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users
@@ -104,6 +121,7 @@ Docs:
 - [docs/NAMING.md](docs/NAMING.md) — file naming convention (Plex/Jellyfin style)
 - [docs/UI-DESIGN.md](docs/UI-DESIGN.md) — screens and look-and-feel
 - [docs/BUNDLE-FORMAT.md](docs/BUNDLE-FORMAT.md) — `.watch-list` bundle spec v2 (datamap-first)
+- [docs/SEED-CATALOG.md](docs/SEED-CATALOG.md) — the built-in public-domain seed catalog
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased milestones
 
 ## License
@@ -125,10 +143,13 @@ inside the app: **Settings → About → Open-source licenses**.
 In short: take the *source* under MIT; redistribute the *binaries* under
 GPLv3.
 
-### Demo movie
+### Bundled catalog
 
-The bundled demo, *Night of the Living Dead* (1968), is in the public
-domain **in the United States** (it was released without a copyright
-notice). Copyright terms differ elsewhere — in much of Europe protection
-runs for 70 years after the death of the last author — so outside the US,
-check your local rules before treating it as free.
+Since alpha.48 a fresh install seeds a catalog of public-domain movies
+and TV episodes (see [docs/SEED-CATALOG.md](docs/SEED-CATALOG.md)),
+headlined by *Night of the Living Dead* (1968). All seeded titles were
+verified public domain **in the United States** (e.g. released without a
+copyright notice, or copyright not renewed). Copyright terms differ
+elsewhere — in much of Europe protection runs for 70 years after the
+death of the last author — so outside the US, check your local rules
+before treating them as free.
