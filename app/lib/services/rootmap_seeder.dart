@@ -4,23 +4,27 @@ import 'dart:io';
 import 'package:flutter/services.dart' show rootBundle;
 
 import 'embedded_client.dart';
-import 'metadata.dart';
+import 'seed_catalog.dart';
 
 /// Seeds the embedded client's root-map store with data maps bundled as
-/// Flutter assets, so the default movie plays within seconds on a fresh
-/// install instead of paying the 20-30s cold network resolve.
+/// Flutter assets, so every seeded catalog title plays within seconds on
+/// a fresh install — required for offline first runs, since the play
+/// path serves locally stored maps only (no network resolve).
 ///
 /// The server verifies every imported map offline before storing it
 /// (verify-then-store on `PUT /rootmap`), so a corrupt or tampered asset
-/// is rejected — the address then just resolves over the network as
-/// before. Idempotent and fully offline; safe to fire-and-forget at
-/// startup.
+/// is rejected — that entry then needs its `.datamap` imported once
+/// while connected before it can play. Idempotent and fully offline;
+/// safe to fire-and-forget at startup.
 
-/// Addresses whose resolved root map ships inside the app. Keep in sync
-/// with the bundled catalog: the asset for an address must exist at
-/// [bundledRootMapAsset] (a test asserts this, so a default-movie swap
-/// cannot silently ship a stale map).
-const List<String> kBundledRootMapAddresses = [kDefaultMovieAddress];
+/// Addresses whose resolved root map ships inside the app: every entry
+/// of the seeded catalog. The asset for an address must exist at
+/// [bundledRootMapAsset] (a test asserts this, so a catalog change
+/// cannot silently ship a stale or missing map).
+final List<String> kBundledRootMapAddresses = [
+  for (final list in kSeedLists)
+    for (final entry in list.entries) entry.address,
+];
 
 /// Asset path of the bundled root map for [address].
 String bundledRootMapAsset(String address) => 'assets/rootmaps/$address.map';
@@ -52,8 +56,8 @@ Future<void> _seedOne(HttpClient client, String base, String address) async {
     final putRes = await put.close();
     await putRes.drain<void>();
   } catch (_) {
-    // Seeding is a fast-path optimization only — any failure (missing
-    // asset, rejected map, server not up yet) falls back to the normal
-    // network resolve on first play.
+    // Best-effort: any failure (missing asset, rejected map, server not
+    // up yet) leaves that entry unplayable until its .datamap is
+    // imported; the next launch retries the seed.
   }
 }

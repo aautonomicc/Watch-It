@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../db/app_database.dart';
 import '../models/media_list.dart';
 import 'metadata.dart';
+import 'seed_catalog.dart';
 
 /// Persists the user's media lists in SQLite (drift, see
 /// db/app_database.dart). Earlier alphas stored them as a JSON blob in
@@ -19,7 +20,10 @@ class LibraryStore {
   // v3: default replaced with the H.264 8-bit re-encode (Plex/Jellyfin
   // file name) — the AV1 10-bit webm was unplayable on most phones and
   // older desktops.
-  static const _seededKey = 'defaults_seeded_v3';
+  // v4: single default movie replaced with the full public-domain seed
+  // catalog (kSeedLists) — v3-seeded installs gain the new titles on
+  // upgrade, with the old default-movie address migrated in place.
+  static const _seededKey = 'defaults_seeded_v4';
 
   /// Id of the seeded default list ("Movies"; "Test Movies" before
   /// alpha.26 — [ensureDefaults] renames it in place).
@@ -83,11 +87,11 @@ class LibraryStore {
     _opening = null;
   }
 
-  /// One-time seed of the built-in test movie so fresh (and upgraded)
-  /// installs have something playable. Entries still pointing at a stale
-  /// default address are rewritten to the current one. Skipped when the
-  /// user already has the address in a list; never re-added after the user
-  /// deletes it.
+  /// One-time seed of the built-in public-domain catalog ([kSeedLists])
+  /// so fresh (and upgraded) installs have something playable. Entries
+  /// still pointing at a stale default-movie address are rewritten to the
+  /// current one. An entry the user already has is never duplicated, and
+  /// nothing is re-added after the user deletes it.
   static Future<void> ensureDefaults() async {
     final prefs = await SharedPreferences.getInstance();
     var lists = await load();
@@ -122,18 +126,27 @@ class LibraryStore {
       ];
       changed = true;
     }
-    if (!lists.any(
-        (l) => l.entries.any((e) => e.address == kDefaultMovieAddress))) {
-      lists.add(const MediaList(
-        id: _defaultListId,
-        title: 'Movies',
-        entries: [
-          MediaEntry(
-            name: kDefaultMovieName,
-            address: kDefaultMovieAddress,
-          ),
-        ],
-      ));
+    // Seed every catalog entry the library doesn't hold yet, merging
+    // into an existing list with the seed list's id (the pre-v4 default
+    // list keeps user renames), else creating the list.
+    final have = {
+      for (final l in lists)
+        for (final e in l.entries) e.address.toLowerCase(),
+    };
+    for (final seed in kSeedLists) {
+      final fresh = [
+        for (final e in seed.entries)
+          if (!have.contains(e.address))
+            MediaEntry(name: e.name, address: e.address),
+      ];
+      if (fresh.isEmpty) continue;
+      final i = lists.indexWhere((l) => l.id == seed.id);
+      if (i != -1) {
+        lists[i] =
+            lists[i].copyWith(entries: [...lists[i].entries, ...fresh]);
+      } else {
+        lists.add(MediaList(id: seed.id, title: seed.title, entries: fresh));
+      }
       changed = true;
     }
     if (changed) await save(lists);
