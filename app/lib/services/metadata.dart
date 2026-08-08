@@ -77,15 +77,22 @@ const kDefaultMovieAddress =
 const kDefaultMovieName =
     'Night of the Living Dead (1968) {imdb-tt0063350} - [1080p].mp4';
 
+/// The genuine-1080p NOTLD upload (the 5.68GB H.264 re-encode that was
+/// the default movie up to v0.1.0-alpha.47). Back in the seed catalog as
+/// a second entry alongside [kDefaultMovieAddress] — same film, same
+/// network file name, told apart by size/format info — so it must NOT be
+/// listed in [kLegacyDefaultMovieAddresses].
+const kDefaultMovie1080Address =
+    '66cacd0604b01b2c2f1da1c1c3c05609d3b4cc448cff3b6cdd868e6b7eebcb13';
+
 /// Stale addresses the default movie was seeded under in older releases;
 /// migrated to [kDefaultMovieAddress] by [LibraryStore.ensureDefaults].
-/// In order: up to v0.1.0-alpha.4 (dead upload), the AV1 10-bit webm
-/// used up to v0.1.0-alpha.15, and the 5.68GB 1080p re-encode used up to
-/// v0.1.0-alpha.47 (replaced by the seed catalog's smaller upload).
+/// In order: up to v0.1.0-alpha.4 (dead upload), and the AV1 10-bit webm
+/// used up to v0.1.0-alpha.15. The 5.68GB re-encode that followed is a
+/// catalog entry again ([kDefaultMovie1080Address]), not a stale address.
 const kLegacyDefaultMovieAddresses = [
   'ac855e1e8b17cb4ba0884a4e7025bd5f51d95ed69e4fa15ca37290496a400ea0',
   'cebd7965268b61d98907378670f13e55a2694064d0eed7ef4be9c19eaaf03988',
-  '66cacd0604b01b2c2f1da1c1c3c05609d3b4cc448cff3b6cdd868e6b7eebcb13',
 ];
 
 const _notld = MediaMetadata(
@@ -103,6 +110,7 @@ const _notld = MediaMetadata(
 /// Bundled catalog, keyed by XOR address.
 const _byAddress = <String, MediaMetadata>{
   kDefaultMovieAddress: _notld,
+  kDefaultMovie1080Address: _notld,
 };
 
 /// Offline fallback metadata for [entry]. Always returns something

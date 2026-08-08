@@ -52,6 +52,15 @@ const kSeedLists = <SeedList>[
       sizeBytes: 597585042,
       videoInfo: '480p H.264',
     ),
+    // Second upload of the same film under the identical network file
+    // name: the genuine-1080p re-encode that was the default movie up to
+    // alpha.47. Size/format info is what tells the two apart in the UI.
+    SeedEntry(
+      kDefaultMovieName,
+      kDefaultMovie1080Address,
+      sizeBytes: 5682464056,
+      videoInfo: '1080p H.264',
+    ),
     SeedEntry(
       'Battleship Potemkin (1925) {imdb-tt0015648}.mp4',
       '012dec733a59182ecce81639c9bd88ca50b23c6cad32273816a99fc37c4e3471',
@@ -339,4 +348,13 @@ const kSeedLists = <SeedList>[
       videoInfo: '720p H.264',
     ),
   ]),
+];
+
+/// Catalog entries added AFTER the v4 seed shipped (v0.1.0-alpha.48).
+/// Installs that already ran the one-time v4 seed never re-enter the
+/// full merge, so [LibraryStore.ensureSeedAdditions] delivers exactly
+/// these addresses to them behind its own one-time flag. Fresh (and
+/// pre-v4) installs get them through the normal [kSeedLists] merge.
+const kSeedAdditionAddresses = [
+  kDefaultMovie1080Address,
 ];

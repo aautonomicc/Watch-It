@@ -1,22 +1,28 @@
 # Built-in seed catalog
 
 Since alpha.48 the app seeds a full public-domain catalog on first run —
-10 movies plus two TV lists (Petticoat Junction, 21 season-1 episodes;
-One Step Beyond, 17 episodes), 48 titles total — replacing the single
-default movie (Night of the Living Dead) earlier alphas shipped. All
-titles are verified public domain (see the uploader's per-title PD
-research); the sources were downloaded from archive.org and uploaded to
-Autonomi with plain `ant file upload` on 2026-08-07.
+a Movies list plus two TV lists (Petticoat Junction, 21 season-1
+episodes; One Step Beyond, 17 episodes) — replacing the single default
+movie (Night of the Living Dead) earlier alphas shipped. All titles are
+verified public domain (see the uploader's per-title PD research); the
+sources were downloaded from archive.org and uploaded to Autonomi with
+plain `ant file upload` on 2026-08-07. The Movies list carries 11
+entries over 10 films: Night of the Living Dead ships twice under the
+identical network file name — the 480p archive.org upload and the
+genuine-1080p 5.68GB re-encode that was the default movie up to
+alpha.47 — told apart by their `sizeBytes`/`videoInfo` columns (the
+same-title differentiation feature exists for exactly this). 49 catalog
+entries, 49 uploads, 49 bundled root maps.
 
 ## Moving parts
 
 | Piece | Where |
 |---|---|
 | Catalog (names + derived addresses + file info) | `app/lib/services/seed_catalog.dart` (`kSeedLists`) — each entry also carries `sizeBytes` (exact upload size) and `videoInfo` (`480p H.264`, ffprobed from the source files) |
-| Library seeding / upgrade migration | `LibraryStore.ensureDefaults` (`defaults_seeded_v4` flag); file info gap-fill for installs seeded before the columns existed: `ensureSeedFileInfo` (`seed_fileinfo_v1` flag — annotates by address, never re-adds) |
+| Library seeding / upgrade migration | `LibraryStore.ensureDefaults` (`defaults_seeded_v4` flag); file info gap-fill for installs seeded before the columns existed: `ensureSeedFileInfo` (`seed_fileinfo_v1` flag — annotates by address, never re-adds); post-v4 catalog additions for already-seeded installs: `ensureSeedAdditions` (`kSeedAdditionAddresses` + `seed_additions_v1` flag — skips held addresses, never recreates a deleted seed list) |
 | Bundled root maps (one per title) | `app/assets/rootmaps/<address>.map`, seeded into the local map store at startup by `rootmap_seeder.dart` |
 | Bundled TMDB metadata + artwork | `app/assets/seed_metadata/metadata.json` + `posters/*.jpg` (~1.5MB), gap-filled into the metadata cache at startup by `metadata_seeder.dart` (`seed_metadata_v1` flag) — fresh keyless installs show posters/descriptions/episode names offline |
-| Default movie constants | `kDefaultMovieAddress` / `kDefaultMovieName` in `metadata.dart` — now the catalog's NOTLD upload; the pre-alpha.48 5.68GB re-encode address moved to `kLegacyDefaultMovieAddresses` |
+| Default movie constants | `kDefaultMovieAddress` / `kDefaultMovieName` / `kDefaultMovie1080Address` in `metadata.dart` — the default is the catalog's 480p NOTLD upload; the 5.68GB re-encode is a catalog entry again (NOT in `kLegacyDefaultMovieAddresses`, which holds only the two dead pre-alpha.16 addresses) |
 
 The bundled root maps are **required** for the seeded entries to play:
 the play path serves locally stored maps only (no network resolve since
@@ -47,8 +53,14 @@ after re-uploading or adding titles:
    in their names but are really 480p (a `file_info_test.dart` test
    pins this). Bump `seed_fileinfo_v1` in `library_store.dart` if
    existing installs should receive corrected info.
-3. Bump the `defaults_seeded_vN` flag in `library_store.dart` only if
-   existing installs should receive the changes.
+3. To deliver **added** titles to installs that already ran the v4 seed,
+   list their addresses in `kSeedAdditionAddresses` and bump the
+   `seed_additions_vN` flag in `library_store.dart` — do NOT bump
+   `defaults_seeded_vN`, which would re-run the full merge and re-add
+   every catalog entry the user has deleted. An addition slots in next
+   to the catalog entry that precedes it when the user still holds that
+   sibling, else at the end of its list; a deleted seed list is not
+   recreated.
 4. Regenerate the bundled TMDB metadata + artwork (from `app/`, with the
    repo-root `.env` loaded):
 

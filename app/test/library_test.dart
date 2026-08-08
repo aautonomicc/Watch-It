@@ -383,7 +383,9 @@ void main() {
 
     test('renames the pre-alpha.26 "Test Movies" list to "Movies"', () async {
       // Already-seeded install: the flag is set, the old title persists.
-      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
+      // Additions flag too — this test pins the rename, not the seeding.
+      SharedPreferences.setMockInitialValues(
+          {'defaults_seeded_v4': true, 'seed_additions_v1': true});
       await LibraryStore.save([
         MediaList(
           id: 'default-test-movies',
@@ -413,6 +415,37 @@ void main() {
       await LibraryStore.save([]);
       await LibraryStore.ensureDefaults();
       expect(await LibraryStore.load(), isEmpty);
+    });
+
+    test('a pre-v4 install keeps the held 1080p re-encode in place',
+        () async {
+      // The 5.68GB re-encode was the default up to alpha.47 and is a
+      // catalog entry again — it must NOT be rewritten like the truly
+      // stale addresses, and the merge must not duplicate it.
+      await LibraryStore.save([
+        const MediaList(
+          id: 'default-test-movies',
+          title: 'Movies',
+          entries: [
+            MediaEntry(
+                name: kDefaultMovieName, address: kDefaultMovie1080Address),
+          ],
+        ),
+      ]);
+      await LibraryStore.ensureDefaults();
+      final lists = await LibraryStore.load();
+      final movies = lists.singleWhere((l) => l.title == 'Movies');
+      expect(movies.entries.first.address, kDefaultMovie1080Address);
+      expect(
+        movies.entries.where((e) => e.address == kDefaultMovie1080Address),
+        hasLength(1),
+      );
+      final seedMovies =
+          kSeedLists.singleWhere((l) => l.id == 'default-test-movies');
+      expect(movies.entries, hasLength(seedMovies.entries.length));
+      // The file-info backfill annotates the held copy on the same pass.
+      expect(movies.entries.first.sizeBytes, 5682464056);
+      expect(movies.entries.first.videoInfo, '1080p H.264');
     });
 
     for (final legacy in kLegacyDefaultMovieAddresses) {
@@ -452,6 +485,118 @@ void main() {
         );
       });
     }
+  });
+
+  group('Seed additions', () {
+    test('a v4-seeded install gains the addition next to its sibling',
+        () async {
+      SharedPreferences.setMockInitialValues({
+        'defaults_seeded_v4': true,
+        'seed_fileinfo_v1': true,
+      });
+      await LibraryStore.save([
+        const MediaList(id: 'default-test-movies', title: 'Movies', entries: [
+          MediaEntry(name: kDefaultMovieName, address: kDefaultMovieAddress),
+          MediaEntry(name: 'Mine.mp4', address: _addr),
+        ]),
+      ]);
+      await LibraryStore.ensureDefaults();
+      final movies = (await LibraryStore.load()).single;
+      expect(movies.entries, hasLength(3));
+      final added = movies.entries[1];
+      expect(added.address, kDefaultMovie1080Address);
+      expect(added.name, kDefaultMovieName);
+      expect(added.sizeBytes, 5682464056);
+      expect(added.videoInfo, '1080p H.264');
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('seed_additions_v1'), isTrue);
+    });
+
+    test('appends at the end when the sibling entry is gone', () async {
+      SharedPreferences.setMockInitialValues({
+        'defaults_seeded_v4': true,
+        'seed_fileinfo_v1': true,
+      });
+      await LibraryStore.save([
+        const MediaList(id: 'default-test-movies', title: 'Movies', entries: [
+          MediaEntry(name: 'Mine.mp4', address: _addr),
+        ]),
+      ]);
+      await LibraryStore.ensureDefaults();
+      final movies = (await LibraryStore.load()).single;
+      expect(movies.entries, hasLength(2));
+      expect(movies.entries.last.address, kDefaultMovie1080Address);
+    });
+
+    test('an addition the user already holds is not re-added', () async {
+      SharedPreferences.setMockInitialValues({
+        'defaults_seeded_v4': true,
+        'seed_fileinfo_v1': true,
+      });
+      await LibraryStore.save([
+        const MediaList(id: 'mine', title: 'My Films', entries: [
+          MediaEntry(
+              name: kDefaultMovieName, address: kDefaultMovie1080Address),
+        ]),
+        const MediaList(id: 'default-test-movies', title: 'Movies', entries: [
+          MediaEntry(name: kDefaultMovieName, address: kDefaultMovieAddress),
+        ]),
+      ]);
+      await LibraryStore.ensureDefaults();
+      final lists = await LibraryStore.load();
+      expect(
+        lists
+            .expand((l) => l.entries)
+            .where((e) => e.address == kDefaultMovie1080Address),
+        hasLength(1),
+      );
+    });
+
+    test('a deleted seed list is not recreated for an addition', () async {
+      SharedPreferences.setMockInitialValues({
+        'defaults_seeded_v4': true,
+        'seed_fileinfo_v1': true,
+      });
+      await LibraryStore.save([
+        const MediaList(id: 'mine', title: 'My Films', entries: [
+          MediaEntry(name: 'Mine.mp4', address: _addr),
+        ]),
+      ]);
+      await LibraryStore.ensureDefaults();
+      final lists = await LibraryStore.load();
+      expect(lists, hasLength(1));
+      expect(lists.single.id, 'mine');
+      expect(lists.single.entries, hasLength(1));
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('seed_additions_v1'), isTrue);
+    });
+
+    test('runs once — the flag short-circuits later launches', () async {
+      SharedPreferences.setMockInitialValues({
+        'defaults_seeded_v4': true,
+        'seed_fileinfo_v1': true,
+        'seed_additions_v1': true,
+      });
+      await LibraryStore.save([
+        const MediaList(id: 'default-test-movies', title: 'Movies', entries: [
+          MediaEntry(name: kDefaultMovieName, address: kDefaultMovieAddress),
+        ]),
+      ]);
+      await LibraryStore.ensureDefaults();
+      final movies = (await LibraryStore.load()).single;
+      expect(movies.entries, hasLength(1));
+    });
+
+    test('every addition address is a catalog entry', () {
+      final catalog = {
+        for (final l in kSeedLists)
+          for (final e in l.entries) e.address,
+      };
+      for (final addr in kSeedAdditionAddresses) {
+        expect(catalog, contains(addr));
+        expect(kLegacyDefaultMovieAddresses, isNot(contains(addr)));
+      }
+    });
   });
 
   group('Metadata', () {
