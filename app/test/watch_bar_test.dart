@@ -37,7 +37,7 @@ void main() {
 
   setUp(() async {
     // Skip default seeding so the wall only holds what each test stores.
-    SharedPreferences.setMockInitialValues({'defaults_seeded_v3': true});
+    SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
     await LibraryStore.useForTesting(
         AppDatabase.forTesting(NativeDatabase.memory()));
     MetadataService.instance = MetadataService(apiKeyProvider: () async => '');

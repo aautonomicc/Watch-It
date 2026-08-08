@@ -43,7 +43,7 @@ void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
   setUp(() async {
-    SharedPreferences.setMockInitialValues({'defaults_seeded_v3': true});
+    SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
     await LibraryStore.useForTesting(
         AppDatabase.forTesting(NativeDatabase.memory()));
     // Offline: no API key, so tiles render from parsed file names.
