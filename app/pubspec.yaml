@@ -90,6 +90,8 @@ flutter:
   assets:
     - assets/posters/
     - assets/rootmaps/
+    - assets/seed_metadata/
+    - assets/seed_metadata/posters/
     - assets/tmdb_logo.png
     - assets/fonts/Anton-OFL.txt
     - assets/licenses/gpl-3.0.txt

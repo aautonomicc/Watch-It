@@ -22,6 +22,7 @@ import 'services/licenses.dart';
 import 'services/metadata.dart';
 import 'services/metadata_service.dart';
 import 'services/network_events.dart';
+import 'services/metadata_seeder.dart';
 import 'services/rootmap_seeder.dart';
 import 'services/season_grouping.dart';
 import 'services/watch_state.dart';
@@ -77,6 +78,10 @@ Future<void> main() async {
   // store so a fresh install skips the cold network resolve on first
   // play. Fire-and-forget: fully offline, idempotent, verified server-side.
   unawaited(seedBundledRootMaps());
+  // Bundled TMDB metadata + artwork for the seed catalog: a fresh
+  // keyless install shows posters/descriptions without a TMDB key.
+  // Gap-fill (existing rows/files win) behind a one-time flag.
+  unawaited(seedBundledMetadata());
   runApp(const WatchItApp());
 }
 
