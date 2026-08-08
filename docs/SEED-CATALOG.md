@@ -15,6 +15,7 @@ Autonomi with plain `ant file upload` on 2026-08-07.
 | Catalog (names + derived addresses) | `app/lib/services/seed_catalog.dart` (`kSeedLists`) |
 | Library seeding / upgrade migration | `LibraryStore.ensureDefaults` (`defaults_seeded_v4` flag) |
 | Bundled root maps (one per title) | `app/assets/rootmaps/<address>.map`, seeded into the local map store at startup by `rootmap_seeder.dart` |
+| Bundled TMDB metadata + artwork | `app/assets/seed_metadata/metadata.json` + `posters/*.jpg` (~1.5MB), gap-filled into the metadata cache at startup by `metadata_seeder.dart` (`seed_metadata_v1` flag) — fresh keyless installs show posters/descriptions/episode names offline |
 | Default movie constants | `kDefaultMovieAddress` / `kDefaultMovieName` in `metadata.dart` — now the catalog's NOTLD upload; the pre-alpha.48 5.68GB re-encode address moved to `kLegacyDefaultMovieAddresses` |
 
 The bundled root maps are **required** for the seeded entries to play:
@@ -40,6 +41,21 @@ after re-uploading or adding titles:
    order).
 3. Bump the `defaults_seeded_vN` flag in `library_store.dart` only if
    existing installs should receive the changes.
+4. Regenerate the bundled TMDB metadata + artwork (from `app/`, with the
+   repo-root `.env` loaded):
+
+   ```
+   set -a; source ../.env; set +a
+   dart run tool/harvest_seed_metadata.dart
+   ```
+
+   The tool resolves every `kSeedLists` entry with the app's own matcher
+   (identical lookup keys, cache-row shape, and image file names to
+   `metadata_service.dart`) and rewrites `app/assets/seed_metadata/`.
+   It fails loudly on any unmatched entry. Bump `kSeedMetadataFlag` in
+   `metadata_seeder.dart` (`seed_metadata_vN`) so existing installs
+   gap-fill the new titles' rows.
 
 The rootmap-seeder test asserts an asset exists for every catalog
-address, so a catalog/asset mismatch fails CI.
+address, and the metadata-seeder test asserts a bundled metadata row +
+artwork exist for every entry — a catalog/asset mismatch fails CI.
