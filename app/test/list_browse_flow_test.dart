@@ -132,7 +132,7 @@ void main() {
     await tester.pumpWidget(const WatchItApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Open navigation menu'));
+    await tester.tap(find.byTooltip('Browse lists'));
     await tester.pumpAndSettle();
     final drawerTile = find.descendant(
         of: find.byType(WiLibraryDrawer), matching: find.text('Favourites'));
@@ -156,7 +156,7 @@ void main() {
     await tester.pumpWidget(const WatchItApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Open navigation menu'));
+    await tester.tap(find.byTooltip('Browse lists'));
     await tester.pumpAndSettle();
     Finder inDrawer(String text) => find.descendant(
         of: find.byType(WiLibraryDrawer), matching: find.text(text));
@@ -221,7 +221,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('TV Shows'), findsNothing);
 
-    await tester.tap(find.byTooltip('Open navigation menu'));
+    await tester.tap(find.byTooltip('Browse lists'));
     await tester.pumpAndSettle();
     Finder inDrawer(String text) => find.descendant(
         of: find.byType(WiLibraryDrawer), matching: find.text(text));
