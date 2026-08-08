@@ -390,6 +390,28 @@ class $MediaEntriesTable extends MediaEntries
     requiredDuringInsert: false,
     defaultValue: const Constant(0),
   );
+  static const VerificationMeta _sizeBytesMeta = const VerificationMeta(
+    'sizeBytes',
+  );
+  @override
+  late final GeneratedColumn<int> sizeBytes = GeneratedColumn<int>(
+    'size_bytes',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _videoInfoMeta = const VerificationMeta(
+    'videoInfo',
+  );
+  @override
+  late final GeneratedColumn<String> videoInfo = GeneratedColumn<String>(
+    'video_info',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     entryId,
@@ -398,6 +420,8 @@ class $MediaEntriesTable extends MediaEntries
     address,
     position,
     addedAt,
+    sizeBytes,
+    videoInfo,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -455,6 +479,18 @@ class $MediaEntriesTable extends MediaEntries
         addedAt.isAcceptableOrUnknown(data['added_at']!, _addedAtMeta),
       );
     }
+    if (data.containsKey('size_bytes')) {
+      context.handle(
+        _sizeBytesMeta,
+        sizeBytes.isAcceptableOrUnknown(data['size_bytes']!, _sizeBytesMeta),
+      );
+    }
+    if (data.containsKey('video_info')) {
+      context.handle(
+        _videoInfoMeta,
+        videoInfo.isAcceptableOrUnknown(data['video_info']!, _videoInfoMeta),
+      );
+    }
     return context;
   }
 
@@ -488,6 +524,14 @@ class $MediaEntriesTable extends MediaEntries
         DriftSqlType.int,
         data['${effectivePrefix}added_at'],
       )!,
+      sizeBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}size_bytes'],
+      ),
+      videoInfo: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}video_info'],
+      ),
     );
   }
 
@@ -508,6 +552,14 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
   /// home screen's Recently Added row. 0 for rows that predate the
   /// column (their add time is unknown, so the row skips them).
   final int addedAt;
+
+  /// Exact original file size in bytes from the root data map; null for
+  /// rows that predate the column (backfilled lazily from `/resolve`).
+  final int? sizeBytes;
+
+  /// Short video-format label (`480p H.264`) — seeded for catalog
+  /// entries, learned from playback for imports; null until known.
+  final String? videoInfo;
   const MediaEntryRow({
     required this.entryId,
     required this.listId,
@@ -515,6 +567,8 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
     required this.address,
     required this.position,
     required this.addedAt,
+    this.sizeBytes,
+    this.videoInfo,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -525,6 +579,12 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
     map['address'] = Variable<String>(address);
     map['position'] = Variable<int>(position);
     map['added_at'] = Variable<int>(addedAt);
+    if (!nullToAbsent || sizeBytes != null) {
+      map['size_bytes'] = Variable<int>(sizeBytes);
+    }
+    if (!nullToAbsent || videoInfo != null) {
+      map['video_info'] = Variable<String>(videoInfo);
+    }
     return map;
   }
 
@@ -536,6 +596,12 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
       address: Value(address),
       position: Value(position),
       addedAt: Value(addedAt),
+      sizeBytes: sizeBytes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sizeBytes),
+      videoInfo: videoInfo == null && nullToAbsent
+          ? const Value.absent()
+          : Value(videoInfo),
     );
   }
 
@@ -551,6 +617,8 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
       address: serializer.fromJson<String>(json['address']),
       position: serializer.fromJson<int>(json['position']),
       addedAt: serializer.fromJson<int>(json['addedAt']),
+      sizeBytes: serializer.fromJson<int?>(json['sizeBytes']),
+      videoInfo: serializer.fromJson<String?>(json['videoInfo']),
     );
   }
   @override
@@ -563,6 +631,8 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
       'address': serializer.toJson<String>(address),
       'position': serializer.toJson<int>(position),
       'addedAt': serializer.toJson<int>(addedAt),
+      'sizeBytes': serializer.toJson<int?>(sizeBytes),
+      'videoInfo': serializer.toJson<String?>(videoInfo),
     };
   }
 
@@ -573,6 +643,8 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
     String? address,
     int? position,
     int? addedAt,
+    Value<int?> sizeBytes = const Value.absent(),
+    Value<String?> videoInfo = const Value.absent(),
   }) => MediaEntryRow(
     entryId: entryId ?? this.entryId,
     listId: listId ?? this.listId,
@@ -580,6 +652,8 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
     address: address ?? this.address,
     position: position ?? this.position,
     addedAt: addedAt ?? this.addedAt,
+    sizeBytes: sizeBytes.present ? sizeBytes.value : this.sizeBytes,
+    videoInfo: videoInfo.present ? videoInfo.value : this.videoInfo,
   );
   MediaEntryRow copyWithCompanion(MediaEntriesCompanion data) {
     return MediaEntryRow(
@@ -589,6 +663,8 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
       address: data.address.present ? data.address.value : this.address,
       position: data.position.present ? data.position.value : this.position,
       addedAt: data.addedAt.present ? data.addedAt.value : this.addedAt,
+      sizeBytes: data.sizeBytes.present ? data.sizeBytes.value : this.sizeBytes,
+      videoInfo: data.videoInfo.present ? data.videoInfo.value : this.videoInfo,
     );
   }
 
@@ -600,14 +676,24 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
           ..write('name: $name, ')
           ..write('address: $address, ')
           ..write('position: $position, ')
-          ..write('addedAt: $addedAt')
+          ..write('addedAt: $addedAt, ')
+          ..write('sizeBytes: $sizeBytes, ')
+          ..write('videoInfo: $videoInfo')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(entryId, listId, name, address, position, addedAt);
+  int get hashCode => Object.hash(
+    entryId,
+    listId,
+    name,
+    address,
+    position,
+    addedAt,
+    sizeBytes,
+    videoInfo,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -617,7 +703,9 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
           other.name == this.name &&
           other.address == this.address &&
           other.position == this.position &&
-          other.addedAt == this.addedAt);
+          other.addedAt == this.addedAt &&
+          other.sizeBytes == this.sizeBytes &&
+          other.videoInfo == this.videoInfo);
 }
 
 class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
@@ -627,6 +715,8 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
   final Value<String> address;
   final Value<int> position;
   final Value<int> addedAt;
+  final Value<int?> sizeBytes;
+  final Value<String?> videoInfo;
   const MediaEntriesCompanion({
     this.entryId = const Value.absent(),
     this.listId = const Value.absent(),
@@ -634,6 +724,8 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     this.address = const Value.absent(),
     this.position = const Value.absent(),
     this.addedAt = const Value.absent(),
+    this.sizeBytes = const Value.absent(),
+    this.videoInfo = const Value.absent(),
   });
   MediaEntriesCompanion.insert({
     this.entryId = const Value.absent(),
@@ -642,6 +734,8 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     required String address,
     required int position,
     this.addedAt = const Value.absent(),
+    this.sizeBytes = const Value.absent(),
+    this.videoInfo = const Value.absent(),
   }) : listId = Value(listId),
        name = Value(name),
        address = Value(address),
@@ -653,6 +747,8 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     Expression<String>? address,
     Expression<int>? position,
     Expression<int>? addedAt,
+    Expression<int>? sizeBytes,
+    Expression<String>? videoInfo,
   }) {
     return RawValuesInsertable({
       if (entryId != null) 'entry_id': entryId,
@@ -661,6 +757,8 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
       if (address != null) 'address': address,
       if (position != null) 'position': position,
       if (addedAt != null) 'added_at': addedAt,
+      if (sizeBytes != null) 'size_bytes': sizeBytes,
+      if (videoInfo != null) 'video_info': videoInfo,
     });
   }
 
@@ -671,6 +769,8 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     Value<String>? address,
     Value<int>? position,
     Value<int>? addedAt,
+    Value<int?>? sizeBytes,
+    Value<String?>? videoInfo,
   }) {
     return MediaEntriesCompanion(
       entryId: entryId ?? this.entryId,
@@ -679,6 +779,8 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
       address: address ?? this.address,
       position: position ?? this.position,
       addedAt: addedAt ?? this.addedAt,
+      sizeBytes: sizeBytes ?? this.sizeBytes,
+      videoInfo: videoInfo ?? this.videoInfo,
     );
   }
 
@@ -703,6 +805,12 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     if (addedAt.present) {
       map['added_at'] = Variable<int>(addedAt.value);
     }
+    if (sizeBytes.present) {
+      map['size_bytes'] = Variable<int>(sizeBytes.value);
+    }
+    if (videoInfo.present) {
+      map['video_info'] = Variable<String>(videoInfo.value);
+    }
     return map;
   }
 
@@ -714,7 +822,9 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
           ..write('name: $name, ')
           ..write('address: $address, ')
           ..write('position: $position, ')
-          ..write('addedAt: $addedAt')
+          ..write('addedAt: $addedAt, ')
+          ..write('sizeBytes: $sizeBytes, ')
+          ..write('videoInfo: $videoInfo')
           ..write(')'))
         .toString();
   }
@@ -3043,6 +3153,8 @@ typedef $$MediaEntriesTableCreateCompanionBuilder =
       required String address,
       required int position,
       Value<int> addedAt,
+      Value<int?> sizeBytes,
+      Value<String?> videoInfo,
     });
 typedef $$MediaEntriesTableUpdateCompanionBuilder =
     MediaEntriesCompanion Function({
@@ -3052,6 +3164,8 @@ typedef $$MediaEntriesTableUpdateCompanionBuilder =
       Value<String> address,
       Value<int> position,
       Value<int> addedAt,
+      Value<int?> sizeBytes,
+      Value<String?> videoInfo,
     });
 
 final class $$MediaEntriesTableReferences
@@ -3107,6 +3221,16 @@ class $$MediaEntriesTableFilterComposer
 
   ColumnFilters<int> get addedAt => $composableBuilder(
     column: $table.addedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sizeBytes => $composableBuilder(
+    column: $table.sizeBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get videoInfo => $composableBuilder(
+    column: $table.videoInfo,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -3168,6 +3292,16 @@ class $$MediaEntriesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get sizeBytes => $composableBuilder(
+    column: $table.sizeBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get videoInfo => $composableBuilder(
+    column: $table.videoInfo,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$MediaListsTableOrderingComposer get listId {
     final $$MediaListsTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -3215,6 +3349,12 @@ class $$MediaEntriesTableAnnotationComposer
 
   GeneratedColumn<int> get addedAt =>
       $composableBuilder(column: $table.addedAt, builder: (column) => column);
+
+  GeneratedColumn<int> get sizeBytes =>
+      $composableBuilder(column: $table.sizeBytes, builder: (column) => column);
+
+  GeneratedColumn<String> get videoInfo =>
+      $composableBuilder(column: $table.videoInfo, builder: (column) => column);
 
   $$MediaListsTableAnnotationComposer get listId {
     final $$MediaListsTableAnnotationComposer composer = $composerBuilder(
@@ -3274,6 +3414,8 @@ class $$MediaEntriesTableTableManager
                 Value<String> address = const Value.absent(),
                 Value<int> position = const Value.absent(),
                 Value<int> addedAt = const Value.absent(),
+                Value<int?> sizeBytes = const Value.absent(),
+                Value<String?> videoInfo = const Value.absent(),
               }) => MediaEntriesCompanion(
                 entryId: entryId,
                 listId: listId,
@@ -3281,6 +3423,8 @@ class $$MediaEntriesTableTableManager
                 address: address,
                 position: position,
                 addedAt: addedAt,
+                sizeBytes: sizeBytes,
+                videoInfo: videoInfo,
               ),
           createCompanionCallback:
               ({
@@ -3290,6 +3434,8 @@ class $$MediaEntriesTableTableManager
                 required String address,
                 required int position,
                 Value<int> addedAt = const Value.absent(),
+                Value<int?> sizeBytes = const Value.absent(),
+                Value<String?> videoInfo = const Value.absent(),
               }) => MediaEntriesCompanion.insert(
                 entryId: entryId,
                 listId: listId,
@@ -3297,6 +3443,8 @@ class $$MediaEntriesTableTableManager
                 address: address,
                 position: position,
                 addedAt: addedAt,
+                sizeBytes: sizeBytes,
+                videoInfo: videoInfo,
               ),
           withReferenceMapper: (p0) => p0
               .map(

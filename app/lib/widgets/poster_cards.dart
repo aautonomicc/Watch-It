@@ -62,6 +62,15 @@ class PosterCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 11.5, color: t.boneDim),
             ),
+            // Format/size of this specific upload — the line that tells
+            // two copies of the same title apart on the wall.
+            if (formatInfoLine(entry) case final line?)
+              Text(
+                line,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 10, color: t.ash),
+              ),
           ],
         ),
       ),
