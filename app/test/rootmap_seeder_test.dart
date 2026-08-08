@@ -24,21 +24,22 @@ void main() {
     for (final address in kBundledRootMapAddresses) {
       final data = await rootBundle.load(bundledRootMapAsset(address));
       expect(data.lengthInBytes, greaterThan(0),
-          reason: 'asset missing/empty for $address — a default-movie '
-              'swap must ship a matching map in assets/rootmaps/');
+          reason: 'asset missing/empty for $address — a seed-catalog '
+              'change must ship a matching map in assets/rootmaps/');
     }
   });
 
   test('seeds over PUT when the server has no stored map', () async {
     final requests = <String>[];
-    var putBytes = 0;
+    final putBytesByAddress = <String, int>{};
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((req) async {
       requests.add('${req.method} ${req.uri.path}');
       if (req.method == 'PUT') {
-        putBytes = (await req.fold<BytesBuilder>(
-                BytesBuilder(), (b, chunk) => b..add(chunk)))
-            .length;
+        putBytesByAddress[req.uri.pathSegments.last] =
+            (await req.fold<BytesBuilder>(
+                    BytesBuilder(), (b, chunk) => b..add(chunk)))
+                .length;
         req.response.statusCode = HttpStatus.noContent;
       } else {
         req.response.statusCode = HttpStatus.notFound;
@@ -49,10 +50,17 @@ void main() {
     await seedWithRealHttp('http://127.0.0.1:${server.port}');
     await server.close(force: true);
 
-    expect(requests,
-        ['GET /rootmap/$kDefaultMovieAddress', 'PUT /rootmap/$kDefaultMovieAddress']);
-    final asset = await rootBundle.load(bundledRootMapAsset(kDefaultMovieAddress));
-    expect(putBytes, asset.lengthInBytes);
+    expect(requests, [
+      for (final address in kBundledRootMapAddresses) ...[
+        'GET /rootmap/$address',
+        'PUT /rootmap/$address',
+      ],
+    ]);
+    for (final address in kBundledRootMapAddresses) {
+      final asset = await rootBundle.load(bundledRootMapAsset(address));
+      expect(putBytesByAddress[address], asset.lengthInBytes,
+          reason: 'PUT body for $address must be the bundled asset');
+    }
   });
 
   test('skips the PUT when the map is already stored', () async {
@@ -67,7 +75,10 @@ void main() {
     await seedWithRealHttp('http://127.0.0.1:${server.port}');
     await server.close(force: true);
 
-    expect(requests, ['GET /rootmap/$kDefaultMovieAddress']);
+    expect(requests, [
+      for (final address in kBundledRootMapAddresses)
+        'GET /rootmap/$address',
+    ]);
   });
 
   test('a dead server is silently ignored', () async {

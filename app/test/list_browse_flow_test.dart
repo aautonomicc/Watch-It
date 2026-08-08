@@ -35,7 +35,7 @@ void main() {
 
   setUp(() async {
     // Skip default seeding so surfaces only hold what each test stores.
-    SharedPreferences.setMockInitialValues({'defaults_seeded_v3': true});
+    SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
     await LibraryStore.useForTesting(
         AppDatabase.forTesting(NativeDatabase.memory()));
     // Offline: no API key, so screens render from parsed file names plus
@@ -93,7 +93,7 @@ void main() {
   testWidgets('auto mode swaps list rows for Movies and TV Shows',
       (tester) async {
     SharedPreferences.setMockInitialValues({
-      'defaults_seeded_v3': true,
+      'defaults_seeded_v4': true,
       'library_arrangement_v1': 'autoByType',
     });
     await seedLibrary();
@@ -149,7 +149,7 @@ void main() {
 
   testWidgets('drawer in auto mode lists the virtual pair', (tester) async {
     SharedPreferences.setMockInitialValues({
-      'defaults_seeded_v3': true,
+      'defaults_seeded_v4': true,
       'library_arrangement_v1': 'autoByType',
     });
     await seedLibrary();
@@ -174,7 +174,7 @@ void main() {
   testWidgets('auto mode swaps the Media page rows for the virtual lists',
       (tester) async {
     SharedPreferences.setMockInitialValues({
-      'defaults_seeded_v3': true,
+      'defaults_seeded_v4': true,
       'library_arrangement_v1': 'autoByType',
     });
     await seedLibrary();
@@ -208,7 +208,7 @@ void main() {
   testWidgets('hidden virtual list leaves the wall and drawer',
       (tester) async {
     SharedPreferences.setMockInitialValues({
-      'defaults_seeded_v3': true,
+      'defaults_seeded_v4': true,
       'library_arrangement_v1': 'autoByType',
       'auto_hidden_lists_v1': [kAutoTvShowsListId],
     });
@@ -232,7 +232,7 @@ void main() {
   testWidgets('hidden virtual list filters Continue Watching and Recently '
       'Added', (tester) async {
     SharedPreferences.setMockInitialValues({
-      'defaults_seeded_v3': true,
+      'defaults_seeded_v4': true,
       'library_arrangement_v1': 'autoByType',
       'auto_hidden_lists_v1': [kAutoTvShowsListId],
     });
@@ -255,7 +255,7 @@ void main() {
   testWidgets('both virtual lists hidden shows the all-media-hidden state',
       (tester) async {
     SharedPreferences.setMockInitialValues({
-      'defaults_seeded_v3': true,
+      'defaults_seeded_v4': true,
       'library_arrangement_v1': 'autoByType',
       'auto_hidden_lists_v1': [kAutoMoviesListId, kAutoTvShowsListId],
     });
@@ -274,7 +274,7 @@ void main() {
 
   testWidgets('user mode ignores the auto-mode hide set', (tester) async {
     SharedPreferences.setMockInitialValues({
-      'defaults_seeded_v3': true,
+      'defaults_seeded_v4': true,
       'auto_hidden_lists_v1': [kAutoMoviesListId, kAutoTvShowsListId],
     });
     await seedLibrary();

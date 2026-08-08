@@ -18,7 +18,7 @@ String _addr(int i) => i.toRadixString(16).padLeft(64, '0');
 /// Base prefs: skip seeding and the TMDB nudge banner so the wall holds
 /// exactly what each test stores.
 const _basePrefs = {
-  'defaults_seeded_v3': true,
+  'defaults_seeded_v4': true,
   'tmdb_nudge_dismissed_v1': true,
 };
 

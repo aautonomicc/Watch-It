@@ -14,6 +14,7 @@ import 'package:watchit/models/media_list.dart';
 import 'package:watchit/services/app_settings.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata.dart';
+import 'package:watchit/services/seed_catalog.dart';
 import 'package:watchit/services/embedded_client.dart';
 
 const _addr =
@@ -334,17 +335,55 @@ void main() {
   });
 
   group('Default seeding', () {
-    test('seeds the built-in test movie once', () async {
+    test('seeds the full public-domain catalog once', () async {
       await LibraryStore.ensureDefaults();
       final lists = await LibraryStore.load();
-      final seeded = lists.singleWhere((l) => l.title == 'Movies');
-      expect(seeded.entries.single.address, kDefaultMovieAddress);
-      expect(seeded.entries.single.name, kDefaultMovieName);
+      for (final seed in kSeedLists) {
+        final seeded = lists.singleWhere((l) => l.title == seed.title);
+        expect(seeded.entries, hasLength(seed.entries.length));
+        for (final (i, entry) in seed.entries.indexed) {
+          expect(seeded.entries[i].name, entry.name);
+          expect(seeded.entries[i].address, entry.address);
+        }
+      }
+      final movies = lists.singleWhere((l) => l.title == 'Movies');
+      expect(
+        movies.entries.where((e) =>
+            e.address == kDefaultMovieAddress && e.name == kDefaultMovieName),
+        hasLength(1),
+      );
+    });
+
+    test('a catalog entry the user already holds is not re-added',
+        () async {
+      await LibraryStore.save([
+        const MediaList(
+          id: 'mine',
+          title: 'My Films',
+          entries: [
+            MediaEntry(name: kDefaultMovieName, address: kDefaultMovieAddress),
+          ],
+        ),
+      ]);
+      await LibraryStore.ensureDefaults();
+      final lists = await LibraryStore.load();
+      // The user's copy is the only one; the seeded Movies list carries
+      // the rest of the catalog.
+      expect(
+        lists
+            .expand((l) => l.entries)
+            .where((e) => e.address == kDefaultMovieAddress),
+        hasLength(1),
+      );
+      final movies = lists.singleWhere((l) => l.title == 'Movies');
+      final seedMovies =
+          kSeedLists.singleWhere((l) => l.title == 'Movies');
+      expect(movies.entries, hasLength(seedMovies.entries.length - 1));
     });
 
     test('renames the pre-alpha.26 "Test Movies" list to "Movies"', () async {
       // Already-seeded install: the flag is set, the old title persists.
-      SharedPreferences.setMockInitialValues({'defaults_seeded_v3': true});
+      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
       await LibraryStore.save([
         MediaList(
           id: 'default-test-movies',
@@ -361,7 +400,7 @@ void main() {
     });
 
     test('a user-renamed default list keeps its name', () async {
-      SharedPreferences.setMockInitialValues({'defaults_seeded_v3': true});
+      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
       await LibraryStore.save([
         const MediaList(id: 'default-test-movies', title: 'My Flicks'),
       ]);
@@ -392,11 +431,19 @@ void main() {
         ]);
         await LibraryStore.ensureDefaults();
         final lists = await LibraryStore.load();
-        // The rename migration also applies on the same pass.
+        // The rename migration also applies on the same pass, and the
+        // rest of the catalog seeds around the migrated entry.
         final seeded = lists.singleWhere((l) => l.title == 'Movies');
-        expect(seeded.entries.single.address, kDefaultMovieAddress);
-        expect(seeded.entries.single.name, kDefaultMovieName);
-        // Other lists/entries with the current address are not duplicated.
+        expect(seeded.entries.first.address, kDefaultMovieAddress);
+        expect(seeded.entries.first.name, kDefaultMovieName);
+        expect(
+          seeded.entries,
+          hasLength(kSeedLists
+              .singleWhere((l) => l.title == 'Movies')
+              .entries
+              .length),
+        );
+        // Seeding does not duplicate the migrated entry.
         expect(
           lists
               .expand((l) => l.entries)
@@ -607,6 +654,7 @@ void main() {
 
     testWidgets('home shows the list after returning from settings',
         (tester) async {
+      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
       await LibraryStore.save([
         MediaList(
           id: '7',
@@ -629,9 +677,16 @@ void main() {
 
   group('Media Lists page', () {
     testWidgets('unchecking a list hides it from home', (tester) async {
+      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
+      await LibraryStore.save([
+        MediaList(
+          id: 'm',
+          title: 'Movies',
+          entries: const [MediaEntry(name: 'A.mkv', address: _addr)],
+        ),
+      ]);
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
-      // Seeded default list is on the wall.
       expect(find.text('Movies'), findsOneWidget);
 
       await tester.tap(find.byTooltip('Settings'));
@@ -674,6 +729,10 @@ void main() {
     });
 
     testWidgets('delete a list from its 3-dot menu', (tester) async {
+      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
+      await LibraryStore.save([
+        const MediaList(id: 'm', title: 'Movies'),
+      ]);
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Settings'));
@@ -695,6 +754,10 @@ void main() {
     });
 
     testWidgets('rename a list from its 3-dot menu', (tester) async {
+      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
+      await LibraryStore.save([
+        const MediaList(id: 'm', title: 'Movies'),
+      ]);
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Settings'));
@@ -718,7 +781,7 @@ void main() {
   group('Season grouping on home', () {
     testWidgets('episodes fold into a season card that opens the episodes',
         (tester) async {
-      SharedPreferences.setMockInitialValues({'defaults_seeded_v3': true});
+      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
       await LibraryStore.save([
         MediaList(
           id: 's',
