@@ -106,6 +106,7 @@ class LibraryStore {
     }
     if (prefs.getBool(_seededKey) ?? false) {
       if (changed) await save(lists);
+      await ensureSeedFileInfo();
       return;
     }
     if (lists.any((l) => l.entries
@@ -137,7 +138,12 @@ class LibraryStore {
       final fresh = [
         for (final e in seed.entries)
           if (!have.contains(e.address))
-            MediaEntry(name: e.name, address: e.address),
+            MediaEntry(
+              name: e.name,
+              address: e.address,
+              sizeBytes: e.sizeBytes,
+              videoInfo: e.videoInfo,
+            ),
       ];
       if (fresh.isEmpty) continue;
       final i = lists.indexWhere((l) => l.id == seed.id);
@@ -151,6 +157,42 @@ class LibraryStore {
     }
     if (changed) await save(lists);
     await prefs.setBool(_seededKey, true);
+    await ensureSeedFileInfo();
+  }
+
+  /// One-time backfill of file size + format info onto catalog entries
+  /// held by installs that seeded before the columns existed (a fresh
+  /// seed carries the info directly). Separate flag from [_seededKey]
+  /// on purpose: it must also run on already-seeded libraries, and it
+  /// never re-adds entries — it only annotates what is already there.
+  static const _fileInfoKey = 'seed_fileinfo_v1';
+
+  static Future<void> ensureSeedFileInfo() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_fileInfoKey) ?? false) return;
+    for (final seed in kSeedLists) {
+      for (final e in seed.entries) {
+        await noteEntryInfo(e.address,
+            sizeBytes: e.sizeBytes, videoInfo: e.videoInfo);
+      }
+    }
+    await prefs.setBool(_fileInfoKey, true);
+  }
+
+  /// Record what is known about the file behind [address] — its exact
+  /// size and/or video-format label — on every list entry holding it.
+  /// A null argument leaves that column untouched.
+  static Future<void> noteEntryInfo(String address,
+      {int? sizeBytes, String? videoInfo}) async {
+    if (sizeBytes == null && videoInfo == null) return;
+    final db = await _database();
+    final addr = address.toLowerCase().replaceFirst('0x', '');
+    await (db.update(db.mediaEntries)
+          ..where((t) => t.address.lower().equals(addr)))
+        .write(MediaEntriesCompanion(
+      sizeBytes: sizeBytes != null ? Value(sizeBytes) : const Value.absent(),
+      videoInfo: videoInfo != null ? Value(videoInfo) : const Value.absent(),
+    ));
   }
 
   static Future<List<MediaList>> load() async {
@@ -169,6 +211,8 @@ class LibraryStore {
             name: row.name,
             address: row.address,
             addedAt: row.addedAt,
+            sizeBytes: row.sizeBytes,
+            videoInfo: row.videoInfo,
           ));
     }
     return [
@@ -209,6 +253,8 @@ class LibraryStore {
                 address: entry.address,
                 position: entryPos,
                 addedAt: Value(entry.addedAt ?? now),
+                sizeBytes: Value(entry.sizeBytes),
+                videoInfo: Value(entry.videoInfo),
               ));
         }
       }

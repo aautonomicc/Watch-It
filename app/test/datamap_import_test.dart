@@ -106,6 +106,8 @@ void main() {
           base: base);
       expect(entry.name, 'The Movie (2024).mkv');
       expect(entry.address, 'ab' * 32);
+      // The exact file size comes off the root map for free at import.
+      expect(entry.sizeBytes, 1234);
     });
 
     test('surfaces the server error text when the client sends one',

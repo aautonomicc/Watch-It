@@ -12,8 +12,8 @@ Autonomi with plain `ant file upload` on 2026-08-07.
 
 | Piece | Where |
 |---|---|
-| Catalog (names + derived addresses) | `app/lib/services/seed_catalog.dart` (`kSeedLists`) |
-| Library seeding / upgrade migration | `LibraryStore.ensureDefaults` (`defaults_seeded_v4` flag) |
+| Catalog (names + derived addresses + file info) | `app/lib/services/seed_catalog.dart` (`kSeedLists`) — each entry also carries `sizeBytes` (exact upload size) and `videoInfo` (`480p H.264`, ffprobed from the source files) |
+| Library seeding / upgrade migration | `LibraryStore.ensureDefaults` (`defaults_seeded_v4` flag); file info gap-fill for installs seeded before the columns existed: `ensureSeedFileInfo` (`seed_fileinfo_v1` flag — annotates by address, never re-adds) |
 | Bundled root maps (one per title) | `app/assets/rootmaps/<address>.map`, seeded into the local map store at startup by `rootmap_seeder.dart` |
 | Bundled TMDB metadata + artwork | `app/assets/seed_metadata/metadata.json` + `posters/*.jpg` (~1.5MB), gap-filled into the metadata cache at startup by `metadata_seeder.dart` (`seed_metadata_v1` flag) — fresh keyless installs show posters/descriptions/episode names offline |
 | Default movie constants | `kDefaultMovieAddress` / `kDefaultMovieName` in `metadata.dart` — now the catalog's NOTLD upload; the pre-alpha.48 5.68GB re-encode address moved to `kLegacyDefaultMovieAddresses` |
@@ -38,7 +38,15 @@ after re-uploading or adding titles:
    `app/assets/rootmaps/<address>.map`.
 2. Rewrite `kSeedLists` from the name → address results (movies list
    leads with the default movie, then alphabetical; episodes in SxxEyy
-   order).
+   order). Each entry also needs `sizeBytes` (`stat -c%s` of the source
+   file — identical to the uploaded bytes) and `videoInfo`
+   (`ffprobe -select_streams v:0 -show_entries stream=codec_name,height`,
+   mapped to a ladder label via `resolutionLabel()` + codec name, e.g.
+   `480p H.264`). Use the **probed** values, not the file name's quality
+   tag — the NOTLD and Lady Vanishes archive.org uploads say `[1080p]`
+   in their names but are really 480p (a `file_info_test.dart` test
+   pins this). Bump `seed_fileinfo_v1` in `library_store.dart` if
+   existing installs should receive corrected info.
 3. Bump the `defaults_seeded_vN` flag in `library_store.dart` only if
    existing installs should receive the changes.
 4. Regenerate the bundled TMDB metadata + artwork (from `app/`, with the

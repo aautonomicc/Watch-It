@@ -135,5 +135,9 @@ Future<MediaEntry> entryFromDatamapFile(
         '"<media file name>.datamap" a private upload produces.');
   }
   final imported = await importDatamapBytes(bytes, base: base);
-  return MediaEntry(name: name, address: imported.address);
+  return MediaEntry(
+    name: name,
+    address: imported.address,
+    sizeBytes: imported.size > 0 ? imported.size : null,
+  );
 }

@@ -8,6 +8,7 @@ import '../models/media_list.dart';
 import '../services/app_settings.dart';
 import '../services/connectivity.dart';
 import '../services/embedded_client.dart';
+import '../services/library_store.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/watch_state.dart';
@@ -74,6 +75,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription<String>? _errorSub;
   StreamSubscription<Duration>? _positionSub;
   StreamSubscription<bool>? _completedSub;
+  StreamSubscription<VideoParams>? _videoParamsSub;
   Timer? _healthTimer;
   Timer? _countdownTimer;
 
@@ -132,6 +134,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _completedSub = _player.stream.completed.listen((done) {
       if (done) _onCompleted();
     });
+    _videoParamsSub = _player.stream.videoParams.listen(_onVideoParams);
     _healthTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
       if (_isLocal || !_buffering || _error != null) return;
       final health = await EmbeddedClient.health();
@@ -141,6 +144,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
       widget.url,
       start: widget.resumeFrom > Duration.zero ? widget.resumeFrom : null,
     ));
+  }
+
+  /// Addresses whose resolution was recorded this session (mpv re-emits
+  /// params on seeks and track changes).
+  final Set<String> _resolutionNoted = {};
+
+  /// Learn the playing file's resolution from mpv and persist it as the
+  /// entry's format label — imported datamaps have no way to know it
+  /// before first playback. Entries that already carry a label (the
+  /// seed catalog's probed `480p H.264`) are left alone.
+  void _onVideoParams(VideoParams params) {
+    final h = params.dh ?? params.h;
+    if (h == null || h <= 0) return;
+    if (_entry.videoInfo != null && _entry.videoInfo!.isNotEmpty) return;
+    if (!_resolutionNoted.add(_entry.address.toLowerCase())) return;
+    unawaited(LibraryStore.noteEntryInfo(_entry.address,
+        videoInfo: resolutionLabel(h)));
   }
 
   void _onPosition(Duration pos) {
@@ -245,6 +265,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _errorSub?.cancel();
     _positionSub?.cancel();
     _completedSub?.cancel();
+    _videoParamsSub?.cancel();
     _player.dispose();
     super.dispose();
   }

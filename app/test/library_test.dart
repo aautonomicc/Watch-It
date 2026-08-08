@@ -833,7 +833,7 @@ void main() {
       await tester.tap(find.textContaining('Episode 1'));
       await tester.pumpAndSettle();
       expect(find.text('Show.S01E01.mkv'), findsOneWidget);
-      expect(find.text('FILE NAME'), findsOneWidget);
+      expect(find.text('FILE'), findsOneWidget);
     });
   });
 

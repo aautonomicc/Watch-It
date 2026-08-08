@@ -5,6 +5,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'library_store.dart';
 
+// formatBytes moved to models/media_list.dart (entry format lines need
+// it below the service layer); re-exported so callers are unaffected.
+export '../models/media_list.dart' show formatBytes;
+
 /// Size on disk and factory reset for everything W@tch stores: the
 /// media-list database, cached artwork and metadata, imported data
 /// maps, settings, and the embedded client's network state — all of it
@@ -79,16 +83,4 @@ Future<Directory?> _appDataDir() async {
   } catch (_) {
     return null;
   }
-}
-
-/// `812 KB`, `64.2 MB`, `1.38 GB` — for the size-on-disk tile.
-String formatBytes(int bytes) {
-  const kb = 1024, mb = kb * 1024, gb = mb * 1024;
-  if (bytes >= gb) return '${(bytes / gb).toStringAsFixed(2)} GB';
-  if (bytes >= mb) {
-    final v = bytes / mb;
-    return v >= 100 ? '${v.round()} MB' : '${v.toStringAsFixed(1)} MB';
-  }
-  if (bytes >= kb) return '${(bytes / kb).round()} KB';
-  return '$bytes B';
 }
