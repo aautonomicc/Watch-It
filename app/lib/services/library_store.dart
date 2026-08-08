@@ -106,6 +106,7 @@ class LibraryStore {
     }
     if (prefs.getBool(_seededKey) ?? false) {
       if (changed) await save(lists);
+      await ensureSeedAdditions();
       await ensureSeedFileInfo();
       return;
     }
@@ -157,7 +158,59 @@ class LibraryStore {
     }
     if (changed) await save(lists);
     await prefs.setBool(_seededKey, true);
+    // The full merge above already delivered any post-v4 additions;
+    // this just records that so the flag state is uniform.
+    await ensureSeedAdditions();
     await ensureSeedFileInfo();
+  }
+
+  /// One-time delivery of catalog entries added after the v4 seed
+  /// ([kSeedAdditionAddresses]) to installs that already ran it — the
+  /// v4 flag keeps them out of the full merge forever. Mirrors the merge
+  /// rules: an address the user already holds anywhere is skipped, and a
+  /// seed list the user deleted is NOT recreated for an addition (fresh
+  /// installs seed it whole via [ensureDefaults]). New entries slot in
+  /// right after the catalog sibling that precedes them when the user
+  /// still holds it, else at the end of the list.
+  static const _additionsKey = 'seed_additions_v1';
+
+  static Future<void> ensureSeedAdditions() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_additionsKey) ?? false) return;
+    final lists = await load();
+    final have = {
+      for (final l in lists)
+        for (final e in l.entries) e.address.toLowerCase(),
+    };
+    var changed = false;
+    for (final seed in kSeedLists) {
+      final i = lists.indexWhere((l) => l.id == seed.id);
+      if (i == -1) continue;
+      for (final (s, e) in seed.entries.indexed) {
+        if (!kSeedAdditionAddresses.contains(e.address)) continue;
+        if (have.contains(e.address.toLowerCase())) continue;
+        final entries = [...lists[i].entries];
+        final after = s == 0
+            ? -1
+            : entries.indexWhere((x) =>
+                x.address.toLowerCase() ==
+                seed.entries[s - 1].address.toLowerCase());
+        entries.insert(
+          after == -1 ? entries.length : after + 1,
+          MediaEntry(
+            name: e.name,
+            address: e.address,
+            sizeBytes: e.sizeBytes,
+            videoInfo: e.videoInfo,
+          ),
+        );
+        lists[i] = lists[i].copyWith(entries: entries);
+        have.add(e.address.toLowerCase());
+        changed = true;
+      }
+    }
+    if (changed) await save(lists);
+    await prefs.setBool(_additionsKey, true);
   }
 
   /// One-time backfill of file size + format info onto catalog entries

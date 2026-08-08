@@ -100,6 +100,19 @@ void main() {
       expect(notld.name, contains('[1080p]'));
       expect(notld.videoInfo, '480p H.264');
     });
+
+    test('the two NOTLD uploads share a name, differ by format info', () {
+      // Same film stored twice under the identical network file name —
+      // the size/format columns are the only thing telling them apart,
+      // which is exactly what they exist for.
+      final movies =
+          kSeedLists.singleWhere((l) => l.id == 'default-test-movies');
+      final notld1080 = movies.entries
+          .singleWhere((e) => e.address == kDefaultMovie1080Address);
+      expect(notld1080.name, kDefaultMovieName);
+      expect(notld1080.videoInfo, '1080p H.264');
+      expect(notld1080.sizeBytes, 5682464056);
+    });
   });
 
   group('LibraryStore file info', () {
