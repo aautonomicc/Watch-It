@@ -756,19 +756,58 @@ Future<BundleSeedSummary> seedBundle(
   Future<Directory> Function()? postersDirProvider,
 }) async {
   final summary = BundleSeedSummary();
+  final (metadataSeeded, postersSeeded) = await seedMetadataGapFill(
+      bundle.metadataRows, bundle.posters,
+      postersDirProvider: postersDirProvider);
+  summary.metadataSeeded = metadataSeeded;
+  summary.postersSeeded = postersSeeded;
+
+  // Watch history: newer-updatedAt-wins, never regresses local progress.
+  if (importHistory) {
+    final states = <WatchState>[
+      for (final e in bundle.historyByMember.entries)
+        if (addressByMember[e.key] != null)
+          WatchState(
+            address: addressByMember[e.key]!,
+            positionMs: e.value.positionMs,
+            durationMs: e.value.durationMs,
+            completed: e.value.completed,
+            updatedAt: e.value.updatedAt,
+          ),
+    ];
+    if (states.isNotEmpty) {
+      summary.historyMerged =
+          await WatchStateStore.instance.mergeAll(states);
+    }
+  }
+
+  return summary;
+}
+
+/// Gap-fill the metadata cache and posters directory: rows whose
+/// lookupKey already exists and poster files already on disk always win.
+/// Shared by bundle import ([seedBundle]) and the first-run catalog
+/// seeder (metadata_seeder.dart). Returns (rowsSeeded, filesSeeded).
+Future<(int, int)> seedMetadataGapFill(
+  Map<String, Map<String, dynamic>> metadataRows,
+  Map<String, Uint8List> posters, {
+  Future<Directory> Function()? postersDirProvider,
+}) async {
+  var metadataSeeded = 0;
+  var postersSeeded = 0;
   final db = await LibraryStore.database();
   final now = DateTime.now().millisecondsSinceEpoch;
 
   // Metadata rows: fill gaps only.
-  if (bundle.metadataRows.isNotEmpty) {
+  if (metadataRows.isNotEmpty) {
     final existing = await (db.selectOnly(db.metadataCache)
           ..addColumns([db.metadataCache.lookupKey])
           ..where(db.metadataCache.lookupKey
-              .isIn(bundle.metadataRows.keys.toList())))
+              .isIn(metadataRows.keys.toList())))
         .map((row) => row.read(db.metadataCache.lookupKey)!)
         .get();
     final have = existing.toSet();
-    for (final entry in bundle.metadataRows.entries) {
+    for (final entry in metadataRows.entries) {
       if (have.contains(entry.key)) continue;
       final row = entry.value;
       try {
@@ -794,7 +833,7 @@ Future<BundleSeedSummary> seedBundle(
               ),
               mode: InsertMode.insertOrIgnore,
             );
-        summary.metadataSeeded++;
+        metadataSeeded++;
       } catch (_) {
         // A malformed row (wrong types) skips, the rest still seed.
       }
@@ -802,37 +841,18 @@ Future<BundleSeedSummary> seedBundle(
   }
 
   // Poster files: existing files win.
-  if (bundle.posters.isNotEmpty) {
+  if (posters.isNotEmpty) {
     final dir = await (postersDirProvider ?? _defaultPostersDir)();
     await dir.create(recursive: true);
-    for (final entry in bundle.posters.entries) {
+    for (final entry in posters.entries) {
       final file = File('${dir.path}/${entry.key}');
       if (file.existsSync()) continue;
       try {
         await file.writeAsBytes(entry.value, flush: true);
-        summary.postersSeeded++;
+        postersSeeded++;
       } catch (_) {}
     }
   }
 
-  // Watch history: newer-updatedAt-wins, never regresses local progress.
-  if (importHistory) {
-    final states = <WatchState>[
-      for (final e in bundle.historyByMember.entries)
-        if (addressByMember[e.key] != null)
-          WatchState(
-            address: addressByMember[e.key]!,
-            positionMs: e.value.positionMs,
-            durationMs: e.value.durationMs,
-            completed: e.value.completed,
-            updatedAt: e.value.updatedAt,
-          ),
-    ];
-    if (states.isNotEmpty) {
-      summary.historyMerged =
-          await WatchStateStore.instance.mergeAll(states);
-    }
-  }
-
-  return summary;
+  return (metadataSeeded, postersSeeded);
 }
