@@ -8,9 +8,18 @@ sealed class HomeItem {
 }
 
 class HomeEntry extends HomeItem {
-  const HomeEntry(this.entry);
+  const HomeEntry(this.entry, {this.versions = const []});
 
   final MediaEntry entry;
+
+  /// Every upload of this title held in the library (same parsed
+  /// [ParsedName.lookupKey], different addresses) when there is more than
+  /// one — e.g. a 480p and a 1080p copy of the same film. Empty for the
+  /// common single-upload case; [entry] is always the first version.
+  final List<MediaEntry> versions;
+
+  /// [versions], or just [entry] for the single-upload case.
+  List<MediaEntry> get allVersions => versions.isEmpty ? [entry] : versions;
 }
 
 class HomeSeason extends HomeItem {
@@ -60,17 +69,38 @@ class _SeasonBuilder {
   final episodes = <(int, MediaEntry)>[];
 }
 
+class _VersionBuilder {
+  _VersionBuilder(this.slot);
+
+  /// Index in the items list where this title's card sits (the position
+  /// of its first upload).
+  final int slot;
+
+  final entries = <MediaEntry>[];
+  final addresses = <String>{};
+}
+
 /// Fold a list's entries into home-wall items: entries whose file name
-/// carries an `S01E02`/`1x02` marker group per (show, season), everything
-/// else stays a single card. A group sits where its first episode
-/// appeared; episodes inside a group sort by episode number.
+/// carries an `S01E02`/`1x02` marker group per (show, season); other
+/// entries get one card per title, with multiple uploads of the same
+/// title (same parsed lookup key — e.g. a 480p and a 1080p copy) folded
+/// into a single [HomeEntry] carrying all versions. A group sits where
+/// its first entry appeared; episodes inside a group sort by episode
+/// number, versions keep library order.
 List<HomeItem> groupSeasons(List<MediaEntry> entries) {
   final items = <HomeItem?>[];
   final bySeason = <String, _SeasonBuilder>{};
+  final byTitle = <String, _VersionBuilder>{};
   for (final entry in entries) {
     final parsed = parseMediaName(entry.name);
     if (!parsed.isEpisode) {
-      items.add(HomeEntry(entry));
+      var builder = byTitle[parsed.lookupKey];
+      if (builder == null) {
+        items.add(null); // reserve the slot; filled in below
+        builder = byTitle[parsed.lookupKey] = _VersionBuilder(items.length - 1);
+      }
+      final addr = entry.address.toLowerCase().replaceFirst('0x', '');
+      if (builder.addresses.add(addr)) builder.entries.add(entry);
       continue;
     }
     final key = '${parsed.title.toLowerCase()}|s${parsed.season}';
@@ -81,6 +111,12 @@ List<HomeItem> groupSeasons(List<MediaEntry> entries) {
           bySeason[key] = _SeasonBuilder(parsed.title, parsed.season!, items.length - 1);
     }
     builder.episodes.add((parsed.episode!, entry));
+  }
+  for (final b in byTitle.values) {
+    items[b.slot] = HomeEntry(
+      b.entries.first,
+      versions: b.entries.length > 1 ? b.entries : const [],
+    );
   }
   for (final b in bySeason.values) {
     b.episodes.sort((x, y) => x.$1.compareTo(y.$1));

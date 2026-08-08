@@ -16,11 +16,18 @@ class PosterCard extends StatelessWidget {
     required this.entry,
     required this.tokens,
     required this.onTap,
+    this.versionCount = 1,
   });
 
   final MediaEntry entry;
   final WiTokens tokens;
   final VoidCallback onTap;
+
+  /// Number of uploads of this title folded into the card (see
+  /// [HomeEntry.versions]); above 1 the info line reads `2 versions`
+  /// instead of one upload's format — the detail page's version picker
+  /// tells them apart.
+  final int versionCount;
 
   @override
   Widget build(BuildContext context) {
@@ -62,9 +69,12 @@ class PosterCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 11.5, color: t.boneDim),
             ),
-            // Format/size of this specific upload — the line that tells
-            // two copies of the same title apart on the wall.
-            if (formatInfoLine(entry) case final line?)
+            // Format/size of this upload — or, when several uploads of
+            // the title are folded into this one card, the version count.
+            if (versionCount > 1
+                    ? '$versionCount versions'
+                    : formatInfoLine(entry)
+                case final line?)
               Text(
                 line,
                 maxLines: 1,

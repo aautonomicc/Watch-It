@@ -323,10 +323,11 @@ class _HomeScreenState extends State<HomeScreen> {
         itemCount: items.length,
         separatorBuilder: (_, _) => const SizedBox(width: 12),
         itemBuilder: (context, i) => switch (items[i]) {
-          HomeEntry(:final entry) => PosterCard(
-              entry: entry,
+          HomeEntry() && final item => PosterCard(
+              entry: item.entry,
+              versionCount: item.allVersions.length,
               tokens: t,
-              onTap: () => _openEntry(entry),
+              onTap: () => _openEntry(item.entry),
             ),
           HomeShow() && final group => ShowCard(
               group: group,

@@ -246,10 +246,11 @@ class _ListHomeScreenState extends State<ListHomeScreen> {
       ),
       itemCount: items.length,
       itemBuilder: (context, i) => switch (items[i]) {
-        HomeEntry(:final entry) => PosterCard(
-            entry: entry,
+        HomeEntry() && final item => PosterCard(
+            entry: item.entry,
+            versionCount: item.allVersions.length,
             tokens: t,
-            onTap: () => _openEntry(entry),
+            onTap: () => _openEntry(item.entry),
           ),
         HomeShow() && final group => ShowCard(
             group: group,
