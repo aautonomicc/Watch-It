@@ -722,12 +722,14 @@ void main() {
   });
 
   group('Settings flow', () {
-    testWidgets('home has a settings button that opens Settings',
+    testWidgets('home drawer has a Settings entry that opens Settings',
         (tester) async {
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Settings'));
+      await tester.tap(find.byTooltip('Browse lists'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
 
       // Library section: a single tile that opens the Media Lists page
@@ -750,7 +752,9 @@ void main() {
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Settings'));
+      await tester.tap(find.byTooltip('Browse lists'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
 
       await tester.scrollUntilVisible(find.text('Buffer size'), 100);
@@ -778,7 +782,9 @@ void main() {
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Settings'));
+      await tester.tap(find.byTooltip('Browse lists'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Media'));
       await tester.pumpAndSettle();
@@ -834,7 +840,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Movies'), findsOneWidget);
 
-      await tester.tap(find.byTooltip('Settings'));
+      await tester.tap(find.byTooltip('Browse lists'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Media'));
       await tester.pumpAndSettle();
@@ -880,7 +888,9 @@ void main() {
       ]);
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Settings'));
+      await tester.tap(find.byTooltip('Browse lists'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Media'));
       await tester.pumpAndSettle();
@@ -905,7 +915,9 @@ void main() {
       ]);
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Settings'));
+      await tester.tap(find.byTooltip('Browse lists'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Media'));
       await tester.pumpAndSettle();
@@ -987,7 +999,9 @@ void main() {
       await AppSettings.setTmdbApiKey('supersecret9876');
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Settings'));
+      await tester.tap(find.byTooltip('Browse lists'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
 
       await tester.scrollUntilVisible(find.text('TMDB API key'), 100);

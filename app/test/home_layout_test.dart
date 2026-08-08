@@ -91,7 +91,9 @@ void main() {
     // Default order: Recently Added tops the wall.
     expect(dy(tester, 'Recently Added'), lessThan(dy(tester, 'Alpha')));
 
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byTooltip('Browse lists'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Home screen'));
     await tester.pumpAndSettle();
@@ -146,7 +148,9 @@ void main() {
     await tester.pumpWidget(const WatchItApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.byTooltip('Browse lists'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Home screen'));
     await tester.pumpAndSettle();

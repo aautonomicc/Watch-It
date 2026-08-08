@@ -101,6 +101,11 @@ class _LifecycleReconnector with WidgetsBindingObserver {
   }
 }
 
+/// Lets HomeScreen reload when a pushed page pops back to it — routes can
+/// be pushed from the library drawer, which can't reach the home state.
+final RouteObserver<ModalRoute<void>> wiRouteObserver =
+    RouteObserver<ModalRoute<void>>();
+
 class WatchItApp extends StatelessWidget {
   const WatchItApp({super.key});
 
@@ -112,6 +117,7 @@ class WatchItApp extends StatelessWidget {
       // App-wide messenger so background work (download auto-resume)
       // can report its outcome whatever screen is on top.
       scaffoldMessengerKey: wiMessengerKey,
+      navigatorObservers: [wiRouteObserver],
       theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
       home: const HomeScreen(),
     );
@@ -125,7 +131,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with RouteAware {
   List<MediaList> _lists = [];
   List<ContinueItem> _continue = const [];
   List<HomeItem> _recent = const [];
@@ -144,9 +150,24 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    wiRouteObserver.subscribe(this, ModalRoute.of(context)!);
+  }
+
+  @override
   void dispose() {
+    wiRouteObserver.unsubscribe(this);
     WatchStateStore.instance.removeListener(_reloadRows);
     super.dispose();
+  }
+
+  /// A pushed page popped back to home. Pages can change the library,
+  /// watch states, downloads, or settings (the drawer's Media/Settings
+  /// pages push without going through the _open* helpers below) — reload.
+  @override
+  void didPopNext() {
+    unawaited(_reload());
   }
 
   Future<void> _reload() async {
@@ -176,19 +197,17 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() => _continue = continueRow);
   }
 
+  // Reloading on return is didPopNext's job — no _reload() here.
   Future<void> _openSettings() async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const SettingsScreen()),
     );
-    await _reload();
   }
 
   Future<void> _openSearch() async {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => SearchScreen(lists: _lists)),
     );
-    // Playing/downloading from a search result changes the home rows.
-    await _reload();
   }
 
   Future<void> _openEntry(MediaEntry entry) async {
@@ -230,12 +249,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _scaffold(WiTokens t, List<MediaList> visible) {
     return Scaffold(
-      // Left drawer for hopping straight to a list's page; Flutter puts
-      // the hamburger in `leading`, the brand lockup stays in `title`.
+      // Left drawer for hopping straight to a list's page. Flutter would
+      // put the drawer hamburger in `leading` — search claims that slot
+      // instead, and the drawer opens from the menu action on the far
+      // right (same pattern as ListHomeScreen).
       drawer: const WiLibraryDrawer(),
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
+        leading: IconButton(
+          tooltip: 'Search',
+          icon: Icon(Icons.search, color: t.boneDim),
+          onPressed: _openSearch,
+        ),
         // App-bar lockup: the launcher icon's bucket mark + wordmark.
         title: Row(
           mainAxisSize: MainAxisSize.min,
@@ -246,16 +272,13 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: 'Search',
-            icon: Icon(Icons.search, color: t.boneDim),
-            onPressed: _openSearch,
-          ),
           const DownloadsIndicator(),
-          IconButton(
-            tooltip: 'Settings',
-            icon: Icon(Icons.settings_outlined, color: t.boneDim),
-            onPressed: _openSettings,
+          Builder(
+            builder: (context) => IconButton(
+              tooltip: 'Browse lists',
+              icon: Icon(Icons.menu, color: t.boneDim),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+            ),
           ),
         ],
       ),
