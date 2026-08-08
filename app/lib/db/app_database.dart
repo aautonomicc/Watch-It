@@ -34,6 +34,14 @@ class MediaEntries extends Table {
   /// home screen's Recently Added row. 0 for rows that predate the
   /// column (their add time is unknown, so the row skips them).
   IntColumn get addedAt => integer().withDefault(const Constant(0))();
+
+  /// Exact original file size in bytes from the root data map; null for
+  /// rows that predate the column (backfilled lazily from `/resolve`).
+  IntColumn get sizeBytes => integer().nullable()();
+
+  /// Short video-format label (`480p H.264`) — seeded for catalog
+  /// entries, learned from playback for imports; null until known.
+  TextColumn get videoInfo => text().nullable()();
 }
 
 /// Playback progress for one file, keyed by its XOR address (content
@@ -148,7 +156,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -179,6 +187,13 @@ class AppDatabase extends _$AppDatabase {
             // auto-resume on reconnect / Wi-Fi return. (An older `from`
             // just created the table with the column already in it.)
             await m.addColumn(downloads, downloads.pausedBySystem);
+          }
+          if (from < 8) {
+            // alpha.48: per-entry file size + video-format label, the
+            // info that tells same-title uploads in different formats
+            // apart.
+            await m.addColumn(mediaEntries, mediaEntries.sizeBytes);
+            await m.addColumn(mediaEntries, mediaEntries.videoInfo);
           }
         },
         beforeOpen: (details) async {

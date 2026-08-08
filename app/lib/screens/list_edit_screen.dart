@@ -141,9 +141,14 @@ class _ListEditScreenState extends State<ListEditScreen> {
                       Divider(height: 1, color: t.line),
                   itemBuilder: (context, i) {
                     final e = list.entries[i];
+                    final info = formatInfoLine(e);
                     return ListTile(
                       title: Text(e.name,
                           style: TextStyle(color: t.bone, fontSize: 14)),
+                      subtitle: info == null
+                          ? null
+                          : Text(info,
+                              style: TextStyle(color: t.ash, fontSize: 12)),
                       trailing: IconButton(
                         tooltip: 'Remove entry',
                         icon: Icon(Icons.close, size: 18, color: t.ash),

@@ -13,7 +13,6 @@ import 'connectivity.dart';
 import 'embedded_client.dart';
 import 'library_store.dart';
 import 'network_events.dart';
-import 'storage_usage.dart';
 
 /// Lifecycle of one managed download.
 enum DownloadStatus { queued, downloading, paused, done, error }
