@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
@@ -38,6 +40,12 @@ class _DetailScreenState extends State<DetailScreen> {
   MediaEntry? _next;
   List<MediaList> _lists = const [];
 
+  /// File size/format shown on the page — starts from the entry the
+  /// navigation passed in, upgraded from the library copy (which may
+  /// have learned more since) and the `/resolve` backfill.
+  int? _sizeBytes;
+  String? _videoInfo;
+
   @override
   void initState() {
     super.initState();
@@ -57,8 +65,53 @@ class _DetailScreenState extends State<DetailScreen> {
       _lists = lists;
       _state = state;
       _next = nextEpisode(lists, entry);
+      // The library's copy of this entry may know more than the object
+      // the navigation passed in (size backfilled earlier, format
+      // learned on a previous playback).
+      final addr = entry.address.toLowerCase();
+      _sizeBytes ??= entry.sizeBytes;
+      _videoInfo ??= entry.videoInfo;
+      for (final l in lists) {
+        for (final e in l.entries) {
+          if (e.address.toLowerCase() == addr) {
+            _sizeBytes ??= e.sizeBytes;
+            _videoInfo ??= e.videoInfo;
+          }
+        }
+      }
     });
+    unawaited(_fillSizeFromResolve());
   }
+
+  /// Backfill the exact file size for entries that predate the size
+  /// column: `GET /resolve` reads it off the locally stored root map
+  /// (no network traffic), and the result is persisted for every list
+  /// entry holding this address.
+  Future<void> _fillSizeFromResolve() async {
+    if (_sizeBytes != null) return;
+    final base = EmbeddedClient.baseUrl();
+    if (base == null) return;
+    try {
+      final res =
+          await http.get(Uri.parse('$base/resolve/${entry.address}'));
+      if (res.statusCode != 200) return;
+      final size =
+          (jsonDecode(res.body) as Map<String, dynamic>)['size'] as int?;
+      if (size == null || size <= 0) return;
+      await LibraryStore.noteEntryInfo(entry.address, sizeBytes: size);
+      if (mounted) setState(() => _sizeBytes = size);
+    } catch (_) {
+      // Size stays unknown — the page just omits the line.
+    }
+  }
+
+  /// `480p H.264 · 570 MB`, or null while nothing is known yet.
+  String? get _fileInfoLine => formatInfoLine(MediaEntry(
+        name: entry.name,
+        address: entry.address,
+        sizeBytes: _sizeBytes,
+        videoInfo: _videoInfo,
+      ));
 
   /// Playback source for [e]: the downloaded file when one is complete
   /// on disk, else the embedded client's stream URL. Also used for
@@ -391,6 +444,13 @@ class _DetailScreenState extends State<DetailScreen> {
                   Text(meta.category!,
                       style: TextStyle(fontSize: 12, color: t.ash)),
                 ],
+                // Format and exact size of this specific upload — what
+                // tells two copies of the same title apart.
+                if (_fileInfoLine != null) ...[
+                  const SizedBox(height: 4),
+                  Text(_fileInfoLine!,
+                      style: TextStyle(fontSize: 12, color: t.ash)),
+                ],
                 // Air date matters on episode pages; a movie's release
                 // date is already covered by the year line.
                 if (meta.episodeLabel != null && meta.airDate != null) ...[
@@ -538,10 +598,15 @@ class _DetailScreenState extends State<DetailScreen> {
               style: TextStyle(fontSize: 12.5, color: t.ash),
             ),
           const SizedBox(height: 24),
-          sectionLabel(t, 'FILE NAME'),
+          sectionLabel(t, 'FILE'),
           const SizedBox(height: 6),
           Text(entry.name,
               style: TextStyle(fontSize: 12.5, color: t.boneDim)),
+          if (_fileInfoLine != null) ...[
+            const SizedBox(height: 4),
+            Text(_fileInfoLine!,
+                style: TextStyle(fontSize: 12, color: t.ash)),
+          ],
         ],
       ),
     );
