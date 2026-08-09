@@ -145,11 +145,14 @@ GPLv3.
 
 ### Bundled catalog
 
-Since alpha.48 a fresh install seeds a catalog of public-domain movies
-and TV episodes (see [docs/SEED-CATALOG.md](docs/SEED-CATALOG.md)),
-headlined by *Night of the Living Dead* (1968). All seeded titles were
-verified public domain **in the United States** (e.g. released without a
-copyright notice, or copyright not renewed). Copyright terms differ
-elsewhere — in much of Europe protection runs for 70 years after the
-death of the last author — so outside the US, check your local rules
-before treating them as free.
+A fresh install seeds *Night of the Living Dead* (1968) in two versions
+— a 480p archive.org upload and a 1080p re-encode, sharing one poster
+card with a version picker (see
+[docs/SEED-CATALOG.md](docs/SEED-CATALOG.md)). Alpha.48–.50 bundled a
+48-title public-domain catalog; alpha.51 trimmed the bundle to NOTLD
+only — installs that already seeded the full catalog keep it, and the
+old uploads remain playable on the network. The film was verified
+public domain **in the United States** (released without a copyright
+notice). Copyright terms differ elsewhere — in much of Europe
+protection runs for 70 years after the death of the last author — so
+outside the US, check your local rules before treating it as free.

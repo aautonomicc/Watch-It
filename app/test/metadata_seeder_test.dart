@@ -123,9 +123,12 @@ void main() {
         .getSingle();
     expect(row.title, 'User Title');
     expect(posterFile.readAsBytesSync(), [1, 2, 3]);
-    // Other entries still seeded around the existing one.
-    expect((await db.select(db.metadataCache).get()).length,
-        greaterThan(1));
+    // The bundle's row for the same lookupKey was skipped, not duplicated
+    // (the trimmed catalog's only lookupKey is NOTLD's, so the user's row
+    // is the whole cache).
+    expect((await db.select(db.metadataCache).get()).length, 1);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool(kSeedMetadataFlag), isTrue);
   });
 
   test('a failed asset load is swallowed and retried next launch',

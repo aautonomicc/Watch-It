@@ -1,7 +1,15 @@
 # Roadmap
 
-**Status (2026-08-08):** latest release is **v0.1.0-alpha.50**
+**Status (2026-08-09):** latest release is **v0.1.0-alpha.50**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)).
+Unreleased on main, ready for alpha.51: the seed catalog is trimmed to
+the two Night of the Living Dead versions (the other 47 alpha.48
+titles leave the bundle — fresh installs and factory resets only;
+existing installs keep everything they seeded, and the dropped uploads
+stay playable on the network — see
+[SEED-CATALOG.md](SEED-CATALOG.md)), plus the loose-name version-fold
+fix (untagged copies of an imdb-tagged title now fold into the same
+card/picker).
 Alpha.50 relays out the home app bar: the search icon moves to the far
 left, the library-drawer hamburger to the far right, and the top-right
 settings icon is gone (the drawer's Settings tile covers it); the home
