@@ -90,9 +90,9 @@ void main() {
     });
 
     test('format info is the probed truth, not the file name tag', () {
-      // The NOTLD and Lady Vanishes archive.org uploads say [1080p] in
-      // their names but are really 480p — the catalog must carry what
-      // ffprobe measured, or the info is worse than none.
+      // The NOTLD archive.org upload says [1080p] in its name but is
+      // really 480p — the catalog must carry what ffprobe measured, or
+      // the info is worse than none.
       final movies =
           kSeedLists.singleWhere((l) => l.id == 'default-test-movies');
       final notld = movies.entries

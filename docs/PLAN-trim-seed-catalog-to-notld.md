@@ -1,6 +1,10 @@
 # Plan: trim the seed catalog to the two NOTLD versions (alpha.51)
 
-Status: PLANNED 2026-08-09, not implemented. One decision open (§2).
+Status: IMPLEMENTED 2026-08-09 (option A). The user resolved §2 on
+2026-08-09: removal only applies to future installs and factory resets
+— existing installs keep everything they seeded (option A, no removal
+migration). Option B's `ensureSeedRemovals` was NOT built; it can be
+added later if removal-everywhere is ever wanted.
 
 ## 1. Goal
 

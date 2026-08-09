@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "attribution": "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+  "entries": [
+    {
+      "lookupKey": "imdb:tt0063350",
+      "title": "Night of the Living Dead",
+      "year": 1968,
+      "overview": "A ragtag group barricade themselves in an old Pennsylvania farmhouse to remain safe from a horde of flesh-eating ghouls ravaging the Northeast.",
+      "category": "Horror · Thriller · Science Fiction",
+      "episodeLabel": null,
+      "posterFile": "movie_10331.jpg",
+      "mediaType": "movie",
+      "tmdbId": 10331,
+      "rating": 7.607,
+      "showOverview": null,
+      "seasonOverview": null,
+      "airDate": "1968-10-04",
+      "stillFile": null,
+      "showPosterFile": null
+    },
+    {
+      "lookupKey": "imdb:tt0063350",
+      "title": "Night of the Living Dead",
+      "year": 1968,
+      "overview": "A ragtag group barricade themselves in an old Pennsylvania farmhouse to remain safe from a horde of flesh-eating ghouls ravaging the Northeast.",
+      "category": "Horror · Thriller · Science Fiction",
+      "episodeLabel": null,
+      "posterFile": "movie_10331.jpg",
+      "mediaType": "movie",
+      "tmdbId": 10331,
+      "rating": 7.607,
+      "showOverview": null,
+      "seasonOverview": null,
+      "airDate": "1968-10-04",
+      "stillFile": null,
+      "showPosterFile": null
+    }
+  ]
+}
