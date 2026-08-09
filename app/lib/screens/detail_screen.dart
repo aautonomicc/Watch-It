@@ -14,6 +14,7 @@ import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/embedded_client.dart';
 import '../services/network_policy.dart';
+import '../services/season_grouping.dart' show VersionKeys;
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
@@ -77,14 +78,19 @@ class _DetailScreenState extends State<DetailScreen> {
   List<MediaEntry> _versionsFor(List<MediaList> lists) {
     final parsed = parseMediaName(entry.name);
     if (parsed.isEpisode) return const [];
-    final key = parsed.lookupKey;
+    final keys = VersionKeys([
+      entry,
+      for (final l in lists)
+        if (l.enabled) ...l.entries,
+    ]);
+    final key = keys.keyFor(parsed);
     final seen = <String>{};
     final found = <MediaEntry>[];
     for (final l in lists) {
       if (!l.enabled) continue;
       for (final e in l.entries) {
         final p = parseMediaName(e.name);
-        if (p.isEpisode || p.lookupKey != key) continue;
+        if (p.isEpisode || keys.keyFor(p) != key) continue;
         if (seen.add(_normalize(e.address))) found.add(e);
       }
     }

@@ -80,6 +80,55 @@ void main() {
       expect((items.single as HomeEntry).allVersions, hasLength(2));
     });
 
+    test('a loosely named copy folds with its imdb-tagged sibling', () {
+      // The regression behind the alpha.50 desktop report: an entry
+      // imported/kept under `Title (Year).mp4` (no imdb tag) parsed to a
+      // title/year key and sat beside the tagged catalog entries as a
+      // second card.
+      final loose = MediaEntry(
+          name: 'Night of the Living Dead (1968).mp4', address: _addr(7));
+      for (final order in [
+        [_v480, _v1080, loose],
+        [loose, _v480, _v1080],
+      ]) {
+        final items = groupSeasons(order);
+        final item = items.single as HomeEntry;
+        expect(item.allVersions, hasLength(3));
+        expect(item.entry.address, order.first.address);
+      }
+    });
+
+    test('an untagged copy with no year folds by title alone', () {
+      final items = groupSeasons([
+        _v480,
+        MediaEntry(name: 'Night of the Living Dead.mp4', address: _addr(7)),
+      ]);
+      expect((items.single as HomeEntry).allVersions, hasLength(2));
+    });
+
+    test('a title claimed by two imdb ids never absorbs untagged copies',
+        () {
+      // Two remakes sharing a title: folding the untagged copy into
+      // either would guess. It keeps its own card.
+      final items = groupSeasons([
+        MediaEntry(
+            name: 'Nosferatu (1922) {imdb-tt0013442}.mp4', address: _addr(1)),
+        MediaEntry(
+            name: 'Nosferatu (2024) {imdb-tt5040012}.mp4', address: _addr(2)),
+        MediaEntry(name: 'Nosferatu.mp4', address: _addr(3)),
+      ]);
+      expect(items, hasLength(3));
+    });
+
+    test('a year mismatch against the tagged sibling never folds', () {
+      final items = groupSeasons([
+        _v480,
+        MediaEntry(
+            name: 'Night of the Living Dead (1990).mp4', address: _addr(7)),
+      ]);
+      expect(items, hasLength(2));
+    });
+
     test('duplicate addresses dedup instead of listing twice', () {
       final items = groupSeasons([_v480, _v480]);
       final item = items.single as HomeEntry;
@@ -165,6 +214,24 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('1080p H.264 · 5.29 GB'), findsWidgets);
       expect(find.byType(DropdownButton<String>), findsOneWidget);
+    });
+
+    testWidgets('the dropdown also finds a loosely named library sibling',
+        (tester) async {
+      final loose = MediaEntry(
+          name: 'Night of the Living Dead (1968).mp4',
+          address: _addr(7),
+          sizeBytes: 5682464056,
+          videoInfo: '1080p H.264');
+      await LibraryStore.save([
+        MediaList(id: 'l1', title: 'Movies', entries: [_v480, loose]),
+      ]);
+      await tester.pumpWidget(page(DetailScreen(entry: _v480)));
+      await tester.pumpAndSettle();
+      expect(find.byType(DropdownButton<String>), findsOneWidget);
+      await tester.tap(find.byType(DropdownButton<String>));
+      await tester.pumpAndSettle();
+      expect(find.text('1080p H.264 · 5.29 GB'), findsWidgets);
     });
 
     testWidgets('single-version titles keep the plain info line',
