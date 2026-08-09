@@ -18,8 +18,14 @@ void main() {
     test('nothing stored yields the default order', () {
       final out = reconcileHomeSections(
           const [], [_list('a'), _list('b')]);
-      expect(_ids(out),
-          ['continue', 'downloads', 'recent', 'list:a', 'list:b']);
+      expect(_ids(out), [
+        'continue',
+        'favourites',
+        'downloads',
+        'recent',
+        'list:a',
+        'list:b',
+      ]);
       expect(out.every((s) => s.visible), isTrue);
     });
 
@@ -34,8 +40,9 @@ void main() {
         ],
         [_list('a'), _list('b')],
       );
+      // Missing specials (favourites here) append after the stored order.
       expect(_ids(out),
-          ['list:b', 'recent', 'continue', 'downloads', 'list:a']);
+          ['list:b', 'recent', 'continue', 'downloads', 'list:a', 'favourites']);
       expect(out[1].visible, isFalse);
     });
 
@@ -49,7 +56,8 @@ void main() {
         ],
         [_list('fresh')],
       );
-      expect(_ids(out), ['continue', 'downloads', 'recent', 'list:fresh']);
+      expect(_ids(out),
+          ['continue', 'downloads', 'recent', 'favourites', 'list:fresh']);
     });
 
     test('missing special rows are appended visible', () {
@@ -57,7 +65,8 @@ void main() {
         const [HomeSection(id: 'recent', visible: false)],
         [_list('a')],
       );
-      expect(_ids(out), ['recent', 'continue', 'downloads', 'list:a']);
+      expect(_ids(out),
+          ['recent', 'continue', 'favourites', 'downloads', 'list:a']);
       expect(out.first.visible, isFalse);
       expect(out[1].visible, isTrue);
     });
@@ -67,6 +76,7 @@ void main() {
       final out = reconcileHomeSections(
         const [
           HomeSection(id: 'continue'),
+          HomeSection(id: 'favourites'),
           HomeSection(id: 'downloads'),
           HomeSection(id: 'recent'),
           HomeSection(id: 'list:a', visible: true),
@@ -86,7 +96,7 @@ void main() {
         ],
         const [],
       );
-      expect(_ids(out), ['recent', 'continue', 'downloads']);
+      expect(_ids(out), ['recent', 'continue', 'downloads', 'favourites']);
       expect(out.first.visible, isFalse);
     });
   });
@@ -133,6 +143,9 @@ void main() {
       expect(cont.isSpecial, isTrue);
       expect(cont.listId, isNull);
       expect(cont.title, 'Continue Watching');
+      const favs = HomeSection(id: 'favourites');
+      expect(favs.isSpecial, isTrue);
+      expect(favs.title, 'Favourites');
       final listRow = HomeSection(id: listSectionId('abc'));
       expect(listRow.isSpecial, isFalse);
       expect(listRow.listId, 'abc');

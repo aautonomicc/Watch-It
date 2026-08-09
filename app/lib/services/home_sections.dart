@@ -2,13 +2,15 @@ import 'dart:convert';
 
 import '../models/media_list.dart';
 
-/// Stable ids for the three built-in home rows. Media-list rows use
+/// Stable ids for the four built-in home rows. Media-list rows use
 /// [listSectionId] so the one ordered sequence can interleave both kinds.
 const kSectionContinue = 'continue';
+const kSectionFavourites = 'favourites';
 const kSectionDownloads = 'downloads';
 const kSectionRecent = 'recent';
 const kSpecialSectionIds = [
   kSectionContinue,
+  kSectionFavourites,
   kSectionDownloads,
   kSectionRecent,
 ];
@@ -38,6 +40,7 @@ class HomeSection {
 
   String get title => switch (id) {
         kSectionContinue => 'Continue Watching',
+        kSectionFavourites => 'Favourites',
         kSectionDownloads => 'Downloads',
         kSectionRecent => 'Recently Added',
         _ => id,
@@ -71,8 +74,8 @@ List<HomeSection> decodeHomeSections(String raw) {
 /// - stored ids whose list no longer exists are dropped;
 /// - lists not in the stored order are appended at the end (in their
 ///   library position order), as are special rows a stale blob lacks;
-/// - nothing stored → default order: continue, downloads, recent, then
-///   lists — exactly the pre-customization layout;
+/// - nothing stored → default order: continue, favourites, downloads,
+///   recent, then lists — exactly the pre-customization layout;
 /// - list rows always report [MediaList.enabled] as their visibility.
 List<HomeSection> reconcileHomeSections(
   List<HomeSection> stored,
