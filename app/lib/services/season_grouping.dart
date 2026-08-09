@@ -80,6 +80,52 @@ class _VersionBuilder {
   final addresses = <String>{};
 }
 
+/// Fold keys for same-title version grouping. Normally an entry folds by
+/// its parsed [ParsedName.lookupKey], but that key is imdb-id-based only
+/// when the file name carries an id tag — a loosely named copy
+/// (`Title (Year).mp4`) of a Plex/Jellyfin-named upload would land in a
+/// different group and show as a second card. So an entry with no imdb
+/// id adopts the key of the imdb-tagged entry sharing its title (and
+/// year, when it has one), as long as exactly one imdb id claims that
+/// title — two different ids (remakes) never alias.
+class VersionKeys {
+  VersionKeys(Iterable<MediaEntry> entries) {
+    for (final e in entries) {
+      final p = parseMediaName(e.name);
+      if (p.isEpisode || p.imdbId == null) continue;
+      final title = p.title.toLowerCase();
+      if (title.isEmpty) continue;
+      _claim(_byTitle, title, p.lookupKey);
+      if (p.year != null) _claim(_byTitleYear, '$title|${p.year}', p.lookupKey);
+    }
+  }
+
+  /// `''` marks a title claimed by two different imdb ids — never alias.
+  final _byTitle = <String, String>{};
+  final _byTitleYear = <String, String>{};
+
+  static void _claim(Map<String, String> map, String key, String value) {
+    final held = map[key];
+    if (held == null) {
+      map[key] = value;
+    } else if (held != value) {
+      map[key] = '';
+    }
+  }
+
+  /// The fold key for [parsed]: its own lookupKey, or the unambiguous
+  /// imdb-tagged sibling's.
+  String keyFor(ParsedName parsed) {
+    if (parsed.isEpisode || parsed.imdbId != null) return parsed.lookupKey;
+    final title = parsed.title.toLowerCase();
+    final alias = parsed.year != null
+        ? _byTitleYear['$title|${parsed.year}']
+        : _byTitle[title];
+    if (alias == null || alias.isEmpty) return parsed.lookupKey;
+    return alias;
+  }
+}
+
 /// Fold a list's entries into home-wall items: entries whose file name
 /// carries an `S01E02`/`1x02` marker group per (show, season); other
 /// entries get one card per title, with multiple uploads of the same
@@ -91,13 +137,15 @@ List<HomeItem> groupSeasons(List<MediaEntry> entries) {
   final items = <HomeItem?>[];
   final bySeason = <String, _SeasonBuilder>{};
   final byTitle = <String, _VersionBuilder>{};
+  final keys = VersionKeys(entries);
   for (final entry in entries) {
     final parsed = parseMediaName(entry.name);
     if (!parsed.isEpisode) {
-      var builder = byTitle[parsed.lookupKey];
+      final key = keys.keyFor(parsed);
+      var builder = byTitle[key];
       if (builder == null) {
         items.add(null); // reserve the slot; filled in below
-        builder = byTitle[parsed.lookupKey] = _VersionBuilder(items.length - 1);
+        builder = byTitle[key] = _VersionBuilder(items.length - 1);
       }
       final addr = entry.address.toLowerCase().replaceFirst('0x', '');
       if (builder.addresses.add(addr)) builder.entries.add(entry);
