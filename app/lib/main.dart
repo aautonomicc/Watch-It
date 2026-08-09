@@ -14,6 +14,7 @@ import 'services/connectivity.dart';
 import 'services/download_foreground.dart';
 import 'services/download_manager.dart';
 import 'services/embedded_client.dart';
+import 'services/favourites.dart';
 import 'services/home_rows.dart';
 import 'services/home_sections.dart';
 import 'services/library_arrangement.dart';
@@ -175,6 +176,8 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     // The wall reads the arrangement inside its ListenableBuilder; make
     // sure the persisted choice is in before the first build settles.
     await ArrangementStore.instance.ensureLoaded();
+    // Same for the hearted addresses behind the Favourites row.
+    await FavouritesStore.instance.ensureLoaded();
     final lists = await LibraryStore.load();
     final continueRow = await continueWatching(lists);
     // Re-checked on every reload so the banner disappears as soon as a
@@ -315,6 +318,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
         MetadataService.instance,
         DownloadManager.instance,
         ArrangementStore.instance,
+        FavouritesStore.instance,
       ]),
       builder: (context, _) => _posterWall(t, lists),
     );
@@ -365,10 +369,12 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   }
 
   Widget _posterWall(WiTokens t, List<MediaList> lists) {
-    // Computed here (not in _reload) so the row appears, updates, and
-    // vanishes live as downloads finish or are removed — this builder
-    // already re-runs on every DownloadManager notification.
+    // Computed here (not in _reload) so the rows appear, update, and
+    // vanish live as downloads finish or hearts are toggled — this
+    // builder already re-runs on every DownloadManager and
+    // FavouritesStore notification.
     final downloads = downloadedItems(lists);
+    final favourites = favouriteItems(lists);
     final listsById = {for (final l in lists) l.id: l};
     // _sections is still empty on the first frame (before _reload lands);
     // reconciling against nothing yields the default order either way.
@@ -384,8 +390,8 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     final hidden = ArrangementStore.instance.hiddenAutoIds;
     // Hidden virtual lists also drop their entries from Continue
     // Watching and Recently Added (a hidden type resurfacing there would
-    // undercut the hide); Downloads is exempt — on-device files always
-    // show. Filtered here, not in _reload, so a checkbox flip on the
+    // undercut the hide); Downloads and Favourites are exempt —
+    // on-device files always show, and a heart is a deliberate pick. Filtered here, not in _reload, so a checkbox flip on the
     // Media page applies live (this builder re-runs on every
     // ArrangementStore notification). Inert in user mode.
     final continueItems = auto && hidden.isNotEmpty
@@ -407,6 +413,9 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
         if (!section.visible) continue;
         children.addAll(switch (section.id) {
           kSectionContinue => _continueSection(t, continueItems),
+          kSectionFavourites => favourites.isEmpty
+              ? const <Widget>[]
+              : [_sectionTitle(t, 'Favourites'), _itemsRow(t, favourites)],
           kSectionDownloads => downloads.isEmpty
               ? const <Widget>[]
               : [_sectionTitle(t, 'Downloads'), _itemsRow(t, downloads)],

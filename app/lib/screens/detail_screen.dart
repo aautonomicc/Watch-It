@@ -8,6 +8,7 @@ import '../models/media_list.dart';
 import '../services/app_settings.dart';
 import '../services/connectivity.dart';
 import '../services/download_manager.dart';
+import '../services/favourites.dart';
 import '../services/home_rows.dart';
 import '../services/library_store.dart';
 import '../services/metadata.dart';
@@ -65,6 +66,7 @@ class _DetailScreenState extends State<DetailScreen> {
     // No data-map warm needed: every entry's map arrived at import time
     // (datamap-first model) — playback reads it from the local store.
     unawaited(DownloadManager.instance.ensureLoaded());
+    unawaited(FavouritesStore.instance.ensureLoaded());
     unawaited(_loadState());
   }
 
@@ -460,6 +462,7 @@ class _DetailScreenState extends State<DetailScreen> {
         MetadataService.instance,
         DownloadManager.instance,
         ConnectivityMonitor.instance,
+        FavouritesStore.instance,
       ]),
       builder: (context, _) => _build(context),
     );
@@ -500,6 +503,27 @@ class _DetailScreenState extends State<DetailScreen> {
         title: Text(meta.title,
             style: TextStyle(color: t.bone, fontSize: 16),
             overflow: TextOverflow.ellipsis),
+        actions: [
+          // Heart the version this page currently shows; the home
+          // screen's Favourites row picks it up. Per-address on purpose —
+          // with two uploads of one title the user hearts the copy they
+          // actually want.
+          IconButton(
+            tooltip: FavouritesStore.instance.isFavourite(entry.address)
+                ? 'Remove from Favourites'
+                : 'Add to Favourites',
+            icon: Icon(
+              FavouritesStore.instance.isFavourite(entry.address)
+                  ? Icons.favorite
+                  : Icons.favorite_border,
+              color: FavouritesStore.instance.isFavourite(entry.address)
+                  ? t.accent
+                  : t.boneDim,
+            ),
+            onPressed: () =>
+                unawaited(FavouritesStore.instance.toggle(entry.address)),
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
