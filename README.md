@@ -12,10 +12,10 @@ W@tch is client-only: your media library is one or more lists of files stored
 privately on the decentralized [Autonomi](https://github.com/WithAutonomi/ant-client)
 network, streamed on demand or downloaded for offline watching.
 
-![W@tch home screen on Linux — a fresh install connected to the live Autonomi network, showing the bundled Night of the Living Dead catalog](docs/screenshots/home-linux.png)
+![W@tch home screen on Linux — connected to the live Autonomi network, browsing a library of public-domain films and shows](docs/screenshots/home-linux.jpg)
 
-*A fresh install on Linux (v0.1.0-alpha.51): connected to the live network, with the
-bundled public-domain catalog ready to stream — no key, no account, no server.*
+*W@tch on Linux: connected to the live network, browsing a library of public-domain
+films and shows streamed straight from Autonomi — no key, no account, no server.*
 
 ## How it works
 
