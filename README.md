@@ -21,11 +21,15 @@ Want this exact library? It's a one-file download:
 [**Public Domain.watch-list**](catalog/README.md) — 48 public-domain
 films and episodes, posters and descriptions included, ready to import.
 
-![Night of the Living Dead detail page in W@tch — poster, rating, version picker, Play and Download buttons, favourite heart](docs/screenshots/detail-linux.jpg)
+<p>
+  <img src="docs/screenshots/detail-linux.jpg" width="49%" alt="Night of the Living Dead detail page in W@tch — poster, rating, version picker, Play and Download buttons, favourite heart" />
+  <img src="docs/screenshots/season-linux.jpg" width="49%" alt="One Step Beyond Season 1 in W@tch — season poster, rating, Download season button, and the episode list with stills and descriptions" />
+</p>
 
-*A title's detail page: pick between uploads of the same film (here 480p or
-1080p), stream it with Play, save it for offline with Download, or heart it
-into the Favourites row.*
+*Left — a film's detail page: pick between uploads of the same film (here 480p
+or 1080p), stream it with Play, save it for offline with Download, or heart it
+into the Favourites row. Right — a season page: every episode with stills, air
+dates and descriptions, plus a one-tap Download season.*
 
 ## How it works
 
