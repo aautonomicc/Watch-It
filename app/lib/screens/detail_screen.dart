@@ -503,27 +503,6 @@ class _DetailScreenState extends State<DetailScreen> {
         title: Text(meta.title,
             style: TextStyle(color: t.bone, fontSize: 16),
             overflow: TextOverflow.ellipsis),
-        actions: [
-          // Heart the version this page currently shows; the home
-          // screen's Favourites row picks it up. Per-address on purpose —
-          // with two uploads of one title the user hearts the copy they
-          // actually want.
-          IconButton(
-            tooltip: FavouritesStore.instance.isFavourite(entry.address)
-                ? 'Remove from Favourites'
-                : 'Add to Favourites',
-            icon: Icon(
-              FavouritesStore.instance.isFavourite(entry.address)
-                  ? Icons.favorite
-                  : Icons.favorite_border,
-              color: FavouritesStore.instance.isFavourite(entry.address)
-                  ? t.accent
-                  : t.boneDim,
-            ),
-            onPressed: () =>
-                unawaited(FavouritesStore.instance.toggle(entry.address)),
-          ),
-        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -640,6 +619,25 @@ class _DetailScreenState extends State<DetailScreen> {
                       ),
                       icon: Icon(downloadIcon, size: 18),
                       label: Text(downloadLabel),
+                    ),
+                    // Heart the version this page currently shows; the home
+                    // screen's Favourites row picks it up. Per-address on
+                    // purpose — with two uploads of one title the user
+                    // hearts the copy they actually want.
+                    IconButton(
+                      tooltip: FavouritesStore.instance.isFavourite(entry.address)
+                          ? 'Remove from Favourites'
+                          : 'Add to Favourites',
+                      icon: Icon(
+                        FavouritesStore.instance.isFavourite(entry.address)
+                            ? Icons.favorite
+                            : Icons.favorite_border,
+                        color: FavouritesStore.instance.isFavourite(entry.address)
+                            ? t.accent
+                            : t.boneDim,
+                      ),
+                      onPressed: () => unawaited(
+                          FavouritesStore.instance.toggle(entry.address)),
                     ),
                     if (_next != null)
                       OutlinedButton.icon(
