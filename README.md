@@ -17,6 +17,10 @@ network, streamed on demand or downloaded for offline watching.
 *W@tch on Linux: connected to the live network, browsing a library of public-domain
 films and shows streamed straight from Autonomi — no key, no account, no server.*
 
+Want this exact library? It's a one-file download:
+[**Public Domain.watch-list**](catalog/README.md) — 48 public-domain
+films and episodes, posters and descriptions included, ready to import.
+
 ## How it works
 
 1. **Upload privately, keep the datamap.** Upload media with
@@ -156,7 +160,10 @@ card with a version picker (see
 [docs/SEED-CATALOG.md](docs/SEED-CATALOG.md)). Alpha.48–.50 bundled a
 48-title public-domain catalog; alpha.51 trimmed the bundle to NOTLD
 only — installs that already seeded the full catalog keep it, and the
-old uploads remain playable on the network. The film was verified
+old uploads remain playable on the network — and the full 48-title
+catalog is available as a downloadable
+[`Public Domain.watch-list` bundle](catalog/README.md) you can import
+in a couple of taps. The film was verified
 public domain **in the United States** (released without a copyright
 notice). Copyright terms differ elsewhere — in much of Europe
 protection runs for 70 years after the death of the last author — so
