@@ -21,6 +21,12 @@ Want this exact library? It's a one-file download:
 [**Public Domain.watch-list**](catalog/README.md) — 48 public-domain
 films and episodes, posters and descriptions included, ready to import.
 
+![Night of the Living Dead detail page in W@tch — poster, rating, version picker, Play and Download buttons, favourite heart](docs/screenshots/detail-linux.jpg)
+
+*A title's detail page: pick between uploads of the same film (here 480p or
+1080p), stream it with Play, save it for offline with Download, or heart it
+into the Favourites row.*
+
 ## How it works
 
 1. **Upload privately, keep the datamap.** Upload media with
