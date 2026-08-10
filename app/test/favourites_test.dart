@@ -153,6 +153,34 @@ void main() {
     expect(find.byIcon(Icons.favorite_border), findsOneWidget);
   });
 
+  testWidgets('heart sits in the action row beside Download, not the app bar',
+      (tester) async {
+    await seedLibrary();
+    await tester.pumpWidget(page(DetailScreen(entry: _e('Movie.2020.mkv', 1))));
+    await tester.pumpAndSettle();
+
+    final heart = find.byTooltip('Add to Favourites');
+    expect(
+        find.descendant(of: find.byType(AppBar), matching: heart),
+        findsNothing);
+    expect(
+        find.ancestor(of: heart, matching: find.byType(Wrap)),
+        findsOneWidget);
+    // Same Wrap as the Download button, immediately to its right.
+    final wrap = tester.widget<Wrap>(
+        find.ancestor(of: heart, matching: find.byType(Wrap)).first);
+    final children = wrap.children;
+    final downloadIndex = children.indexWhere((w) =>
+        w is OutlinedButton &&
+        find
+            .descendant(
+                of: find.byWidget(w), matching: find.text('Download'))
+            .evaluate()
+            .isNotEmpty);
+    expect(downloadIndex, greaterThanOrEqualTo(0));
+    expect(children[downloadIndex + 1], isA<IconButton>());
+  });
+
   testWidgets('home shows the Favourites row only when hearts exist',
       (tester) async {
     await seedLibrary();
