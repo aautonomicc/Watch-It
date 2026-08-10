@@ -17,9 +17,9 @@ path = "src/bin/devserver.rs"
 cc = "1"
 
 [dependencies]
-# Pinned to the commit the Phase 0 streaming spike verified (ant-core 0.4.0):
+# Pinned to ant-core 0.5.1 (rc-2026.7.4). Still exposes
 # Client::file_download_to_sender + self_encryption 0.36 get_range seek.
-ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "629b87fc2560653e96084596721e9564c47f4181" }
+ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "81a0a2470ea74fa8608ed60c8ff214ff1fe2fc3d" }
 self_encryption = "0.36"
 axum = "0.8"
 # blake3 + rmp-serde mirror ant-core's address derivation (compute_address
