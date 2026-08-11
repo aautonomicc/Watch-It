@@ -9,6 +9,7 @@ APP_DIR="$REPO_ROOT/app"
 PKG_DIR="$REPO_ROOT/linux-packaging"
 OUT_DIR="$REPO_ROOT/dist"
 LINUXDEPLOY="${LINUXDEPLOY:-$HOME/tools/linuxdeploy-x86_64.AppImage}"
+APPIMAGETOOL="${APPIMAGETOOL:-$HOME/tools/appimagetool-x86_64.AppImage}"
 
 VERSION="$(grep '^version:' "$APP_DIR/pubspec.yaml" | awk '{print $2}' | cut -d+ -f1)"
 BUNDLE="$APP_DIR/build/linux/x64/release/bundle"
@@ -50,19 +51,39 @@ cp "$APP_DIR/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" "$STAGE/wa
 LIBMPV="$(/sbin/ldconfig -p | awk '/libmpv\.so\.2 .*x86-64/{print $NF; exit}')"
 [ -n "$LIBMPV" ] || { echo "libmpv.so.2 not found (apt install libmpv-dev)"; exit 1; }
 
+# Deploy into the AppDir only — packing happens after the audio-lib
+# restructuring below (a second linuxdeploy pass would re-bundle libpulse).
 "$LINUXDEPLOY" --appimage-extract-and-run \
   --appdir "$APPDIR" \
   -e "$APPDIR/usr/bin/watchit" \
   -l "$LIBMPV" \
   -d "$PKG_DIR/watchit.desktop" \
   -i "$STAGE/watchit.png" \
-  --custom-apprun "$PKG_DIR/AppRun" \
-  --output appimage
+  --custom-apprun "$PKG_DIR/AppRun"
+
+# Audio client libs are system-first with bundled fallback (AppRun picks per
+# host): park the ones linuxdeploy bundled OFF the loader path in fallback/
+# (a bundled Pulse client vs the host's daemon = silent audio), and add host
+# copies of the three linuxdeploy deliberately excludes — libmpv/libavdevice
+# hard-link them, so distros without e.g. JACK otherwise fail at load.
+FALLBACK="$APPDIR/usr/lib/fallback"
+mkdir -p "$FALLBACK"
+for pat in libpulse.so.0 libpulsecommon-*.so libsndio.so.7 libopenal.so.1; do
+  for f in "$APPDIR/usr/lib/"$pat; do
+    [ -e "$f" ] && mv "$f" "$FALLBACK/"
+  done
+done
+for lib in libjack.so.0 libpipewire-0.3.so.0 libasound.so.2; do
+  src="$(/sbin/ldconfig -p | awk -v l="$lib" '$1==l && /x86-64/{print $NF; exit}')"
+  [ -n "$src" ] || { echo "$lib not found on build host"; exit 1; }
+  cp -L "$src" "$FALLBACK/"
+done
+for lib in libjack.so.0 libpipewire-0.3.so.0 libasound.so.2 \
+           libpulse.so.0 libsndio.so.7 libopenal.so.1; do
+  [ -e "$FALLBACK/$lib" ] || { echo "fallback/$lib missing"; exit 1; }
+done
 
 mkdir -p "$OUT_DIR"
-# linuxdeploy names the output from the .desktop Name= (now "W@tch"); the
-# published artifact keeps the @-free Watch-It name (matches the repo).
-mv W@tch*.AppImage "$OUT_DIR/Watch-It-$VERSION-x86_64.AppImage" 2>/dev/null \
-  || mv Watch-It*.AppImage "$OUT_DIR/Watch-It-$VERSION-x86_64.AppImage" 2>/dev/null \
-  || mv watchit*.AppImage "$OUT_DIR/Watch-It-$VERSION-x86_64.AppImage"
+ARCH=x86_64 "$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" \
+  "$OUT_DIR/Watch-It-$VERSION-x86_64.AppImage"
 echo "Built $OUT_DIR/Watch-It-$VERSION-x86_64.AppImage"
