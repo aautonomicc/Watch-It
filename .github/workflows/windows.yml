@@ -1,0 +1,42 @@
+name: Windows build
+
+# Manual for now: the Rust tree (ant-core → aws-lc, vendored OpenSSL,
+# evmlib/alloy) takes ~40+ min cold on a Windows runner. Trigger with
+# `gh workflow run windows.yml`; grab the zip from the run's artifacts.
+on:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      # aws-lc-sys (via rustls) and the vendored OpenSSL both assemble
+      # with NASM on MSVC targets; the runner image doesn't ship it.
+      - uses: ilammy/setup-nasm@v1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/watchit_core
+      - name: Build watchit_core (Rust cdylib)
+        working-directory: native/watchit_core
+        run: cargo build --release --lib
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.6
+          cache: true
+      - name: Build Flutter Windows app
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build windows --release
+      - name: Assemble bundle
+        shell: pwsh
+        run: |
+          $out = "app/build/windows/x64/runner/Release"
+          Copy-Item native/watchit_core/target/release/watchit_core.dll $out/
+          Compress-Archive -Path "$out/*" -DestinationPath Watch-It-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Watch-It-windows-x64
+          path: Watch-It-windows-x64.zip

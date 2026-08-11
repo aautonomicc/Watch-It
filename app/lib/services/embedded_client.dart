@@ -55,19 +55,26 @@ class EmbeddedClient {
     }
   }
 
-  /// Load the native library. A plain name works on Android (and on Linux
-  /// when the loader path covers it, e.g. the AppImage's AppRun); desktop
-  /// builds also carry the .so in the bundle's lib/ dir next to the
-  /// executable, so fall back to that explicit path.
+  /// Load the native library. A plain name works on Android and Windows
+  /// (the loader search path covers the exe dir), and on Linux when the
+  /// loader path covers it (e.g. the AppImage's AppRun); desktop builds
+  /// also carry the library next to the executable — Linux in the
+  /// bundle's lib/ dir, Windows beside the .exe — so fall back to that
+  /// explicit path.
   static DynamicLibrary? _openLibrary() {
+    final name =
+        Platform.isWindows ? 'watchit_core.dll' : 'libwatchit_core.so';
     try {
-      return DynamicLibrary.open('libwatchit_core.so');
+      return DynamicLibrary.open(name);
     } catch (_) {
-      if (!Platform.isLinux) return null;
+      if (!Platform.isLinux && !Platform.isWindows) return null;
     }
     try {
       final exeDir = File(Platform.resolvedExecutable).parent.path;
-      return DynamicLibrary.open('$exeDir/lib/libwatchit_core.so');
+      final path = Platform.isWindows
+          ? '$exeDir\\watchit_core.dll'
+          : '$exeDir/lib/libwatchit_core.so';
+      return DynamicLibrary.open(path);
     } catch (_) {
       return null;
     }
