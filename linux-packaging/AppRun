@@ -2,5 +2,48 @@
 # media_kit dlopens libmpv.so.2 by name, so the bundled copy in usr/lib
 # must be on the loader path — rpath patching alone doesn't reach plugins.
 HERE="$(dirname "$(readlink -f "$0")")"
-export LD_LIBRARY_PATH="$HERE/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+# Audio client libraries must come from the host when it has them: a bundled
+# Pulse/PipeWire client talking to a different host daemon is the classic
+# silent-audio failure. But libmpv/libavdevice hard-link libjack/libpipewire/
+# libasound/libpulse, so a host missing any one of them (no JACK on AerynOS)
+# kills the whole app at load. usr/lib/fallback holds bundled copies OFF the
+# loader path; only the ones the host can't provide get symlinked into a
+# runtime dir that sits on LD_LIBRARY_PATH.
+FALLBACK="$HERE/usr/lib/fallback"
+AUDIO_DIR="${XDG_RUNTIME_DIR:-/tmp}/watchit-audio-fallback-$(id -u)"
+
+host_has() {
+    for lc in ldconfig /sbin/ldconfig /usr/sbin/ldconfig; do
+        command -v "$lc" >/dev/null 2>&1 || continue
+        "$lc" -p 2>/dev/null | grep -q "^[[:space:]]*$1 " && return 0
+        break
+    done
+    # no ldconfig cache (or lib not in it) — probe the usual lib dirs
+    for d in /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib /usr/local/lib \
+             /lib/x86_64-linux-gnu /lib64 /lib; do
+        [ -e "$d/$1" ] && return 0
+    done
+    return 1
+}
+
+if [ -d "$FALLBACK" ]; then
+    # recreate each launch: stale links would point at a dead mount point
+    rm -rf "$AUDIO_DIR" 2>/dev/null
+    mkdir -p "$AUDIO_DIR" 2>/dev/null
+    for lib in libjack.so.0 libpipewire-0.3.so.0 libasound.so.2 \
+               libpulse.so.0 libsndio.so.7 libopenal.so.1; do
+        [ -e "$FALLBACK/$lib" ] || continue
+        host_has "$lib" && continue
+        ln -sf "$FALLBACK/$lib" "$AUDIO_DIR/$lib" 2>/dev/null
+        # the bundled libpulse needs its exact-version libpulsecommon
+        if [ "$lib" = "libpulse.so.0" ]; then
+            for c in "$FALLBACK"/libpulsecommon-*.so; do
+                [ -e "$c" ] && ln -sf "$c" "$AUDIO_DIR/${c##*/}" 2>/dev/null
+            done
+        fi
+    done
+fi
+
+export LD_LIBRARY_PATH="$HERE/usr/lib:$AUDIO_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 exec "$HERE/usr/bin/watchit" "$@"
