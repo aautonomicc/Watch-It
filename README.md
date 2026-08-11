@@ -18,7 +18,7 @@ network, streamed on demand or downloaded for offline watching.
 films and shows streamed straight from Autonomi — no key, no account, no server.*
 
 Want this exact library? It's a one-file download:
-[**Public Domain.watch-list**](catalog/README.md) — 47 public-domain
+[**Public Domain.watch-list**](catalog/README.md) — 40 public-domain
 films and episodes, posters and descriptions included, ready to import.
 
 <p>
