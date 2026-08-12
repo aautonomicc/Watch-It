@@ -11,6 +11,7 @@ import '../services/embedded_client.dart';
 import '../services/library_store.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
+import '../services/screen_wake.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 
@@ -72,6 +73,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late final Player _player;
   late final VideoController _controller;
   StreamSubscription<bool>? _bufferingSub;
+  StreamSubscription<bool>? _playingSub;
   StreamSubscription<String>? _errorSub;
   StreamSubscription<Duration>? _positionSub;
   StreamSubscription<bool>? _completedSub;
@@ -121,6 +123,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _bufferingSub = _player.stream.buffering.listen((b) {
       if (mounted) setState(() => _buffering = b);
     });
+    // Linux screensaver/lock inhibit while playback runs — the wakelock the
+    // Video widget holds covers the other platforms (see ScreenWake docs).
+    _playingSub = _player.stream.playing.listen(ScreenWake.instance.setPlaying);
     // mpv reports error-level log lines that are not fatal — e.g. a
     // hardware decoder that fails to open ("could not open codec")
     // right before it falls back to software and plays fine. Only treat
@@ -262,6 +267,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _healthTimer?.cancel();
     _countdownTimer?.cancel();
     _bufferingSub?.cancel();
+    _playingSub?.cancel();
+    ScreenWake.instance.setPlaying(false);
     _errorSub?.cancel();
     _positionSub?.cancel();
     _completedSub?.cancel();
@@ -445,14 +452,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 seekBarHeight: 4.8,
               ),
               child: MaterialDesktopVideoControlsTheme(
-                normal: kDefaultMaterialDesktopVideoControlsThemeData.copyWith(
-                  bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
-                ),
-                fullscreen:
-                    kDefaultMaterialDesktopVideoControlsThemeDataFullscreen
-                        .copyWith(
-                  bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
-                ),
+                normal: desktopControlsTheme(
+                    kDefaultMaterialDesktopVideoControlsThemeData),
+                fullscreen: desktopControlsTheme(
+                    kDefaultMaterialDesktopVideoControlsThemeDataFullscreen),
                 child: Video(controller: _controller),
               ),
             ),
@@ -473,3 +476,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
 String playerTitle(MediaMetadata meta) => meta.episodeLabel == null
     ? meta.title
     : '${meta.title} · ${meta.episodeLabel}';
+
+/// Desktop controls theme tweaks: the branded overlay replaces the stock
+/// buffering spinner, and the mouse cursor fades out with the controls
+/// instead of sitting on the film forever.
+MaterialDesktopVideoControlsThemeData desktopControlsTheme(
+        MaterialDesktopVideoControlsThemeData base) =>
+    base.copyWith(
+      bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
+      hideMouseOnControlsRemoval: true,
+    );
