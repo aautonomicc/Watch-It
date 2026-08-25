@@ -77,16 +77,18 @@ void _deleteUserPosters(Directory dir, String prefix, {String? keep}) {
 }
 
 /// Upsert the user's details for [lookupKey]. Fields the editor doesn't
-/// touch (rating, episode label, stills, TMDB id…) are preserved from
-/// the existing row so an edit on top of a TMDB match keeps its extras.
+/// touch (rating, stills, TMDB id…) are preserved from the existing row
+/// so an edit on top of a TMDB match keeps its extras.
 /// [posterFile] absent = keep the current artwork; `Value(null)` =
 /// remove it (the file itself is only deleted when it is a `user_` one —
-/// TMDB artwork files can be shared between rows).
+/// TMDB artwork files can be shared between rows). [episodeLabel] absent
+/// = keep the current label; the episode editor writes `SxxEyy · Name`.
 Future<void> saveUserDetails({
   required String lookupKey,
   required String title,
   int? year,
   String? overview,
+  Value<String?> episodeLabel = const Value.absent(),
   Value<String?> posterFile = const Value.absent(),
   Future<Directory> Function()? postersDirProvider,
 }) async {
@@ -112,7 +114,9 @@ Future<void> saveUserDetails({
           overview: Value(
               (overview == null || overview.trim().isEmpty) ? null : overview),
           category: Value(existing?.category),
-          episodeLabel: Value(existing?.episodeLabel),
+          episodeLabel: episodeLabel.present
+              ? episodeLabel
+              : Value(existing?.episodeLabel),
           posterFile: Value(newPoster),
           mediaType: Value(existing?.mediaType),
           tmdbId: Value(existing?.tmdbId),

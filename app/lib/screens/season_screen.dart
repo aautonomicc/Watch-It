@@ -12,6 +12,7 @@ import '../widgets/detail_header.dart';
 import '../widgets/download_badge.dart';
 import '../widgets/watch_progress.dart';
 import 'detail_screen.dart';
+import 'edit_details_screen.dart';
 
 /// One season of a show: big season artwork with description and rating,
 /// then the episodes as tiles flowing left to right — TMDB screenshot,
@@ -76,6 +77,23 @@ class SeasonScreen extends StatelessWidget {
         title: Text('${meta.title} — Season ${group.season}',
             style: TextStyle(color: t.bone, fontSize: 16),
             overflow: TextOverflow.ellipsis),
+        actions: [
+          // Edit details for this season — artwork and synopsis, written
+          // under the season key and overlaid on its episodes by
+          // MetadataService.
+          IconButton(
+            tooltip: 'Edit details',
+            icon: Icon(Icons.edit_outlined, color: t.boneDim, size: 20),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => EditDetailsScreen(
+                  entry: group.episodes.first,
+                  scope: EditDetailsScope.season,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),

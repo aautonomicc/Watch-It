@@ -48,6 +48,11 @@ class MetadataService extends ChangeNotifier {
   final _memory = <String, MediaMetadata?>{};
   final _inFlight = <String, Future<void>>{};
 
+  /// User-authored show/season rows by their episode-less lookup key
+  /// (`tv:title:year` / `…:sN` — keys no entry resolves under), overlaid
+  /// on every episode's metadata. `null` = resolved, no user row.
+  final _overlays = <String, _UserOverlay?>{};
+
   static Future<Directory> _defaultPostersDir() async {
     final support = await getApplicationSupportDirectory();
     return Directory('${support.path}/posters');
@@ -57,12 +62,81 @@ class MetadataService extends ChangeNotifier {
   /// resolve that fires [notifyListeners] later.
   MediaMetadata metadataFor(MediaEntry entry) {
     final fallback = fallbackMetadataFor(entry);
-    final key = parseMediaName(entry.name).lookupKey;
-    if (_memory.containsKey(key)) return _memory[key] ?? fallback;
-    // Async gap so a resolve completing mid-build can't notify listeners
-    // during build.
-    _inFlight[key] ??= Future(() => _resolve(key, entry.name));
-    return fallback;
+    final parsed = parseMediaName(entry.name);
+    final key = parsed.lookupKey;
+    MediaMetadata meta;
+    if (_memory.containsKey(key)) {
+      meta = _memory[key] ?? fallback;
+    } else {
+      // Async gap so a resolve completing mid-build can't notify
+      // listeners during build.
+      _inFlight[key] ??= Future(() => _resolve(key, entry.name));
+      meta = fallback;
+    }
+    if (!parsed.isEpisode) return meta;
+    // Show/season pages and cards read metadataFor(first episode), so
+    // user-authored show/season details must reach them through every
+    // episode: overlay the show row (title/year/synopsis/show poster)
+    // and season row (season artwork/synopsis) when the user wrote one.
+    final show = _overlayFor(parsed.showLookupKey);
+    final season = _overlayFor(parsed.seasonLookupKey!);
+    if (show == null && season == null) return meta;
+    return MediaMetadata(
+      title: show?.title ?? meta.title,
+      year: show?.year ?? meta.year,
+      overview: meta.overview,
+      category: meta.category,
+      episodeLabel: meta.episodeLabel,
+      posterAsset: meta.posterAsset,
+      posterFilePath: season?.posterFilePath ?? meta.posterFilePath,
+      rating: meta.rating,
+      showOverview: show?.overview ?? meta.showOverview,
+      seasonOverview: season?.overview ?? meta.seasonOverview,
+      airDate: meta.airDate,
+      stillFilePath: meta.stillFilePath,
+      showPosterFilePath: show?.posterFilePath ?? meta.showPosterFilePath,
+      mediaType: meta.mediaType,
+    );
+  }
+
+  /// The user's show/season overlay under [key], if resolved; kicks off
+  /// a cache read (never a TMDB fetch — these keys are user-only) the
+  /// first time and returns null until it lands.
+  _UserOverlay? _overlayFor(String key) {
+    if (_overlays.containsKey(key)) return _overlays[key];
+    _inFlight['overlay:$key'] ??= Future(() => _resolveOverlay(key));
+    return null;
+  }
+
+  Future<void> _resolveOverlay(String key) async {
+    try {
+      final db = await LibraryStore.database();
+      final row = await (db.select(db.metadataCache)
+            ..where((t) => t.lookupKey.equals(key)))
+          .getSingleOrNull();
+      if (row == null || !row.found || !row.userEdited) {
+        _overlays[key] = null;
+        return;
+      }
+      final postersDir = (await _postersDirProvider()).path;
+      String? posterPath;
+      if (row.posterFile != null) {
+        final f = File('$postersDir/${row.posterFile}');
+        if (f.existsSync()) posterPath = f.path;
+      }
+      _overlays[key] = _UserOverlay(
+        title: row.title,
+        year: row.year,
+        overview: row.overview,
+        posterFilePath: posterPath,
+      );
+      notifyListeners();
+    } catch (e) {
+      debugPrint('metadata: overlay lookup failed for "$key": $e');
+      _overlays[key] = null;
+    } finally {
+      _inFlight.remove('overlay:$key');
+    }
   }
 
   /// Completes when no lookups are running — test synchronization only.
@@ -77,6 +151,7 @@ class MetadataService extends ChangeNotifier {
   /// matching — called when the API key changes.
   Future<void> reset() async {
     _memory.clear();
+    _overlays.clear();
     _inFlight.clear();
     final db = await LibraryStore.database();
     await (db.delete(db.metadataCache)
@@ -90,6 +165,7 @@ class MetadataService extends ChangeNotifier {
   /// this leaves the SQLite cache alone — the seeded rows are the point.
   void notifyExternalSeed() {
     _memory.clear();
+    _overlays.clear();
     notifyListeners();
   }
 
@@ -251,6 +327,19 @@ class MetadataService extends ChangeNotifier {
 /// the fallback without a network attempt.
 class _CachedMiss implements Exception {
   const _CachedMiss();
+}
+
+/// A user-authored show/season cache row, reduced to the fields that
+/// overlay episode metadata. Fields left null fall back to the TMDB
+/// match stored in the episode rows.
+class _UserOverlay {
+  const _UserOverlay(
+      {this.title, this.year, this.overview, this.posterFilePath});
+
+  final String? title;
+  final int? year;
+  final String? overview;
+  final String? posterFilePath;
 }
 
 /// Poster widget for [meta]: cached TMDB artwork beats the bundled asset;

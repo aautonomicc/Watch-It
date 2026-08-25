@@ -6,32 +6,56 @@ import 'package:drift/drift.dart' show Value;
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
+import '../db/app_database.dart' show MetadataCacheRow;
 import '../models/media_list.dart';
 import '../services/download_manager.dart';
 import '../services/embedded_client.dart';
 import '../services/ffmpeg.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
+import '../services/season_grouping.dart' show episodeNameFromLabel;
 import '../services/user_metadata.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 
-/// Edit details: user-authored title/year/description and artwork for
-/// one entry, written to the metadata cache under the entry's lookup
-/// key (services/user_metadata.dart). For files TMDB doesn't know —
-/// home videos, obscure uploads — this is the only way to get artwork
-/// and a description; on top of a TMDB match it's an override that a
-/// later re-match never undoes. Artwork comes from an image file, or
-/// (with ffmpeg available) a frame sampled out of the video itself.
+/// What one Edit details page edits — which cache key it writes and
+/// which fields it shows.
+enum EditDetailsScope {
+  /// The entry itself: a movie's title/year/description, or (when the
+  /// entry is an episode) the episode's name/synopsis/artwork.
+  entry,
+
+  /// The whole show, written under the episode-less show key: title,
+  /// year, show synopsis, show poster. Reached from the show page.
+  show,
+
+  /// One season, written under the season key: season artwork and
+  /// synopsis. Reached from the season page.
+  season,
+}
+
+/// Edit details: user-authored details and artwork written to the
+/// metadata cache (services/user_metadata.dart) under the key for
+/// [scope] — the entry's own lookup key, or the show/season key that
+/// MetadataService overlays onto every episode. For files TMDB doesn't
+/// know — home videos, obscure uploads — this is the only way to get
+/// artwork and a description; on top of a TMDB match it's an override
+/// that a later re-match never undoes. Artwork comes from an image
+/// file, or (with ffmpeg available) a frame sampled out of the video.
 class EditDetailsScreen extends StatefulWidget {
   const EditDetailsScreen({
     super.key,
     required this.entry,
+    this.scope = EditDetailsScope.entry,
     this.ffmpeg,
     this.postersDirProvider,
   });
 
+  /// The entry being edited; for [EditDetailsScope.show]/[EditDetailsScope.season]
+  /// any episode of the show/season (frames are sampled from its video).
   final MediaEntry entry;
+
+  final EditDetailsScope scope;
 
   /// Injectable for tests.
   final FfmpegService? ffmpeg;
@@ -50,7 +74,13 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
 
   /// The entry's current metadata at open time — prefills the fields.
   late final MediaMetadata _meta;
+  late final ParsedName _parsed;
   late final String _lookupKey;
+
+  /// The cache row under [_lookupKey] at open time, if any — the source
+  /// for fields the editor preserves rather than shows (an episode row's
+  /// stored title, a season row's year).
+  MetadataCacheRow? _row;
 
   /// Artwork change staged in the editor: new bytes, or removal. Nothing
   /// touches disk until Save.
@@ -61,14 +91,35 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
   bool _frameSourceAvailable = false;
   bool _saving = false;
 
+  EditDetailsScope get _scope => widget.scope;
+
+  /// The entry scope splits by entry kind: an episode entry edits
+  /// episode-level fields (name/synopsis), not the show's.
+  bool get _episodeScope =>
+      _scope == EditDetailsScope.entry && _parsed.isEpisode;
+
   @override
   void initState() {
     super.initState();
     _meta = MetadataService.instance.metadataFor(widget.entry);
-    _lookupKey = parseMediaName(widget.entry.name).lookupKey;
-    _title = TextEditingController(text: _meta.title);
+    _parsed = parseMediaName(widget.entry.name);
+    _lookupKey = switch (_scope) {
+      EditDetailsScope.entry => _parsed.lookupKey,
+      EditDetailsScope.show => _parsed.showLookupKey,
+      EditDetailsScope.season =>
+        _parsed.seasonLookupKey ?? _parsed.lookupKey,
+    };
+    _title = TextEditingController(
+        text: _episodeScope
+            ? episodeNameFromLabel(_meta.episodeLabel) ?? ''
+            : _meta.title);
     _year = TextEditingController(text: _meta.year?.toString() ?? '');
-    _overview = TextEditingController(text: _meta.overview ?? '');
+    _overview = TextEditingController(
+        text: switch (_scope) {
+      EditDetailsScope.show => _meta.showOverview ?? '',
+      EditDetailsScope.season => _meta.seasonOverview ?? '',
+      EditDetailsScope.entry => _meta.overview ?? '',
+    });
     unawaited(_load());
   }
 
@@ -77,6 +128,7 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     final ffmpegAvailable = await _ffmpeg.available;
     if (!mounted) return;
     setState(() {
+      _row = row;
       _userEdited = row?.userEdited ?? false;
       _frameSourceAvailable = ffmpegAvailable && _frameSource() != null;
     });
@@ -159,12 +211,27 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     });
   }
 
-  bool get _hasCurrentPoster =>
-      _meta.posterFilePath != null || _meta.posterAsset != null;
+  /// The image the poster preview shows before any staged change — the
+  /// artwork slot this scope's save would replace.
+  Widget? _currentPosterImage() => _scope == EditDetailsScope.show
+      ? showPosterImage(_meta, fit: BoxFit.cover)
+      : posterImage(_meta, fit: BoxFit.cover);
+
+  bool get _hasCurrentPoster => _currentPosterImage() != null;
+
+  /// A title is only typed (and required) for a movie or the show scope;
+  /// episode and season rows keep the show title already stored (or the
+  /// one currently displayed) so other readers of the row see it.
+  bool get _hasTitleField => !_episodeScope && _scope != EditDetailsScope.season;
+
+  /// `S01E02` marker for the episode being edited.
+  String get _episodeMarker =>
+      'S${_parsed.season.toString().padLeft(2, '0')}'
+      'E${_parsed.episode.toString().padLeft(2, '0')}';
 
   Future<void> _save() async {
-    final title = _title.text.trim();
-    if (title.isEmpty || _saving) return;
+    final text = _title.text.trim();
+    if (_saving || (_hasTitleField && text.isEmpty)) return;
     setState(() => _saving = true);
     Value<String?> posterFile = const Value.absent();
     if (_newPosterBytes != null) {
@@ -173,11 +240,18 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     } else if (_removePoster) {
       posterFile = const Value(null);
     }
+    // Episode/season rows never take the typed text as the row title —
+    // the row keeps its stored show title (falling back to the one on
+    // display) so the fields stay scoped to what the page claims to edit.
+    final keptTitle = _row?.title ?? _meta.title;
     await saveUserDetails(
       lookupKey: _lookupKey,
-      title: title,
-      year: int.tryParse(_year.text.trim()),
+      title: _hasTitleField ? text : keptTitle,
+      year: _hasTitleField ? int.tryParse(_year.text.trim()) : _row?.year,
       overview: _overview.text,
+      episodeLabel: _episodeScope
+          ? Value(text.isEmpty ? _episodeMarker : '$_episodeMarker · $text')
+          : const Value.absent(),
       posterFile: posterFile,
       postersDirProvider: widget.postersDirProvider,
     );
@@ -221,7 +295,7 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     if (_newPosterBytes != null) {
       image = Image.memory(_newPosterBytes!, fit: BoxFit.cover);
     } else if (!_removePoster) {
-      image = posterImage(_meta, fit: BoxFit.cover);
+      image = _currentPosterImage();
     }
     return Container(
       width: 120,
@@ -236,6 +310,27 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     );
   }
 
+  String get _pageTitle => switch (_scope) {
+        EditDetailsScope.show => 'Edit show details',
+        EditDetailsScope.season =>
+          'Edit season ${_parsed.season} details',
+        EditDetailsScope.entry =>
+          _episodeScope ? 'Edit episode details' : 'Edit details',
+      };
+
+  String get _explainer {
+    final target = switch (_scope) {
+      EditDetailsScope.show => 'the whole show, everywhere it appears',
+      EditDetailsScope.season => 'this season only',
+      EditDetailsScope.entry =>
+        _episodeScope ? 'this episode only' : 'this title',
+    };
+    return 'Details entered here are yours and apply to $target: they '
+        'replace what TMDB matched (or fill in files it doesn\'t know) '
+        'and are never overwritten by a later match. Exported lists '
+        'carry them, so people you share with see the same details.';
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
@@ -243,7 +338,7 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
-        title: Text('Edit details',
+        title: Text(_pageTitle,
             style: TextStyle(color: t.bone, fontSize: 16)),
         actions: [
           TextButton(
@@ -258,10 +353,7 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           Text(
-            'Details entered here are yours: they replace what TMDB '
-            'matched (or fill in files it doesn\'t know) and are never '
-            'overwritten by a later match. Exported lists carry them, so '
-            'people you share with see the same details.',
+            _explainer,
             style: TextStyle(fontSize: 12, color: t.ash, height: 1.4),
           ),
           const SizedBox(height: 16),
@@ -323,19 +415,31 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
             ],
           ),
           const SizedBox(height: 20),
-          TextField(
-            controller: _title,
-            style: TextStyle(color: t.bone, fontSize: 14),
-            decoration: _fieldDecoration(t, 'Title'),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _year,
-            keyboardType: TextInputType.number,
-            style: TextStyle(color: t.bone, fontSize: 14),
-            decoration: _fieldDecoration(t, 'Year (optional)'),
-          ),
-          const SizedBox(height: 12),
+          if (_episodeScope) ...[
+            // The show's title is edited from the show page; here the
+            // text is the episode's own name (the part after SxxEyy).
+            TextField(
+              controller: _title,
+              style: TextStyle(color: t.bone, fontSize: 14),
+              decoration: _fieldDecoration(
+                  t, 'Episode name (optional) — $_episodeMarker'),
+            ),
+            const SizedBox(height: 12),
+          ] else if (_hasTitleField) ...[
+            TextField(
+              controller: _title,
+              style: TextStyle(color: t.bone, fontSize: 14),
+              decoration: _fieldDecoration(t, 'Title'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _year,
+              keyboardType: TextInputType.number,
+              style: TextStyle(color: t.bone, fontSize: 14),
+              decoration: _fieldDecoration(t, 'Year (optional)'),
+            ),
+            const SizedBox(height: 12),
+          ],
           TextField(
             controller: _overview,
             minLines: 4,

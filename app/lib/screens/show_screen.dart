@@ -8,6 +8,7 @@ import '../services/season_grouping.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
 import '../widgets/download_badge.dart';
+import 'edit_details_screen.dart';
 import 'season_screen.dart';
 
 /// One show: big show artwork with description and rating, then the
@@ -75,6 +76,23 @@ class ShowScreen extends StatelessWidget {
         title: Text(meta.title,
             style: TextStyle(color: t.bone, fontSize: 16),
             overflow: TextOverflow.ellipsis),
+        actions: [
+          // Edit details for the whole show — title, year, synopsis, and
+          // show poster, written under the show's own key and overlaid
+          // on every episode by MetadataService.
+          IconButton(
+            tooltip: 'Edit details',
+            icon: Icon(Icons.edit_outlined, color: t.boneDim, size: 20),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => EditDetailsScreen(
+                  entry: seasons.first.episodes.first,
+                  scope: EditDetailsScope.show,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),

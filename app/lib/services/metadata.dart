@@ -165,12 +165,22 @@ class ParsedName {
 
   /// Cache key for this lookup: same key means the same TMDB query, so
   /// renamed copies and duplicates share one cached match.
-  String get lookupKey {
-    final ep = isEpisode ? ':s$season:e$episode' : '';
-    if (imdbId != null) return 'imdb:$imdbId$ep';
+  String get lookupKey =>
+      isEpisode ? '$showLookupKey:s$season:e$episode' : showLookupKey;
+
+  /// Episode-less key for the show an episode belongs to (equals
+  /// [lookupKey] for non-episodes). User-authored show-level details —
+  /// Edit details on a show page — live in the metadata cache under this
+  /// key; no TMDB match is ever stored there.
+  String get showLookupKey {
+    if (imdbId != null) return 'imdb:$imdbId';
     return '${isEpisode ? 'tv' : 'movie'}'
-        ':${title.toLowerCase()}:${year ?? ''}$ep';
+        ':${title.toLowerCase()}:${year ?? ''}';
   }
+
+  /// Season-level key (`<showLookupKey>:sN`), null for non-episodes.
+  /// User-authored season artwork/description lives under this key.
+  String? get seasonLookupKey => isEpisode ? '$showLookupKey:s$season' : null;
 }
 
 /// Parse a media file name into a display title, year, optional IMDb id,

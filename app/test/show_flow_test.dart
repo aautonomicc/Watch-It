@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/screens/detail_screen.dart';
+import 'package:watchit/screens/edit_details_screen.dart';
 import 'package:watchit/screens/season_screen.dart';
 import 'package:watchit/screens/show_screen.dart';
 import 'package:watchit/services/library_store.dart';
@@ -70,5 +71,41 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(DetailScreen), findsOneWidget);
     expect(find.text('Play'), findsOneWidget);
+  });
+
+  testWidgets('show and season pages carry an Edit details pencil',
+      (tester) async {
+    final entries = [_e('Show.S01E01.mkv'), _e('Show.S01E02.mkv')];
+    await tester
+        .pumpWidget(app(ShowScreen(seasons: showSeasons(entries, 'Show'))));
+    await tester.pumpAndSettle();
+
+    // Show page pencil opens the show-scoped editor.
+    final pencil = find.byTooltip('Edit details');
+    expect(pencil, findsOneWidget);
+    await tester.tap(pencil);
+    await tester.pumpAndSettle();
+    expect(find.text('Edit show details'), findsOneWidget);
+    expect(
+        tester
+            .widget<EditDetailsScreen>(find.byType(EditDetailsScreen))
+            .scope,
+        EditDetailsScope.show);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    // Season page pencil opens the season-scoped editor.
+    await tester.ensureVisible(find.text('Season 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Season 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Edit details'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit season 1 details'), findsOneWidget);
+    expect(
+        tester
+            .widget<EditDetailsScreen>(find.byType(EditDetailsScreen))
+            .scope,
+        EditDetailsScope.season);
   });
 }

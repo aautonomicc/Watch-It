@@ -203,6 +203,126 @@ void main() {
     expect(a, isNot(b));
   });
 
+  group('show/season scoping', () {
+    const ep1Name = 'My Show S01E01.mkv';
+    const ep2Name = 'My Show S01E02.mkv';
+    final ep1 = MediaEntry(
+        name: ep1Name,
+        address:
+            'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd');
+    final ep2 = MediaEntry(
+        name: ep2Name,
+        address:
+            'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee');
+    final parsed = parseMediaName(ep1Name);
+
+    Future<MediaMetadata> composed(MediaEntry e) async {
+      MetadataService.instance.metadataFor(e);
+      await MetadataService.instance.whenIdle();
+      return MetadataService.instance.metadataFor(e);
+    }
+
+    test('show and season keys derive from the episode key', () {
+      expect(parsed.lookupKey, 'tv:my show::s1:e1');
+      expect(parsed.showLookupKey, 'tv:my show:');
+      expect(parsed.seasonLookupKey, 'tv:my show::s1');
+      final movie = parseMediaName(name);
+      expect(movie.showLookupKey, movie.lookupKey);
+      expect(movie.seasonLookupKey, isNull);
+    });
+
+    test('a show-level user row overlays every episode', () async {
+      final poster = await saveUserPoster(
+          parsed.showLookupKey, Uint8List.fromList([7]),
+          postersDirProvider: () async => postersDir);
+      await saveUserDetails(
+        lookupKey: parsed.showLookupKey,
+        title: 'Renamed Show',
+        year: 1999,
+        overview: 'A show of ours.',
+        posterFile: Value(poster),
+        postersDirProvider: () async => postersDir,
+      );
+      for (final e in [ep1, ep2]) {
+        final meta = await composed(e);
+        expect(meta.title, 'Renamed Show');
+        expect(meta.year, 1999);
+        expect(meta.showOverview, 'A show of ours.');
+        expect(meta.showPosterFilePath, '${postersDir.path}/$poster');
+        // Episode-level fields stay the episode's own.
+        expect(meta.episodeLabel, startsWith('S01E'));
+      }
+    });
+
+    test('a season-level user row overlays artwork and synopsis',
+        () async {
+      final poster = await saveUserPoster(
+          parsed.seasonLookupKey!, Uint8List.fromList([8]),
+          postersDirProvider: () async => postersDir);
+      await saveUserDetails(
+        lookupKey: parsed.seasonLookupKey!,
+        title: 'My Show',
+        overview: 'The first season.',
+        posterFile: Value(poster),
+        postersDirProvider: () async => postersDir,
+      );
+      final meta = await composed(ep1);
+      expect(meta.posterFilePath, '${postersDir.path}/$poster');
+      expect(meta.seasonOverview, 'The first season.');
+      expect(meta.title, 'My Show'); // no show overlay — base title
+    });
+
+    test('an episode-scoped label save touches nothing show-level',
+        () async {
+      await saveUserDetails(
+        lookupKey: parsed.lookupKey,
+        title: 'My Show',
+        episodeLabel: const Value('S01E01 · The One With The Beach'),
+        overview: 'They go to the beach.',
+        postersDirProvider: () async => postersDir,
+      );
+      final m1 = await composed(ep1);
+      expect(m1.episodeLabel, 'S01E01 · The One With The Beach');
+      expect(m1.overview, 'They go to the beach.');
+      final m2 = await composed(ep2);
+      expect(m2.episodeLabel, 'S01E02'); // sibling untouched
+      expect(m2.overview, isNull);
+      expect(await metadataRowFor(parsed.showLookupKey), isNull);
+    });
+
+    test('exported bundles carry show and season rows', () async {
+      await saveUserDetails(
+        lookupKey: parsed.showLookupKey,
+        title: 'Renamed Show',
+        postersDirProvider: () async => postersDir,
+      );
+      await saveUserDetails(
+        lookupKey: parsed.seasonLookupKey!,
+        title: 'Renamed Show',
+        overview: 'The first season.',
+        postersDirProvider: () async => postersDir,
+      );
+      final built = await buildBundle(
+        [
+          MediaList(id: 'l1', title: 'Shows', entries: [ep1, ep2])
+        ],
+        const BundleExportOptions(includeHistory: false),
+        base: null,
+        postersDirProvider: () async => postersDir,
+      );
+      final archive = ZipDecoder().decodeBytes(built.bytes);
+      final metadataFile =
+          archive.files.firstWhere((f) => f.name == 'metadata.json');
+      final keys = ((jsonDecode(utf8.decode(metadataFile.readBytes()!))
+              as Map<String, dynamic>)['entries'] as List)
+          .cast<Map<String, dynamic>>()
+          .map((r) => r['lookupKey'])
+          .toSet();
+      expect(keys, contains(parsed.showLookupKey));
+      expect(keys, contains(parsed.seasonLookupKey));
+    });
+  });
+
   test('exported bundles carry userEdited and imports seed it', () async {
     await saveUserDetails(
       lookupKey: key,
