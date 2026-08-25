@@ -1,6 +1,20 @@
 # Plan — next edition (v0.1.0-alpha.55) — "Publish edition"
 
-Status: rev 5 2026-08-25 — ALL OPEN QUESTIONS RESOLVED, BUILD STARTED.
+Status: rev 6 2026-08-25 — alpha.55 RELEASED and fully verified (user
+confirmed a paid upload on mainnet). The alpha.56 scope (section 4
+tiers/ffmpeg + section 6 update check) is BUILT, plus one user addition
+from 2026-08-25: **multi-file selection in Publish** ("when uploading
+let's have the ability to select multiple files so we can accommodate
+full series") — the Publish screen now takes a batch of files, probes
+each, applies the tier checkboxes across the batch (per-file
+applicability), and runs a sequential encode→upload queue with
+retry/skip/stop on errors; results land in the library together.
+ffmpeg sourcing pins: Linux johnvansickle 7.0.2 static (fully static, no
+soname interplay with bundled libmpv deps; cached ~/tools, sha256 in
+build_appimage.sh), Windows BtbN win64-gpl-shared autobuild-2026-08-25
+(small exes + shared DLLs ≈ half the size of two static exes; sha256 in
+windows.yml).
+Earlier (rev 5): ALL OPEN QUESTIONS RESOLVED, BUILD STARTED.
 User: "Go with your recommendations for all the points and use Publish
 as the name and let's go with a wallet and plain upload release to
 start with." So: alpha.55 = **wallet + plain upload** ("Publish", no

@@ -33,6 +33,26 @@ jobs:
         run: |
           flutter pub get
           flutter build windows --release
+      # Publish quality tiers need ffmpeg/ffprobe beside watchit.exe.
+      # BtbN shared build (small exes + DLLs shared between them) is
+      # ~half the size of two static exes; pinned tag + sha256 keeps the
+      # build reproducible. ffplay is dropped.
+      - name: Bundle ffmpeg (BtbN win64-gpl-shared, pinned)
+        shell: pwsh
+        run: |
+          $tag = "autobuild-2026-08-25-13-06"
+          $name = "ffmpeg-n8.1.2-44-g7c533d0f86-win64-gpl-shared-8.1"
+          $sha256 = "53c28beda739244ac70784e09edff8fe915acca68e7eb8952d97cd5a015ea146"
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/$tag/$name.zip"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
+          $actual = (Get-FileHash ffmpeg.zip -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $sha256) { throw "ffmpeg.zip sha256 mismatch: $actual" }
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-dist
+          $out = "app/build/windows/x64/runner/Release"
+          Copy-Item "ffmpeg-dist/$name/bin/ffmpeg.exe" $out/
+          Copy-Item "ffmpeg-dist/$name/bin/ffprobe.exe" $out/
+          Copy-Item "ffmpeg-dist/$name/bin/*.dll" $out/
+          & "$out/ffprobe.exe" -version
       - name: Assemble bundle
         shell: pwsh
         run: |

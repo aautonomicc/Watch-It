@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'models/media_list.dart';
 import 'screens/detail_screen.dart';
@@ -26,6 +27,7 @@ import 'services/network_events.dart';
 import 'services/metadata_seeder.dart';
 import 'services/rootmap_seeder.dart';
 import 'services/season_grouping.dart';
+import 'services/update_check.dart';
 import 'services/watch_state.dart';
 import 'theme/tokens.dart';
 import 'widgets/brand_mark.dart';
@@ -83,6 +85,25 @@ Future<void> main() async {
   // keyless install shows posters/descriptions without a TMDB key.
   // Gap-fill (existing rows/files win) behind a one-time flag.
   unawaited(seedBundledMetadata());
+  // Desktop update check-and-notify: ≤once/24h against GitHub releases,
+  // behind the Settings → About toggle; a newer tag shows a quiet
+  // snackbar and a Settings row. Silent on failure/offline.
+  UpdateCheck.instance.addListener(() {
+    final tag = UpdateCheck.instance.availableTag;
+    if (tag == null) return;
+    final url = UpdateCheck.instance.releaseUrl;
+    wiMessengerKey.currentState?.showSnackBar(SnackBar(
+      content: Text('Update available: $tag'),
+      duration: const Duration(seconds: 8),
+      action: url == null
+          ? null
+          : SnackBarAction(
+              label: 'View',
+              onPressed: () => launchUrl(Uri.parse(url)),
+            ),
+    ));
+  });
+  unawaited(UpdateCheck.instance.maybeCheck());
   runApp(const WatchItApp());
 }
 

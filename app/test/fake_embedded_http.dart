@@ -42,9 +42,11 @@ class FakeEmbeddedHttp extends HttpOverrides {
   String ethWei = '20000000000000000';
 
   /// Responses `GET /upload/<id>` plays back, in order (the last one
-  /// repeats). Empty → job 1 reports done immediately with [uploadResult].
+  /// repeats). Empty → the job reports done immediately with its result.
+  /// Replayed from the start for every new `POST /upload`.
   final List<Map<String, dynamic>> uploadStates = [];
   int _uploadPolls = 0;
+  int _uploadsStarted = 0;
   Map<String, dynamic> uploadResult = {
     'address': 'ab' * 32,
     'size': 5,
@@ -52,6 +54,10 @@ class FakeEmbeddedHttp extends HttpOverrides {
     'cost_atto': '250000000000000000',
     'gas_wei': '1000000000000',
   };
+
+  /// Per-upload results by start order (batch tests); falls back to
+  /// [uploadResult] when the list is shorter than the job id.
+  List<Map<String, dynamic>> uploadResults = [];
 
   /// Non-null → `POST /upload/estimate` fails with (status, message).
   (int, String)? estimateFailure;
@@ -119,16 +125,20 @@ class FakeEmbeddedHttp extends HttpOverrides {
         );
       }
       _uploadPolls = 0;
-      return (200, utf8.encode(jsonEncode({'id': 1})));
+      _uploadsStarted++;
+      return (200, utf8.encode(jsonEncode({'id': _uploadsStarted})));
     }
     if (method == 'GET' && path.startsWith('/upload/')) {
+      final id = int.parse(path.substring('/upload/'.length));
+      final result =
+          id <= uploadResults.length ? uploadResults[id - 1] : uploadResult;
       final state = uploadStates.isEmpty
           ? {
               'phase': 'done',
               'done': 1,
               'total': 1,
               'error': null,
-              'result': uploadResult,
+              'result': result,
             }
           : uploadStates[
               _uploadPolls.clamp(0, uploadStates.length - 1)];
@@ -136,7 +146,7 @@ class FakeEmbeddedHttp extends HttpOverrides {
       return (
         200,
         utf8.encode(jsonEncode({
-          'id': 1,
+          'id': id,
           'name': 'upload',
           'done': 0,
           'total': 0,
