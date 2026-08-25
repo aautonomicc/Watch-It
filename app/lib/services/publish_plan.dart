@@ -133,17 +133,38 @@ String probeVerdict(MediaProbe? probe) {
       'the encoded qualities are recommended.';
 }
 
-/// Output file name for a tier, per docs/NAMING.md: any existing
-/// resolution tag is replaced with the tier's, extension becomes .mp4.
-/// `Show S01E02.mkv` → `Show S01E02 [720p].mp4`. Original keeps the
-/// source name untouched.
-String tierOutputName(String sourceName, PublishTier tier) {
-  if (tier == PublishTier.original) return sourceName;
+/// Real encoded height for an encode tier of a given source: the tier
+/// height, or the source height when that is smaller (encoding never
+/// upscales), snapped down to even exactly like [encodeArgs] does. Null
+/// for Original and when the source height is unknown.
+int? tierOutputHeight(MediaProbe? probe, PublishTier tier) {
+  if (tier == PublishTier.original) return null;
+  final height = probe?.height;
+  if (height == null || height <= 0) return null;
   final spec = kTierSpecs[tier]!;
+  return height >= spec.height ? spec.height : height - (height % 2);
+}
+
+/// Quality tag for a tier's output of a given source, e.g. `480p` — or the
+/// real lower resolution (`360p`) when the source is below the tier height.
+/// Falls back to the tier's nominal label when the source is unprobed.
+String tierLabel(MediaProbe? probe, PublishTier tier) {
+  final height = tierOutputHeight(probe, tier);
+  return height == null ? kTierSpecs[tier]!.label : '${height}p';
+}
+
+/// Output file name for a tier, per docs/NAMING.md: any existing
+/// resolution tag is replaced with the real output resolution
+/// ([tierLabel]), extension becomes .mp4. `Show S01E02.mkv` →
+/// `Show S01E02 [720p].mp4`; a 360p source at Low → `… [360p].mp4`.
+/// Original keeps the source name untouched.
+String tierOutputName(String sourceName, PublishTier tier,
+    [MediaProbe? probe]) {
+  if (tier == PublishTier.original) return sourceName;
   final dot = sourceName.lastIndexOf('.');
   var base = dot > 0 ? sourceName.substring(0, dot) : sourceName;
   base = base.replaceAll(RegExp(r'\s*-?\s*\[\d{3,4}p\]'), '').trim();
-  return '$base [${spec.label}].mp4';
+  return '$base [${tierLabel(probe, tier)}].mp4';
 }
 
 /// Predicted encoded size from tier bitrates × duration (+2% container
@@ -215,7 +236,7 @@ List<PublishItem> buildQueue(
       items.add(PublishItem(
         source: source,
         tier: tier,
-        outputName: tierOutputName(source.name, tier),
+        outputName: tierOutputName(source.name, tier, source.probe),
         needsEncode: tier != PublishTier.original,
         predictedBytes: predictedSizeBytes(source.probe, tier, source.size),
       ));

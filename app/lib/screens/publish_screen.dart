@@ -923,9 +923,8 @@ class _PublishScreenState extends State<PublishScreen> {
     final String label;
     double? fraction;
     if (entry.status == _EntryStatus.encoding) {
-      final spec = kTierSpecs[entry.item.tier];
       fraction = entry.encodeFraction;
-      label = 'Encoding ${spec?.label ?? ''}'
+      label = 'Encoding ${tierLabel(entry.item.source.probe, entry.item.tier)}'
           '${fraction == null ? '…' : ' · ${(fraction * 100).round()}%'}';
     } else {
       final job = entry.job;
