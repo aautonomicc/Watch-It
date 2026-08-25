@@ -1,15 +1,27 @@
 # Roadmap
 
-**Status (2026-08-09):** latest release is **v0.1.0-alpha.50**
-([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)).
-Unreleased on main, ready for alpha.51: the seed catalog is trimmed to
-the two Night of the Living Dead versions (the other 47 alpha.48
-titles leave the bundle — fresh installs and factory resets only;
-existing installs keep everything they seeded, and the dropped uploads
-stay playable on the network — see
-[SEED-CATALOG.md](SEED-CATALOG.md)), plus the loose-name version-fold
-fix (untagged copies of an imdb-tagged title now fold into the same
-card/picker).
+**Status (2026-08-25):** latest release is **v0.1.0-alpha.57**
+([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
+and every release since alpha.55 ships a signed APK, a Linux AppImage,
+**and a Windows portable zip**. The headline of the recent releases is
+**Publish**: W@tch now uploads files to Autonomi itself (see the
+Publish section below). Alpha.55 shipped the built-in ANT wallet and
+single-file private uploads with live cost estimates (paid upload
+verified end-to-end on mainnet); alpha.56 grew Publish to multi-file
+batches with quality tiers via bundled ffmpeg and added the desktop
+update check; alpha.57 added **Edit details** — user-entered
+title/year/description and artwork from an image file or a video frame
+for content TMDB doesn't know, carried along in `.watch-list` bundles.
+Before that: alpha.51 trimmed the built-in seed catalog to the two
+Night of the Living Dead versions (fresh installs and factory resets
+only; existing installs keep what they seeded, and the dropped uploads
+stay playable on the network — see [SEED-CATALOG.md](SEED-CATALOG.md))
+and added the Favourites home row; alpha.52 bumped ant-core to 0.5.1
+and moved the favourite heart beside Download; alpha.53 made the
+AppImage's audio libraries system-first with a bundled fallback
+(fixing no-start and silent-audio reports on several distros);
+alpha.54 hides the mouse cursor with the player controls and holds a
+Linux screen-lock inhibit while playing.
 Alpha.50 relays out the home app bar: the search icon moves to the far
 left, the library-drawer hamburger to the far right, and the top-right
 settings icon is gone (the drawer's Settings tile covers it); the home
@@ -370,8 +382,54 @@ upgrade-flag rules, and the regeneration procedure live in
       hamburger far right, top-right settings icon removed; home
       reloads after any pushed page pops (route-observer fix)
 
+## Publish — in-app uploads (shipped 2026-08-25, v0.1.0-alpha.55/.56/.57)
+
+W@tch now uploads to Autonomi itself — no CLI needed. Desktop-only for
+now (the pipeline needs bundled ffmpeg and a windowed flow); plan and
+decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
+[ARCHITECTURE.md](ARCHITECTURE.md) → Publishing.
+
+- [x] Internal ANT wallet (alpha.55): private key in the OS keychain
+      (mode-0600 file fallback when none), BIP-39 12-word create
+      ceremony with retype-confirm / import key-or-phrase
+      (MetaMask-compatible derivation), live ANT/ETH balances on
+      Arbitrum One; deliberately a hot wallet — fund it small
+- [x] Private upload (alpha.55): pick file → live cost estimate →
+      rights/permanence confirm gate → pay + progress; the root map is
+      stored locally under its derived address, so the upload is
+      instantly playable, addable to the library, and exportable as a
+      `.datamap`; money-spending routes gated behind a per-start
+      shared-secret header
+- [x] Multi-file batches + quality tiers (alpha.56): full-series
+      multi-pick with per-file probe verdicts; High 1080p / Medium
+      720p / Low 480p tiers (H.264 High 8-bit + AAC faststart MP4 via
+      bundled ffmpeg — static in the AppImage, shared in the Windows
+      zip; never upscales; graceful as-is-only degrade when ffmpeg is
+      missing) or Original as-is; summed live cost estimate; sequential
+      encode→upload queue with per-item retry/skip and a batch done
+      page (add-all-to-library, save-all `.datamap` files); outputs
+      named per [NAMING.md](NAMING.md) with the real output height so
+      tiers fold into the alpha.49 version picker
+- [x] Update check (alpha.56): desktop-only, at most once per 24h
+      against GitHub releases, snackbar + Settings → About badge;
+      toggle in About (the app's only phone-home), default on
+- [x] Edit details (alpha.57): user metadata (title/year/description)
+      plus artwork from an image file, a picked video frame (bundled
+      ffmpeg, desktop), or the player's "use this frame" button (all
+      platforms); user rows are never overwritten by TMDB and travel
+      in bundles
+- [ ] Publish on Android/iOS (desktop-only today)
+- [ ] External signer / WalletConnect (the internal hot wallet is the
+      only signing path today)
+- [ ] True self-update (the check only notifies; AppImageUpdate/zsync
+      and a Windows helper are deferred — see PLAN-alpha55.md §6)
+
 ## Phase 3 — All desktop platforms
-- [ ] Windows + macOS builds and packaging (MSIX, .dmg)
+- [x] Windows build + packaging → CI-built portable zip, shipped with
+      every release since alpha.55 (unsigned: SmartScreen "More info →
+      Run anyway"; installer + code signing deferred to beta —
+      decision in [PLAN-alpha55.md](PLAN-alpha55.md) §6)
+- [ ] macOS build and packaging (.dmg)
 - [ ] Keyboard map, window polish, hover thumbnails on seek bar
 - [ ] Shared-list format v1 documented → plain text shipped (alpha.25/.31),
       bundle spec locked ([BUNDLE-FORMAT.md](BUNDLE-FORMAT.md)); import from an

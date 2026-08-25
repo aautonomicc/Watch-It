@@ -50,6 +50,18 @@ Rules of thumb:
   finds the show on TMDB and pulls the episode name and synopsis, the show
   poster, and genres.
 
+## Publishing from the app
+
+The desktop **Publish** flow (alpha.55+) applies this convention
+automatically. When a quality tier re-encodes a file, the output keeps the
+source name with the resolution tag replaced by the *real* output height —
+`Title (Year) [720p].mp4` for the Medium tier, or `[360p]` for a 360p
+source on the Low tier (the encoder never upscales) — and the extension
+switched to `.mp4`. Episode markers (`SxxEyy`) are preserved, so multiple
+tiers of one title fold into the same card's version picker. Name your
+source files per this convention before publishing and the tags take care
+of themselves.
+
 ## Encoding note
 
 Prefer widely hardware-decodable codecs — **H.264 8-bit** plays everywhere,

@@ -44,7 +44,7 @@ is the only remote source, accessed via the
 ├──────────────────────────────────────────────┤
 │               App core (Dart)                 │
 │  lists · metadata matcher · watch state       │
-│  download manager · playback controller       │
+│  downloads · publish · playback controller    │
 ├──────────────────────┬───────────────────────┤
 │   Autonomi access    │   Metadata fetcher     │
 │  (ant-client: fetch  │  (filename → TMDB →    │
@@ -77,12 +77,15 @@ noise. For a file that *was* uploaded publicly the derived address equals
 its XOR address, so entries created by older versions kept their identity
 unchanged.
 
-- Content enters the library exactly two ways: importing `.datamap` files
+- Content enters the library exactly three ways: importing `.datamap` files
   (multi-select picker; the file name minus `.datamap` is the media name,
-  feeding the metadata matcher) or importing a `.watch-list` **bundle** (a
+  feeding the metadata matcher), importing a `.watch-list` **bundle** (a
   zip of datamap members plus TMDB metadata, posters, optional watch
-  history) — spec v2 in [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md). Export is the
-  bundle, full stop (a name list without maps is unplayable).
+  history) — spec v2 in [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md) — or
+  **publishing your own file from the app** (desktop, alpha.55+): the
+  upload's root map is stored locally under its derived address, so the
+  new entry behaves exactly like an import. Export is the bundle, full
+  stop (a name list without maps is unplayable).
 - A datamap is full access to its content: sharing a bundle shares the
   ability to watch, and publishing one at a public address re-leaks every
   title (privacy is transitive). Future publish/subscribe features must
@@ -148,7 +151,44 @@ serves deterministic decrypted bytes) to disk:
 - A downloaded item is the same library entry with a local path — stream vs
   downloaded is a playback-source detail, not a different library.
 
-Known upstream limitation: when the OS network vanishes entirely, ant-core's
+### Publishing — in-app uploads (shipped alpha.55/.56, desktop)
+
+W@tch uploads to Autonomi itself; the `ant` CLI is no longer required for
+the write path. Desktop-only for now (needs the bundled ffmpeg and a
+windowed flow). Two new Rust modules in `watchit_core`:
+
+- **Wallet** (`wallet.rs`): the payment key lives in the **OS keychain**
+  (Windows Credential Manager / macOS Keychain / Secret Service on Linux,
+  with a mode-0600 `wallet.key` file fallback when no keychain is
+  available — surfaced in the UI). Create is a BIP-39 12-word ceremony
+  (retype-confirm before anything persists); import accepts a raw key or a
+  phrase (MetaMask-compatible `m/44'/60'/0'/0/0`); the mnemonic itself is
+  never stored. Settings → Publishing shows the address and live ANT/ETH
+  balances (Arbitrum One). It is deliberately a **hot wallet** — the docs
+  and UI say to fund it small.
+- **Upload** (`upload.rs`): a single-slot job around ant-core's
+  `file_upload_with_progress` (automatic payment) that the UI polls for
+  phase/progress. The finished upload's root map goes straight into the
+  local map store under its derived address, so the result is immediately
+  playable, addable to the library, and exportable as a `.datamap` file.
+- **Routes**: `GET/POST/DELETE /wallet`, `POST /wallet/generate`,
+  `GET /wallet/balances`, `POST /upload/estimate`, `POST /upload`,
+  `GET /upload/{id}` — all behind an `x-watchit-auth` shared secret
+  (random per app start, passed to Dart over FFI): the localhost port is
+  visible to every local process and these routes spend money.
+
+On the Dart side (`publish_screen.dart`, `publish_plan.dart`,
+`ffmpeg.dart`): multi-file batches (full series in one go), per-file
+ffprobe verdicts, **quality tiers** — High 1080p/5Mbps, Medium
+720p/2.5Mbps, Low 480p/1Mbps, encoded to H.264 High 8-bit + AAC stereo
+faststart MP4, plus "Original (as-is)" — with per-tier applicability (no
+upscaling) and a summed live cost estimate scaled per-chunk from one
+`/upload/estimate` call; then a sequential encode→upload queue with
+per-item retry/skip. Encoded outputs are named per
+[NAMING.md](NAMING.md) with the *real* output height tag, so tiers fold
+into the alpha.49 same-title version picker. ffmpeg/ffprobe are bundled
+(static builds in the AppImage, shared build in the Windows zip); when
+missing, Publish degrades gracefully to as-is-only uploads with a banner. when the OS network vanishes entirely, ant-core's
 `/health` can keep reporting ready with stale peers, so airplane-mode-style
 loss may go undetected (VPN-cut / handshake-timeout loss is detected fine).
 
@@ -177,7 +217,7 @@ loss may go undetected (VPN-cut / handshake-timeout loss is detected fine).
 | Android TV | same APK / AAB | leanback launcher entry + TV banner asset; sideloads onto any TV box; Play Store TV listing optional |
 | iOS | IPA | needs Apple dev account; TestFlight first |
 | Linux | AppImage + Flatpak | AppImage matches existing workflow |
-| Windows | MSIX / portable zip | |
+| Windows | portable zip | CI-built, ships with every release since alpha.55; unsigned (SmartScreen "More info → Run anyway"), installer/signing deferred to beta |
 | macOS | .dmg | notarization needed for distribution |
 
 ## Repo layout
@@ -189,7 +229,8 @@ Watch-It/
 │   │   ├── db/                # drift database (lists, metadata cache)
 │   │   ├── services/          # embedded client FFI, library store, metadata
 │   │   │                      #   matcher, TMDB client, datamap/bundle
-│   │   │                      #   import/export, downloads, connectivity
+│   │   │                      #   import/export, downloads, connectivity,
+│   │   │                      #   publish plan/API, ffmpeg, update check
 │   │   ├── screens/           # home wall, show/season/detail, player,
 │   │   │                      #   media lists, settings
 │   │   ├── widgets/           # shared UI (detail header, …)
