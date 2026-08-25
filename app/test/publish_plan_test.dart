@@ -128,6 +128,55 @@ void main() {
       expect(tierOutputName('Show S01E02.mkv', PublishTier.original),
           'Show S01E02.mkv');
     });
+
+    test('sub-480p source: tag is the real output resolution', () {
+      expect(
+          tierOutputName('Old Short.avi', PublishTier.low,
+              video(width: 480, height: 360)),
+          'Old Short [360p].mp4');
+    });
+
+    test('odd source height snaps down to even like the encoder', () {
+      expect(
+          tierOutputName('Old Short.avi', PublishTier.low,
+              video(width: 512, height: 361)),
+          'Old Short [360p].mp4');
+    });
+
+    test('source at or above the tier height keeps the tier tag', () {
+      expect(
+          tierOutputName('Show.mkv', PublishTier.medium,
+              video(width: 1920, height: 1080)),
+          'Show [720p].mp4');
+      expect(
+          tierOutputName('Show.mkv', PublishTier.low,
+              video(width: 854, height: 480)),
+          'Show [480p].mp4');
+    });
+
+    test('unprobed source falls back to the nominal tier tag', () {
+      expect(tierOutputName('Show.mkv', PublishTier.low, null),
+          'Show [480p].mp4');
+    });
+  });
+
+  group('tierOutputHeight + tierLabel', () {
+    test('caps at the tier height', () {
+      expect(tierOutputHeight(video(height: 2160), PublishTier.high), 1080);
+      expect(tierLabel(video(height: 2160), PublishTier.high), '1080p');
+    });
+
+    test('smaller source keeps its (even-snapped) height', () {
+      expect(tierOutputHeight(video(height: 360), PublishTier.low), 360);
+      expect(tierOutputHeight(video(height: 361), PublishTier.low), 360);
+      expect(tierLabel(video(height: 240), PublishTier.low), '240p');
+    });
+
+    test('original and unknown heights', () {
+      expect(tierOutputHeight(video(height: 360), PublishTier.original), null);
+      expect(tierOutputHeight(null, PublishTier.low), null);
+      expect(tierLabel(null, PublishTier.low), '480p');
+    });
   });
 
   group('size + cost prediction', () {
