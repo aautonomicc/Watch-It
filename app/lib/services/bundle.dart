@@ -316,6 +316,7 @@ Future<BundleBuildResult> buildBundle(
       'airDate': row.airDate,
       'stillFile': row.stillFile,
       'showPosterFile': row.showPosterFile,
+      'userEdited': row.userEdited,
     });
     posterFiles.addAll([
       if (row.posterFile != null) row.posterFile!,
@@ -830,6 +831,7 @@ Future<(int, int)> seedMetadataGapFill(
                 airDate: Value(row['airDate'] as String?),
                 stillFile: Value(row['stillFile'] as String?),
                 showPosterFile: Value(row['showPosterFile'] as String?),
+                userEdited: Value(row['userEdited'] as bool? ?? false),
               ),
               mode: InsertMode.insertOrIgnore,
             );

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -12,6 +13,7 @@ import '../services/library_store.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/screen_wake.dart';
+import '../services/user_metadata.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 
@@ -261,6 +263,34 @@ class _PlayerScreenState extends State<PlayerScreen> {
     setState(() => _upNext = null);
   }
 
+  /// "Use this frame as artwork": grab the current video frame off mpv
+  /// and save it as the playing entry's user poster (pause at the
+  /// perfect moment, tap the camera). The companion to Edit details'
+  /// sampled-frame picker; the row keeps its displayed title/details.
+  Future<void> _useFrameAsPoster() async {
+    final bytes = await _player.screenshot();
+    if (!mounted) return;
+    if (bytes == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No frame to capture yet — wait for the video '
+              'to start.')));
+      return;
+    }
+    final key = parseMediaName(_entry.name).lookupKey;
+    final meta = MetadataService.instance.metadataFor(_entry);
+    final name = await saveUserPoster(key, bytes);
+    await saveUserDetails(
+      lookupKey: key,
+      title: meta.title,
+      year: meta.year,
+      overview: meta.overview,
+      posterFile: Value(name),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Frame saved as this title\'s artwork')));
+  }
+
   @override
   void dispose() {
     _saveProgress();
@@ -441,6 +471,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 seekBarMargin:
                     const EdgeInsets.only(left: 16, right: 16, bottom: 48),
                 seekBarHeight: 4.8,
+                topButtonBar: [
+                  const Spacer(),
+                  MaterialCustomButton(
+                    onPressed: () => unawaited(_useFrameAsPoster()),
+                    icon: const Icon(Icons.photo_camera_outlined),
+                  ),
+                ],
               ),
               fullscreen:
                   kDefaultMaterialVideoControlsThemeDataFullscreen.copyWith(
@@ -450,12 +487,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 seekBarMargin:
                     const EdgeInsets.only(left: 16, right: 16, bottom: 64),
                 seekBarHeight: 4.8,
+                topButtonBar: [
+                  const Spacer(),
+                  MaterialCustomButton(
+                    onPressed: () => unawaited(_useFrameAsPoster()),
+                    icon: const Icon(Icons.photo_camera_outlined),
+                  ),
+                ],
               ),
               child: MaterialDesktopVideoControlsTheme(
                 normal: desktopControlsTheme(
-                    kDefaultMaterialDesktopVideoControlsThemeData),
+                    kDefaultMaterialDesktopVideoControlsThemeData,
+                    topButtonBar: [
+                      const Spacer(),
+                      MaterialDesktopCustomButton(
+                        onPressed: () => unawaited(_useFrameAsPoster()),
+                        icon: const Icon(Icons.photo_camera_outlined),
+                      ),
+                    ]),
                 fullscreen: desktopControlsTheme(
-                    kDefaultMaterialDesktopVideoControlsThemeDataFullscreen),
+                    kDefaultMaterialDesktopVideoControlsThemeDataFullscreen,
+                    topButtonBar: [
+                      const Spacer(),
+                      MaterialDesktopCustomButton(
+                        onPressed: () => unawaited(_useFrameAsPoster()),
+                        icon: const Icon(Icons.photo_camera_outlined),
+                      ),
+                    ]),
                 child: Video(controller: _controller),
               ),
             ),
@@ -479,10 +537,13 @@ String playerTitle(MediaMetadata meta) => meta.episodeLabel == null
 
 /// Desktop controls theme tweaks: the branded overlay replaces the stock
 /// buffering spinner, and the mouse cursor fades out with the controls
-/// instead of sitting on the film forever.
+/// instead of sitting on the film forever. [topButtonBar] carries the
+/// screen's own buttons (frame-as-artwork capture).
 MaterialDesktopVideoControlsThemeData desktopControlsTheme(
-        MaterialDesktopVideoControlsThemeData base) =>
+        MaterialDesktopVideoControlsThemeData base,
+        {List<Widget> topButtonBar = const []}) =>
     base.copyWith(
       bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
       hideMouseOnControlsRemoval: true,
+      topButtonBar: topButtonBar,
     );

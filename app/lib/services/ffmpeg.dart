@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'publish_plan.dart';
 
@@ -115,6 +116,56 @@ class FfmpegService {
   void cancel() {
     _current?.kill();
     _current = null;
+  }
+
+  Process? _frameProcess;
+
+  /// Grab one frame of [source] at [atSeconds] as JPEG bytes; null when
+  /// ffmpeg is missing or the grab fails (bad timestamp, unreadable
+  /// source). [source] may be a local file or an HTTP URL — the embedded
+  /// client's stream URL works, each seek costing range requests. Height
+  /// is capped at [maxHeight] (never upscaled, even-snapped for the JPEG
+  /// encoder's chroma subsampling).
+  Future<Uint8List?> extractFrame({
+    required String source,
+    required double atSeconds,
+    int maxHeight = 720,
+  }) async {
+    await _locate();
+    final ffmpeg = _ffmpeg;
+    if (ffmpeg == null) return null;
+    try {
+      // -ss before -i: keyframe-accurate fast seek — right for sampling
+      // representative frames, and the only affordable mode over HTTP.
+      final process = await Process.start(ffmpeg, [
+        '-v', 'error',
+        '-ss', atSeconds.toStringAsFixed(3),
+        '-i', source,
+        '-frames:v', '1',
+        '-vf', 'scale=-2:2*trunc(min($maxHeight\\,ih)/2)',
+        '-f', 'image2pipe',
+        '-vcodec', 'mjpeg',
+        'pipe:1',
+      ]);
+      _frameProcess = process;
+      final out = BytesBuilder(copy: false);
+      final stdoutDone = process.stdout.forEach(out.add);
+      final stderrDone = process.stderr.drain<void>();
+      final exitCode = await process.exitCode;
+      await Future.wait([stdoutDone, stderrDone]);
+      _frameProcess = null;
+      if (exitCode != 0 || out.isEmpty) return null;
+      return out.takeBytes();
+    } catch (_) {
+      _frameProcess = null;
+      return null;
+    }
+  }
+
+  /// Kill an in-flight frame grab (closing the frame picker mid-sample).
+  void cancelFrameExtraction() {
+    _frameProcess?.kill();
+    _frameProcess = null;
   }
 
   /// `-progress pipe:1` key=value line → completed fraction, using the

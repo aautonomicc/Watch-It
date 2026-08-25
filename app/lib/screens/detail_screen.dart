@@ -21,6 +21,7 @@ import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
 import '../widgets/messenger.dart' show wiMessengerKey;
 import '../widgets/watch_progress.dart';
+import 'edit_details_screen.dart';
 import 'player_screen.dart';
 
 /// Movie/episode detail: big artwork with description and rating, and
@@ -503,6 +504,20 @@ class _DetailScreenState extends State<DetailScreen> {
         title: Text(meta.title,
             style: TextStyle(color: t.bone, fontSize: 16),
             overflow: TextOverflow.ellipsis),
+        actions: [
+          // Edit details: user-authored title/description/artwork — the
+          // way in for files TMDB doesn't know. The editor writes the
+          // metadata cache; MetadataService notifies and this page's
+          // ListenableBuilder repaints with the new details.
+          IconButton(
+            tooltip: 'Edit details',
+            icon: Icon(Icons.edit_outlined, color: t.boneDim, size: 20),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                  builder: (_) => EditDetailsScreen(entry: entry)),
+            ),
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
