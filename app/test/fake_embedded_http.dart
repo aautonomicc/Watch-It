@@ -28,6 +28,34 @@ class FakeEmbeddedHttp extends HttpOverrides {
   final Map<String, List<int>> rootmapPuts = {};
   final List<String> requests = [];
 
+  /// Wallet state for the `/wallet` routes: null = not configured.
+  /// `POST /wallet` "derives" an address by hashing the body so tests can
+  /// assert generate→import consistency without real key math.
+  Map<String, dynamic>? wallet;
+
+  /// Mnemonic that `POST /wallet/generate` hands out.
+  String generatedMnemonic =
+      'test test test test test test test test test test test junk';
+
+  /// Balances `GET /wallet/balances` reports (raw 18-decimal strings).
+  String antAtto = '1500000000000000000';
+  String ethWei = '20000000000000000';
+
+  /// Responses `GET /upload/<id>` plays back, in order (the last one
+  /// repeats). Empty → job 1 reports done immediately with [uploadResult].
+  final List<Map<String, dynamic>> uploadStates = [];
+  int _uploadPolls = 0;
+  Map<String, dynamic> uploadResult = {
+    'address': 'ab' * 32,
+    'size': 5,
+    'chunks': 1,
+    'cost_atto': '250000000000000000',
+    'gas_wei': '1000000000000',
+  };
+
+  /// Non-null → `POST /upload/estimate` fails with (status, message).
+  (int, String)? estimateFailure;
+
   /// The `size` every `POST /datamap` reports — tests override it to
   /// exercise size limits.
   int datamapSize = 100;
@@ -65,6 +93,57 @@ class FakeEmbeddedHttp extends HttpOverrides {
         }))
       );
     }
+    if (path == '/wallet' || path.startsWith('/wallet/')) {
+      return _handleWallet(method, path, body);
+    }
+    if (method == 'POST' && path == '/upload/estimate') {
+      final fail = estimateFailure;
+      if (fail != null) return (fail.$1, utf8.encode(fail.$2));
+      return (
+        200,
+        utf8.encode(jsonEncode({
+          'file_size': 5,
+          'chunk_count': 3,
+          'storage_cost_atto': '250000000000000000',
+          'estimated_gas_cost_wei': '1000000000000',
+          'confidence': 'PricedSample',
+        }))
+      );
+    }
+    if (method == 'POST' && path == '/upload') {
+      if (wallet == null) {
+        return (
+          400,
+          utf8.encode('no upload wallet configured — set one up in '
+              'Settings → Wallet')
+        );
+      }
+      _uploadPolls = 0;
+      return (200, utf8.encode(jsonEncode({'id': 1})));
+    }
+    if (method == 'GET' && path.startsWith('/upload/')) {
+      final state = uploadStates.isEmpty
+          ? {
+              'phase': 'done',
+              'done': 1,
+              'total': 1,
+              'error': null,
+              'result': uploadResult,
+            }
+          : uploadStates[
+              _uploadPolls.clamp(0, uploadStates.length - 1)];
+      _uploadPolls++;
+      return (
+        200,
+        utf8.encode(jsonEncode({
+          'id': 1,
+          'name': 'upload',
+          'done': 0,
+          'total': 0,
+          ...state,
+        }))
+      );
+    }
     if (method == 'GET' && path.startsWith('/datamap/')) {
       final map = datamaps[path.substring('/datamap/'.length)];
       return map == null ? (404, const <int>[]) : (200, map);
@@ -87,6 +166,70 @@ class FakeEmbeddedHttp extends HttpOverrides {
       return (204, const <int>[]);
     }
     return (404, const <int>[]);
+  }
+
+  (int, List<int>) _handleWallet(String method, String path, List<int> body) {
+    if (method == 'GET' && path == '/wallet') {
+      final w = wallet;
+      return (
+        200,
+        utf8.encode(jsonEncode(w == null
+            ? {'configured': false}
+            : {'configured': true, ...w}))
+      );
+    }
+    if (method == 'POST' && path == '/wallet/generate') {
+      return (
+        200,
+        utf8.encode(jsonEncode({
+          'mnemonic': generatedMnemonic,
+          'address': _addressFor(generatedMnemonic),
+        }))
+      );
+    }
+    if (method == 'POST' && path == '/wallet') {
+      final json = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
+      final secret =
+          (json['mnemonic'] ?? json['private_key']) as String?;
+      if (secret == null || secret.trim().isEmpty) {
+        return (400, utf8.encode('body must have a key or mnemonic'));
+      }
+      if (json.containsKey('private_key') &&
+          !RegExp(r'^(0x)?[0-9a-fA-F]{64}$').hasMatch(secret.trim())) {
+        return (
+          400,
+          utf8.encode('not a valid private key (expect 64 hex characters)')
+        );
+      }
+      wallet = {'address': _addressFor(secret), 'storage': 'keychain'};
+      return (200, utf8.encode(jsonEncode(wallet)));
+    }
+    if (method == 'DELETE' && path == '/wallet') {
+      wallet = null;
+      return (204, const <int>[]);
+    }
+    if (method == 'GET' && path == '/wallet/balances') {
+      if (wallet == null) {
+        return (404, utf8.encode('no wallet configured'));
+      }
+      return (
+        200,
+        utf8.encode(jsonEncode({'ant_atto': antAtto, 'eth_wei': ethWei}))
+      );
+    }
+    return (404, const <int>[]);
+  }
+
+  /// Deterministic pretend address: 0x + first 40 hex chars of the
+  /// secret's code units, so the same input always maps to the same
+  /// address (generate → import round trips agree).
+  static String _addressFor(String secret) {
+    final hex = StringBuffer();
+    for (final unit in secret.trim().codeUnits) {
+      hex.write((unit & 0xff).toRadixString(16).padLeft(2, '0'));
+      if (hex.length >= 40) break;
+    }
+    return '0x${hex.toString().padRight(40, '0').substring(0, 40)}';
   }
 }
 

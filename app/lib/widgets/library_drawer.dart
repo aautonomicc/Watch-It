@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/media_list.dart';
 import '../screens/list_home_screen.dart';
 import '../screens/media_lists_screen.dart';
+import '../screens/publish_screen.dart';
 import '../screens/settings_screen.dart';
 import '../services/library_arrangement.dart';
 import '../services/library_store.dart';
@@ -140,6 +141,17 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                       style: TextStyle(color: t.bone, fontSize: 14)),
                   onTap: () => _openPage(const MediaListsScreen()),
                 ),
+                // Desktop-only this edition: uploads need local files
+                // and the internal wallet (see docs/PLAN-alpha55.md).
+                if (isDesktopPlatform)
+                  ListTile(
+                    dense: true,
+                    leading: Icon(Icons.cloud_upload_outlined,
+                        color: t.boneDim, size: 20),
+                    title: Text('Publish',
+                        style: TextStyle(color: t.bone, fontSize: 14)),
+                    onTap: () => _openPage(const PublishScreen()),
+                  ),
                 ListTile(
                   dense: true,
                   leading: Icon(Icons.settings_outlined,
