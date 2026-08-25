@@ -95,6 +95,7 @@ class MetadataService extends ChangeNotifier {
       airDate: meta.airDate,
       stillFilePath: meta.stillFilePath,
       showPosterFilePath: show?.posterFilePath ?? meta.showPosterFilePath,
+      episodePosterFilePath: meta.episodePosterFilePath,
       mediaType: meta.mediaType,
     );
   }
@@ -207,13 +208,34 @@ class MetadataService extends ChangeNotifier {
       return f.existsSync() ? f.path : null;
     }
 
+    // For episode rows posterFile is the SEASON artwork slot (season
+    // tiles/headers read it through their first episode), but an
+    // episode-scope artwork edit stores the user's file there: serve
+    // that file as episode-only art instead, and put the TMDB season
+    // poster — one shared file per season, its name derivable from the
+    // row's TMDB id — back in the season slot.
+    var posterPath = existingFile(row.posterFile);
+    String? episodePosterPath;
+    final ep = RegExp(r':s(\d+):e\d+$').firstMatch(key);
+    if (ep != null && row.userEdited) {
+      if (row.posterFile?.startsWith('user_') ?? false) {
+        episodePosterPath = posterPath;
+        posterPath = null;
+      }
+      posterPath ??= row.tmdbId == null
+          ? null
+          : existingFile(
+              '${row.mediaType}_${row.tmdbId}_s${ep.group(1)}.jpg');
+    }
+
     return MediaMetadata(
       title: row.title ?? '',
       year: row.year,
       overview: row.overview,
       category: row.category,
       episodeLabel: row.episodeLabel,
-      posterFilePath: existingFile(row.posterFile),
+      posterFilePath: posterPath,
+      episodePosterFilePath: episodePosterPath,
       rating: row.rating,
       showOverview: row.showOverview,
       seasonOverview: row.seasonOverview,
@@ -351,6 +373,19 @@ Widget? posterImage(MediaMetadata meta, {BoxFit? fit}) {
   if (meta.posterAsset != null) return Image.asset(meta.posterAsset!, fit: fit);
   return null;
 }
+
+/// The user's own artwork for an episode entry (Edit details on that
+/// episode), never season or show art; `null` for everything else.
+Widget? episodePosterImage(MediaMetadata meta, {BoxFit? fit}) {
+  if (meta.episodePosterFilePath == null) return null;
+  return Image.file(File(meta.episodePosterFilePath!), fit: fit);
+}
+
+/// Poster for an entry's own surfaces (its detail page, per-entry
+/// cards): an episode's user artwork beats the season-art slot. Same as
+/// [posterImage] for non-episodes.
+Widget? entryPosterImage(MediaMetadata meta, {BoxFit? fit}) =>
+    episodePosterImage(meta, fit: fit) ?? posterImage(meta, fit: fit);
 
 /// Show-level poster for an episode's [meta] (its [posterImage] is the
 /// season artwork); falls back to the season/regular artwork.

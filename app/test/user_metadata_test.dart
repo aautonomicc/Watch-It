@@ -272,6 +272,111 @@ void main() {
       expect(meta.title, 'My Show'); // no show overlay — base title
     });
 
+    /// TMDB-matched rows for both episodes, sharing one season poster
+    /// file the way the real matcher writes them.
+    Future<File> seedTmdbEpisodeRows() async {
+      final db = await LibraryStore.database();
+      final seasonArt = File('${postersDir.path}/tv_7_s1.jpg')
+        ..writeAsBytesSync([1, 1]);
+      for (final n in [ep1Name, ep2Name]) {
+        await db.into(db.metadataCache).insert(
+              MetadataCacheCompanion.insert(
+                lookupKey: parseMediaName(n).lookupKey,
+                found: true,
+                title: const Value('My Show'),
+                posterFile: const Value('tv_7_s1.jpg'),
+                tmdbId: const Value(7),
+                mediaType: const Value('tv'),
+                fetchedAt: 0,
+              ),
+            );
+      }
+      return seasonArt;
+    }
+
+    test('episode user artwork stays off the season art slot', () async {
+      final seasonArt = await seedTmdbEpisodeRows();
+      final userFile = await saveUserPoster(
+          parsed.lookupKey, Uint8List.fromList([9]),
+          postersDirProvider: () async => postersDir);
+      await saveUserDetails(
+        lookupKey: parsed.lookupKey,
+        title: 'My Show',
+        posterFile: Value(userFile),
+        postersDirProvider: () async => postersDir,
+      );
+      final m1 = await composed(ep1);
+      expect(m1.episodePosterFilePath, '${postersDir.path}/$userFile');
+      // The season slot recovers the TMDB season poster instead.
+      expect(m1.posterFilePath, seasonArt.path);
+      final m2 = await composed(ep2);
+      expect(m2.episodePosterFilePath, isNull);
+      expect(m2.posterFilePath, seasonArt.path);
+    });
+
+    test('season slot recovers after removing episode artwork', () async {
+      final seasonArt = await seedTmdbEpisodeRows();
+      final userFile = await saveUserPoster(
+          parsed.lookupKey, Uint8List.fromList([9]),
+          postersDirProvider: () async => postersDir);
+      await saveUserDetails(
+        lookupKey: parsed.lookupKey,
+        title: 'My Show',
+        posterFile: Value(userFile),
+        postersDirProvider: () async => postersDir,
+      );
+      await saveUserDetails(
+        lookupKey: parsed.lookupKey,
+        title: 'My Show',
+        posterFile: const Value(null),
+        postersDirProvider: () async => postersDir,
+      );
+      final meta = await composed(ep1);
+      expect(meta.episodePosterFilePath, isNull);
+      expect(meta.posterFilePath, seasonArt.path);
+    });
+
+    test('season-level user artwork beats the recovered TMDB poster',
+        () async {
+      await seedTmdbEpisodeRows();
+      final epFile = await saveUserPoster(
+          parsed.lookupKey, Uint8List.fromList([9]),
+          postersDirProvider: () async => postersDir);
+      await saveUserDetails(
+        lookupKey: parsed.lookupKey,
+        title: 'My Show',
+        posterFile: Value(epFile),
+        postersDirProvider: () async => postersDir,
+      );
+      final seasonFile = await saveUserPoster(
+          parsed.seasonLookupKey!, Uint8List.fromList([8]),
+          postersDirProvider: () async => postersDir);
+      await saveUserDetails(
+        lookupKey: parsed.seasonLookupKey!,
+        title: 'My Show',
+        posterFile: Value(seasonFile),
+        postersDirProvider: () async => postersDir,
+      );
+      final meta = await composed(ep1);
+      expect(meta.posterFilePath, '${postersDir.path}/$seasonFile');
+      expect(meta.episodePosterFilePath, '${postersDir.path}/$epFile');
+    });
+
+    test("a movie's user artwork stays in the poster slot", () async {
+      final userFile = await saveUserPoster(
+          key, Uint8List.fromList([9]),
+          postersDirProvider: () async => postersDir);
+      await saveUserDetails(
+        lookupKey: key,
+        title: 'Our Holiday',
+        posterFile: Value(userFile),
+        postersDirProvider: () async => postersDir,
+      );
+      final meta = await resolvedMetadata();
+      expect(meta.posterFilePath, '${postersDir.path}/$userFile');
+      expect(meta.episodePosterFilePath, isNull);
+    });
+
     test('an episode-scoped label save touches nothing show-level',
         () async {
       await saveUserDetails(

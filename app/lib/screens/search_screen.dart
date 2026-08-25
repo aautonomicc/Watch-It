@@ -307,7 +307,7 @@ class _SearchScreenState extends State<SearchScreen> {
       leading: _thumb(
         t,
         stillImage(meta, fit: BoxFit.cover) ??
-            posterImage(meta, fit: BoxFit.cover),
+            entryPosterImage(meta, fit: BoxFit.cover),
         Icons.live_tv_outlined,
         badge: entryDownloadBadge(t, entry),
         bar: entryWatchBar(t, entry),

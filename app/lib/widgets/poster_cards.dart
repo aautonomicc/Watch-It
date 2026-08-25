@@ -50,7 +50,7 @@ class PosterCard extends StatelessWidget {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    posterImage(meta, fit: BoxFit.cover) ??
+                    entryPosterImage(meta, fit: BoxFit.cover) ??
                         Container(
                           color: t.ink2,
                           child: Icon(Icons.movie_outlined,

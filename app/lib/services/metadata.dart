@@ -21,6 +21,7 @@ class MediaMetadata {
     this.airDate,
     this.stillFilePath,
     this.showPosterFilePath,
+    this.episodePosterFilePath,
     this.mediaType,
   });
 
@@ -63,6 +64,12 @@ class MediaMetadata {
   /// Cached show poster file for episode entries ([posterFilePath] is
   /// then the season's artwork).
   final String? showPosterFilePath;
+
+  /// User-authored artwork for this episode entry only (Edit details on
+  /// the episode). Kept apart from [posterFilePath] — the season-art
+  /// slot — so season tiles and headers, which read the first episode's
+  /// metadata, never show one episode's artwork.
+  final String? episodePosterFilePath;
 }
 
 /// XOR address of the built-in default movie seeded on first run — the
