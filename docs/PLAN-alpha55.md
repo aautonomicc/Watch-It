@@ -1,6 +1,11 @@
 # Plan — next edition (v0.1.0-alpha.55) — "Publish edition"
 
-Status: rev 3 2026-08-25 — APPROVED scope, decisions recorded (see
+Status: rev 4 2026-08-25 — WINDOWS TEST PASSED: user ran the fresh
+2026-08-25 zip on a real Windows box, confirmed working → the Windows
+release leg is UNGATED; Windows joins this and future desktop releases.
+New section 6 (distribution: release mechanics, installer question,
+desktop auto-update) added with recommendations — discussion pending.
+Earlier: APPROVED scope, decisions recorded (see
 "Decisions" below): internal wallet with seed-word backup + private-key
 import, all tiers encoded by default with deselect checkboxes, ffmpeg
 bundled, no macOS attempt this edition. Desktop-only releases (Windows +
@@ -176,16 +181,65 @@ Since there is no server to transcode later, encode BEFORE upload:
 
 ### 5. Release scope: desktop-only
 
-- Artifacts: **Linux AppImage + Windows zip** (Windows still GATED on
-  your test — a FRESH zip built 2026-08-25 at current HEAD, incl. the
-  alpha.54 cursor-hide, replaces the 2026-08-11 one at
-  ~/projects/Watch-It-windows-x64.zip; that test gates this edition's
-  Windows leg). No APK this release (nothing Android-relevant in it;
-  skipping avoids implying upload works there).
+- Artifacts: **Linux AppImage + Windows zip** (Windows gate CLEARED
+  2026-08-25 — user tested the fresh zip built at HEAD fafbdfd on a real
+  Windows box, confirmed working). No APK this release (nothing
+  Android-relevant in it; skipping avoids implying upload works there).
 - **macOS — DECIDED 2026-08-25: NOT attempted this edition.** Parked
   until after this ships (no Mac hardware to smoke-test; a macos.yml CI
   stretch remains the plan for a later edition — unsigned build,
   Gatekeeper friction, $99/yr Apple ID for proper signing).
+
+### 6. Windows distribution + desktop auto-update (rev 4 — recommendations)
+
+**How the Windows zip joins releases (mechanics — mostly settled):**
+- Release process: trigger windows.yml (workflow_dispatch) on the
+  version-bump commit → `gh run download` → verify contents + sha256 →
+  rename `Watch-It-<version>-windows-x64.zip` → attach to the GitHub
+  release beside the AppImage. Small improvement to land with alpha.55:
+  add `push: tags: ['v*']` to windows.yml so tagging the release builds
+  the zip automatically (keep workflow_dispatch for ad-hoc builds).
+- Release notes get a standing Windows section: unzip anywhere, run
+  watchit.exe; first run trips SmartScreen ("Windows protected your
+  PC") because the binaries are unsigned — More info → Run anyway.
+  Delete the folder to uninstall (data lives in %APPDATA%).
+
+**Installer — recommendation: NOT yet; the portable zip IS the answer
+for alpha:**
+- The zip is the Windows analogue of the AppImage: no admin rights, no
+  install step, delete to remove. Right fit for weekly-ish alphas.
+- An installer would NOT reduce the real friction, which is SmartScreen:
+  an unsigned Inno/MSIX installer gets flagged exactly like the unzipped
+  exe. The actual fix is a code-signing certificate (OV ~$100+/yr, or
+  Azure Trusted Signing ~$10/mo — both need identity validation) — not
+  worth it at alpha user counts; revisit at beta/1.0.
+- When one IS wanted later: **Inno Setup**, per-user install to
+  %LOCALAPPDATA% (no admin), Start-menu shortcut + uninstaller +
+  optional `.datamap`/`.watch-list` file associations (the one real UX
+  win only an installer provides). MSIX is store-oriented and strict
+  about signing — Inno is the pragmatic pick. An installer also pairs
+  naturally with self-update (below) — decide the two together.
+
+**Desktop auto-upgrade — recommendation: check-and-notify now, actual
+self-update later:**
+- **Phase 1 — update CHECK (small, proposed for this edition or the
+  next):** on desktop, at most once per 24h on startup, GET
+  `https://api.github.com/repos/aautonomicc/Watch-It/releases/latest`
+  (unauthenticated; 60 req/h anonymous limit is plenty), compare the tag
+  to the built-in version; if newer → quiet "Update available:
+  v0.1.0-alpha.NN" snackbar + a badge/row in Settings → About linking
+  the release page (per-OS asset link). Failures silent (offline = no
+  nag). MUST have a Settings toggle ("Check for updates on startup") —
+  this is the app's only phone-home besides the Autonomi network itself
+  and the user's own TMDB key, so it stays visible and switchable;
+  default ON, mentioned in release notes. Desktop-only for now (an APK
+  can't self-serve an install anyway; extendable later).
+- **Phase 2 — self-update (DEFERRED):** Linux = AppImageUpdate/zsync
+  (needs update info embedded at build time + zsync file per release);
+  Windows = a running exe cannot replace itself — needs a helper
+  process or an installer handoff (ties into the Inno decision). Real
+  work on both platforms for modest payoff while check-and-notify
+  covers awareness. Not this edition.
 
 ## Suggested build order (each step lands with tests)
 
@@ -217,6 +271,9 @@ Your call.
 5. **Windows:** fresh Windows zip generated for user download + test
    (build at current HEAD incl. alpha.54 changes — supersedes the
    2026-08-11 zip).
+6. **Windows CONFIRMED WORKING** (user test on real Windows,
+   2026-08-25) — Windows zip joins this and future desktop releases;
+   the alpha.55 Windows leg is ungated.
 
 ## Still open
 
@@ -224,6 +281,14 @@ Your call.
    "Publish" until said otherwise.)
 2. **Split the edition?** Wallet+plain upload in alpha.55, encode tiers
    in alpha.56 — or one big release?
+3. **Windows installer?** Recommendation: no — keep the portable zip
+   through alpha; revisit (Inno Setup, per-user) at beta/1.0 together
+   with code signing and self-update. (Section 6.)
+4. **Update check-and-notify** (GitHub releases API, Settings toggle):
+   include in alpha.55, or park for the next edition? Recommendation:
+   yes if the edition doesn't split — it's ~a day of work; if the
+   edition splits, it slots into the second half. Self-update proper is
+   deferred either way. (Section 6.)
 
 ## DEFERRED to a later release (was rev-1 scope A)
 
@@ -240,7 +305,6 @@ Your call.
 
 ## Standing user actions (outside the release, reminders)
 
-- Test the Windows zip (now gates the Windows leg of this edition).
 - Rotate the old TMDB key (extractable from alpha.24–.33 binaries).
 - GitHub Support sensitive-data request still unsubmitted
   (~/projects/watchit-github-support-request.md).
