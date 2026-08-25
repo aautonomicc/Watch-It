@@ -17,6 +17,7 @@ import '../services/season_grouping.dart' show episodeNameFromLabel;
 import '../services/user_metadata.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
+import '../widgets/poster_crop_dialog.dart';
 
 /// What one Edit details page edits — which cache key it writes and
 /// which fields it shows.
@@ -205,8 +206,16 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
       ),
     );
     if (bytes == null || !mounted) return;
+    // Frames are landscape; the crop step picks the poster-shaped piece
+    // (or keeps the whole frame — the old behaviour).
+    final chosen = await showDialog<Uint8List>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PosterCropDialog(bytes: bytes),
+    );
+    if (chosen == null || !mounted) return;
     setState(() {
-      _newPosterBytes = bytes;
+      _newPosterBytes = chosen;
       _removePoster = false;
     });
   }
