@@ -14,6 +14,7 @@ import 'package:watchit/services/bundle.dart' show kTmdbAttributionNotice;
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/licenses.dart';
 import 'package:watchit/services/storage_usage.dart';
+import 'package:watchit/services/update_check.dart';
 import 'package:watchit/theme/tokens.dart';
 
 void main() {
@@ -139,5 +140,26 @@ void main() {
     expect(find.text('Are you sure?'), findsNothing);
     // Nothing was deleted: the store still answers.
     expect(await LibraryStore.load(), isEmpty);
+  });
+
+  testWidgets('About: update toggle persists; available update shows a row',
+      (tester) async {
+    UpdateCheck.resetForTesting();
+    addTearDown(UpdateCheck.resetForTesting);
+    await pumpSettings(tester);
+    expect(find.text('Check for updates on startup'), findsOneWidget);
+    expect(find.text('Update available'), findsNothing);
+
+    await tester.tap(find.text('Check for updates on startup'));
+    await tester.pumpAndSettle();
+    expect(await UpdateCheck.enabled(), false);
+
+    UpdateCheck.instance.availableTag = 'v0.1.0-alpha.99';
+    UpdateCheck.instance.releaseUrl = UpdateCheck.releasePage;
+    // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
+    UpdateCheck.instance.notifyListeners();
+    await tester.pump();
+    expect(find.text('Update available'), findsOneWidget);
+    expect(find.textContaining('v0.1.0-alpha.99'), findsOneWidget);
   });
 }

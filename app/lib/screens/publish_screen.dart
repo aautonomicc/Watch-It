@@ -8,54 +8,103 @@ import 'package:http/http.dart' as http;
 
 import '../models/media_list.dart';
 import '../services/embedded_client.dart';
+import '../services/ffmpeg.dart';
 import '../services/library_store.dart';
 import '../services/publish_api.dart';
+import '../services/publish_plan.dart';
 import '../theme/tokens.dart';
 import 'settings_screen.dart' show promptForText;
 import 'wallet_screen.dart';
 
-/// Publish: upload a media file to the Autonomi network from the app.
+/// Publish: upload media files to the Autonomi network from the app.
 ///
-/// Plain upload edition — pick a file, see the live network cost
-/// estimate, confirm rights + permanence, pay from the internal wallet
-/// and watch progress; the result lands in the library like any import.
-/// (Quality tiers / re-encoding arrive in the next edition.)
+/// Multi-file edition — pick one file or a whole series, see per-file
+/// probe verdicts, choose quality tiers (encoded with bundled ffmpeg;
+/// H.264/AAC faststart MP4 that plays everywhere), confirm rights +
+/// permanence, then the batch runs: each file × tier encodes and uploads
+/// in turn, paid from the internal wallet. Results land in the library
+/// like any import; same-title tiers fold into the version picker.
 class PublishScreen extends StatefulWidget {
-  const PublishScreen({super.key, this.apiBase, this.apiToken});
+  const PublishScreen({super.key, this.apiBase, this.apiToken, this.ffmpeg});
 
   /// Test overrides for the embedded server base URL / auth token.
   final String? apiBase;
   final String? apiToken;
 
+  /// Test override for the ffmpeg integration.
+  final FfmpegService? ffmpeg;
+
   @override
   State<PublishScreen> createState() => _PublishScreenState();
+}
+
+enum _Stage { setup, running, done }
+
+enum _EntryStatus { pending, encoding, uploading, done, error, skipped }
+
+enum _ErrorAction { retry, skip, stop }
+
+class _PickedFile {
+  _PickedFile(this.file, this.size, this.probe);
+  final XFile file;
+  final int size;
+  final MediaProbe? probe;
+
+  PublishSource get source => PublishSource(
+      path: file.path, name: file.name, size: size, probe: probe);
+}
+
+class _QueueEntry {
+  _QueueEntry(this.item);
+  final PublishItem item;
+  _EntryStatus status = _EntryStatus.pending;
+  double? encodeFraction;
+  UploadJob? job;
+  UploadResult? result;
+  String? error;
+  String? tempPath;
 }
 
 class _PublishScreenState extends State<PublishScreen> {
   late final PublishApi _api =
       PublishApi(base: widget.apiBase, token: widget.apiToken);
+  late final FfmpegService _ffmpeg = widget.ffmpeg ?? FfmpegService();
 
   WalletStatus? _wallet;
-  XFile? _file;
-  int? _fileSize;
-  UploadEstimate? _estimate;
+  bool? _ffmpegAvailable;
+
+  _Stage _stage = _Stage.setup;
+  final List<_PickedFile> _files = [];
+  bool _picking = false;
+  Set<PublishTier> _selection = {};
+  UploadEstimate? _refEstimate;
   bool _estimating = false;
   String? _estimateError;
   bool _rights = false;
-  int? _jobId;
-  UploadJob? _job;
-  Timer? _poll;
-  String? _startError;
+
+  List<_QueueEntry> _queue = [];
+  int _current = 0;
+  Completer<_ErrorAction>? _errorAction;
+  Directory? _tempDir;
+  bool _disposed = false;
 
   @override
   void initState() {
     super.initState();
     _loadWallet();
+    _ffmpeg.available.then((ok) {
+      if (mounted) setState(() => _ffmpegAvailable = ok);
+    });
   }
 
   @override
   void dispose() {
-    _poll?.cancel();
+    _disposed = true;
+    _ffmpeg.cancel();
+    if (!(_errorAction?.isCompleted ?? true)) {
+      _errorAction!.complete(_ErrorAction.stop);
+    }
+    _cleanupTempDir();
     super.dispose();
   }
 
@@ -66,46 +115,66 @@ class _PublishScreenState extends State<PublishScreen> {
     } catch (_) {
       // Leave null — the wallet row shows setup guidance either way.
       if (mounted) {
-        setState(() => _wallet =
-            const WalletStatus(configured: false));
+        setState(() => _wallet = const WalletStatus(configured: false));
       }
     }
   }
 
-  Future<void> _pickFile() async {
-    final file = await openFile(acceptedTypeGroups: [
+  Future<void> _pickFiles() async {
+    final files = await openFiles(acceptedTypeGroups: [
       const XTypeGroup(label: 'Media files', extensions: [
         'mp4', 'mkv', 'webm', 'avi', 'mov', 'm4v',
         'mp3', 'flac', 'm4a', 'ogg', 'opus', 'wav',
       ]),
       const XTypeGroup(label: 'All files'),
     ]);
-    if (file == null) return;
-    final size = await file.length();
-    if (!mounted) return;
+    if (files.isEmpty || !mounted) return;
+    setState(() => _picking = true);
+    final hadFirst = _files.isNotEmpty;
+    for (final file in files) {
+      if (_files.any((f) => f.file.path == file.path)) continue;
+      final size = await file.length();
+      final probe = await _ffmpeg.probe(file.path);
+      if (!mounted) return;
+      _files.add(_PickedFile(file, size, probe));
+    }
     setState(() {
-      _file = file;
-      _fileSize = size;
-      _estimate = null;
-      _estimateError = null;
+      _picking = false;
+      _selection = _defaultSelection();
       _rights = false;
-      _jobId = null;
-      _job = null;
-      _startError = null;
     });
-    await _estimateCost();
+    if (!hadFirst || _refEstimate == null) await _estimateCost();
   }
 
+  void _removeFile(_PickedFile file) {
+    final wasFirst = _files.isNotEmpty && identical(_files.first, file);
+    setState(() {
+      _files.remove(file);
+      _selection = _defaultSelection();
+      _rights = false;
+      if (_files.isEmpty) {
+        _refEstimate = null;
+        _estimateError = null;
+      }
+    });
+    // The reference quote came from the removed file — refresh it.
+    if (wasFirst && _files.isNotEmpty) unawaited(_estimateCost());
+  }
+
+  /// Default tier ticks: the union of every file's defaults, so a series
+  /// mixing sources starts with each file's recommended tiers covered.
+  Set<PublishTier> _defaultSelection() =>
+      {for (final f in _files) ...defaultTiers(f.probe)};
+
   Future<void> _estimateCost() async {
-    final file = _file;
-    if (file == null) return;
+    if (_files.isEmpty) return;
     setState(() {
       _estimating = true;
       _estimateError = null;
     });
     try {
-      final estimate = await _api.estimate(file.path);
-      if (mounted) setState(() => _estimate = estimate);
+      final estimate = await _api.estimate(_files.first.file.path);
+      if (mounted) setState(() => _refEstimate = estimate);
     } catch (e) {
       if (mounted) setState(() => _estimateError = '$e');
     } finally {
@@ -113,80 +182,241 @@ class _PublishScreenState extends State<PublishScreen> {
     }
   }
 
+  List<PublishItem> _plannedQueue() =>
+      buildQueue([for (final f in _files) f.source], _selection);
+
+  /// Files none of the selected qualities apply to — they would be
+  /// skipped, so the setup stage calls them out.
+  List<_PickedFile> _uncoveredFiles() => [
+        for (final f in _files)
+          if (!f.source.offered.any(_selection.contains)) f,
+      ];
+
+  BigInt? _approxTotalCost(List<PublishItem> queue) {
+    final ref = _refEstimate;
+    if (ref == null) return null;
+    var total = BigInt.zero;
+    for (final item in queue) {
+      final bytes = item.predictedBytes ?? item.source.size;
+      total += approxCostAtto(bytes, ref.costAtto, ref.chunkCount);
+    }
+    return total;
+  }
+
+  bool get _canPublish =>
+      _stage == _Stage.setup &&
+      !_picking &&
+      (_wallet?.configured ?? false) &&
+      _refEstimate != null &&
+      _rights &&
+      _plannedQueue().isNotEmpty;
+
   Future<void> _publish() async {
-    final file = _file;
-    if (file == null) return;
-    setState(() => _startError = null);
-    try {
-      final id = await _api.startUpload(file.path, name: file.name);
+    final queue = _plannedQueue();
+    if (queue.isEmpty) return;
+    if (queue.any((i) => i.needsEncode)) {
+      // Sync on purpose: async file IO never completes in the widget
+      // tests' fake-async zone, and this is a one-off cheap call.
+      _tempDir = Directory.systemTemp.createTempSync('watchit-publish');
+    }
+    setState(() {
+      _queue = [for (final item in queue) _QueueEntry(item)];
+      _current = 0;
+      _stage = _Stage.running;
+    });
+    unawaited(_run());
+  }
+
+  Future<void> _run() async {
+    for (var i = 0; i < _queue.length; i++) {
+      if (_disposed) return;
+      final entry = _queue[i];
+      if (mounted) setState(() => _current = i);
+      var done = false;
+      while (!done) {
+        try {
+          await _runEntry(entry);
+          done = true;
+        } catch (e) {
+          if (_disposed || !mounted) return;
+          setState(() {
+            entry.status = _EntryStatus.error;
+            entry.error = '$e';
+          });
+          _errorAction = Completer<_ErrorAction>();
+          final action = await _errorAction!.future;
+          _errorAction = null;
+          if (_disposed || !mounted) return;
+          switch (action) {
+            case _ErrorAction.retry:
+              setState(() => entry.error = null);
+            case _ErrorAction.skip:
+              setState(() => entry.status = _EntryStatus.skipped);
+              done = true;
+            case _ErrorAction.stop:
+              _finishRun(markRemainingSkipped: true);
+              return;
+          }
+        }
+      }
+    }
+    _finishRun();
+  }
+
+  Future<void> _runEntry(_QueueEntry entry) async {
+    final item = entry.item;
+    var uploadPath = item.source.path;
+    if (item.needsEncode) {
+      // A retry after an upload failure reuses the finished encode.
+      final existing = entry.tempPath;
+      if (existing != null && File(existing).existsSync()) {
+        uploadPath = existing;
+      } else {
+        if (mounted) {
+          setState(() {
+            entry.status = _EntryStatus.encoding;
+            entry.encodeFraction = null;
+          });
+        }
+        final output =
+            '${_tempDir!.path}${Platform.pathSeparator}${item.outputName}';
+        await _ffmpeg.encode(
+          input: item.source.path,
+          output: output,
+          tier: item.tier,
+          probe: item.source.probe,
+          onProgress: (fraction) {
+            if (mounted) setState(() => entry.encodeFraction = fraction);
+          },
+        );
+        if (_disposed) throw FfmpegException('cancelled');
+        entry.tempPath = output;
+        uploadPath = output;
+      }
+    }
+    if (mounted) {
       setState(() {
-        _jobId = id;
-        _job = UploadJob(id: id, phase: 'starting', done: 0, total: 0);
+        entry.status = _EntryStatus.uploading;
+        entry.job = null;
       });
-      _poll = Timer.periodic(const Duration(seconds: 1), (_) => _pollJob());
-    } catch (e) {
-      setState(() => _startError = '$e');
+    }
+    final id = await _api.startUpload(uploadPath, name: item.outputName);
+    while (true) {
+      await Future<void>.delayed(const Duration(seconds: 1));
+      if (_disposed) return;
+      UploadJob job;
+      try {
+        job = await _api.jobStatus(id);
+      } catch (_) {
+        continue; // Transient poll failure — next tick retries.
+      }
+      if (mounted) setState(() => entry.job = job);
+      final result = job.result;
+      if (job.phase == 'done' && result != null) {
+        if (mounted) {
+          setState(() {
+            entry.result = result;
+            entry.status = _EntryStatus.done;
+          });
+        }
+        _deleteTemp(entry);
+        return;
+      }
+      if (job.phase == 'error') {
+        throw PublishApiException(job.error ?? 'upload failed');
+      }
     }
   }
 
-  Future<void> _pollJob() async {
-    final id = _jobId;
-    if (id == null) return;
-    try {
-      final job = await _api.jobStatus(id);
-      if (!mounted) return;
-      setState(() => _job = job);
-      if (job.finished) {
-        _poll?.cancel();
-        _poll = null;
+  void _finishRun({bool markRemainingSkipped = false}) {
+    if (!mounted) return;
+    setState(() {
+      if (markRemainingSkipped) {
+        for (final entry in _queue) {
+          if (entry.status == _EntryStatus.pending ||
+              entry.status == _EntryStatus.error) {
+            entry.status = _EntryStatus.skipped;
+          }
+        }
       }
-    } catch (_) {
-      // Transient poll failure: keep the timer, the next tick retries.
-    }
+      _stage = _Stage.done;
+    });
+    _cleanupTempDir();
+  }
+
+  void _deleteTemp(_QueueEntry entry) {
+    final path = entry.tempPath;
+    if (path == null) return;
+    entry.tempPath = null;
+    try {
+      File(path).deleteSync();
+    } catch (_) {}
+  }
+
+  void _cleanupTempDir() {
+    final dir = _tempDir;
+    _tempDir = null;
+    if (dir == null) return;
+    try {
+      dir.deleteSync(recursive: true);
+    } catch (_) {}
   }
 
   void _reset() {
-    _poll?.cancel();
-    _poll = null;
     setState(() {
-      _file = null;
-      _fileSize = null;
-      _estimate = null;
+      _stage = _Stage.setup;
+      _files.clear();
+      _selection = {};
+      _refEstimate = null;
       _estimateError = null;
       _rights = false;
-      _jobId = null;
-      _job = null;
-      _startError = null;
+      _queue = [];
+      _current = 0;
     });
   }
 
-  Future<void> _addToLibrary(UploadResult result) async {
+  List<_QueueEntry> get _published =>
+      [for (final e in _queue) if (e.result != null) e];
+
+  Future<void> _addAllToLibrary() async {
+    final published = _published;
+    if (published.isEmpty) return;
     final lists = await LibraryStore.load();
     if (!mounted) return;
     final chosen = await _pickTargetLists(lists);
     if (chosen == null || chosen.isEmpty) return;
     var updated = List<MediaList>.of(lists);
     var idBase = DateTime.now().microsecondsSinceEpoch;
-    final entry = MediaEntry(
-      name: _file?.name ?? result.address,
-      address: result.address,
-      sizeBytes: result.size,
-    );
+    final entries = [
+      for (final e in published)
+        MediaEntry(
+          name: e.item.outputName,
+          address: e.result!.address,
+          sizeBytes: e.result!.size,
+        ),
+    ];
     for (final title in chosen) {
       final i = updated
           .indexWhere((l) => l.title.toLowerCase() == title.toLowerCase());
       if (i < 0) {
         updated.add(MediaList(
-            id: '${idBase++}', title: title, entries: [entry]));
-      } else if (!updated[i]
-          .entries
-          .any((e) => e.address == result.address)) {
-        updated[i] = updated[i]
-            .copyWith(entries: [...updated[i].entries, entry]);
+            id: '${idBase++}', title: title, entries: entries));
+      } else {
+        final existing = updated[i].entries.map((e) => e.address).toSet();
+        final fresh = [
+          for (final entry in entries)
+            if (!existing.contains(entry.address)) entry,
+        ];
+        if (fresh.isNotEmpty) {
+          updated[i] = updated[i]
+              .copyWith(entries: [...updated[i].entries, ...fresh]);
+        }
       }
     }
     await LibraryStore.save(updated);
-    _snack('Added to ${chosen.length == 1 ? chosen.first : '${chosen.length} lists'}');
+    _snack('Added ${entries.length} '
+        '${entries.length == 1 ? 'title' : 'titles'} to '
+        '${chosen.length == 1 ? chosen.first : '${chosen.length} lists'}');
   }
 
   /// Checkbox picker over the existing lists plus a create-new option —
@@ -199,7 +429,7 @@ class _PublishScreenState extends State<PublishScreen> {
         context,
         title: 'New list',
         hint: 'e.g. My uploads',
-        note: 'The library has no lists yet — name one for this title.',
+        note: 'The library has no lists yet — name one for these titles.',
       );
       final trimmed = title?.trim() ?? '';
       return trimmed.isEmpty ? null : [trimmed];
@@ -265,31 +495,28 @@ class _PublishScreenState extends State<PublishScreen> {
     );
   }
 
-  Future<void> _saveDatamap(UploadResult result) async {
+  Future<void> _saveAllDatamaps() async {
+    final published = _published;
+    if (published.isEmpty) return;
     final base = widget.apiBase ?? EmbeddedClient.baseUrl();
     if (base == null) return;
-    final fileName = '${_file?.name ?? result.address}.datamap';
-    try {
-      final res = await http
-          .get(Uri.parse('$base/datamap/${result.address}'));
-      if (res.statusCode != 200) {
-        _snack('Could not fetch the data map (${res.statusCode})');
-        return;
-      }
-      final location = await getSaveLocation(
-        suggestedName: fileName,
-        acceptedTypeGroups: const [
-          XTypeGroup(label: 'Data map', extensions: ['datamap']),
-        ],
-      );
-      if (location == null) return;
-      await XFile.fromData(res.bodyBytes,
-              mimeType: 'application/octet-stream', name: fileName)
-          .saveTo(location.path);
-      _snack('Saved $fileName');
-    } catch (e) {
-      _snack('Save failed: $e');
+    final dirPath = await getDirectoryPath();
+    if (dirPath == null) return;
+    var saved = 0;
+    for (final entry in published) {
+      try {
+        final res = await http
+            .get(Uri.parse('$base/datamap/${entry.result!.address}'));
+        if (res.statusCode != 200) continue;
+        File('$dirPath${Platform.pathSeparator}'
+                '${entry.item.outputName}.datamap')
+            .writeAsBytesSync(res.bodyBytes);
+        saved++;
+      } catch (_) {}
     }
+    _snack(saved == published.length
+        ? 'Saved $saved .datamap ${saved == 1 ? 'file' : 'files'}'
+        : 'Saved $saved of ${published.length} .datamap files');
   }
 
   void _snack(String message) {
@@ -298,21 +525,9 @@ class _PublishScreenState extends State<PublishScreen> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
-  bool get _uploading =>
-      _job != null && !_job!.finished || _jobId != null && _job == null;
-
-  bool get _canPublish =>
-      _file != null &&
-      (_wallet?.configured ?? false) &&
-      _estimate != null &&
-      _rights &&
-      !_uploading &&
-      (_job == null || _job!.phase == 'error');
-
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
-    final job = _job;
     return Scaffold(
       appBar: AppBar(
         backgroundColor: t.ink,
@@ -321,54 +536,295 @@ class _PublishScreenState extends State<PublishScreen> {
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
+        children: switch (_stage) {
+          _Stage.setup => _setupChildren(t),
+          _Stage.running => _runningChildren(t),
+          _Stage.done => _doneChildren(t),
+        },
+      ),
+    );
+  }
+
+  // ── setup ────────────────────────────────────────────────────────────
+
+  List<Widget> _setupChildren(WiTokens t) {
+    final queue = _plannedQueue();
+    return [
+      Text(
+        'Publish media files to the Autonomi network — one file or a '
+        'whole series at once. Published files are permanent — they '
+        'cannot be edited or deleted — and storage is paid once, in ANT, '
+        'from your wallet.',
+        style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
+      ),
+      const SizedBox(height: 16),
+      _walletRow(t),
+      if (_ffmpegAvailable == false) ...[
+        const SizedBox(height: 12),
+        Text(
+          'ffmpeg was not found beside the app, so quality tiers are '
+          'unavailable — files can only be published as-is.',
+          style: TextStyle(color: t.rust, fontSize: 12, height: 1.4),
+        ),
+      ],
+      const SizedBox(height: 16),
+      ..._filesSection(t),
+      if (_files.isNotEmpty && !_picking) ...[
+        const SizedBox(height: 16),
+        ..._tierSection(t),
+        const SizedBox(height: 16),
+        _estimateSection(t, queue),
+        const SizedBox(height: 8),
+        ..._uncoveredWarning(t),
+        CheckboxListTile(
+          value: _rights,
+          contentPadding: EdgeInsets.zero,
+          controlAffinity: ListTileControlAffinity.leading,
+          title: Text(
+            'I have the right to publish '
+            '${_files.length == 1 ? 'this file' : 'these files'} — '
+            '${_files.length == 1 ? 'it is' : 'they are'} my own work or '
+            'verifiably public domain.',
+            style: TextStyle(color: t.bone, fontSize: 13),
+          ),
+          onChanged: (v) => setState(() => _rights = v ?? false),
+        ),
+        const SizedBox(height: 8),
+        FilledButton.icon(
+          onPressed: _canPublish ? _publish : null,
+          icon: const Icon(Icons.cloud_upload_outlined),
+          label: Text(queue.length <= 1
+              ? 'Publish'
+              : 'Publish ${queue.length} uploads'),
+        ),
+      ],
+    ];
+  }
+
+  List<Widget> _filesSection(WiTokens t) {
+    if (_files.isEmpty && !_picking) {
+      return [
+        OutlinedButton.icon(
+          onPressed: _pickFiles,
+          icon: const Icon(Icons.insert_drive_file_outlined),
+          label: const Text('Choose files to publish'),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Select several files at once to publish a whole series — '
+          'episodes named like "Show S01E02.mkv" group under one card '
+          'in the library.',
+          style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+        ),
+      ];
+    }
+    return [
+      Row(
         children: [
-          if (job?.phase == 'done' && job?.result != null)
-            ..._doneSection(t, job!.result!)
-          else ...[
-            Text(
-              'Publish a media file to the Autonomi network. Published '
-              'files are permanent — they cannot be edited or deleted — '
-              'and storage is paid once, in ANT, from your wallet.',
-              style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
+          Text(
+            'FILES (${_files.length})',
+            style: TextStyle(
+                fontSize: 11,
+                letterSpacing: 1.5,
+                fontWeight: FontWeight.w700,
+                color: t.ash),
+          ),
+          const Spacer(),
+          if (!_picking)
+            TextButton.icon(
+              onPressed: _pickFiles,
+              icon: const Icon(Icons.add, size: 16),
+              label: Text('Add more', style: TextStyle(color: t.accent)),
             ),
-            const SizedBox(height: 16),
-            _walletRow(t),
-            const SizedBox(height: 16),
-            _fileRow(t),
-            if (_file != null) ...[
-              const SizedBox(height: 16),
-              _estimateSection(t),
+        ],
+      ),
+      for (final file in _files)
+        ListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(Icons.insert_drive_file_outlined,
+              color: t.accent, size: 20),
+          title: Text(
+            '${file.file.name} · ${formatBytes(file.size)}',
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: t.bone, fontSize: 14),
+          ),
+          subtitle: Text(
+            probeVerdict(file.probe),
+            style: TextStyle(color: t.ash, fontSize: 12),
+          ),
+          trailing: IconButton(
+            tooltip: 'Remove',
+            icon: Icon(Icons.close, color: t.ash, size: 18),
+            onPressed: () => _removeFile(file),
+          ),
+        ),
+      if (_picking)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            children: [
+              const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2)),
+              const SizedBox(width: 10),
+              Text('Reading files…',
+                  style: TextStyle(color: t.ash, fontSize: 13)),
             ],
-            if (_file != null && _estimate != null && !_uploading) ...[
-              const SizedBox(height: 8),
-              CheckboxListTile(
-                value: _rights,
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                title: Text(
-                  'I have the right to publish this file — it is my own '
-                  'work or verifiably public domain.',
-                  style: TextStyle(color: t.bone, fontSize: 13),
-                ),
-                onChanged: (v) => setState(() => _rights = v ?? false),
-              ),
-            ],
-            const SizedBox(height: 8),
-            if (_startError != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(_startError!,
-                    style: TextStyle(color: t.rust, fontSize: 13)),
-              ),
-            if (_uploading || job?.phase == 'error')
-              _progressSection(t, job)
-            else
-              FilledButton.icon(
-                onPressed: _canPublish ? _publish : null,
-                icon: const Icon(Icons.cloud_upload_outlined),
-                label: const Text('Publish'),
-              ),
-          ],
+          ),
+        ),
+    ];
+  }
+
+  List<Widget> _tierSection(WiTokens t) {
+    final offered = <PublishTier>{
+      for (final f in _files) ...f.source.offered,
+    };
+    // Best encode tiers first, Original last — matches the queue order.
+    final ordered = [
+      ...kEncodeTierOrder.where(offered.contains),
+      if (offered.contains(PublishTier.original)) PublishTier.original,
+    ];
+    if (ordered.length == 1 && ordered.single == PublishTier.original) {
+      // Nothing to choose — every file goes up as-is.
+      return const [];
+    }
+    return [
+      Text(
+        'QUALITY',
+        style: TextStyle(
+            fontSize: 11,
+            letterSpacing: 1.5,
+            fontWeight: FontWeight.w700,
+            color: t.ash),
+      ),
+      Text(
+        'Each ticked quality is encoded and uploaded for every file it '
+        'applies to; same-title uploads share one card with a version '
+        'picker.',
+        style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+      ),
+      for (final tier in ordered) _tierTile(t, tier),
+    ];
+  }
+
+  Widget _tierTile(WiTokens t, PublishTier tier) {
+    final applicable = [
+      for (final f in _files)
+        if (f.source.offered.contains(tier)) f,
+    ];
+    var knownBytes = 0;
+    var anyUnknown = false;
+    for (final f in applicable) {
+      final bytes = predictedSizeBytes(f.probe, tier, f.size);
+      if (bytes == null) {
+        anyUnknown = true;
+      } else {
+        knownBytes += bytes;
+      }
+    }
+    final ref = _refEstimate;
+    final cost = ref == null || knownBytes == 0
+        ? null
+        : approxCostAtto(knownBytes, ref.costAtto, ref.chunkCount);
+    final spec = kTierSpecs[tier];
+    final title = tier == PublishTier.original
+        ? 'Original files (as-is)'
+        : '${spec!.name} · ${spec.label} H.264';
+    final details = [
+      if (_files.length > 1)
+        'applies to ${applicable.length} of ${_files.length} files',
+      if (knownBytes > 0)
+        '≈${formatBytes(knownBytes)}${anyUnknown ? '+' : ''}',
+      if (cost != null) '≈${formatUnits(cost)} ANT',
+    ].join(' · ');
+    return CheckboxListTile(
+      dense: true,
+      value: _selection.contains(tier),
+      contentPadding: EdgeInsets.zero,
+      controlAffinity: ListTileControlAffinity.leading,
+      title: Text(title, style: TextStyle(color: t.bone, fontSize: 14)),
+      subtitle: details.isEmpty
+          ? null
+          : Text(details, style: TextStyle(color: t.ash, fontSize: 12)),
+      onChanged: (v) => setState(() {
+        v == true ? _selection.add(tier) : _selection.remove(tier);
+      }),
+    );
+  }
+
+  List<Widget> _uncoveredWarning(WiTokens t) {
+    final uncovered = _uncoveredFiles();
+    if (uncovered.isEmpty) return const [];
+    return [
+      Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(
+          '${uncovered.length} '
+          '${uncovered.length == 1 ? 'file matches' : 'files match'} none '
+          'of the ticked qualities and will be skipped: '
+          '${uncovered.map((f) => f.file.name).join(', ')}',
+          style: TextStyle(color: t.rust, fontSize: 12, height: 1.4),
+        ),
+      ),
+    ];
+  }
+
+  Widget _estimateSection(WiTokens t, List<PublishItem> queue) {
+    if (_estimating) {
+      return Row(
+        children: [
+          const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2)),
+          const SizedBox(width: 10),
+          Text('Getting storage quotes from the network…',
+              style: TextStyle(color: t.ash, fontSize: 13)),
+        ],
+      );
+    }
+    final error = _estimateError;
+    if (error != null) {
+      return Row(
+        children: [
+          Expanded(
+            child: Text('Estimate failed: $error',
+                style: TextStyle(color: t.rust, fontSize: 13)),
+          ),
+          TextButton(
+            onPressed: _estimateCost,
+            child: Text('Retry', style: TextStyle(color: t.accent)),
+          ),
+        ],
+      );
+    }
+    final total = _approxTotalCost(queue);
+    if (total == null) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: t.ink2,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: t.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${queue.length} ${queue.length == 1 ? 'upload' : 'uploads'} · '
+            'estimated cost ≈${formatUnits(total)} ANT',
+            style: TextStyle(
+                color: t.bone, fontSize: 15, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Estimated from live network quotes on the first file; encoded '
+            'sizes are predictions. Each upload is quoted and paid at live '
+            'prices, so the final total can differ.',
+            style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+          ),
         ],
       ),
     );
@@ -427,159 +883,179 @@ class _PublishScreenState extends State<PublishScreen> {
     );
   }
 
-  Widget _fileRow(WiTokens t) {
-    final file = _file;
-    if (file == null) {
-      return OutlinedButton.icon(
-        onPressed: _pickFile,
-        icon: const Icon(Icons.insert_drive_file_outlined),
-        label: const Text('Choose a file to publish'),
-      );
-    }
-    return Row(
-      children: [
-        Icon(Icons.insert_drive_file_outlined, color: t.accent, size: 20),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            '${file.name}${_fileSize != null ? ' · ${formatBytes(_fileSize!)}' : ''}',
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: t.bone, fontSize: 14),
-          ),
-        ),
-        if (!_uploading)
-          TextButton(
-            onPressed: _pickFile,
-            child: Text('Change', style: TextStyle(color: t.ash)),
-          ),
-      ],
-    );
+  // ── running ──────────────────────────────────────────────────────────
+
+  List<Widget> _runningChildren(WiTokens t) {
+    final finished = _queue
+        .where((e) =>
+            e.status == _EntryStatus.done || e.status == _EntryStatus.skipped)
+        .length;
+    final entry =
+        _current < _queue.length ? _queue[_current] : _queue.last;
+    return [
+      Text(
+        'Publishing · task ${(_current + 1).clamp(1, _queue.length)} of '
+        '${_queue.length}',
+        style: TextStyle(
+            color: t.bone, fontSize: 16, fontWeight: FontWeight.w600),
+      ),
+      const SizedBox(height: 8),
+      LinearProgressIndicator(
+        value: _queue.isEmpty ? null : finished / _queue.length,
+        backgroundColor: t.ink2,
+      ),
+      const SizedBox(height: 16),
+      if (entry.status == _EntryStatus.error)
+        ..._entryErrorSection(t, entry)
+      else
+        ..._entryProgressSection(t, entry),
+      const SizedBox(height: 4),
+      Text(
+        'Keep W@tch open until publishing finishes.',
+        style: TextStyle(color: t.ash, fontSize: 12),
+      ),
+      const SizedBox(height: 16),
+      ..._queueList(t),
+    ];
   }
 
-  Widget _estimateSection(WiTokens t) {
-    if (_estimating) {
-      return Row(
-        children: [
-          const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2)),
-          const SizedBox(width: 10),
-          Text('Getting storage quotes from the network…',
-              style: TextStyle(color: t.ash, fontSize: 13)),
-        ],
-      );
+  List<Widget> _entryProgressSection(WiTokens t, _QueueEntry entry) {
+    final String label;
+    double? fraction;
+    if (entry.status == _EntryStatus.encoding) {
+      final spec = kTierSpecs[entry.item.tier];
+      fraction = entry.encodeFraction;
+      label = 'Encoding ${spec?.label ?? ''}'
+          '${fraction == null ? '…' : ' · ${(fraction * 100).round()}%'}';
+    } else {
+      final job = entry.job;
+      final phase = job?.phase ?? 'starting';
+      final total = job?.total ?? 0;
+      final done = job?.done ?? 0;
+      label = switch (phase) {
+        'starting' => 'Starting upload…',
+        'encrypting' => 'Encrypting file…',
+        'quoting' =>
+          'Getting storage quotes${total > 0 ? ' ($done of $total)' : '…'}',
+        'paying' => 'Paying for storage…',
+        'storing' =>
+          'Storing chunks${total > 0 ? ' ($done of $total)' : '…'}',
+        _ => phase,
+      };
+      fraction =
+          phase == 'storing' && total > 0 ? done / total : null;
     }
-    final error = _estimateError;
-    if (error != null) {
-      return Row(
-        children: [
-          Expanded(
-            child: Text('Estimate failed: $error',
-                style: TextStyle(color: t.rust, fontSize: 13)),
-          ),
-          TextButton(
-            onPressed: _estimateCost,
-            child: Text('Retry', style: TextStyle(color: t.accent)),
-          ),
-        ],
-      );
-    }
-    final estimate = _estimate;
-    if (estimate == null) return const SizedBox.shrink();
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: t.ink2,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: t.line),
+    return [
+      Text(
+        entry.item.outputName,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: t.bone, fontSize: 14),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            estimate.alreadyStored
-                ? 'Already on the network — publishing again is free'
-                : 'Estimated cost: ${formatUnits(estimate.costAtto)} ANT',
-            style: TextStyle(
-                color: t.bone, fontSize: 15, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${estimate.chunkCount} chunks · plus ~'
-            '${formatUnits(estimate.gasWei)} ETH gas · the network quotes '
-            'live prices, so the final cost can differ slightly',
-            style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
-          ),
-        ],
-      ),
-    );
+      const SizedBox(height: 8),
+      LinearProgressIndicator(value: fraction, backgroundColor: t.ink2),
+      const SizedBox(height: 8),
+      Text(label, style: TextStyle(color: t.boneDim, fontSize: 13)),
+    ];
   }
 
-  Widget _progressSection(WiTokens t, UploadJob? job) {
-    final phase = job?.phase ?? 'starting';
-    final total = job?.total ?? 0;
-    final done = job?.done ?? 0;
-    final label = switch (phase) {
-      'starting' => 'Starting…',
-      'encrypting' => 'Encrypting file…',
-      'quoting' =>
-        'Getting storage quotes${total > 0 ? ' ($done of $total)' : '…'}',
-      'paying' => 'Paying for storage…',
-      'storing' =>
-        'Storing chunks${total > 0 ? ' ($done of $total)' : '…'}',
-      'error' => 'Upload failed',
-      _ => phase,
-    };
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (phase != 'error') ...[
-          LinearProgressIndicator(
-            value: phase == 'storing' && total > 0 ? done / total : null,
-            backgroundColor: t.ink2,
+  List<Widget> _entryErrorSection(WiTokens t, _QueueEntry entry) {
+    return [
+      Text(
+        '${entry.item.outputName} failed',
+        style: TextStyle(
+            color: t.rust, fontSize: 14, fontWeight: FontWeight.w600),
+      ),
+      const SizedBox(height: 4),
+      Text(entry.error ?? 'unknown error',
+          style: TextStyle(color: t.boneDim, fontSize: 13)),
+      const SizedBox(height: 12),
+      Wrap(
+        spacing: 12,
+        children: [
+          FilledButton(
+            onPressed: () => _errorAction?.complete(_ErrorAction.retry),
+            child: const Text('Try again'),
           ),
-          const SizedBox(height: 8),
-          Text(label, style: TextStyle(color: t.boneDim, fontSize: 13)),
-          const SizedBox(height: 4),
-          Text(
-            'Keep W@tch open until the upload finishes.',
-            style: TextStyle(color: t.ash, fontSize: 12),
+          OutlinedButton(
+            onPressed: () => _errorAction?.complete(_ErrorAction.skip),
+            child: const Text('Skip this file'),
           ),
-        ] else ...[
-          Text(label,
-              style: TextStyle(
-                  color: t.rust,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600)),
-          const SizedBox(height: 4),
-          Text(job?.error ?? 'unknown error',
-              style: TextStyle(color: t.boneDim, fontSize: 13)),
-          const SizedBox(height: 12),
-          Row(
+          TextButton(
+            onPressed: () => _errorAction?.complete(_ErrorAction.stop),
+            child: Text('Stop', style: TextStyle(color: t.ash)),
+          ),
+        ],
+      ),
+    ];
+  }
+
+  List<Widget> _queueList(WiTokens t) {
+    return [
+      for (final entry in _queue)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child: Row(
             children: [
-              FilledButton(
-                onPressed: _canPublish ? _publish : null,
-                child: const Text('Try again'),
+              Icon(
+                switch (entry.status) {
+                  _EntryStatus.pending => Icons.schedule,
+                  _EntryStatus.encoding => Icons.movie_filter_outlined,
+                  _EntryStatus.uploading => Icons.cloud_upload_outlined,
+                  _EntryStatus.done => Icons.check_circle_outline,
+                  _EntryStatus.error => Icons.error_outline,
+                  _EntryStatus.skipped => Icons.remove_circle_outline,
+                },
+                size: 16,
+                color: switch (entry.status) {
+                  _EntryStatus.done => t.signalOk,
+                  _EntryStatus.error => t.rust,
+                  _EntryStatus.pending || _EntryStatus.skipped => t.ash,
+                  _ => t.accent,
+                },
               ),
-              const SizedBox(width: 12),
-              TextButton(
-                onPressed: _reset,
-                child:
-                    Text('Start over', style: TextStyle(color: t.ash)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  entry.item.outputName,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: entry.status == _EntryStatus.skipped
+                          ? t.ash
+                          : t.boneDim,
+                      fontSize: 13),
+                ),
               ),
             ],
           ),
-        ],
-      ],
-    );
+        ),
+    ];
   }
 
-  List<Widget> _doneSection(WiTokens t, UploadResult result) {
+  // ── done ─────────────────────────────────────────────────────────────
+
+  List<Widget> _doneChildren(WiTokens t) {
+    final published = _published;
+    final failed = _queue
+        .where((e) => e.status == _EntryStatus.error)
+        .length;
+    final skipped = _queue
+        .where((e) => e.status == _EntryStatus.skipped)
+        .length;
+    var paid = BigInt.zero;
+    for (final e in published) {
+      paid += e.result!.costAtto;
+    }
+    final allGood = failed == 0 && skipped == 0;
     return [
       Row(
         children: [
-          Icon(Icons.check_circle_outline, color: t.signalOk, size: 28),
+          Icon(
+            allGood && published.isNotEmpty
+                ? Icons.check_circle_outline
+                : Icons.info_outline,
+            color: allGood && published.isNotEmpty ? t.signalOk : t.rust,
+            size: 28,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -592,71 +1068,95 @@ class _PublishScreenState extends State<PublishScreen> {
       ),
       const SizedBox(height: 8),
       Text(
-        '${_file?.name ?? ''} · ${formatBytes(result.size)} · '
-        '${result.chunks} chunks · paid ${formatUnits(result.costAtto)} ANT',
+        '${published.length} of ${_queue.length} uploads published · '
+        'paid ${formatUnits(paid)} ANT'
+        '${skipped > 0 ? ' · $skipped skipped' : ''}'
+        '${failed > 0 ? ' · $failed failed' : ''}',
         style: TextStyle(color: t.boneDim, fontSize: 13),
       ),
       const SizedBox(height: 16),
-      Text('ADDRESS',
-          style: TextStyle(
-              fontSize: 11,
-              letterSpacing: 1.5,
-              fontWeight: FontWeight.w700,
-              color: t.ash)),
-      const SizedBox(height: 6),
-      Row(
+      for (final entry in published) _publishedTile(t, entry),
+      const SizedBox(height: 8),
+      Text(
+        'The titles are ready to play from your library once added. To '
+        'share them, save the .datamap files and send those (or export a '
+        'list bundle from the Media page).',
+        style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+      ),
+      const SizedBox(height: 20),
+      if (published.isNotEmpty) ...[
+        FilledButton.icon(
+          onPressed: _addAllToLibrary,
+          icon: const Icon(Icons.video_library_outlined),
+          label: const Text('Add to library'),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: _saveAllDatamaps,
+          icon: const Icon(Icons.save_alt),
+          label: Text(published.length == 1
+              ? 'Save .datamap file'
+              : 'Save ${published.length} .datamap files'),
+        ),
+        const SizedBox(height: 10),
+      ],
+      TextButton(
+        onPressed: _reset,
+        child: Text('Publish more', style: TextStyle(color: t.ash)),
+      ),
+    ];
+  }
+
+  Widget _publishedTile(WiTokens t, _QueueEntry entry) {
+    final result = entry.result!;
+    final address = result.address;
+    final short = address.length > 16
+        ? '${address.substring(0, 10)}…${address.substring(address.length - 6)}'
+        : address;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
         children: [
+          Icon(Icons.check_circle_outline, color: t.signalOk, size: 18),
+          const SizedBox(width: 8),
           Expanded(
-            child: SelectableText(
-              result.address,
-              style: TextStyle(
-                fontFamily: wiMonoFamily,
-                fontFamilyFallback: wiMonoFallback,
-                fontSize: 12,
-                color: t.accent,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.item.outputName,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: t.bone, fontSize: 13),
+                ),
+                Text(
+                  '${formatBytes(result.size)} · ${result.chunks} chunks · '
+                  '${formatUnits(result.costAtto)} ANT · $short',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: t.ash,
+                    fontSize: 11,
+                    fontFamily: wiMonoFamily,
+                    fontFamilyFallback: wiMonoFallback,
+                  ),
+                ),
+              ],
             ),
           ),
           IconButton(
             tooltip: 'Copy address',
-            icon: Icon(Icons.copy, color: t.ash, size: 18),
+            icon: Icon(Icons.copy, color: t.ash, size: 16),
             onPressed: () {
-              Clipboard.setData(ClipboardData(text: result.address));
+              Clipboard.setData(ClipboardData(text: address));
               _snack('Address copied');
             },
           ),
         ],
       ),
-      const SizedBox(height: 8),
-      Text(
-        'The title is ready to play from your library once added. To '
-        'share it, save the .datamap file and send that (or export a '
-        'list bundle from the Media page).',
-        style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
-      ),
-      const SizedBox(height: 20),
-      FilledButton.icon(
-        onPressed: () => _addToLibrary(result),
-        icon: const Icon(Icons.video_library_outlined),
-        label: const Text('Add to library'),
-      ),
-      const SizedBox(height: 10),
-      OutlinedButton.icon(
-        onPressed: () => _saveDatamap(result),
-        icon: const Icon(Icons.save_alt),
-        label: const Text('Save .datamap file'),
-      ),
-      const SizedBox(height: 10),
-      TextButton(
-        onPressed: _reset,
-        child:
-            Text('Publish another file', style: TextStyle(color: t.ash)),
-      ),
-    ];
+    );
   }
 }
 
 /// Desktop platforms are the only place Publish exists this edition
-/// (uploads need local files, ffmpeg later, and a wallet on disk).
+/// (uploads need local files, ffmpeg, and a wallet on disk).
 bool get isDesktopPlatform =>
     Platform.isLinux || Platform.isMacOS || Platform.isWindows;

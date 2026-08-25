@@ -3,6 +3,7 @@ import 'dart:io' show exit;
 
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
@@ -12,6 +13,7 @@ import '../services/library_store.dart';
 import '../services/embedded_client.dart';
 import '../services/metadata_service.dart';
 import '../services/storage_usage.dart';
+import '../services/update_check.dart';
 import '../theme/tokens.dart';
 import '../widgets/brand_mark.dart';
 import 'downloads_screen.dart';
@@ -39,12 +41,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   StreamingNetworkPolicy _streamingNetwork = StreamingNetworkPolicy.ask;
   int? _dataSizeBytes;
   bool _dataSizeKnown = false;
+  bool _updateCheckEnabled = true;
 
   @override
   void initState() {
     super.initState();
     _reload();
     _loadVersion();
+    UpdateCheck.enabled().then((v) {
+      if (mounted) setState(() => _updateCheckEnabled = v);
+    });
     _loadDataSize();
     _scheduleHealthPoll();
     DownloadManager.instance.ensureLoaded();
@@ -666,6 +672,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(color: t.ash, fontSize: 12),
                   ),
                 ),
+                if (isDesktopPlatform) ...[
+                  ListenableBuilder(
+                    listenable: UpdateCheck.instance,
+                    builder: (context, _) {
+                      final tag = UpdateCheck.instance.availableTag;
+                      if (tag == null) return const SizedBox.shrink();
+                      return ListTile(
+                        leading:
+                            Icon(Icons.system_update_alt, color: t.accent),
+                        title: Text('Update available',
+                            style:
+                                TextStyle(color: t.accent, fontSize: 15)),
+                        subtitle: Text(
+                          '$tag — open the release page to download',
+                          style: TextStyle(color: t.ash, fontSize: 12),
+                        ),
+                        trailing: Icon(Icons.open_in_new,
+                            color: t.ash, size: 18),
+                        onTap: () => launchUrl(Uri.parse(
+                            UpdateCheck.instance.releaseUrl ??
+                                UpdateCheck.releasePage)),
+                      );
+                    },
+                  ),
+                  SwitchListTile(
+                    secondary: Icon(Icons.update, color: t.accent),
+                    title: Text('Check for updates on startup',
+                        style: TextStyle(color: t.bone, fontSize: 15)),
+                    subtitle: Text(
+                      'At most once a day, W@tch asks GitHub for the '
+                      'latest release and mentions it here if it is '
+                      'newer. This is the app\'s only server contact '
+                      'besides the Autonomi network and your own '
+                      'TMDB key.',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                    value: _updateCheckEnabled,
+                    onChanged: (v) async {
+                      await UpdateCheck.setEnabled(v);
+                      if (mounted) {
+                        setState(() => _updateCheckEnabled = v);
+                      }
+                    },
+                  ),
+                ],
                 ListTile(
                   leading: Icon(Icons.gavel_outlined, color: t.accent),
                   title: Text('Open-source licenses',

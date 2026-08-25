@@ -83,6 +83,23 @@ for lib in libjack.so.0 libpipewire-0.3.so.0 libasound.so.2 \
   [ -e "$FALLBACK/$lib" ] || { echo "fallback/$lib missing"; exit 1; }
 done
 
+# Publish quality tiers: static ffmpeg/ffprobe (johnvansickle build,
+# fully static — no glibc/soname interplay with the bundled libmpv
+# stack) land beside the app binary, where FfmpegService looks first.
+# Tarball cached in ~/tools and sha256-pinned; a hash mismatch means the
+# release URL moved on to a newer version — re-pin deliberately.
+FFMPEG_TAR="${FFMPEG_TAR:-$HOME/tools/ffmpeg-7.0.2-amd64-static.tar.xz}"
+FFMPEG_URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+FFMPEG_SHA256="abda8d77ce8309141f83ab8edf0596834087c52467f6badf376a6a2a4c87cf67"
+[ -f "$FFMPEG_TAR" ] || curl -fsSL -o "$FFMPEG_TAR" "$FFMPEG_URL"
+echo "$FFMPEG_SHA256  $FFMPEG_TAR" | sha256sum -c --quiet - \
+  || { echo "ffmpeg tarball sha256 mismatch"; exit 1; }
+tar -xJf "$FFMPEG_TAR" -C "$STAGE" \
+  ffmpeg-7.0.2-amd64-static/ffmpeg ffmpeg-7.0.2-amd64-static/ffprobe
+install -m755 "$STAGE/ffmpeg-7.0.2-amd64-static/ffmpeg" \
+  "$STAGE/ffmpeg-7.0.2-amd64-static/ffprobe" "$APPDIR/usr/bin/"
+"$APPDIR/usr/bin/ffprobe" -version >/dev/null || { echo "bundled ffprobe broken"; exit 1; }
+
 mkdir -p "$OUT_DIR"
 ARCH=x86_64 "$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" \
   "$OUT_DIR/Watch-It-$VERSION-x86_64.AppImage"
