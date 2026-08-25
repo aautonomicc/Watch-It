@@ -1,10 +1,16 @@
 # Plan — next edition (v0.1.0-alpha.55) — "Publish edition"
 
-Status: rev 4 2026-08-25 — WINDOWS TEST PASSED: user ran the fresh
+Status: rev 5 2026-08-25 — ALL OPEN QUESTIONS RESOLVED, BUILD STARTED.
+User: "Go with your recommendations for all the points and use Publish
+as the name and let's go with a wallet and plain upload release to
+start with." So: alpha.55 = **wallet + plain upload** ("Publish", no
+re-encode tiers); encode tiers + bundled ffmpeg + the update
+check-and-notify move to alpha.56; no Windows installer during alpha
+(portable zip stands); windows.yml gains the `push: tags: v*` trigger
+now. See Decisions 7–10.
+Earlier (rev 4): WINDOWS TEST PASSED: user ran the fresh
 2026-08-25 zip on a real Windows box, confirmed working → the Windows
 release leg is UNGATED; Windows joins this and future desktop releases.
-New section 6 (distribution: release mechanics, installer question,
-desktop auto-update) added with recommendations — discussion pending.
 Earlier: APPROVED scope, decisions recorded (see
 "Decisions" below): internal wallet with seed-word backup + private-key
 import, all tiers encoded by default with deselect checkboxes, ffmpeg
@@ -274,21 +280,20 @@ Your call.
 6. **Windows CONFIRMED WORKING** (user test on real Windows,
    2026-08-25) — Windows zip joins this and future desktop releases;
    the alpha.55 Windows leg is ungated.
+7. **Name: "Publish"** for the drawer entry (2026-08-25).
+8. **Edition SPLIT** (2026-08-25): alpha.55 = wallet + plain upload
+   (pick file → cost → confirm → pay → upload → into library; no
+   probe/tiers/ffmpeg). alpha.56 = quality tiers + bundled ffmpeg
+   (section 4 stands as its spec) + the update check-and-notify
+   (section 6 phase 1, per the split-slots-it-there recommendation).
+9. **No Windows installer** during alpha — portable zip stands;
+   revisit at beta/1.0 with code signing + Inno Setup (section 6).
+10. **windows.yml `push: tags: v*` trigger** lands with alpha.55
+    (workflow_dispatch kept for ad-hoc builds).
 
 ## Still open
 
-1. **Name:** Publish vs Upload for the drawer entry? (Plan assumes
-   "Publish" until said otherwise.)
-2. **Split the edition?** Wallet+plain upload in alpha.55, encode tiers
-   in alpha.56 — or one big release?
-3. **Windows installer?** Recommendation: no — keep the portable zip
-   through alpha; revisit (Inno Setup, per-user) at beta/1.0 together
-   with code signing and self-update. (Section 6.)
-4. **Update check-and-notify** (GitHub releases API, Settings toggle):
-   include in alpha.55, or park for the next edition? Recommendation:
-   yes if the edition doesn't split — it's ~a day of work; if the
-   edition splits, it slots into the second half. Self-update proper is
-   deferred either way. (Section 6.)
+None — all resolved; see Decisions.
 
 ## DEFERRED to a later release (was rev-1 scope A)
 
