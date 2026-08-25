@@ -525,7 +525,7 @@ class _DetailScreenState extends State<DetailScreen> {
           DetailHeader(
             poster: headerArtwork(
               t,
-              posterImage(meta, fit: BoxFit.cover),
+              entryPosterImage(meta, fit: BoxFit.cover),
               meta.episodeLabel != null
                   ? Icons.live_tv_outlined
                   : Icons.movie_outlined,

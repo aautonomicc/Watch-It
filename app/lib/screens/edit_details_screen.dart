@@ -212,10 +212,16 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
   }
 
   /// The image the poster preview shows before any staged change — the
-  /// artwork slot this scope's save would replace.
-  Widget? _currentPosterImage() => _scope == EditDetailsScope.show
-      ? showPosterImage(_meta, fit: BoxFit.cover)
-      : posterImage(_meta, fit: BoxFit.cover);
+  /// artwork slot this scope's save would replace. The episode editor
+  /// shows only the episode's own user artwork, not the season art its
+  /// pages merely display (that slot belongs to the season editor).
+  Widget? _currentPosterImage() => switch (_scope) {
+        EditDetailsScope.show => showPosterImage(_meta, fit: BoxFit.cover),
+        EditDetailsScope.season => posterImage(_meta, fit: BoxFit.cover),
+        EditDetailsScope.entry => _episodeScope
+            ? episodePosterImage(_meta, fit: BoxFit.cover)
+            : posterImage(_meta, fit: BoxFit.cover),
+      };
 
   bool get _hasCurrentPoster => _currentPosterImage() != null;
 
