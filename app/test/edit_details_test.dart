@@ -64,20 +64,26 @@ void main() {
     postersDir.deleteSync(recursive: true);
   });
 
-  Future<void> pumpEditor(WidgetTester tester) async {
+  Future<void> pumpEditor(WidgetTester tester,
+      {MediaEntry? forEntry,
+      EditDetailsScope scope = EditDetailsScope.entry}) async {
     tester.view.physicalSize = const Size(900, 1600);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(
       theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
       home: EditDetailsScreen(
-        entry: entry,
+        entry: forEntry ?? entry,
+        scope: scope,
         ffmpeg: _NoFfmpeg(),
         postersDirProvider: () async => postersDir,
       ),
     ));
     await tester.pumpAndSettle();
   }
+
+  Finder fieldWithLabel(String label) => find.byWidgetPredicate(
+      (w) => w is TextField && w.decoration?.labelText == label);
 
   testWidgets('prefills from parsed name, saves user details',
       (tester) async {
@@ -133,6 +139,77 @@ void main() {
     final saved = File('${postersDir.path}/${row.posterFile}');
     expect(saved.existsSync(), true);
     expect(saved.readAsBytesSync(), bytes);
+  });
+
+  group('TV scopes', () {
+    const epName = 'My Show S01E02.mkv';
+    final epParsed = parseMediaName(epName);
+    final episode = MediaEntry(
+        name: epName,
+        address:
+            'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd');
+
+    testWidgets('episode entries edit the episode, not the show',
+        (tester) async {
+      await pumpEditor(tester, forEntry: episode);
+
+      // No show-title/year fields; the text field is the episode name.
+      expect(fieldWithLabel('Title'), findsNothing);
+      expect(fieldWithLabel('Year (optional)'), findsNothing);
+      final nameField =
+          fieldWithLabel('Episode name (optional) — S01E02');
+      expect(nameField, findsOneWidget);
+      expect(find.text('Edit episode details'), findsOneWidget);
+
+      await tester.enterText(nameField, 'The One With The Beach');
+      await tester.enterText(fieldWithLabel('Description (optional)'),
+          'They go to the beach.');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final row = await metadataRowFor(epParsed.lookupKey);
+      expect(row!.userEdited, true);
+      expect(row.episodeLabel, 'S01E02 · The One With The Beach');
+      expect(row.overview, 'They go to the beach.');
+      expect(row.title, 'My Show'); // show title kept, not rewritten
+      expect(await metadataRowFor(epParsed.showLookupKey), isNull);
+    });
+
+    testWidgets('show scope writes the show key', (tester) async {
+      await pumpEditor(tester,
+          forEntry: episode, scope: EditDetailsScope.show);
+
+      expect(find.text('Edit show details'), findsOneWidget);
+      expect(fieldWithLabel('Title'), findsOneWidget);
+      await tester.enterText(fieldWithLabel('Title'), 'Renamed Show');
+      await tester.enterText(
+          fieldWithLabel('Description (optional)'), 'A show of ours.');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final row = await metadataRowFor(epParsed.showLookupKey);
+      expect(row!.userEdited, true);
+      expect(row.title, 'Renamed Show');
+      expect(row.overview, 'A show of ours.');
+      expect(await metadataRowFor(epParsed.lookupKey), isNull);
+    });
+
+    testWidgets('season scope writes the season key', (tester) async {
+      await pumpEditor(tester,
+          forEntry: episode, scope: EditDetailsScope.season);
+
+      expect(find.text('Edit season 1 details'), findsOneWidget);
+      expect(fieldWithLabel('Title'), findsNothing);
+      await tester.enterText(fieldWithLabel('Description (optional)'),
+          'The first season.');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final row = await metadataRowFor(epParsed.seasonLookupKey!);
+      expect(row!.userEdited, true);
+      expect(row.overview, 'The first season.');
+      expect(await metadataRowFor(epParsed.lookupKey), isNull);
+    });
   });
 
   testWidgets('remove-my-edits appears for user rows and clears them',

@@ -288,9 +288,17 @@ Future<BundleBuildResult> buildBundle(
   final entries = [for (final list in lists) ...list.entries];
 
   // metadata.json + posters/ — cached rows for the bundled entries.
-  final keys = <String>{
-    for (final e in entries) parseMediaName(e.name).lookupKey,
-  };
+  // Episodes also pull in their show/season keys: user-authored
+  // show/season details live under those (no entry resolves there).
+  final keys = <String>{};
+  for (final e in entries) {
+    final parsed = parseMediaName(e.name);
+    keys.add(parsed.lookupKey);
+    if (parsed.isEpisode) {
+      keys.add(parsed.showLookupKey);
+      keys.add(parsed.seasonLookupKey!);
+    }
+  }
   final db = await LibraryStore.database();
   final rows = keys.isEmpty
       ? <MetadataCacheRow>[]
