@@ -189,15 +189,120 @@ async fn drive_upload(
     }
 
     // Same identity a `.datamap` import derives; storing the root map
-    // makes the upload instantly playable/exportable.
-    let addr = crate::verify::derive_address(&result.data_map)?;
-    engine.store_root_map(addr, &result.data_map);
+    // makes the upload instantly playable/exportable. Everything below
+    // runs after payment + storage succeeded, so any failure here must
+    // not read as a lost upload — the file is on the network and a
+    // retry finishes for free.
+    let (addr, root) =
+        uploaded_root_map(engine, &result.data_map).await.map_err(|e| {
+            format!(
+                "the upload itself succeeded (all chunks stored and paid \
+                 for) but finishing the library entry failed: {e} — \
+                 publish the same file again to finish for free \
+                 (already-stored chunks cost nothing)"
+            )
+        })?;
+    engine.store_root_map(addr, &root);
 
     Ok(Outcome {
         address: hex::encode(addr),
-        size: result.data_map.original_file_size() as u64,
+        size: root.original_file_size() as u64,
         chunks: result.total_chunks,
         cost_atto: result.storage_cost_atto.clone(),
         gas_wei: result.gas_cost_wei,
     })
+}
+
+/// Address + root map for what ant-core handed back. A ≤3-chunk file's
+/// map is its own root, but anything bigger (~12 MiB up — every real
+/// movie) arrives as the SHRUNK child map (the same shape ant-cli
+/// writes to `.datamap` files): its own hash IS the address, and the
+/// root is recovered by fetching the wrapper chunks this upload just
+/// stored — exactly the `POST /datamap` import path (server.rs).
+async fn uploaded_root_map(
+    engine: &'static Engine,
+    map: &ant_core::data::DataMap,
+) -> Result<([u8; 32], ant_core::data::DataMap), String> {
+    if !map.is_child() {
+        return Ok((crate::verify::derive_address(map)?, map.clone()));
+    }
+    let addr = crate::verify::shrunk_map_address(map)?;
+    // Re-publish of a file already imported/published here: the stored
+    // root went through expand+verify — no network round needed.
+    if let Some(root) = engine.stored_root_map(&addr) {
+        return Ok((addr, root));
+    }
+    let root = engine.expand_child_map(map.clone()).await?;
+    crate::verify::verify_root_map(&addr, &root)?;
+    Ok((addr, root))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ant_core::data::DataMap;
+    use std::collections::HashMap;
+    use xor_name::XorName;
+
+    /// Offline upload-equivalent (same as verify.rs tests): encrypt
+    /// deterministic content, derive the address, resolve the root.
+    fn upload(len: usize) -> ([u8; 32], DataMap, DataMap) {
+        let mut v = Vec::with_capacity(len);
+        let mut x = 0x51ED2701u64;
+        while v.len() < len {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            v.extend_from_slice(&x.to_le_bytes());
+        }
+        v.truncate(len);
+        let (shrunk, chunks) = self_encryption::encrypt(v.into()).unwrap();
+        let addr = *blake3::hash(&rmp_serde::to_vec(&shrunk).unwrap()).as_bytes();
+        let by_name: HashMap<XorName, bytes::Bytes> = chunks
+            .iter()
+            .map(|c| (self_encryption::hash::content_hash(&c.content), c.content.clone()))
+            .collect();
+        let mut fetch = |name: XorName| {
+            by_name
+                .get(&name)
+                .cloned()
+                .ok_or_else(|| self_encryption::Error::Generic("missing chunk".into()))
+        };
+        let root = self_encryption::get_root_data_map(shrunk.clone(), &mut fetch).unwrap();
+        (addr, shrunk, root)
+    }
+
+    fn test_engine(name: &str) -> &'static Engine {
+        let dir = std::env::temp_dir()
+            .join(format!("wi-upload-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // Engine::new never touches the network; the client connects only
+        // when a request needs it, which these branches never do.
+        Box::leak(Box::new(Engine::new(None, dir.to_str())))
+    }
+
+    #[tokio::test]
+    async fn small_upload_map_is_its_own_root() {
+        let engine = test_engine("small");
+        let (addr, map, root) = upload(10 * 1024);
+        assert!(!map.is_child()); // ≤3 chunks: ant-core returns the root itself
+        let (got_addr, got_root) = uploaded_root_map(engine, &map).await.unwrap();
+        assert_eq!(got_addr, addr);
+        assert_eq!(got_root.infos(), root.infos());
+    }
+
+    #[tokio::test]
+    async fn large_upload_child_map_resolves_via_stored_root() {
+        // What the bug hit: >3-chunk uploads hand back the SHRUNK child
+        // map. With the root already stored (re-publish of an imported
+        // file) it must resolve offline instead of erroring out.
+        let engine = test_engine("large");
+        let (addr, shrunk, root) = upload(14 * 1024 * 1024);
+        assert!(shrunk.is_child());
+        engine.store_root_map(addr, &root);
+        let (got_addr, got_root) =
+            uploaded_root_map(engine, &shrunk).await.unwrap();
+        assert_eq!(got_addr, addr);
+        assert_eq!(got_root.infos(), root.infos());
+        assert!(!got_root.is_child());
+        assert_eq!(got_root.original_file_size(), 14 * 1024 * 1024);
+    }
 }
