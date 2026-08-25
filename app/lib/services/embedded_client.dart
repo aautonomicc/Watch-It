@@ -55,6 +55,30 @@ class EmbeddedClient {
     }
   }
 
+  static String? _authToken;
+
+  /// Shared secret guarding the embedded server's wallet/upload routes
+  /// (sent as the `x-watchit-auth` header). Those endpoints can spend
+  /// money, and the localhost port is visible to every process on the
+  /// machine — only the app, which reads the token over FFI, may call
+  /// them. Null where the native library is unavailable (widget tests).
+  static String? authToken() {
+    if (_authToken != null) return _authToken;
+    if (baseUrl() == null) return null;
+    try {
+      final lib = _openLibrary();
+      if (lib == null) return null;
+      final token = lib.lookupFunction<Pointer<Utf8> Function(),
+          Pointer<Utf8> Function()>('watchit_core_auth_token');
+      final ptr = token();
+      if (ptr == nullptr) return null;
+      _authToken = ptr.toDartString();
+      return _authToken;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Load the native library. A plain name works on Android and Windows
   /// (the loader search path covers the exe dir), and on Linux when the
   /// loader path covers it (e.g. the AppImage's AppRun); desktop builds

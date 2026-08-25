@@ -11,8 +11,9 @@
 //! replug) so recovery does not wait for the next poll interval.
 
 use axum::body::{Body, Bytes};
-use axum::extract::{DefaultBodyLimit, Path};
+use axum::extract::{DefaultBodyLimit, Path, Request};
 use axum::http::{header, HeaderMap, Method, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
@@ -28,7 +29,54 @@ use crate::engine::Engine;
 /// data map (zip-bomb guard on the bundle import path).
 const MAX_ROOTMAP_BYTES: usize = 32 * 1024 * 1024;
 
+/// Full router with the wallet/upload routes guarded by a shared-secret
+/// header. Those endpoints spend money or manage the wallet key, and the
+/// server port is reachable by every local process — only the app itself
+/// (which gets the token over FFI) may call them. The streaming/import
+/// routes stay open: libmpv fetches them without custom headers.
+pub fn router_with_auth(engine: &'static Engine, token: &'static str) -> Router {
+    open_router(engine).merge(protected_router(engine).layer(middleware::from_fn(
+        move |req: Request, next: Next| async move {
+            let presented = req
+                .headers()
+                .get("x-watchit-auth")
+                .and_then(|v| v.to_str().ok());
+            if presented == Some(token) {
+                next.run(req).await
+            } else {
+                (StatusCode::UNAUTHORIZED, "auth token required").into_response()
+            }
+        },
+    )))
+}
+
+/// Tokenless router (tests, devserver without WATCHIT_AUTH_TOKEN).
 pub fn router(engine: &'static Engine) -> Router {
+    open_router(engine).merge(protected_router(engine))
+}
+
+fn protected_router(engine: &'static Engine) -> Router {
+    Router::new()
+        .route(
+            "/wallet",
+            get(move || wallet_status(engine))
+                .post(move |body: Bytes| wallet_import(engine, body))
+                .delete(move || wallet_delete(engine)),
+        )
+        .route("/wallet/generate", post(wallet_generate))
+        .route("/wallet/balances", get(move || wallet_balances(engine)))
+        .route(
+            "/upload/estimate",
+            post(move |body: Bytes| upload_estimate(engine, body)),
+        )
+        .route("/upload", post(move |body: Bytes| upload_start(engine, body)))
+        .route(
+            "/upload/{id}",
+            get(move |path: Path<u64>| upload_status(engine, path)),
+        )
+}
+
+fn open_router(engine: &'static Engine) -> Router {
     Router::new()
         .route("/health", get(move || health(engine)))
         .route("/reconnect", post(move || reconnect(engine)))
@@ -272,6 +320,189 @@ async fn put_rootmap(
             tracing::warn!("rootmap import rejected for {addr_hex}: {e}");
             (StatusCode::UNPROCESSABLE_ENTITY, e).into_response()
         }
+    }
+}
+
+fn json_ok(body: serde_json::Value) -> Response {
+    ([(header::CONTENT_TYPE, "application/json")], body.to_string()).into_response()
+}
+
+/// First keychain touch can block on the Secret Service D-Bus round
+/// trip, so wallet-store reads/writes run off the async workers.
+async fn load_wallet(engine: &'static Engine) -> Option<(String, crate::wallet::Storage)> {
+    tokio::task::spawn_blocking(move || engine.wallet.load())
+        .await
+        .ok()
+        .flatten()
+}
+
+/// `GET /wallet` — configured?, address, storage backend. Never returns
+/// key material.
+async fn wallet_status(engine: &'static Engine) -> Response {
+    let body = match load_wallet(engine).await {
+        Some((key, storage)) => match crate::wallet::address_of(&key) {
+            Ok(address) => serde_json::json!({
+                "configured": true,
+                "address": address,
+                "storage": storage.as_str(),
+            }),
+            Err(e) => serde_json::json!({ "configured": false, "error": e }),
+        },
+        None => serde_json::json!({ "configured": false }),
+    };
+    json_ok(body)
+}
+
+/// `POST /wallet/generate` — a fresh 12-word mnemonic + its address for
+/// the backup ceremony. Nothing is stored (and nothing logged); the app
+/// POSTs the phrase back to `/wallet` once the user confirms the words.
+async fn wallet_generate() -> Response {
+    match crate::wallet::generate() {
+        Ok((mnemonic, _key, address)) => json_ok(serde_json::json!({
+            "mnemonic": mnemonic,
+            "address": address,
+        })),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+/// `POST /wallet` — import `{"private_key": …}` or `{"mnemonic": …}`,
+/// persist the key, and reconnect so the client picks the wallet up.
+async fn wallet_import(engine: &'static Engine, body: Bytes) -> Response {
+    let json: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("bad JSON: {e}")).into_response(),
+    };
+    let derived = if let Some(pk) = json.get("private_key").and_then(|v| v.as_str()) {
+        crate::wallet::normalize_private_key(pk)
+    } else if let Some(phrase) = json.get("mnemonic").and_then(|v| v.as_str()) {
+        crate::wallet::key_from_mnemonic(phrase)
+    } else {
+        Err("body must have \"private_key\" or \"mnemonic\"".to_string())
+    };
+    let key = match derived {
+        Ok(k) => k,
+        Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let address = match crate::wallet::address_of(&key) {
+        Ok(a) => a,
+        Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let stored = tokio::task::spawn_blocking({
+        let key = key.clone();
+        move || engine.wallet.store(&key)
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r);
+    match stored {
+        Ok(storage) => {
+            engine.reconnect_for_wallet();
+            json_ok(serde_json::json!({
+                "address": address,
+                "storage": storage.as_str(),
+            }))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+/// `DELETE /wallet` — remove the key from every backend and drop the
+/// wallet from the live client.
+async fn wallet_delete(engine: &'static Engine) -> Response {
+    let _ = tokio::task::spawn_blocking(move || engine.wallet.remove()).await;
+    engine.reconnect_for_wallet();
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// `GET /wallet/balances` — ANT + ETH on Arbitrum One as raw base-unit
+/// decimal strings (UI formats; ANT and ETH are both 18 decimals).
+async fn wallet_balances(engine: &'static Engine) -> Response {
+    let Some((key, _)) = load_wallet(engine).await else {
+        return (StatusCode::NOT_FOUND, "no wallet configured").into_response();
+    };
+    match crate::wallet::balances(&key).await {
+        Ok((ant_atto, eth_wei)) => json_ok(serde_json::json!({
+            "ant_atto": ant_atto,
+            "eth_wei": eth_wei,
+        })),
+        Err(e) => (StatusCode::BAD_GATEWAY, e).into_response(),
+    }
+}
+
+/// `POST /upload/estimate` `{"path": …}` — live per-chunk quotes from the
+/// network (fast, no wallet needed, no chain traffic; gas is a static
+/// heuristic on ant-core's side).
+async fn upload_estimate(engine: &'static Engine, body: Bytes) -> Response {
+    let json: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("bad JSON: {e}")).into_response(),
+    };
+    let Some(path) = json.get("path").and_then(|v| v.as_str()) else {
+        return (StatusCode::BAD_REQUEST, "body must have \"path\"").into_response();
+    };
+    let path = std::path::PathBuf::from(path);
+    if !path.is_file() {
+        return (StatusCode::BAD_REQUEST, format!("no such file: {}", path.display()))
+            .into_response();
+    }
+    let client = match engine.client().await {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("not connected to the network yet: {e}"),
+            )
+                .into_response()
+        }
+    };
+    use ant_core::data::PaymentMode;
+    match client
+        .estimate_upload_cost(&path, PaymentMode::Auto, None)
+        .await
+    {
+        Ok(est) => json_ok(serde_json::json!({
+            "file_size": est.file_size,
+            "chunk_count": est.chunk_count,
+            "storage_cost_atto": est.storage_cost_atto,
+            "estimated_gas_cost_wei": est.estimated_gas_cost_wei,
+            "confidence": format!("{:?}", est.confidence),
+        })),
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("estimate failed: {e}")).into_response(),
+    }
+}
+
+/// `POST /upload` `{"path": …, "name": …?}` — start the one paid upload
+/// slot; returns `{"id": N}` to poll on `GET /upload/{id}`.
+async fn upload_start(engine: &'static Engine, body: Bytes) -> Response {
+    let json: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("bad JSON: {e}")).into_response(),
+    };
+    let Some(path) = json.get("path").and_then(|v| v.as_str()) else {
+        return (StatusCode::BAD_REQUEST, "body must have \"path\"").into_response();
+    };
+    let path = std::path::PathBuf::from(path);
+    let name = json
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_default();
+    match engine.start_upload(path, name) {
+        Ok(id) => json_ok(serde_json::json!({ "id": id })),
+        Err(e) if e.contains("already running") => {
+            (StatusCode::CONFLICT, e).into_response()
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+/// `GET /upload/{id}` — current job state (phase/progress/result/error).
+async fn upload_status(engine: &'static Engine, Path(id): Path<u64>) -> Response {
+    match engine.uploads.state(id) {
+        Some(state) => json_ok(state.to_json(id)),
+        None => (StatusCode::NOT_FOUND, "no such upload job").into_response(),
     }
 }
 
@@ -649,6 +880,204 @@ mod rootmap_tests {
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+}
+
+#[cfg(test)]
+mod wallet_api_tests {
+    use super::*;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    // hardhat/foundry account 0 — same vector as the wallet module tests.
+    const KEY: &str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+    const ADDR: &str = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+    const PHRASE: &str = "test test test test test test test test test test test junk";
+
+    /// Engine with a temp data dir and the keychain disabled — API tests
+    /// must never write a developer's real keychain, and the file
+    /// fallback is the deterministic backend.
+    fn test_engine(name: &str) -> &'static Engine {
+        let dir = std::env::temp_dir().join(format!(
+            "wi-wallet-api-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let engine: &'static Engine =
+            Box::leak(Box::new(Engine::new(None, dir.to_str())));
+        engine.wallet.disable_keychain();
+        engine
+    }
+
+    async fn send_auth(
+        app: &Router,
+        method: &str,
+        uri: &str,
+        body: Vec<u8>,
+        token: Option<&str>,
+    ) -> (StatusCode, Vec<u8>) {
+        let mut req = axum::http::Request::builder().method(method).uri(uri);
+        if let Some(t) = token {
+            req = req.header("x-watchit-auth", t);
+        }
+        let res = app
+            .clone()
+            .oneshot(req.body(Body::from(body)).unwrap())
+            .await
+            .unwrap();
+        let status = res.status();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        (status, bytes.to_vec())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn wallet_import_status_delete_round_trip() {
+        let app = router(test_engine("roundtrip"));
+
+        let (status, body) = send_auth(&app, "GET", "/wallet", vec![], None).await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["configured"], serde_json::json!(false));
+
+        // Import by private key.
+        let (status, body) = send_auth(
+            &app,
+            "POST",
+            "/wallet",
+            serde_json::json!({ "private_key": KEY }).to_string().into_bytes(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["address"], serde_json::json!(ADDR));
+        assert_eq!(json["storage"], serde_json::json!("file"));
+
+        let (status, body) = send_auth(&app, "GET", "/wallet", vec![], None).await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["configured"], serde_json::json!(true));
+        assert_eq!(json["address"], serde_json::json!(ADDR));
+
+        let (status, _) = send_auth(&app, "DELETE", "/wallet", vec![], None).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, body) = send_auth(&app, "GET", "/wallet", vec![], None).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["configured"], serde_json::json!(false));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn wallet_import_by_mnemonic_and_bad_input() {
+        let app = router(test_engine("mnemonic"));
+        let (status, body) = send_auth(
+            &app,
+            "POST",
+            "/wallet",
+            serde_json::json!({ "mnemonic": PHRASE }).to_string().into_bytes(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["address"], serde_json::json!(ADDR));
+
+        for bad in [
+            serde_json::json!({ "private_key": "0x1234" }),
+            serde_json::json!({ "mnemonic": "junk words here" }),
+            serde_json::json!({ "somethingelse": 1 }),
+        ] {
+            let (status, _) = send_auth(
+                &app,
+                "POST",
+                "/wallet",
+                bad.to_string().into_bytes(),
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn generate_returns_importable_wallet_without_storing() {
+        let app = router(test_engine("generate"));
+        let (status, body) =
+            send_auth(&app, "POST", "/wallet/generate", vec![], None).await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let phrase = json["mnemonic"].as_str().unwrap();
+        assert_eq!(phrase.split_whitespace().count(), 12);
+        // Nothing stored by generate.
+        let (_, body) = send_auth(&app, "GET", "/wallet", vec![], None).await;
+        let status_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(status_json["configured"], serde_json::json!(false));
+        // Importing the phrase lands on the promised address.
+        let (status, body) = send_auth(
+            &app,
+            "POST",
+            "/wallet",
+            serde_json::json!({ "mnemonic": phrase }).to_string().into_bytes(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let imported: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(imported["address"], json["address"]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn auth_token_guards_wallet_routes_but_not_streaming() {
+        let engine = test_engine("auth");
+        let app = router_with_auth(engine, "sekrit");
+        // No token / wrong token → 401.
+        let (status, _) = send_auth(&app, "GET", "/wallet", vec![], None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) =
+            send_auth(&app, "GET", "/wallet", vec![], Some("wrong")).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        // Right token → 200.
+        let (status, _) =
+            send_auth(&app, "GET", "/wallet", vec![], Some("sekrit")).await;
+        assert_eq!(status, StatusCode::OK);
+        // Open routes stay tokenless.
+        let (status, _) = send_auth(&app, "GET", "/health", vec![], None).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn upload_refused_without_wallet_and_missing_file() {
+        let app = router(test_engine("upload-guards"));
+        // No wallet configured → 400 with the settings hint.
+        let file = std::env::temp_dir().join("wi-upload-guard-test.bin");
+        std::fs::write(&file, b"hello").unwrap();
+        let (status, body) = send_auth(
+            &app,
+            "POST",
+            "/upload",
+            serde_json::json!({ "path": file.to_str().unwrap() })
+                .to_string()
+                .into_bytes(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(String::from_utf8_lossy(&body).contains("no upload wallet"));
+        // Missing file → 400 either way.
+        let (status, _) = send_auth(
+            &app,
+            "POST",
+            "/upload",
+            serde_json::json!({ "path": "/does/not/exist" })
+                .to_string()
+                .into_bytes(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        // Unknown job id → 404.
+        let (status, _) = send_auth(&app, "GET", "/upload/99", vec![], None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let _ = std::fs::remove_file(&file);
     }
 }
 

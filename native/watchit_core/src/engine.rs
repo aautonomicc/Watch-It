@@ -12,6 +12,7 @@ use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use std::time::Duration;
 
 use ant_core::data::{Client, ClientConfig, DataMap, Error as AntError};
+use ant_core::data::{EvmNetwork, Wallet as EvmWallet};
 use bytes::Bytes;
 use futures::StreamExt;
 use tokio::runtime::Handle;
@@ -120,6 +121,11 @@ pub struct Engine {
     map_store: Option<MapStore>,
     last_error: Mutex<Option<String>>,
     attempts: AtomicU32,
+    /// Upload-wallet key storage; the key is attached to every client the
+    /// connect path builds (ant-core wallets are set at construct time).
+    pub wallet: crate::wallet::WalletStore,
+    /// Publish upload jobs (`POST /upload` → poll `GET /upload/{id}`).
+    pub uploads: crate::upload::UploadManager,
 }
 
 impl Engine {
@@ -155,6 +161,8 @@ impl Engine {
             map_store,
             last_error: Mutex::new(None),
             attempts: AtomicU32::new(0),
+            wallet: crate::wallet::WalletStore::new(data_dir, true),
+            uploads: crate::upload::UploadManager::default(),
         }
     }
 
@@ -223,7 +231,7 @@ impl Engine {
         };
         match result {
             Ok(c) => {
-                let c = Arc::new(c);
+                let c = Arc::new(self.attach_wallet(c));
                 *self.client.write().unwrap() = Some(c.clone());
                 *self.last_error.lock().unwrap() = None;
                 Ok(c)
@@ -234,6 +242,36 @@ impl Engine {
                 Err(msg)
             }
         }
+    }
+
+    /// Attach the stored upload wallet, if any. Wallets are builder-set
+    /// (`with_wallet` consumes the client), so this runs on every fresh
+    /// connect; a bad stored key degrades to a wallet-less client rather
+    /// than blocking streaming.
+    fn attach_wallet(&self, client: Client) -> Client {
+        let Some((key, _)) = self.wallet.load() else {
+            return client;
+        };
+        match EvmWallet::new_from_private_key(EvmNetwork::ArbitrumOne, &key) {
+            Ok(w) => {
+                tracing::info!("upload wallet attached ({})", w.address());
+                client.with_wallet(w)
+            }
+            Err(e) => {
+                tracing::warn!("stored wallet key unusable, continuing without: {e:?}");
+                client
+            }
+        }
+    }
+
+    /// Wallet config changed (import/remove): drop the installed client
+    /// and re-dial so the connect path rebuilds it with the new wallet
+    /// state. Active streams end on their next fetch — acceptable, the
+    /// user is in the wallet settings, not mid-movie (and the supervisor
+    /// reconnects within seconds).
+    pub fn reconnect_for_wallet(&self) {
+        self.evict();
+        self.kick_reconnect();
     }
 
     pub async fn connected_peer_count(&self) -> usize {

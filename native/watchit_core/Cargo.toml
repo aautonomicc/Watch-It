@@ -21,6 +21,12 @@ cc = "1"
 # Client::file_download_to_sender + self_encryption 0.36 get_range seek.
 ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "81a0a2470ea74fa8608ed60c8ff214ff1fe2fc3d" }
 self_encryption = "0.36"
+# Upload-wallet key derivation: pinned to the alloy minor evmlib 0.9
+# already resolves to (no second alloy tree); the mnemonic feature adds
+# the BIP-39/BIP-32 path (m/44'/60'/0'/0/0, MetaMask-compatible).
+alloy-signer-local = { version = "1.8.3", features = ["mnemonic"] }
+coins-bip39 = { version = "0.12", default-features = false, features = ["english"] }
+rand = "0.8"
 axum = "0.8"
 # blake3 + rmp-serde mirror ant-core's address derivation (compute_address
 # over the rmp-serde-encoded shrunk data map) for offline map verification.
@@ -45,6 +51,25 @@ tower = { version = "0.5", features = ["util"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 tracing-android = "0.2"
+
+# Upload-wallet key storage in the OS keychain (Windows Credential
+# Manager / macOS Keychain / Secret Service over zbus — pure Rust, no
+# libdbus link, matching the alpha.53 lesson about system-lib deps).
+# Desktop only: upload is desktop-only, and on Android keyring would
+# silently use its non-persistent mock store.
+[target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dependencies]
+keyring = { version = "3", default-features = false, features = [
+    "windows-native",
+    "apple-native",
+    "async-secret-service",
+    "crypto-rust",
+    # async-io, NOT tokio: with the tokio feature zbus block_on panics
+    # ("Cannot start a runtime from within a runtime") when a keychain
+    # call happens on a runtime thread — and it killed the connect
+    # supervisor. async-io gives zbus its own executor; wallet.rs also
+    # runs every keyring call on a dedicated plain thread.
+    "async-io",
+] }
 
 [profile.release]
 lto = "thin"

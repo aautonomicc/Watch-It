@@ -9,7 +9,9 @@ pub mod cache;
 pub mod engine;
 pub mod mapstore;
 pub mod server;
+pub mod upload;
 pub mod verify;
+pub mod wallet;
 
 use std::ffi::CStr;
 use std::os::raw::c_char;
@@ -21,6 +23,11 @@ use engine::Engine;
 static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 static ENGINE: OnceLock<Engine> = OnceLock::new();
 static PORT: AtomicI32 = AtomicI32::new(0);
+/// Shared secret guarding the wallet/upload endpoints (the server port is
+/// visible to every local process; only the app, which reads this over
+/// FFI, may call routes that spend money). NUL-terminated for the FFI
+/// getter. WATCHIT_AUTH_TOKEN overrides it for curl-based dev testing.
+static AUTH_TOKEN: OnceLock<std::ffi::CString> = OnceLock::new();
 
 /// Route panic messages through tracing so they reach logcat on Android
 /// (a bare panic in a tokio task is otherwise swallowed silently).
@@ -136,6 +143,17 @@ pub extern "C" fn watchit_core_port() -> i32 {
     PORT.load(Ordering::SeqCst)
 }
 
+/// Auth token for the wallet/upload endpoints (send as `x-watchit-auth`).
+/// NULL before [`watchit_core_start`]; the pointer stays valid for the
+/// process lifetime afterwards.
+#[no_mangle]
+pub extern "C" fn watchit_core_auth_token() -> *const c_char {
+    match AUTH_TOKEN.get() {
+        Some(token) => token.as_ptr(),
+        None => std::ptr::null(),
+    }
+}
+
 /// Rust-side start, shared by the FFI entry point and the dev server.
 /// `data_dir` (the app's writable directory) hosts the persistent
 /// root-map cache; pass None to run without one (devserver/tests).
@@ -168,7 +186,17 @@ pub fn start(peers_override: Option<&str>, data_dir: Option<&str>) -> Result<i32
         .map_err(|e| format!("local_addr failed: {e}"))?
         .port() as i32;
 
-    let app = server::router(engine);
+    let token = AUTH_TOKEN.get_or_init(|| {
+        let value = std::env::var("WATCHIT_AUTH_TOKEN").unwrap_or_else(|_| {
+            use rand::RngCore;
+            let mut bytes = [0u8; 32];
+            rand::thread_rng().fill_bytes(&mut bytes);
+            hex::encode(bytes)
+        });
+        std::ffi::CString::new(value).expect("token has no NUL")
+    });
+    let token: &'static str = token.to_str().expect("token is valid UTF-8");
+    let app = server::router_with_auth(engine, token);
     runtime.spawn(async move {
         // Connection supervisor: dials until connected (nothing else
         // retries until a playback request arrives), then keeps watching

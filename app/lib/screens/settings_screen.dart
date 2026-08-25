@@ -17,6 +17,8 @@ import '../widgets/brand_mark.dart';
 import 'downloads_screen.dart';
 import 'home_layout_screen.dart';
 import 'media_lists_screen.dart';
+import 'publish_screen.dart' show isDesktopPlatform;
+import 'wallet_screen.dart';
 
 /// Settings: library, streaming, metadata, and about sections.
 class SettingsScreen extends StatefulWidget {
@@ -578,6 +580,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
                 ),
+                // Desktop-only this edition (Publish is): see
+                // docs/PLAN-alpha55.md.
+                if (isDesktopPlatform) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
+                    child: Text(
+                      'PUBLISHING',
+                      style: TextStyle(
+                        fontSize: 11,
+                        letterSpacing: 1.5,
+                        fontWeight: FontWeight.w700,
+                        color: t.ash,
+                      ),
+                    ),
+                  ),
+                  ListTile(
+                    leading: Icon(Icons.account_balance_wallet_outlined,
+                        color: t.accent),
+                    title: Text('Wallet',
+                        style: TextStyle(color: t.bone, fontSize: 15)),
+                    subtitle: Text(
+                      'The ANT wallet that pays for publishing files to '
+                      'the network',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                    trailing: Icon(Icons.chevron_right, color: t.ash),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                          builder: (_) => const WalletScreen()),
+                    ),
+                  ),
+                ],
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
                   child: Text(
