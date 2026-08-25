@@ -12,8 +12,8 @@ library private by construction.
   account-gated and increasingly ad/subscription driven.
 - VLC/mpv play everything but have no library experience — no posters, no metadata,
   no "continue watching".
-- Media on decentralized storage (Autonomi) has no first-class player at all: today
-  it's CLI downloads and raw addresses.
+- Media on decentralized storage (Autonomi) has no first-class player — or
+  uploader — at all: without W@tch it's CLI commands and raw addresses.
 
 ## Goals
 
@@ -24,8 +24,9 @@ library private by construction.
    app, add a list, get a poster-wall library. No accounts, no configuration, nothing
    to host.
 3. **Lists as libraries.** A library is a list of entries, each backed by a
-   `.datamap` file — the key a private `ant file upload` produces. Users can
-   keep several lists and share them as `.watch-list` bundles.
+   `.datamap` file — the key a private upload produces (W@tch's own Publish
+   flow, or `ant file upload`). Users can keep several lists and share them
+   as `.watch-list` bundles.
 4. **Private by construction.** Public Autonomi uploads are discoverable —
    their data map sits on the network in plaintext, readable by any node
    operator. W@tch therefore takes datamaps only: content stays invisible on
@@ -38,9 +39,13 @@ library private by construction.
    (TMDB), so a bare file list becomes a rich, browsable collection.
 6. **Stream or keep.** Play instantly from the network, or download for offline —
    downloaded items keep the full library experience.
-7. **Play everything.** libmpv-based engine: every container/codec, subtitles,
+7. **Publish from the app.** Getting media *onto* the network shouldn't need
+   a terminal either: pick files, choose quality tiers, pay with a built-in
+   wallet, and the upload lands in the library with its datamap on-device
+   (shipped for desktop in alpha.55/.56).
+8. **Play everything.** libmpv-based engine: every container/codec, subtitles,
    multiple audio tracks, chapters.
-8. **Own your data.** Watch history, resume points, lists, and cached metadata stored
+9. **Own your data.** Watch history, resume points, lists, and cached metadata stored
    locally. No telemetry.
 
 ## Non-goals

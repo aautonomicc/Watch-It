@@ -10,7 +10,10 @@ Think the Plex / Emby / [Silo](https://github.com/Silo-Server/) experience —
 poster-wall library, rich metadata, resume-watching — but **with no server to install**.
 W@tch is client-only: your media library is one or more lists of files stored
 privately on the decentralized [Autonomi](https://github.com/WithAutonomi/ant-client)
-network, streamed on demand or downloaded for offline watching.
+network, streamed on demand or downloaded for offline watching. And since
+alpha.55 W@tch **uploads too**: the desktop app's Publish page encodes your
+files to universally playable quality tiers and uploads them to the network
+itself, paid from a built-in ANT wallet — no command line needed.
 
 ![W@tch home screen on Linux — connected to the live Autonomi network, browsing a library of public-domain films and shows](docs/screenshots/home-linux.jpg)
 
@@ -33,13 +36,22 @@ dates and descriptions, plus a one-tap Download season.*
 
 ## How it works
 
-1. **Upload privately, keep the datamap.** Upload media with
-   `ant file upload <file>` (private is the default — **don't** use `-p`).
-   The upload prints a small `<file name>.datamap` file: that file *is* the
-   key to the content. The encrypted chunks on the network are unreadable
-   noise to everyone who doesn't hold it — unlike a *public* upload, whose
-   datamap is itself stored on the network where any node operator can find
-   it and watch the file. That's why W@tch takes datamaps only, and has no
+1. **Publish from the app — or upload with the CLI.** On desktop, the
+   drawer's **Publish** page uploads media straight from W@tch: pick one
+   file or a whole series, choose quality tiers (High 1080p / Medium 720p /
+   Low 480p, encoded to play-everywhere H.264/AAC MP4 by the bundled
+   ffmpeg — or keep the original as-is), see a live cost estimate, and pay
+   with the app's built-in ANT wallet (create or import it under
+   Settings → Publishing; the key lives in the OS keychain — treat it as a
+   hot wallet and fund it small). The finished upload lands in your library
+   ready to play, and its `.datamap` file can be saved to share. Prefer the
+   command line? `ant file upload <file>` does the same job (private is the
+   default — **don't** use `-p`) and prints the `<file name>.datamap`.
+   Either way, uploads are **private** and the datamap *is* the key to the
+   content: the encrypted chunks on the network are unreadable noise to
+   everyone who doesn't hold it — unlike a *public* upload, whose datamap
+   is itself stored on the network where any node operator can find it and
+   watch the file. That's why W@tch takes datamaps only, and has no
    public-address entry type.
 2. **Lists of media.** Import `.datamap` files into one or more lists; share
    a library as a `.watch-list` bundle (datamaps + artwork). A datamap grants
@@ -49,7 +61,12 @@ dates and descriptions, plus a one-tap Download season.*
    category to organize and display the collection as a poster-wall library. Name
    files with the Plex/Jellyfin convention —
    `Title (Year) {imdb-ttXXXXXXX} - [quality].ext` — **before uploading**; see
-   [docs/NAMING.md](docs/NAMING.md).
+   [docs/NAMING.md](docs/NAMING.md) (the Publish flow keeps names in this
+   convention automatically, re-tagging encoded tiers with their real output
+   resolution). For home movies and anything TMDB doesn't know, the detail
+   page's **Edit details** editor takes your own title, year, description,
+   and artwork — from an image file, a picked video frame, or the player's
+   "use this frame" button — and those edits travel inside shared bundles.
 4. **Stream or download.** Hit play to stream straight from the network, or download
    an item to the device for offline watching. Downloaded items play with the full
    library experience, no connectivity needed.
@@ -59,8 +76,10 @@ server compatibility** — Autonomi *is* the backend.
 
 ## Status
 
-**Working alpha on Android and Linux** — [the latest release](https://github.com/aautonomicc/Watch-It/releases)
-ships a signed APK and a Linux AppImage that connect to the live Autonomi network
+**Working alpha on Android, Linux, and Windows** — [the latest release](https://github.com/aautonomicc/Watch-It/releases)
+ships a signed APK, a Linux AppImage, and a Windows portable zip (since
+alpha.55; unzip and run `watchit.exe` — the binaries are unsigned, so
+SmartScreen needs "More info → Run anyway") that connect to the live Autonomi network
 with an embedded Rust client (no gateway, no sidecar) and stream with
 byte-exact seeking and a chunk cache with keep-ahead prefetch. Since
 alpha.40 the library is **datamap-first**: entries are created from
@@ -132,7 +151,26 @@ and video format. Alpha.49 folds multiple uploads of the same title
 into one card with a version picker on the detail page (e.g.
 "480p H.264 · 570 MB" vs "1080p H.264 · 5.29 GB"), and alpha.50 puts
 the search icon on the far left of the home app bar and the library
-drawer button on the far right.
+drawer button on the far right. Alpha.51 trims the built-in seed
+catalog to Night of the Living Dead only (the full catalog moved to the
+downloadable bundle above) and adds a Favourites home row via a heart
+on detail pages. Alpha.53 makes the AppImage's audio libraries
+system-first with a bundled fallback (fixes no-start and silent-audio
+reports on several distros), and alpha.54 hides the mouse cursor with
+the player controls and holds off the Linux screen lock while playing.
+Alpha.55 is the **Publish** release: a built-in ANT wallet (BIP-39
+create/import, key in the OS keychain, live balances) and in-app
+private uploads with live cost estimates — verified end-to-end on
+mainnet — plus the Windows portable zip joining every release from
+here on. Alpha.56 grows Publish to multi-file batches for full series,
+with quality tiers (High 1080p / Medium 720p / Low 480p H.264+AAC via
+bundled ffmpeg, or Original as-is — never upscaled, tiers fold into
+the version picker) and adds a desktop update check (at most once a
+day, toggle in Settings → About — the app's only phone-home).
+Alpha.57 adds **Edit details**: your own title, year, description, and
+artwork — from an image file, a picked video frame, or the player's
+camera button — for anything TMDB doesn't know, never overwritten by
+TMDB and carried along in shared bundles.
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users

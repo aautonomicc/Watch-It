@@ -68,9 +68,25 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - Lists (manage, import/export)
 - Network (embedded client status, bandwidth limit for downloads)
 - Downloads (storage location, storage used, clear)
+- Publishing (wallet: create with 12-word ceremony + retype confirm,
+  import key/phrase, live ANT/ETH balances, remove)
 - Playback (hardware decode, default subtitle language, skip amounts)
 - Appearance (theme, poster size)
-- About / licenses (incl. TMDB attribution notice + logo)
+- About / licenses (incl. TMDB attribution notice + logo; update-check
+  toggle + "Update available" row on desktop)
+
+### 7. Publish (desktop, alpha.55/.56)
+- Drawer tile between Media and Settings (desktop-only)
+- Multi-select file pick with "Add more" / per-file remove; per-file
+  probe verdict line ("1080p H.264 10-bit — many devices can't play
+  this" / "480p H.264 — plays everywhere")
+- Quality checkboxes — High 1080p / Medium 720p / Low 480p (H.264+AAC
+  MP4, never upscaled) or Original as-is — with per-tier
+  "applies to N of M · ≈size · ≈ANT" and a summed live cost estimate
+- Rights/permanence confirm gate → sequential encode→upload queue with
+  progress and per-item retry/skip → done page: per-title address +
+  copy, add-all-to-library via the list picker, save-all `.datamap`
+  files
 
 ## Layout adaptation
 
@@ -86,7 +102,7 @@ TV notes: larger base type scale (readable at 3 m), no hover-only affordances, t
 entry kept to add/import flows only (paste via network share or a shown-on-TV import
 address is preferred over typing addresses with a remote).
 
-## Built so far (alpha.39)
+## Built so far (alpha.57)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,
@@ -129,6 +145,13 @@ pages; alpha.49 folds same-title uploads into one card with an
 "N versions" line and a detail-page version dropdown. Alpha.50 settles
 the home app bar layout: search icon far left, library-drawer hamburger
 far right, and the settings icon removed from the bar (Settings lives
-in the drawer). Still to
+in the drawer). Alpha.51 adds the Favourites home row (heart on detail
+pages, beside Download since alpha.52). Alpha.54 hides the mouse cursor
+when the player controls fade. Alpha.55/.56 ship the Publish screen and
+the Settings → Publishing wallet described above, plus the update-check
+toggle and badge in Settings → About. Alpha.57 adds the detail-page
+Edit details editor (pencil in the app bar): title/year/description
+plus artwork from an image file, a 12-frame video-frame picker
+(desktop), or the player's camera button. Still to
 come from this document: filter/sort + fast-scroller on
 the grid, the full desktop keyboard map, mobile gestures, and the TV layout.
