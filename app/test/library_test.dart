@@ -283,6 +283,13 @@ void main() {
           list_id TEXT NOT NULL REFERENCES media_lists (id) ON DELETE CASCADE,
           name TEXT NOT NULL, address TEXT NOT NULL,
           position INTEGER NOT NULL, added_at INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE metadata_cache (
+          lookup_key TEXT NOT NULL, found INTEGER NOT NULL,
+          title TEXT, year INTEGER, overview TEXT, category TEXT,
+          episode_label TEXT, poster_file TEXT, media_type TEXT,
+          tmdb_id INTEGER, fetched_at INTEGER NOT NULL, rating REAL,
+          show_overview TEXT, season_overview TEXT, air_date TEXT,
+          still_file TEXT, show_poster_file TEXT, PRIMARY KEY (lookup_key));
         CREATE TABLE downloads (
           address TEXT NOT NULL, name TEXT NOT NULL,
           file_path TEXT NOT NULL,
@@ -305,6 +312,47 @@ void main() {
       // An old pause was by definition a user pause — never auto-resume.
       expect(row.pausedBySystem, isFalse);
       expect(row.status, 'paused');
+    });
+
+    test('v8 metadata cache gains userEdited on upgrade, defaulting false',
+        () async {
+      final dir = await Directory.systemTemp.createTemp('watchit-migration');
+      addTearDown(() => dir.delete(recursive: true));
+      final file = File('${dir.path}/watchit.sqlite');
+
+      // Hand-build the alpha.48–56 (schema v8) cache table: no
+      // user_edited column yet, one cached TMDB match.
+      final raw = sqlite3.open(file.path);
+      raw.execute('''
+        CREATE TABLE media_lists (
+          id TEXT NOT NULL, title TEXT NOT NULL, position INTEGER NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (id));
+        CREATE TABLE media_entries (
+          entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          list_id TEXT NOT NULL REFERENCES media_lists (id) ON DELETE CASCADE,
+          name TEXT NOT NULL, address TEXT NOT NULL,
+          position INTEGER NOT NULL, added_at INTEGER NOT NULL DEFAULT 0,
+          size_bytes INTEGER, video_info TEXT);
+        CREATE TABLE metadata_cache (
+          lookup_key TEXT NOT NULL, found INTEGER NOT NULL,
+          title TEXT, year INTEGER, overview TEXT, category TEXT,
+          episode_label TEXT, poster_file TEXT, media_type TEXT,
+          tmdb_id INTEGER, fetched_at INTEGER NOT NULL, rating REAL,
+          show_overview TEXT, season_overview TEXT, air_date TEXT,
+          still_file TEXT, show_poster_file TEXT, PRIMARY KEY (lookup_key));
+        INSERT INTO metadata_cache (lookup_key, found, title, fetched_at)
+          VALUES ('movie:old:2020', 1, 'Old', 1);
+        PRAGMA user_version = 8;
+      ''');
+      raw.close();
+
+      await LibraryStore.useForTesting(
+          AppDatabase.forTesting(NativeDatabase(file)));
+      final db = await LibraryStore.database();
+      final row = (await db.select(db.metadataCache).get()).single;
+      // Every pre-upgrade row is a TMDB match, not a user edit.
+      expect(row.userEdited, isFalse);
+      expect(row.title, 'Old');
     });
   });
 

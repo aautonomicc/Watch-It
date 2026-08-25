@@ -69,6 +69,33 @@ void main() {
     expect(outProbe.height, 480);
   });
 
+  test('extractFrame grabs JPEG frames without upscaling', () async {
+    if (!await service.available) {
+      markTestSkipped('ffmpeg/ffprobe not installed');
+      return;
+    }
+    final source = await generateClip();
+
+    final frame = await service.extractFrame(
+        source: source, atSeconds: 1.0, maxHeight: 240);
+    expect(frame, isNotNull);
+    // JPEG magic — the picker feeds these bytes to Image.memory.
+    expect(frame!.sublist(0, 2), [0xFF, 0xD8]);
+
+    // A cap above the source height must not upscale (480p source).
+    final full = await service.extractFrame(
+        source: source, atSeconds: 0.5, maxHeight: 720);
+    final saved = File('${dir.path}/frame.jpg')
+      ..writeAsBytesSync(full!);
+    final probed = await service.probe(saved.path);
+    expect(probed!.height, 480);
+
+    // Out-of-range timestamp → no frame, not a crash.
+    final beyond = await service.extractFrame(
+        source: source, atSeconds: 99.0, maxHeight: 240);
+    expect(beyond, isNull);
+  });
+
   test('encode failure throws with ffmpeg detail', () async {
     if (!await service.available) {
       markTestSkipped('ffmpeg/ffprobe not installed');

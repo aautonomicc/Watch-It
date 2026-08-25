@@ -1016,6 +1016,21 @@ class $MetadataCacheTable extends MetadataCache
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _userEditedMeta = const VerificationMeta(
+    'userEdited',
+  );
+  @override
+  late final GeneratedColumn<bool> userEdited = GeneratedColumn<bool>(
+    'user_edited',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("user_edited" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     lookupKey,
@@ -1035,6 +1050,7 @@ class $MetadataCacheTable extends MetadataCache
     airDate,
     stillFile,
     showPosterFile,
+    userEdited,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1168,6 +1184,12 @@ class $MetadataCacheTable extends MetadataCache
         ),
       );
     }
+    if (data.containsKey('user_edited')) {
+      context.handle(
+        _userEditedMeta,
+        userEdited.isAcceptableOrUnknown(data['user_edited']!, _userEditedMeta),
+      );
+    }
     return context;
   }
 
@@ -1245,6 +1267,10 @@ class $MetadataCacheTable extends MetadataCache
         DriftSqlType.string,
         data['${effectivePrefix}show_poster_file'],
       ),
+      userEdited: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}user_edited'],
+      )!,
     );
   }
 
@@ -1285,6 +1311,11 @@ class MetadataCacheRow extends DataClass
   /// Episode screenshot / show poster file names in the posters dir.
   final String? stillFile;
   final String? showPosterFile;
+
+  /// Row written by the user through Edit details rather than matched
+  /// from TMDB. User rows are never replaced by a TMDB match (a found
+  /// row already short-circuits the fetch) and survive key changes.
+  final bool userEdited;
   const MetadataCacheRow({
     required this.lookupKey,
     required this.found,
@@ -1303,6 +1334,7 @@ class MetadataCacheRow extends DataClass
     this.airDate,
     this.stillFile,
     this.showPosterFile,
+    required this.userEdited,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1352,6 +1384,7 @@ class MetadataCacheRow extends DataClass
     if (!nullToAbsent || showPosterFile != null) {
       map['show_poster_file'] = Variable<String>(showPosterFile);
     }
+    map['user_edited'] = Variable<bool>(userEdited);
     return map;
   }
 
@@ -1400,6 +1433,7 @@ class MetadataCacheRow extends DataClass
       showPosterFile: showPosterFile == null && nullToAbsent
           ? const Value.absent()
           : Value(showPosterFile),
+      userEdited: Value(userEdited),
     );
   }
 
@@ -1426,6 +1460,7 @@ class MetadataCacheRow extends DataClass
       airDate: serializer.fromJson<String?>(json['airDate']),
       stillFile: serializer.fromJson<String?>(json['stillFile']),
       showPosterFile: serializer.fromJson<String?>(json['showPosterFile']),
+      userEdited: serializer.fromJson<bool>(json['userEdited']),
     );
   }
   @override
@@ -1449,6 +1484,7 @@ class MetadataCacheRow extends DataClass
       'airDate': serializer.toJson<String?>(airDate),
       'stillFile': serializer.toJson<String?>(stillFile),
       'showPosterFile': serializer.toJson<String?>(showPosterFile),
+      'userEdited': serializer.toJson<bool>(userEdited),
     };
   }
 
@@ -1470,6 +1506,7 @@ class MetadataCacheRow extends DataClass
     Value<String?> airDate = const Value.absent(),
     Value<String?> stillFile = const Value.absent(),
     Value<String?> showPosterFile = const Value.absent(),
+    bool? userEdited,
   }) => MetadataCacheRow(
     lookupKey: lookupKey ?? this.lookupKey,
     found: found ?? this.found,
@@ -1492,6 +1529,7 @@ class MetadataCacheRow extends DataClass
     showPosterFile: showPosterFile.present
         ? showPosterFile.value
         : this.showPosterFile,
+    userEdited: userEdited ?? this.userEdited,
   );
   MetadataCacheRow copyWithCompanion(MetadataCacheCompanion data) {
     return MetadataCacheRow(
@@ -1522,6 +1560,9 @@ class MetadataCacheRow extends DataClass
       showPosterFile: data.showPosterFile.present
           ? data.showPosterFile.value
           : this.showPosterFile,
+      userEdited: data.userEdited.present
+          ? data.userEdited.value
+          : this.userEdited,
     );
   }
 
@@ -1544,7 +1585,8 @@ class MetadataCacheRow extends DataClass
           ..write('seasonOverview: $seasonOverview, ')
           ..write('airDate: $airDate, ')
           ..write('stillFile: $stillFile, ')
-          ..write('showPosterFile: $showPosterFile')
+          ..write('showPosterFile: $showPosterFile, ')
+          ..write('userEdited: $userEdited')
           ..write(')'))
         .toString();
   }
@@ -1568,6 +1610,7 @@ class MetadataCacheRow extends DataClass
     airDate,
     stillFile,
     showPosterFile,
+    userEdited,
   );
   @override
   bool operator ==(Object other) =>
@@ -1589,7 +1632,8 @@ class MetadataCacheRow extends DataClass
           other.seasonOverview == this.seasonOverview &&
           other.airDate == this.airDate &&
           other.stillFile == this.stillFile &&
-          other.showPosterFile == this.showPosterFile);
+          other.showPosterFile == this.showPosterFile &&
+          other.userEdited == this.userEdited);
 }
 
 class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
@@ -1610,6 +1654,7 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
   final Value<String?> airDate;
   final Value<String?> stillFile;
   final Value<String?> showPosterFile;
+  final Value<bool> userEdited;
   final Value<int> rowid;
   const MetadataCacheCompanion({
     this.lookupKey = const Value.absent(),
@@ -1629,6 +1674,7 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
     this.airDate = const Value.absent(),
     this.stillFile = const Value.absent(),
     this.showPosterFile = const Value.absent(),
+    this.userEdited = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   MetadataCacheCompanion.insert({
@@ -1649,6 +1695,7 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
     this.airDate = const Value.absent(),
     this.stillFile = const Value.absent(),
     this.showPosterFile = const Value.absent(),
+    this.userEdited = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : lookupKey = Value(lookupKey),
        found = Value(found),
@@ -1671,6 +1718,7 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
     Expression<String>? airDate,
     Expression<String>? stillFile,
     Expression<String>? showPosterFile,
+    Expression<bool>? userEdited,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1691,6 +1739,7 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
       if (airDate != null) 'air_date': airDate,
       if (stillFile != null) 'still_file': stillFile,
       if (showPosterFile != null) 'show_poster_file': showPosterFile,
+      if (userEdited != null) 'user_edited': userEdited,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1713,6 +1762,7 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
     Value<String?>? airDate,
     Value<String?>? stillFile,
     Value<String?>? showPosterFile,
+    Value<bool>? userEdited,
     Value<int>? rowid,
   }) {
     return MetadataCacheCompanion(
@@ -1733,6 +1783,7 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
       airDate: airDate ?? this.airDate,
       stillFile: stillFile ?? this.stillFile,
       showPosterFile: showPosterFile ?? this.showPosterFile,
+      userEdited: userEdited ?? this.userEdited,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1791,6 +1842,9 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
     if (showPosterFile.present) {
       map['show_poster_file'] = Variable<String>(showPosterFile.value);
     }
+    if (userEdited.present) {
+      map['user_edited'] = Variable<bool>(userEdited.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1817,6 +1871,7 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
           ..write('airDate: $airDate, ')
           ..write('stillFile: $stillFile, ')
           ..write('showPosterFile: $showPosterFile, ')
+          ..write('userEdited: $userEdited, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3532,6 +3587,7 @@ typedef $$MetadataCacheTableCreateCompanionBuilder =
       Value<String?> airDate,
       Value<String?> stillFile,
       Value<String?> showPosterFile,
+      Value<bool> userEdited,
       Value<int> rowid,
     });
 typedef $$MetadataCacheTableUpdateCompanionBuilder =
@@ -3553,6 +3609,7 @@ typedef $$MetadataCacheTableUpdateCompanionBuilder =
       Value<String?> airDate,
       Value<String?> stillFile,
       Value<String?> showPosterFile,
+      Value<bool> userEdited,
       Value<int> rowid,
     });
 
@@ -3647,6 +3704,11 @@ class $$MetadataCacheTableFilterComposer
 
   ColumnFilters<String> get showPosterFile => $composableBuilder(
     column: $table.showPosterFile,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get userEdited => $composableBuilder(
+    column: $table.userEdited,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -3744,6 +3806,11 @@ class $$MetadataCacheTableOrderingComposer
     column: $table.showPosterFile,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get userEdited => $composableBuilder(
+    column: $table.userEdited,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$MetadataCacheTableAnnotationComposer
@@ -3815,6 +3882,11 @@ class $$MetadataCacheTableAnnotationComposer
     column: $table.showPosterFile,
     builder: (column) => column,
   );
+
+  GeneratedColumn<bool> get userEdited => $composableBuilder(
+    column: $table.userEdited,
+    builder: (column) => column,
+  );
 }
 
 class $$MetadataCacheTableTableManager
@@ -3869,6 +3941,7 @@ class $$MetadataCacheTableTableManager
                 Value<String?> airDate = const Value.absent(),
                 Value<String?> stillFile = const Value.absent(),
                 Value<String?> showPosterFile = const Value.absent(),
+                Value<bool> userEdited = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MetadataCacheCompanion(
                 lookupKey: lookupKey,
@@ -3888,6 +3961,7 @@ class $$MetadataCacheTableTableManager
                 airDate: airDate,
                 stillFile: stillFile,
                 showPosterFile: showPosterFile,
+                userEdited: userEdited,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -3909,6 +3983,7 @@ class $$MetadataCacheTableTableManager
                 Value<String?> airDate = const Value.absent(),
                 Value<String?> stillFile = const Value.absent(),
                 Value<String?> showPosterFile = const Value.absent(),
+                Value<bool> userEdited = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MetadataCacheCompanion.insert(
                 lookupKey: lookupKey,
@@ -3928,6 +4003,7 @@ class $$MetadataCacheTableTableManager
                 airDate: airDate,
                 stillFile: stillFile,
                 showPosterFile: showPosterFile,
+                userEdited: userEdited,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

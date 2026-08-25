@@ -102,6 +102,11 @@ class MetadataCache extends Table {
   TextColumn get stillFile => text().nullable()();
   TextColumn get showPosterFile => text().nullable()();
 
+  /// Row written by the user through Edit details rather than matched
+  /// from TMDB. User rows are never replaced by a TMDB match (a found
+  /// row already short-circuits the fetch) and survive key changes.
+  BoolColumn get userEdited => boolean().withDefault(const Constant(false))();
+
   @override
   Set<Column> get primaryKey => {lookupKey};
 }
@@ -156,7 +161,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -194,6 +199,13 @@ class AppDatabase extends _$AppDatabase {
             // apart.
             await m.addColumn(mediaEntries, mediaEntries.sizeBytes);
             await m.addColumn(mediaEntries, mediaEntries.videoInfo);
+          }
+          if (from >= 4 && from < 9) {
+            // alpha.57: Edit details — user-authored metadata rows are
+            // flagged so they can be listed/cleared distinctly. (An
+            // older `from` created or recreated the table with the
+            // column already in it.)
+            await m.addColumn(metadataCache, metadataCache.userEdited);
           }
         },
         beforeOpen: (details) async {
