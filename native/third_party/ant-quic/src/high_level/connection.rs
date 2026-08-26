@@ -1,0 +1,1989 @@
+// Copyright 2024 Saorsa Labs Ltd.
+//
+// This Saorsa Network Software is licensed under the General Public License (GPL), version 3.
+// Please see the file LICENSE-GPL, or visit <http://www.gnu.org/licenses/> for the full text.
+//
+// Full details available at https://saorsalabs.com/licenses
+
+use std::{
+    any::Any,
+    collections::VecDeque,
+    fmt,
+    future::Future,
+    io,
+    net::{IpAddr, SocketAddr},
+    pin::Pin,
+    sync::{Arc, Weak},
+    task::{Context, Poll, Waker, ready},
+};
+
+use bytes::Bytes;
+use pin_project_lite::pin_project;
+use rustc_hash::FxHashMap;
+use thiserror::Error;
+use tokio::sync::{Notify, futures::Notified, mpsc, oneshot};
+use tracing::{Instrument, Span, debug, debug_span, error};
+
+use super::{
+    ConnectionEvent,
+    endpoint::is_transient_socket_error,
+    mutex::Mutex,
+    recv_stream::RecvStream,
+    runtime::{AsyncTimer, AsyncUdpSocket, Runtime, UdpSender},
+    send_stream::SendStream,
+    udp_transmit,
+};
+use crate::{
+    ConnectionError, ConnectionHandle, ConnectionStats, DatagramDropStats, Dir, Duration,
+    EndpointEvent, Instant, Side, StreamEvent, StreamId, VarInt,
+    congestion::Controller,
+    path::{Path, PathId, PathSnapshot},
+};
+
+/// In-progress connection attempt future
+#[derive(Debug)]
+pub struct Connecting {
+    conn: Option<ConnectionRef>,
+    connected: oneshot::Receiver<bool>,
+    handshake_data_ready: Option<oneshot::Receiver<()>>,
+}
+
+fn is_expected_background_io_error(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::AddrNotAvailable
+            | io::ErrorKind::ConnectionRefused
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::HostUnreachable
+            | io::ErrorKind::NetworkUnreachable
+            | io::ErrorKind::NotConnected
+            | io::ErrorKind::TimedOut
+    ) || matches!(error.raw_os_error(), Some(49 | 51 | 65 | 101 | 113))
+}
+
+impl Connecting {
+    pub(crate) fn new(
+        handle: ConnectionHandle,
+        conn: crate::Connection,
+        endpoint_events: mpsc::UnboundedSender<(ConnectionHandle, EndpointEvent)>,
+        conn_events: mpsc::Receiver<ConnectionEvent>,
+        socket: Arc<dyn AsyncUdpSocket>,
+        runtime: Arc<dyn Runtime>,
+        buffered_registry: Arc<crate::high_level::endpoint::BufferedBytesRegistry>,
+    ) -> Self {
+        let (on_handshake_data_send, on_handshake_data_recv) = oneshot::channel();
+        let (on_connected_send, on_connected_recv) = oneshot::channel();
+        let conn = ConnectionRef::new(
+            handle,
+            conn,
+            endpoint_events,
+            conn_events,
+            on_handshake_data_send,
+            on_connected_send,
+            socket,
+            runtime.clone(),
+            buffered_registry,
+        );
+
+        let driver = ConnectionDriver(conn.clone());
+        runtime.spawn(Box::pin(
+            async {
+                if let Err(e) = driver.await {
+                    if is_expected_background_io_error(&e) {
+                        debug!("background I/O path ended: {e}");
+                    } else {
+                        tracing::error!("I/O error: {e}");
+                    }
+                }
+            }
+            .instrument(Span::current()),
+        ));
+
+        Self {
+            conn: Some(conn),
+            connected: on_connected_recv,
+            handshake_data_ready: Some(on_handshake_data_recv),
+        }
+    }
+
+    /// Convert into a 0-RTT or 0.5-RTT connection at the cost of weakened security
+    ///
+    /// Returns `Ok` immediately if the local endpoint is able to attempt sending 0/0.5-RTT data.
+    /// If so, the returned [`Connection`] can be used to send application data without waiting for
+    /// the rest of the handshake to complete, at the cost of weakened cryptographic security
+    /// guarantees. The returned [`ZeroRttAccepted`] future resolves when the handshake does
+    /// complete, at which point subsequently opened streams and written data will have full
+    /// cryptographic protection.
+    ///
+    /// ## Outgoing
+    ///
+    /// For outgoing connections, the initial attempt to convert to a [`Connection`] which sends
+    /// 0-RTT data will proceed if the [`crypto::ClientConfig`][crate::crypto::ClientConfig]
+    /// attempts to resume a previous TLS session. However, **the remote endpoint may not actually
+    /// _accept_ the 0-RTT data**--yet still accept the connection attempt in general. This
+    /// possibility is conveyed through the [`ZeroRttAccepted`] future--when the handshake
+    /// completes, it resolves to true if the 0-RTT data was accepted and false if it was rejected.
+    /// If it was rejected, the existence of streams opened and other application data sent prior
+    /// to the handshake completing will not be conveyed to the remote application, and local
+    /// operations on them will return `ZeroRttRejected` errors.
+    ///
+    /// A server may reject 0-RTT data at its discretion, but accepting 0-RTT data requires the
+    /// relevant resumption state to be stored in the server, which servers may limit or lose for
+    /// various reasons including not persisting resumption state across server restarts.
+    ///
+    /// If manually providing a [`crypto::ClientConfig`][crate::crypto::ClientConfig], check your
+    /// implementation's docs for 0-RTT pitfalls.
+    ///
+    /// ## Incoming
+    ///
+    /// For incoming connections, conversion to 0.5-RTT will always fully succeed. `into_0rtt` will
+    /// always return `Ok` and the [`ZeroRttAccepted`] will always resolve to true.
+    ///
+    /// If manually providing a [`crypto::ServerConfig`][crate::crypto::ServerConfig], check your
+    /// implementation's docs for 0-RTT pitfalls.
+    ///
+    /// ## Security
+    ///
+    /// On outgoing connections, this enables transmission of 0-RTT data, which is vulnerable to
+    /// replay attacks, and should therefore never invoke non-idempotent operations.
+    ///
+    /// On incoming connections, this enables transmission of 0.5-RTT data, which may be sent
+    /// before TLS client authentication has occurred, and should therefore not be used to send
+    /// data for which client authentication is being used.
+    pub fn into_0rtt(mut self) -> Result<(Connection, ZeroRttAccepted), Self> {
+        // This lock borrows `self` and would normally be dropped at the end of this scope, so we'll
+        // have to release it explicitly before returning `self` by value.
+        let conn = match self.conn.as_mut() {
+            Some(conn) => conn.state.lock("into_0rtt"),
+            None => {
+                return Err(self);
+            }
+        };
+
+        let is_ok = conn.inner.has_0rtt() || conn.inner.side().is_server();
+        drop(conn);
+
+        if is_ok {
+            match self.conn.take() {
+                Some(conn) => Ok((Connection(conn), ZeroRttAccepted(self.connected))),
+                None => {
+                    tracing::error!("Connection state missing during 0-RTT acceptance");
+                    Err(self)
+                }
+            }
+        } else {
+            Err(self)
+        }
+    }
+
+    /// Parameters negotiated during the handshake
+    ///
+    /// The dynamic type returned is determined by the configured
+    /// [`Session`](crate::crypto::Session). For the default `rustls` session, the return value can
+    /// be [`downcast`](Box::downcast) to a
+    /// [`crypto::rustls::HandshakeData`](crate::crypto::rustls::HandshakeData).
+    pub async fn handshake_data(&mut self) -> Result<Box<dyn Any>, ConnectionError> {
+        // Taking &mut self allows us to use a single oneshot channel rather than dealing with
+        // potentially many tasks waiting on the same event. It's a bit of a hack, but keeps things
+        // simple.
+        if let Some(x) = self.handshake_data_ready.take() {
+            let _ = x.await;
+        }
+        let conn = self.conn.as_ref().ok_or_else(|| {
+            tracing::error!("Connection state missing while retrieving handshake data");
+            ConnectionError::LocallyClosed
+        })?;
+        let inner = conn.state.lock("handshake");
+        inner
+            .inner
+            .crypto_session()
+            .handshake_data()
+            .ok_or_else(|| {
+                inner.error.clone().unwrap_or_else(|| {
+                    error!("Spurious handshake data ready notification with no error");
+                    ConnectionError::TransportError(crate::transport_error::Error::INTERNAL_ERROR(
+                        "Spurious handshake notification".to_string(),
+                    ))
+                })
+            })
+    }
+
+    /// The local IP address which was used when the peer established
+    /// the connection
+    ///
+    /// This can be different from the address the endpoint is bound to, in case
+    /// the endpoint is bound to a wildcard address like `0.0.0.0` or `::`.
+    ///
+    /// This will return `None` for clients, or when the platform does not expose this
+    /// information. See quinn_udp's RecvMeta::dst_ip for a list of
+    /// supported platforms when using quinn_udp for I/O, which is the default.
+    ///
+    /// Will panic if called after `poll` has returned `Ready`.
+    pub fn local_ip(&self) -> Option<IpAddr> {
+        let conn = self.conn.as_ref()?;
+        let inner = conn.state.lock("local_ip");
+
+        inner.inner.local_ip()
+    }
+
+    /// The peer's UDP address
+    ///
+    /// Returns an error if called after `poll` has returned `Ready`.
+    pub fn remote_address(&self) -> Result<SocketAddr, ConnectionError> {
+        let conn_ref: &ConnectionRef = self.conn.as_ref().ok_or_else(|| {
+            error!("Connection used after yielding Ready");
+            ConnectionError::LocallyClosed
+        })?;
+        Ok(conn_ref.state.lock("remote_address").inner.remote_address())
+    }
+}
+
+impl Future for Connecting {
+    type Output = Result<Connection, ConnectionError>;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        Pin::new(&mut self.connected).poll(cx).map(|_| {
+            let conn = self.conn.take().ok_or_else(|| {
+                error!("Connection not available when connecting future resolves");
+                ConnectionError::LocallyClosed
+            })?;
+            let inner = conn.state.lock("connecting");
+            if inner.connected {
+                drop(inner);
+                Ok(Connection(conn))
+            } else {
+                Err(inner.error.clone().unwrap_or_else(|| {
+                    ConnectionError::TransportError(crate::transport_error::Error::INTERNAL_ERROR(
+                        "connection failed without error".to_string(),
+                    ))
+                }))
+            }
+        })
+    }
+}
+
+/// Future that completes when a connection is fully established
+///
+/// For clients, the resulting value indicates if 0-RTT was accepted. For servers, the resulting
+/// value is meaningless.
+pub struct ZeroRttAccepted(oneshot::Receiver<bool>);
+
+impl Future for ZeroRttAccepted {
+    type Output = bool;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        Pin::new(&mut self.0).poll(cx).map(|x| x.unwrap_or(false))
+    }
+}
+
+/// A future that drives protocol logic for a connection
+///
+/// This future handles the protocol logic for a single connection, routing events from the
+/// `Connection` API object to the `Endpoint` task and the related stream-related interfaces.
+/// It also keeps track of outstanding timeouts for the `Connection`.
+///
+/// If the connection encounters an error condition, this future will yield an error. It will
+/// terminate (yielding `Ok(())`) if the connection was closed without error. Unlike other
+/// connection-related futures, this waits for the draining period to complete to ensure that
+/// packets still in flight from the peer are handled gracefully.
+/// Throttle for the #368 buffered-bytes snapshot refresh (4 Hz).
+const BUFFERED_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
+
+#[must_use = "connection drivers must be spawned for their connections to function"]
+#[derive(Debug)]
+struct ConnectionDriver(ConnectionRef);
+
+impl Future for ConnectionDriver {
+    type Output = Result<(), io::Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let conn = &mut *self.0.state.lock("poll");
+
+        let span = debug_span!("drive", id = conn.handle.0);
+        let _guard = span.enter();
+
+        if let Err(e) = conn.process_conn_events(&self.0.shared, cx) {
+            conn.terminate(e, &self.0.shared);
+            conn.buffered_registry.remove(conn.handle.0);
+            return Poll::Ready(Ok(()));
+        }
+        let mut keep_going = conn.drive_transmit(cx)?;
+        // If a timer expires, there might be more to transmit. When we transmit something, we
+        // might need to reset a timer. Hence, we must loop until neither happens.
+        keep_going |= conn.drive_timer(cx);
+        conn.forward_endpoint_events();
+        conn.forward_app_events(&self.0.shared);
+
+        // #368 gate 5: refresh this connection's buffered-bytes snapshot
+        // into the endpoint registry, throttled to 4 Hz — polls are hot, the
+        // absolute sums must not be. Instrumentation only.
+        let refresh_due = conn
+            .last_buffered_refresh
+            .is_none_or(|at| at.elapsed() >= BUFFERED_REFRESH_INTERVAL);
+        if refresh_due {
+            let (send_unacked, recv_buffered, streams) = conn.inner.buffered_snapshot();
+            conn.buffered_registry.update(
+                conn.handle.0,
+                crate::high_level::endpoint::ConnBufferedSnapshot {
+                    send_unacked,
+                    recv_buffered,
+                    recv_streams_with_unread: streams,
+                },
+            );
+            conn.last_buffered_refresh = Some(Instant::now());
+        }
+
+        // Kick off automatic channel binding once connected, if configured
+        if conn.connected && !conn.binding_started {
+            if let Some(rt) = crate::trust::global_runtime() {
+                // Delay NEW_TOKEN until binding completes
+                conn.inner.set_delay_new_token_until_binding(true);
+
+                let hl_conn_server = Connection(self.0.clone());
+                let hl_conn_client = hl_conn_server.clone();
+                let store = rt.store.clone();
+                let policy = rt.policy.clone();
+                let signer = rt.local_secret_key.clone();
+                let spki = rt.local_spki.clone();
+                let runtime = conn.runtime.clone();
+
+                if conn.inner.side().is_server() {
+                    runtime.spawn(Box::pin(async move {
+                        match crate::trust::recv_verify_binding(&hl_conn_server, &*store, &policy)
+                            .await
+                        {
+                            Ok(peer) => {
+                                hl_conn_server
+                                    .0
+                                    .state
+                                    .lock("set peer")
+                                    .inner
+                                    .set_token_binding_peer_id(peer);
+                                hl_conn_server
+                                    .0
+                                    .state
+                                    .lock("allow tokens")
+                                    .inner
+                                    .set_delay_new_token_until_binding(false);
+                            }
+                            Err(_e) => {
+                                hl_conn_server.close(0u32.into(), b"channel binding failed");
+                            }
+                        }
+                    }));
+                }
+
+                if conn.inner.side().is_client() {
+                    runtime.spawn(Box::pin(async move {
+                        if let Ok(exp) = crate::trust::derive_exporter(&hl_conn_client) {
+                            let _ =
+                                crate::trust::send_binding(&hl_conn_client, &exp, &signer, &spki)
+                                    .await;
+                        }
+                    }));
+                }
+
+                conn.binding_started = true;
+            }
+        }
+
+        if !conn.inner.is_drained() {
+            if keep_going {
+                // If the connection hasn't processed all tasks, schedule it again
+                cx.waker().wake_by_ref();
+            } else {
+                conn.driver = Some(cx.waker().clone());
+            }
+            return Poll::Pending;
+        }
+        if conn.error.is_none() {
+            unreachable!("drained connections always have an error");
+        }
+        conn.buffered_registry.remove(conn.handle.0);
+        Poll::Ready(Ok(()))
+    }
+}
+
+/// A QUIC connection.
+///
+/// If all references to a connection (including every clone of the `Connection` handle, streams of
+/// incoming streams, and the various stream types) have been dropped, then the connection will be
+/// automatically closed with an `error_code` of 0 and an empty `reason`. You can also close the
+/// connection explicitly by calling [`Connection::close()`].
+///
+/// Closing the connection immediately abandons efforts to deliver data to the peer.  Upon
+/// receiving CONNECTION_CLOSE the peer *may* drop any stream data not yet delivered to the
+/// application. [`Connection::close()`] describes in more detail how to gracefully close a
+/// connection without losing application data.
+///
+/// May be cloned to obtain another handle to the same connection.
+///
+/// [`Connection::close()`]: Connection::close
+#[derive(Debug, Clone)]
+pub struct Connection(ConnectionRef);
+
+/// Weak handle to a QUIC connection.
+///
+/// This lets observers retain a reference to connection identity without
+/// keeping the connection alive.
+#[derive(Debug, Clone)]
+pub struct WeakConnectionHandle(Weak<ConnectionInner>);
+
+impl WeakConnectionHandle {
+    /// Returns true while the connection still exists and has not closed.
+    pub fn is_alive(&self) -> bool {
+        self.0
+            .upgrade()
+            .is_some_and(|inner| inner.state.lock("weak_is_alive").error.is_none())
+    }
+
+    /// Upgrade to a strong connection handle if the connection state still exists.
+    pub fn upgrade(&self) -> Option<Connection> {
+        let conn = ConnectionRef(self.0.upgrade()?);
+        conn.state.lock("weak_upgrade").ref_count += 1;
+        Some(Connection(conn))
+    }
+
+    /// Returns true if both weak handles refer to the same connection allocation.
+    pub fn is_same_connection(&self, other: &Self) -> bool {
+        self.0.ptr_eq(&other.0)
+    }
+}
+
+impl Connection {
+    /// Initiate a new outgoing unidirectional stream.
+    ///
+    /// Streams are cheap and instantaneous to open unless blocked by flow control. As a
+    /// consequence, the peer won't be notified that a stream has been opened until the stream is
+    /// actually used.
+    pub fn open_uni(&self) -> OpenUni<'_> {
+        OpenUni {
+            conn: &self.0,
+            notify: self.0.shared.stream_budget_available[Dir::Uni as usize].notified(),
+        }
+    }
+
+    /// Initiate a new outgoing bidirectional stream.
+    ///
+    /// Streams are cheap and instantaneous to open unless blocked by flow control. As a
+    /// consequence, the peer won't be notified that a stream has been opened until the stream is
+    /// actually used. Calling [`open_bi()`] then waiting on the [`RecvStream`] without writing
+    /// anything to [`SendStream`] will never succeed.
+    ///
+    /// [`open_bi()`]: Self::open_bi
+    /// [`SendStream`]: crate::SendStream
+    /// [`RecvStream`]: crate::RecvStream
+    pub fn open_bi(&self) -> OpenBi<'_> {
+        OpenBi {
+            conn: &self.0,
+            notify: self.0.shared.stream_budget_available[Dir::Bi as usize].notified(),
+        }
+    }
+
+    /// Accept the next incoming uni-directional stream
+    pub fn accept_uni(&self) -> AcceptUni<'_> {
+        AcceptUni {
+            conn: &self.0,
+            notify: self.0.shared.stream_incoming[Dir::Uni as usize].notified(),
+        }
+    }
+
+    /// Accept the next incoming bidirectional stream
+    ///
+    /// **Important Note**: The `Connection` that calls [`open_bi()`] must write to its [`SendStream`]
+    /// before the other `Connection` is able to `accept_bi()`. Calling [`open_bi()`] then
+    /// waiting on the [`RecvStream`] without writing anything to [`SendStream`] will never succeed.
+    ///
+    /// [`accept_bi()`]: Self::accept_bi
+    /// [`open_bi()`]: Self::open_bi
+    /// [`SendStream`]: crate::SendStream
+    /// [`RecvStream`]: crate::RecvStream
+    pub fn accept_bi(&self) -> AcceptBi<'_> {
+        AcceptBi {
+            conn: &self.0,
+            notify: self.0.shared.stream_incoming[Dir::Bi as usize].notified(),
+        }
+    }
+
+    /// Receive an application datagram
+    pub fn read_datagram(&self) -> ReadDatagram<'_> {
+        ReadDatagram {
+            conn: &self.0,
+            notify: self.0.shared.datagram_received.notified(),
+        }
+    }
+
+    /// Wait for the connection to be closed for any reason
+    ///
+    /// Despite the return type's name, closed connections are often not an error condition at the
+    /// application layer. Cases that might be routine include [`ConnectionError::LocallyClosed`]
+    /// and [`ConnectionError::ApplicationClosed`].
+    pub async fn closed(&self) -> ConnectionError {
+        {
+            let conn = self.0.state.lock("closed");
+            if let Some(error) = conn.error.as_ref() {
+                return error.clone();
+            }
+            // Construct the future while the lock is held to ensure we can't miss a wakeup if
+            // the `Notify` is signaled immediately after we release the lock. `await` it after
+            // the lock guard is out of scope.
+            self.0.shared.closed.notified()
+        }
+        .await;
+        self.0
+            .state
+            .lock("closed")
+            .error
+            .as_ref()
+            .unwrap_or_else(|| &crate::connection::ConnectionError::LocallyClosed)
+            .clone()
+    }
+
+    /// Wait for the connection to be closed for any reason.
+    pub fn on_closed(&self) -> impl Future<Output = ConnectionError> + '_ {
+        self.closed()
+    }
+
+    /// Downgrade this connection to a weak handle.
+    pub fn weak_handle(&self) -> WeakConnectionHandle {
+        WeakConnectionHandle(Arc::downgrade(&self.0.0))
+    }
+
+    /// Return read-only handles for the connection's currently known paths.
+    ///
+    /// The current high-level API exposes the primary single-path route. Future
+    /// multipath support will extend this list without changing the handle
+    /// shape.
+    pub fn paths(&self) -> Vec<Path> {
+        self.path_snapshot(PathId::PRIMARY)
+            .map(|snapshot| Path::new(self.weak_handle(), PathId::PRIMARY, snapshot))
+            .into_iter()
+            .collect()
+    }
+
+    /// Return statistics for a path if the path is currently known.
+    pub fn path_stats(&self, id: PathId) -> Option<crate::connection::PathStats> {
+        self.path_snapshot(id).map(|snapshot| snapshot.stats)
+    }
+
+    pub(crate) fn path_snapshot(&self, id: PathId) -> Option<PathSnapshot> {
+        if id != PathId::PRIMARY {
+            return None;
+        }
+
+        let conn = self.0.state.lock("path_snapshot");
+        let stats = conn.inner.stats().path;
+        let remote_address = conn.inner.remote_address();
+        let observed_external_addr = conn.inner.observed_address();
+        Some(PathSnapshot {
+            stats,
+            remote_address,
+            observed_external_addr,
+        })
+    }
+
+    /// Check if this connection is still alive (not closed or draining).
+    ///
+    /// Returns `true` if the connection has not been closed for any reason.
+    /// This is useful for detecting phantom or stale connections that should
+    /// be cleaned up before attempting deduplication.
+    pub fn is_alive(&self) -> bool {
+        self.0.state.lock("is_alive").error.is_none()
+    }
+
+    /// If the connection is closed, the reason why.
+    ///
+    /// Returns `None` if the connection is still open.
+    pub fn close_reason(&self) -> Option<ConnectionError> {
+        self.0.state.lock("close_reason").error.clone()
+    }
+
+    pub(crate) fn supports_ack_receive_v2(&self) -> bool {
+        self.0
+            .state
+            .lock("supports_ack_receive_v2")
+            .inner
+            .supports_ack_receive_v2()
+    }
+
+    /// Close the connection immediately.
+    ///
+    /// Pending operations will fail immediately with [`ConnectionError::LocallyClosed`]. No
+    /// more data is sent to the peer and the peer may drop buffered data upon receiving
+    /// the CONNECTION_CLOSE frame.
+    ///
+    /// `error_code` and `reason` are not interpreted, and are provided directly to the peer.
+    ///
+    /// `reason` will be truncated to fit in a single packet with overhead; to improve odds that it
+    /// is preserved in full, it should be kept under 1KiB.
+    ///
+    /// # Gracefully closing a connection
+    ///
+    /// Only the peer last receiving application data can be certain that all data is
+    /// delivered. The only reliable action it can then take is to close the connection,
+    /// potentially with a custom error code. The delivery of the final CONNECTION_CLOSE
+    /// frame is very likely if both endpoints stay online long enough, and
+    /// [`Endpoint::wait_idle()`] can be used to provide sufficient time. Otherwise, the
+    /// remote peer will time out the connection, provided that the idle timeout is not
+    /// disabled.
+    ///
+    /// The sending side can not guarantee all stream data is delivered to the remote
+    /// application. It only knows the data is delivered to the QUIC stack of the remote
+    /// endpoint. Once the local side sends a CONNECTION_CLOSE frame in response to calling
+    /// [`close()`] the remote endpoint may drop any data it received but is as yet
+    /// undelivered to the application, including data that was acknowledged as received to
+    /// the local endpoint.
+    ///
+    /// [`ConnectionError::LocallyClosed`]: crate::ConnectionError::LocallyClosed
+    /// [`Endpoint::wait_idle()`]: crate::high_level::Endpoint::wait_idle
+    /// [`close()`]: Connection::close
+    /// Wake the connection driver to trigger immediate transmission of
+    /// any pending frames. Call after queuing frames at the low level
+    /// (e.g., PUNCH_ME_NOW) that bypass the stream API.
+    pub fn wake_transmit(&self) {
+        self.0.state.lock("wake_transmit").wake();
+    }
+
+    /// Close the connection immediately with the given error code and reason.
+    pub fn close(&self, error_code: VarInt, reason: &[u8]) {
+        let conn = &mut *self.0.state.lock("close");
+        conn.close(error_code, Bytes::copy_from_slice(reason), &self.0.shared);
+    }
+
+    /// Transmit `data` as an unreliable, unordered application datagram
+    ///
+    /// Application datagrams are a low-level primitive. They may be lost or delivered out of order,
+    /// and `data` must both fit inside a single QUIC packet and be smaller than the maximum
+    /// dictated by the peer.
+    ///
+    /// Previously queued datagrams which are still unsent may be discarded to make space for this
+    /// datagram, in order of oldest to newest.
+    pub fn send_datagram(&self, data: Bytes) -> Result<(), SendDatagramError> {
+        let conn = &mut *self.0.state.lock("send_datagram");
+        if let Some(ref x) = conn.error {
+            return Err(SendDatagramError::ConnectionLost(x.clone()));
+        }
+        use crate::SendDatagramError::*;
+        match conn.inner.datagrams().send(data, true) {
+            Ok(()) => {
+                conn.wake();
+                Ok(())
+            }
+            Err(e) => Err(match e {
+                Blocked(..) => unreachable!(),
+                UnsupportedByPeer => SendDatagramError::UnsupportedByPeer,
+                Disabled => SendDatagramError::Disabled,
+                TooLarge => SendDatagramError::TooLarge,
+            }),
+        }
+    }
+
+    /// Transmit `data` as an unreliable, unordered application datagram
+    ///
+    /// Unlike [`send_datagram()`], this method will wait for buffer space during congestion
+    /// conditions, which effectively prioritizes old datagrams over new datagrams.
+    ///
+    /// See [`send_datagram()`] for details.
+    ///
+    /// [`send_datagram()`]: Connection::send_datagram
+    pub fn send_datagram_wait(&self, data: Bytes) -> SendDatagram<'_> {
+        SendDatagram {
+            conn: &self.0,
+            data: Some(data),
+            notify: self.0.shared.datagrams_unblocked.notified(),
+        }
+    }
+
+    /// Compute the maximum size of datagrams that may be passed to [`send_datagram()`].
+    ///
+    /// Returns `None` if datagrams are unsupported by the peer or disabled locally.
+    ///
+    /// This may change over the lifetime of a connection according to variation in the path MTU
+    /// estimate. The peer can also enforce an arbitrarily small fixed limit, but if the peer's
+    /// limit is large this is guaranteed to be a little over a kilobyte at minimum.
+    ///
+    /// Not necessarily the maximum size of received datagrams.
+    ///
+    /// [`send_datagram()`]: Connection::send_datagram
+    pub fn max_datagram_size(&self) -> Option<usize> {
+        self.0
+            .state
+            .lock("max_datagram_size")
+            .inner
+            .datagrams()
+            .max_size()
+    }
+
+    /// Bytes available in the outgoing datagram buffer
+    ///
+    /// When greater than zero, calling [`send_datagram()`](Self::send_datagram) with a datagram of
+    /// at most this size is guaranteed not to cause older datagrams to be dropped.
+    pub fn datagram_send_buffer_space(&self) -> usize {
+        self.0
+            .state
+            .lock("datagram_send_buffer_space")
+            .inner
+            .datagrams()
+            .send_buffer_space()
+    }
+
+    /// Total number of application datagrams that have been dropped due to receive buffer overflow
+    pub fn datagram_drop_stats(&self) -> DatagramDropStats {
+        self.0
+            .state
+            .lock("datagram_drop_stats")
+            .inner
+            .stats()
+            .datagram_drops
+    }
+
+    /// Wait for the next datagram drop notification
+    pub fn on_datagram_drop(&self) -> DatagramDrop<'_> {
+        DatagramDrop {
+            conn: &self.0,
+            notify: self.0.shared.datagram_dropped.notified(),
+        }
+    }
+
+    /// Queue an ADD_ADDRESS NAT traversal frame via the underlying connection
+    pub fn send_nat_address_advertisement(
+        &self,
+        address: SocketAddr,
+        priority: u32,
+    ) -> Result<u64, crate::ConnectionError> {
+        let conn = &mut *self.0.state.lock("send_nat_address_advertisement");
+        conn.inner.send_nat_address_advertisement(address, priority)
+    }
+
+    /// #262: seed local NAT traversal candidates on the underlying
+    /// connection (see the connection-level method of the same name). No
+    /// frames are sent. Returns the number of candidates inserted.
+    pub fn seed_local_traversal_candidates(&self, addresses: &[SocketAddr]) -> usize {
+        let conn = &mut *self.0.state.lock("seed_local_traversal_candidates");
+        conn.inner.seed_local_traversal_candidates(addresses)
+    }
+
+    /// Queue a REMOVE_ADDRESS NAT traversal frame via the underlying connection
+    pub fn send_nat_address_removal(&self, sequence: u64) -> Result<(), crate::ConnectionError> {
+        let conn = &mut *self.0.state.lock("send_nat_address_removal");
+        conn.inner.send_nat_address_removal(sequence)
+    }
+
+    /// Queue a PUNCH_ME_NOW NAT traversal frame via the underlying connection
+    pub fn send_nat_punch_coordination(
+        &self,
+        paired_with_sequence_number: u64,
+        address: SocketAddr,
+        round: u32,
+    ) -> Result<(), crate::ConnectionError> {
+        let conn = &mut *self.0.state.lock("send_nat_punch_coordination");
+        conn.inner
+            .send_nat_punch_coordination(paired_with_sequence_number, address, round)
+    }
+
+    /// Queue a PUNCH_ME_NOW frame via a coordinator to reach a target peer behind NAT
+    ///
+    /// This sends a PUNCH_ME_NOW to the current connection (acting as coordinator)
+    /// with a target peer ID, asking the coordinator to relay to the target peer.
+    pub fn send_nat_punch_via_relay(
+        &self,
+        target_peer_id: [u8; 32],
+        our_address: SocketAddr,
+        round: u32,
+    ) -> Result<(), crate::ConnectionError> {
+        let conn = &mut *self.0.state.lock("send_nat_punch_via_relay");
+        conn.inner
+            .send_nat_punch_via_relay(target_peer_id, our_address, round)
+    }
+
+    /// Whether NAT traversal was negotiated for this connection.
+    pub fn nat_traversal_supported(&self) -> bool {
+        self.0
+            .state
+            .lock("nat_traversal_supported")
+            .inner
+            .nat_traversal_supported()
+    }
+
+    /// Whether this connection will transmit RFC-format NAT traversal frames.
+    pub fn nat_traversal_uses_rfc_frame_format(&self) -> bool {
+        self.0
+            .state
+            .lock("nat_traversal_uses_rfc_frame_format")
+            .inner
+            .nat_traversal_uses_rfc_frame_format()
+    }
+
+    /// Whether this connection accepts legacy-format NAT traversal frames.
+    pub fn nat_traversal_accepts_legacy_frame_format(&self) -> bool {
+        self.0
+            .state
+            .lock("nat_traversal_accepts_legacy_frame_format")
+            .inner
+            .nat_traversal_accepts_legacy_frame_format()
+    }
+
+    /// The side of the connection (client or server)
+    pub fn side(&self) -> Side {
+        self.0.state.lock("side").inner.side()
+    }
+
+    /// The peer's UDP address
+    ///
+    /// If `ServerConfig::migration` is `true`, clients may change addresses at will, e.g. when
+    /// switching to a cellular internet connection.
+    pub fn remote_address(&self) -> SocketAddr {
+        self.0.state.lock("remote_address").inner.remote_address()
+    }
+
+    /// The external/reflexive address observed by the remote peer
+    ///
+    /// Returns the address that the remote peer has observed for this connection,
+    /// as reported via OBSERVED_ADDRESS frames. This is useful for NAT traversal
+    /// to learn the public address of this endpoint as seen by others.
+    ///
+    /// Returns `None` if:
+    /// - Address discovery is not enabled
+    /// - No OBSERVED_ADDRESS frame has been received yet
+    /// - The connection hasn't completed the handshake
+    pub fn observed_address(&self) -> Option<SocketAddr> {
+        self.0
+            .state
+            .lock("observed_address")
+            .inner
+            .observed_address()
+    }
+
+    /// Returns all observed external addresses from all QUIC paths on this connection.
+    ///
+    /// Different paths may report different address families (IPv4 vs IPv6).
+    pub fn all_observed_addresses(&self) -> Vec<SocketAddr> {
+        self.0
+            .state
+            .lock("all_observed_addresses")
+            .inner
+            .all_observed_addresses()
+    }
+
+    /// Wait for the connection's observed-address set to change.
+    pub(crate) fn observed_address_updated(&self) -> Notified<'_> {
+        self.0.shared.observed_address_updated.notified()
+    }
+
+    /// The local IP address which was used when the peer established
+    /// the connection
+    ///
+    /// This can be different from the address the endpoint is bound to, in case
+    /// the endpoint is bound to a wildcard address like `0.0.0.0` or `::`.
+    ///
+    /// This will return `None` for clients, or when the platform does not expose this
+    /// information. See quinn_udp's RecvMeta::dst_ip for a list of
+    /// supported platforms when using quinn_udp for I/O, which is the default.
+    pub fn local_ip(&self) -> Option<IpAddr> {
+        self.0.state.lock("local_ip").inner.local_ip()
+    }
+
+    /// Current best estimate of this connection's latency (round-trip-time)
+    pub fn rtt(&self) -> Duration {
+        self.0.state.lock("rtt").inner.rtt()
+    }
+
+    /// Returns connection statistics
+    pub fn stats(&self) -> ConnectionStats {
+        self.0.state.lock("stats").inner.stats()
+    }
+
+    /// Current state of the congestion control algorithm, for debugging purposes
+    pub fn congestion_state(&self) -> Box<dyn Controller> {
+        self.0
+            .state
+            .lock("congestion_state")
+            .inner
+            .congestion_state()
+            .clone_box()
+    }
+
+    /// Parameters negotiated during the handshake
+    ///
+    /// Guaranteed to return `Some` on fully established connections or after
+    /// [`Connecting::handshake_data()`] succeeds. See that method's documentations for details on
+    /// the returned value.
+    ///
+    /// [`Connection::handshake_data()`]: crate::Connecting::handshake_data
+    pub fn handshake_data(&self) -> Option<Box<dyn Any>> {
+        self.0
+            .state
+            .lock("handshake_data")
+            .inner
+            .crypto_session()
+            .handshake_data()
+    }
+
+    /// Cryptographic identity of the peer
+    ///
+    /// The dynamic type returned is determined by the configured
+    /// [`Session`](crate::crypto::Session). For the default `rustls` session, the return value can
+    /// be [`downcast`](Box::downcast) to a <code>Vec<[rustls::pki_types::CertificateDer]></code>
+    pub fn peer_identity(&self) -> Option<Box<dyn Any>> {
+        self.0
+            .state
+            .lock("peer_identity")
+            .inner
+            .crypto_session()
+            .peer_identity()
+    }
+
+    /// A stable identifier for this connection
+    ///
+    /// Peer addresses and connection IDs can change, but this value will remain
+    /// fixed for the lifetime of the connection.
+    pub fn stable_id(&self) -> usize {
+        self.0.stable_id()
+    }
+
+    /// Returns true if this connection negotiated post-quantum settings.
+    ///
+    /// This reflects either explicit PQC algorithms advertised via transport
+    /// parameters or in-band detection from handshake CRYPTO frames.
+    pub fn is_pqc(&self) -> bool {
+        let state = self.0.state.lock("is_pqc");
+        state.inner.is_pqc()
+    }
+
+    /// Debug-only hint: returns true when the underlying TLS provider was
+    /// configured to run in KEM-only (ML‑KEM) mode. This is a diagnostic aid
+    /// for tests and does not itself guarantee group enforcement.
+    pub fn debug_kem_only(&self) -> bool {
+        crate::crypto::rustls::debug_kem_only_enabled()
+    }
+
+    /// Update traffic keys spontaneously
+    ///
+    /// This primarily exists for testing purposes.
+    pub fn force_key_update(&self) {
+        self.0
+            .state
+            .lock("force_key_update")
+            .inner
+            .force_key_update()
+    }
+
+    /// Derive keying material from this connection's TLS session secrets.
+    ///
+    /// When both peers call this method with the same `label` and `context`
+    /// arguments and `output` buffers of equal length, they will get the
+    /// same sequence of bytes in `output`. These bytes are cryptographically
+    /// strong and pseudorandom, and are suitable for use as keying material.
+    ///
+    /// See [RFC5705](https://tools.ietf.org/html/rfc5705) for more information.
+    pub fn export_keying_material(
+        &self,
+        output: &mut [u8],
+        label: &[u8],
+        context: &[u8],
+    ) -> Result<(), crate::crypto::ExportKeyingMaterialError> {
+        self.0
+            .state
+            .lock("export_keying_material")
+            .inner
+            .crypto_session()
+            .export_keying_material(output, label, context)
+    }
+
+    /// Modify the number of remotely initiated unidirectional streams that may be concurrently open
+    ///
+    /// No streams may be opened by the peer unless fewer than `count` are already open. Large
+    /// `count`s increase both minimum and worst-case memory consumption.
+    pub fn set_max_concurrent_uni_streams(&self, count: VarInt) {
+        let mut conn = self.0.state.lock("set_max_concurrent_uni_streams");
+        conn.inner.set_max_concurrent_streams(Dir::Uni, count);
+        // May need to send MAX_STREAMS to make progress
+        conn.wake();
+    }
+
+    /// See [`crate::TransportConfig::receive_window()`]
+    pub fn set_receive_window(&self, receive_window: VarInt) {
+        let mut conn = self.0.state.lock("set_receive_window");
+        conn.inner.set_receive_window(receive_window);
+        conn.wake();
+    }
+
+    /// Modify the number of remotely initiated bidirectional streams that may be concurrently open
+    ///
+    /// No streams may be opened by the peer unless fewer than `count` are already open. Large
+    /// `count`s increase both minimum and worst-case memory consumption.
+    pub fn set_max_concurrent_bi_streams(&self, count: VarInt) {
+        let mut conn = self.0.state.lock("set_max_concurrent_bi_streams");
+        conn.inner.set_max_concurrent_streams(Dir::Bi, count);
+        // May need to send MAX_STREAMS to make progress
+        conn.wake();
+    }
+
+    /// Set up qlog for this connection.
+    #[cfg(feature = "__qlog")]
+    pub fn set_qlog(
+        &mut self,
+        writer: Box<dyn std::io::Write + Send + Sync>,
+        title: Option<String>,
+        description: Option<String>,
+    ) {
+        let mut state = self.0.state.lock("__qlog");
+        state
+            .inner
+            .set_qlog(writer, title, description, Instant::now());
+    }
+}
+
+pin_project! {
+    /// Future produced by [`Connection::open_uni`]
+    pub struct OpenUni<'a> {
+        conn: &'a ConnectionRef,
+        #[pin]
+        notify: Notified<'a>,
+    }
+}
+
+impl Future for OpenUni<'_> {
+    type Output = Result<SendStream, ConnectionError>;
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let (conn, id, is_0rtt) = ready!(poll_open(ctx, this.conn, this.notify, Dir::Uni))?;
+        Poll::Ready(Ok(SendStream::new(conn, id, is_0rtt)))
+    }
+}
+
+pin_project! {
+    /// Future produced by [`Connection::open_bi`]
+    pub struct OpenBi<'a> {
+        conn: &'a ConnectionRef,
+        #[pin]
+        notify: Notified<'a>,
+    }
+}
+
+impl Future for OpenBi<'_> {
+    type Output = Result<(SendStream, RecvStream), ConnectionError>;
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let (conn, id, is_0rtt) = ready!(poll_open(ctx, this.conn, this.notify, Dir::Bi))?;
+
+        Poll::Ready(Ok((
+            SendStream::new(conn.clone(), id, is_0rtt),
+            RecvStream::new(conn, id, is_0rtt),
+        )))
+    }
+}
+
+fn poll_open<'a>(
+    ctx: &mut Context<'_>,
+    conn: &'a ConnectionRef,
+    mut notify: Pin<&mut Notified<'a>>,
+    dir: Dir,
+) -> Poll<Result<(ConnectionRef, StreamId, bool), ConnectionError>> {
+    let mut state = conn.state.lock("poll_open");
+    if let Some(ref e) = state.error {
+        return Poll::Ready(Err(e.clone()));
+    } else if let Some(id) = state.inner.streams().open(dir) {
+        let is_0rtt = state.inner.side().is_client() && state.inner.is_handshaking();
+        drop(state); // Release the lock so clone can take it
+        return Poll::Ready(Ok((conn.clone(), id, is_0rtt)));
+    }
+    loop {
+        match notify.as_mut().poll(ctx) {
+            // `state` lock ensures we didn't race with readiness
+            Poll::Pending => return Poll::Pending,
+            // Spurious wakeup, get a new future
+            Poll::Ready(()) => {
+                notify.set(conn.shared.stream_budget_available[dir as usize].notified())
+            }
+        }
+    }
+}
+
+pin_project! {
+    /// Future produced by [`Connection::accept_uni`]
+    pub struct AcceptUni<'a> {
+        conn: &'a ConnectionRef,
+        #[pin]
+        notify: Notified<'a>,
+    }
+}
+
+impl Future for AcceptUni<'_> {
+    type Output = Result<RecvStream, ConnectionError>;
+
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let (conn, id, is_0rtt) = ready!(poll_accept(ctx, this.conn, this.notify, Dir::Uni))?;
+        Poll::Ready(Ok(RecvStream::new(conn, id, is_0rtt)))
+    }
+}
+
+pin_project! {
+    /// Future produced by [`Connection::accept_bi`]
+    pub struct AcceptBi<'a> {
+        conn: &'a ConnectionRef,
+        #[pin]
+        notify: Notified<'a>,
+    }
+}
+
+impl Future for AcceptBi<'_> {
+    type Output = Result<(SendStream, RecvStream), ConnectionError>;
+
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let (conn, id, is_0rtt) = ready!(poll_accept(ctx, this.conn, this.notify, Dir::Bi))?;
+        Poll::Ready(Ok((
+            SendStream::new(conn.clone(), id, is_0rtt),
+            RecvStream::new(conn, id, is_0rtt),
+        )))
+    }
+}
+
+fn poll_accept<'a>(
+    ctx: &mut Context<'_>,
+    conn: &'a ConnectionRef,
+    mut notify: Pin<&mut Notified<'a>>,
+    dir: Dir,
+) -> Poll<Result<(ConnectionRef, StreamId, bool), ConnectionError>> {
+    let mut state = conn.state.lock("poll_accept");
+    // Check for incoming streams before checking `state.error` so that already-received streams,
+    // which are necessarily finite, can be drained from a closed connection.
+    if let Some(id) = state.inner.streams().accept(dir) {
+        let is_0rtt = state.inner.is_handshaking();
+        state.wake(); // To send additional stream ID credit
+        drop(state); // Release the lock so clone can take it
+        return Poll::Ready(Ok((conn.clone(), id, is_0rtt)));
+    } else if let Some(ref e) = state.error {
+        return Poll::Ready(Err(e.clone()));
+    }
+    loop {
+        match notify.as_mut().poll(ctx) {
+            // `state` lock ensures we didn't race with readiness
+            Poll::Pending => return Poll::Pending,
+            // Spurious wakeup, get a new future
+            Poll::Ready(()) => notify.set(conn.shared.stream_incoming[dir as usize].notified()),
+        }
+    }
+}
+
+pin_project! {
+    /// Future produced by [`Connection::read_datagram`]
+    pub struct ReadDatagram<'a> {
+        conn: &'a ConnectionRef,
+        #[pin]
+        notify: Notified<'a>,
+    }
+}
+
+impl Future for ReadDatagram<'_> {
+    type Output = Result<Bytes, ConnectionError>;
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+        let mut state = this.conn.state.lock("ReadDatagram::poll");
+        // Check for buffered datagrams before checking `state.error` so that already-received
+        // datagrams, which are necessarily finite, can be drained from a closed connection.
+        match state.inner.datagrams().recv() {
+            Some(x) => {
+                return Poll::Ready(Ok(x));
+            }
+            _ => {
+                if let Some(ref e) = state.error {
+                    return Poll::Ready(Err(e.clone()));
+                }
+            }
+        }
+        loop {
+            match this.notify.as_mut().poll(ctx) {
+                // `state` lock ensures we didn't race with readiness
+                Poll::Pending => return Poll::Pending,
+                // Spurious wakeup, get a new future
+                Poll::Ready(()) => this
+                    .notify
+                    .set(this.conn.shared.datagram_received.notified()),
+            }
+        }
+    }
+}
+
+pin_project! {
+    /// Future produced by [`Connection::on_datagram_drop`]
+    pub struct DatagramDrop<'a> {
+        conn: &'a ConnectionRef,
+        #[pin]
+        notify: Notified<'a>,
+    }
+}
+
+impl Future for DatagramDrop<'_> {
+    type Output = Result<DatagramDropStats, ConnectionError>;
+
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+        let mut state = this.conn.state.lock("DatagramDrop::poll");
+        if let Some(drop) = state.datagram_drop_events.pop_front() {
+            return Poll::Ready(Ok(drop));
+        }
+        if let Some(ref e) = state.error {
+            return Poll::Ready(Err(e.clone()));
+        }
+        loop {
+            match this.notify.as_mut().poll(ctx) {
+                // `state` lock ensures we didn't race with readiness
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(()) => this
+                    .notify
+                    .set(this.conn.shared.datagram_dropped.notified()),
+            }
+        }
+    }
+}
+
+pin_project! {
+    /// Future produced by [`Connection::send_datagram_wait`]
+    pub struct SendDatagram<'a> {
+        conn: &'a ConnectionRef,
+        data: Option<Bytes>,
+        #[pin]
+        notify: Notified<'a>,
+    }
+}
+
+impl Future for SendDatagram<'_> {
+    type Output = Result<(), SendDatagramError>;
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+        let mut state = this.conn.state.lock("SendDatagram::poll");
+        if let Some(ref e) = state.error {
+            return Poll::Ready(Err(SendDatagramError::ConnectionLost(e.clone())));
+        }
+        use crate::SendDatagramError::*;
+        match state.inner.datagrams().send(
+            this.data.take().ok_or_else(|| {
+                error!("SendDatagram future polled without data");
+                SendDatagramError::ConnectionLost(ConnectionError::LocallyClosed)
+            })?,
+            false,
+        ) {
+            Ok(()) => {
+                state.wake();
+                Poll::Ready(Ok(()))
+            }
+            Err(e) => Poll::Ready(Err(match e {
+                Blocked(data) => {
+                    this.data.replace(data);
+                    loop {
+                        match this.notify.as_mut().poll(ctx) {
+                            Poll::Pending => return Poll::Pending,
+                            // Spurious wakeup, get a new future
+                            Poll::Ready(()) => this
+                                .notify
+                                .set(this.conn.shared.datagrams_unblocked.notified()),
+                        }
+                    }
+                }
+                UnsupportedByPeer => SendDatagramError::UnsupportedByPeer,
+                Disabled => SendDatagramError::Disabled,
+                TooLarge => SendDatagramError::TooLarge,
+            })),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ConnectionRef(Arc<ConnectionInner>);
+
+impl ConnectionRef {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        handle: ConnectionHandle,
+        conn: crate::Connection,
+        endpoint_events: mpsc::UnboundedSender<(ConnectionHandle, EndpointEvent)>,
+        conn_events: mpsc::Receiver<ConnectionEvent>,
+        on_handshake_data: oneshot::Sender<()>,
+        on_connected: oneshot::Sender<bool>,
+        socket: Arc<dyn AsyncUdpSocket>,
+        runtime: Arc<dyn Runtime>,
+        buffered_registry: Arc<crate::high_level::endpoint::BufferedBytesRegistry>,
+    ) -> Self {
+        Self(Arc::new(ConnectionInner {
+            state: Mutex::new(State {
+                inner: conn,
+                driver: None,
+                handle,
+                on_handshake_data: Some(on_handshake_data),
+                on_connected: Some(on_connected),
+                connected: false,
+                timer: None,
+                timer_deadline: None,
+                conn_events,
+                endpoint_events,
+                blocked_writers: FxHashMap::default(),
+                blocked_readers: FxHashMap::default(),
+                stopped: FxHashMap::default(),
+                error: None,
+                ref_count: 0,
+                datagram_drop_events: VecDeque::new(),
+                udp_sender: socket.create_sender(),
+                socket,
+                runtime,
+                send_buffer: Vec::new(),
+                buffered_transmit: None,
+                binding_started: false,
+                buffered_registry,
+                last_buffered_refresh: None,
+            }),
+            shared: Shared::default(),
+        }))
+    }
+
+    fn stable_id(&self) -> usize {
+        &*self.0 as *const _ as usize
+    }
+}
+
+impl Clone for ConnectionRef {
+    fn clone(&self) -> Self {
+        self.state.lock("clone").ref_count += 1;
+        Self(self.0.clone())
+    }
+}
+
+impl Drop for ConnectionRef {
+    fn drop(&mut self) {
+        let conn = &mut *self.state.lock("drop");
+        if let Some(x) = conn.ref_count.checked_sub(1) {
+            conn.ref_count = x;
+            if x == 0 && !conn.inner.is_closed() {
+                // If the driver is alive, it's just it and us, so we'd better shut it down. If it's
+                // not, we can't do any harm. If there were any streams being opened, then either
+                // the connection will be closed for an unrelated reason or a fresh reference will
+                // be constructed for the newly opened stream.
+                conn.implicit_close(&self.shared);
+            }
+        }
+    }
+}
+
+impl std::ops::Deref for ConnectionRef {
+    type Target = ConnectionInner;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ConnectionInner {
+    pub(crate) state: Mutex<State>,
+    pub(crate) shared: Shared,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct Shared {
+    /// Notified when new streams may be locally initiated due to an increase in stream ID flow
+    /// control budget
+    stream_budget_available: [Notify; 2],
+    /// Notified when the peer has initiated a new stream
+    stream_incoming: [Notify; 2],
+    datagram_received: Notify,
+    datagrams_unblocked: Notify,
+    datagram_dropped: Notify,
+    observed_address_updated: Notify,
+    closed: Notify,
+}
+
+pub(crate) struct State {
+    pub(crate) inner: crate::Connection,
+    driver: Option<Waker>,
+    handle: ConnectionHandle,
+    on_handshake_data: Option<oneshot::Sender<()>>,
+    on_connected: Option<oneshot::Sender<bool>>,
+    connected: bool,
+    timer: Option<Pin<Box<dyn AsyncTimer>>>,
+    timer_deadline: Option<Instant>,
+    conn_events: mpsc::Receiver<ConnectionEvent>,
+    endpoint_events: mpsc::UnboundedSender<(ConnectionHandle, EndpointEvent)>,
+    pub(crate) blocked_writers: FxHashMap<StreamId, Waker>,
+    pub(crate) blocked_readers: FxHashMap<StreamId, Waker>,
+    pub(crate) stopped: FxHashMap<StreamId, Arc<Notify>>,
+    /// Always set to Some before the connection becomes drained
+    pub(crate) error: Option<ConnectionError>,
+    /// Number of live handles that can be used to initiate or handle I/O; excludes the driver
+    ref_count: usize,
+    datagram_drop_events: VecDeque<DatagramDropStats>,
+    socket: Arc<dyn AsyncUdpSocket>,
+    udp_sender: Pin<Box<dyn UdpSender>>,
+    runtime: Arc<dyn Runtime>,
+    send_buffer: Vec<u8>,
+    /// We buffer a transmit when the underlying I/O would block
+    buffered_transmit: Option<crate::Transmit>,
+    /// True once we've initiated automatic channel binding (if enabled)
+    binding_started: bool,
+    /// #368 gate 5: endpoint-wide buffered-bytes registry this connection
+    /// reports into (driver poll, throttled).
+    buffered_registry: Arc<crate::high_level::endpoint::BufferedBytesRegistry>,
+    /// Last #368 snapshot refresh (throttle anchor).
+    last_buffered_refresh: Option<Instant>,
+}
+
+impl State {
+    fn drive_transmit(&mut self, cx: &mut Context) -> io::Result<bool> {
+        let now = self.runtime.now();
+        let mut transmits = 0;
+
+        let max_datagrams = self
+            .udp_sender
+            .max_transmit_segments()
+            .min(MAX_TRANSMIT_SEGMENTS);
+
+        loop {
+            // Retry the last transmit, or get a new one.
+            let t = match self.buffered_transmit.take() {
+                Some(t) => t,
+                None => {
+                    self.send_buffer.clear();
+                    self.send_buffer.reserve(self.inner.current_mtu() as usize);
+                    match self
+                        .inner
+                        .poll_transmit(now, max_datagrams, &mut self.send_buffer)
+                    {
+                        Some(t) => {
+                            transmits += match t.segment_size {
+                                None => 1,
+                                Some(s) => t.size.div_ceil(s), // round up
+                            };
+                            t
+                        }
+                        None => break,
+                    }
+                }
+            };
+
+            // X0X-0043 GSO bundle accounting. We only count multi-segment
+            // bundles (`segment_size.is_some()` and segment count > 1);
+            // single datagrams are not GSO bundles and would muddy the
+            // "did GSO actually fire?" question this telemetry exists to
+            // answer. See `crate::diagnostics::gso` module docs for the
+            // current observability limitation: ant-quic's in-tree
+            // `UdpSender` impls return `max_transmit_segments() = 1`
+            // and use `try_send_to(transmit.contents, ...)`, so under
+            // current code paths `t.segment_size` is `None` and this
+            // branch is dead until kernel GSO is wired into the runtime.
+            let segment_count = match t.segment_size {
+                Some(s) if s > 0 => t.size.div_ceil(s),
+                _ => 1,
+            };
+            let is_gso_bundle = segment_count > 1;
+
+            let len = t.size;
+            match self
+                .udp_sender
+                .as_mut()
+                .poll_send(&udp_transmit(&t, &self.send_buffer[..len]), cx)
+            {
+                Poll::Pending => {
+                    self.buffered_transmit = Some(t);
+                    return Ok(false);
+                }
+                Poll::Ready(Ok(())) => {
+                    if is_gso_bundle {
+                        crate::diagnostics::gso_diagnostics()
+                            .record_bundle_submitted(segment_count);
+                    }
+                }
+                Poll::Ready(Err(e)) => {
+                    // A destination the host cannot reach (a peer-advertised
+                    // NAT candidate on an unreachable subnet or address family)
+                    // must not be fatal. Returning `Err` here ends the
+                    // connection driver task for good: the connection stays
+                    // `Live` to the application while emitting no ACKs, no PTO
+                    // probes and no idle-timeout CONNECTION_CLOSE, so the peer
+                    // sees a black hole while this side reports a healthy
+                    // connection indefinitely. Drop the datagram and let loss
+                    // recovery retransmit over a path that works — the same
+                    // treatment the endpoint receive path already gives this
+                    // error class (x0x issue #262).
+                    if is_transient_socket_error(&e) {
+                        debug!(
+                            "ignoring transient socket send error to {}: {}",
+                            t.destination, e
+                        );
+                        continue;
+                    }
+                    // X0X-0043: a hard error from the kernel send path is
+                    // the closest measurable proxy for a "partial send"
+                    // today. When the runtime is rewritten to use
+                    // `quinn_udp::UdpSocketState::send`, the per-segment
+                    // delivered count it returns will replace this heuristic.
+                    if is_gso_bundle {
+                        crate::diagnostics::gso_diagnostics()
+                            .record_bundle_submitted(segment_count);
+                        crate::diagnostics::gso_diagnostics().record_bundle_partial_send();
+                    }
+                    return Err(e);
+                }
+            }
+
+            if transmits >= MAX_TRANSMIT_DATAGRAMS {
+                // TODO: What isn't ideal here yet is that if we don't poll all
+                // datagrams that could be sent we don't go into the `app_limited`
+                // state and CWND continues to grow until we get here the next time.
+                // See https://github.com/quinn-rs/quinn/issues/1126
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    fn forward_endpoint_events(&mut self) {
+        while let Some(event) = self.inner.poll_endpoint_events() {
+            // If the endpoint driver is gone, noop.
+            let _ = self.endpoint_events.send((self.handle, event));
+        }
+    }
+
+    /// If this returns `Err`, the endpoint is dead, so the driver should exit immediately.
+    fn process_conn_events(
+        &mut self,
+        shared: &Shared,
+        cx: &mut Context,
+    ) -> Result<(), ConnectionError> {
+        loop {
+            match self.conn_events.poll_recv(cx) {
+                Poll::Ready(Some(ConnectionEvent::Rebind(socket))) => {
+                    self.socket = socket;
+                    self.udp_sender = self.socket.create_sender();
+                    self.inner.local_address_changed();
+                }
+                Poll::Ready(Some(ConnectionEvent::Proto(event))) => {
+                    let mut observed_before = self.inner.all_observed_addresses();
+                    observed_before.sort_unstable();
+                    observed_before.dedup();
+
+                    self.inner.handle_event(event);
+
+                    let mut observed_after = self.inner.all_observed_addresses();
+                    observed_after.sort_unstable();
+                    observed_after.dedup();
+                    if observed_before != observed_after {
+                        shared.observed_address_updated.notify_one();
+                    }
+                }
+                Poll::Ready(Some(ConnectionEvent::Close { reason, error_code })) => {
+                    self.close(error_code, reason, shared);
+                }
+                Poll::Ready(None) => {
+                    return Err(ConnectionError::TransportError(crate::TransportError {
+                        code: crate::TransportErrorCode::INTERNAL_ERROR,
+                        frame: None,
+                        reason: "endpoint driver future was dropped".to_string(),
+                    }));
+                }
+                Poll::Pending => {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    fn forward_app_events(&mut self, shared: &Shared) {
+        while let Some(event) = self.inner.poll() {
+            use crate::Event::*;
+            match event {
+                HandshakeDataReady => {
+                    if let Some(x) = self.on_handshake_data.take() {
+                        let _ = x.send(());
+                    }
+                }
+                Connected => {
+                    self.connected = true;
+                    if let Some(x) = self.on_connected.take() {
+                        // We don't care if the on-connected future was dropped
+                        let _ = x.send(self.inner.accepted_0rtt());
+                    }
+                    if self.inner.side().is_client() && !self.inner.accepted_0rtt() {
+                        // Wake up rejected 0-RTT streams so they can fail immediately with
+                        // `ZeroRttRejected` errors.
+                        wake_all(&mut self.blocked_writers);
+                        wake_all(&mut self.blocked_readers);
+                        wake_all_notify(&mut self.stopped);
+                    }
+                }
+                ConnectionLost { reason } => {
+                    self.terminate(reason, shared);
+                }
+                Stream(StreamEvent::Writable { id }) => wake_stream(id, &mut self.blocked_writers),
+                Stream(StreamEvent::Opened { dir: Dir::Uni }) => {
+                    shared.stream_incoming[Dir::Uni as usize].notify_waiters();
+                }
+                Stream(StreamEvent::Opened { dir: Dir::Bi }) => {
+                    shared.stream_incoming[Dir::Bi as usize].notify_waiters();
+                }
+                DatagramReceived => {
+                    shared.datagram_received.notify_waiters();
+                }
+                DatagramsUnblocked => {
+                    shared.datagrams_unblocked.notify_waiters();
+                }
+                DatagramDropped(drop) => {
+                    // Buffer overflow - surface to application via dedicated queue and notify
+                    tracing::debug!(
+                        datagrams = drop.datagrams,
+                        bytes = drop.bytes,
+                        "datagrams dropped due to receive buffer overflow"
+                    );
+                    self.datagram_drop_events.push_back(drop);
+                    shared.datagram_dropped.notify_waiters();
+                }
+                Stream(StreamEvent::Readable { id }) => wake_stream(id, &mut self.blocked_readers),
+                Stream(StreamEvent::Available { dir }) => {
+                    // Might mean any number of streams are ready, so we wake up everyone
+                    shared.stream_budget_available[dir as usize].notify_waiters();
+                }
+                Stream(StreamEvent::Finished { id }) => wake_stream_notify(id, &mut self.stopped),
+                Stream(StreamEvent::Stopped { id, .. }) => {
+                    wake_stream_notify(id, &mut self.stopped);
+                    wake_stream(id, &mut self.blocked_writers);
+                }
+            }
+        }
+    }
+
+    fn drive_timer(&mut self, cx: &mut Context) -> bool {
+        // Check whether we need to (re)set the timer. If so, we must poll again to ensure the
+        // timer is registered with the runtime (and check whether it's already
+        // expired).
+        match self.inner.poll_timeout() {
+            Some(deadline) => {
+                if let Some(delay) = &mut self.timer {
+                    // There is no need to reset the tokio timer if the deadline
+                    // did not change
+                    if self
+                        .timer_deadline
+                        .map(|current_deadline| current_deadline != deadline)
+                        .unwrap_or(true)
+                    {
+                        delay.as_mut().reset(deadline);
+                    }
+                } else {
+                    self.timer = Some(self.runtime.new_timer(deadline));
+                }
+                // Store the actual expiration time of the timer
+                self.timer_deadline = Some(deadline);
+            }
+            None => {
+                self.timer_deadline = None;
+                return false;
+            }
+        }
+
+        if self.timer_deadline.is_none() {
+            return false;
+        }
+
+        let delay = match self.timer.as_mut() {
+            Some(timer) => timer.as_mut(),
+            None => {
+                error!("Timer missing in state where it should exist");
+                return false;
+            }
+        };
+        if delay.poll(cx).is_pending() {
+            // Since there wasn't a timeout event, there is nothing new
+            // for the connection to do
+            return false;
+        }
+
+        // A timer expired, so the caller needs to check for
+        // new transmits, which might cause new timers to be set.
+        self.inner.handle_timeout(self.runtime.now());
+        self.timer_deadline = None;
+        true
+    }
+
+    /// Wake up a blocked `Driver` task to process I/O
+    pub(crate) fn wake(&mut self) {
+        if let Some(x) = self.driver.take() {
+            x.wake();
+        }
+    }
+
+    /// Used to wake up all blocked futures when the connection becomes closed for any reason
+    fn terminate(&mut self, reason: ConnectionError, shared: &Shared) {
+        self.error = Some(reason.clone());
+        if let Some(x) = self.on_handshake_data.take() {
+            let _ = x.send(());
+        }
+        wake_all(&mut self.blocked_writers);
+        wake_all(&mut self.blocked_readers);
+        shared.stream_budget_available[Dir::Uni as usize].notify_waiters();
+        shared.stream_budget_available[Dir::Bi as usize].notify_waiters();
+        shared.stream_incoming[Dir::Uni as usize].notify_waiters();
+        shared.stream_incoming[Dir::Bi as usize].notify_waiters();
+        shared.datagram_received.notify_waiters();
+        shared.datagrams_unblocked.notify_waiters();
+        shared.datagram_dropped.notify_waiters();
+        shared.observed_address_updated.notify_waiters();
+        if let Some(x) = self.on_connected.take() {
+            let _ = x.send(false);
+        }
+        wake_all_notify(&mut self.stopped);
+        shared.closed.notify_waiters();
+    }
+
+    fn close(&mut self, error_code: VarInt, reason: Bytes, shared: &Shared) {
+        self.inner.close(self.runtime.now(), error_code, reason);
+        self.terminate(ConnectionError::LocallyClosed, shared);
+        self.wake();
+    }
+
+    /// Close for a reason other than the application's explicit request
+    pub(crate) fn implicit_close(&mut self, shared: &Shared) {
+        self.close(0u32.into(), Bytes::new(), shared);
+    }
+
+    pub(crate) fn check_0rtt(&self) -> Result<(), ()> {
+        if self.inner.is_handshaking()
+            || self.inner.accepted_0rtt()
+            || self.inner.side().is_server()
+        {
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl Drop for State {
+    fn drop(&mut self) {
+        if !self.inner.is_drained() {
+            // Ensure the endpoint can tidy up
+            let _ = self
+                .endpoint_events
+                .send((self.handle, crate::EndpointEvent::drained()));
+        }
+    }
+}
+
+impl fmt::Debug for State {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("State").field("inner", &self.inner).finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    use tokio::time::{Duration, timeout};
+
+    use crate::config::{ClientConfig, ServerConfig};
+    use crate::high_level::Endpoint;
+
+    fn gen_self_signed_cert() -> (Vec<CertificateDer<'static>>, PrivateKeyDer<'static>) {
+        let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
+            .expect("generate self-signed cert");
+        let cert_der = CertificateDer::from(cert.cert);
+        let key_der = PrivateKeyDer::Pkcs8(cert.signing_key.serialize_der().into());
+        (vec![cert_der], key_der)
+    }
+
+    fn client_config(chain: &[CertificateDer<'static>]) -> ClientConfig {
+        let mut roots = rustls::RootCertStore::empty();
+        for cert in chain.iter().cloned() {
+            roots.add(cert).expect("add root");
+        }
+        ClientConfig::with_root_certificates(Arc::new(roots)).expect("client config")
+    }
+
+    #[tokio::test]
+    async fn weak_connection_handle_does_not_keep_connection_alive() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let (chain, key) = gen_self_signed_cert();
+        let server_config =
+            ServerConfig::with_single_cert(chain.clone(), key).expect("server config");
+        let server =
+            Endpoint::server(server_config, ([127, 0, 0, 1], 0).into()).expect("server endpoint");
+        let server_addr = server.local_addr().expect("server local addr");
+
+        let server_task = tokio::spawn(async move {
+            let incoming = timeout(Duration::from_secs(10), server.accept())
+                .await
+                .expect("server accept wait")
+                .expect("incoming connection");
+            let conn = timeout(Duration::from_secs(10), incoming)
+                .await
+                .expect("server handshake wait")
+                .expect("server handshake");
+            let _ = timeout(Duration::from_secs(10), conn.closed()).await;
+        });
+
+        let mut client = Endpoint::client(([127, 0, 0, 1], 0).into()).expect("client endpoint");
+        client.set_default_client_config(client_config(&chain));
+        let connecting = client
+            .connect(server_addr, "localhost")
+            .expect("connect start");
+        let conn = timeout(Duration::from_secs(10), connecting)
+            .await
+            .expect("client handshake wait")
+            .expect("client handshake");
+
+        let weak = conn.weak_handle();
+        assert!(weak.is_alive());
+
+        let upgraded = weak.upgrade().expect("weak upgrade while live");
+        assert!(weak.is_same_connection(&upgraded.weak_handle()));
+        drop(upgraded);
+
+        conn.close(0u32.into(), b"x0x-0045");
+        let _ = timeout(Duration::from_secs(10), conn.on_closed())
+            .await
+            .expect("client closed");
+        assert!(!weak.is_alive());
+
+        drop(conn);
+        drop(client);
+
+        timeout(Duration::from_secs(10), async {
+            while weak.upgrade().is_some() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("weak handle released after strong handles dropped");
+
+        server_task.await.expect("server task");
+    }
+    /// The hard live-connection cap refuses connections beyond the limit via the
+    /// existing refuse path, so a peer flood cannot exhaust a fleet/bootstrap
+    /// node's memory (x0x#278).
+    #[tokio::test]
+    async fn live_connection_cap_refuses_beyond_limit() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let (chain, key) = gen_self_signed_cert();
+        let server_config =
+            ServerConfig::with_single_cert(chain.clone(), key).expect("server config");
+        let server =
+            Endpoint::server(server_config, ([127, 0, 0, 1], 0).into()).expect("server endpoint");
+        // Allow only two live connections on this endpoint.
+        server.set_max_connections(2);
+        let server_addr = server.local_addr().expect("server local addr");
+
+        // Server accepts and holds exactly two connections, saturating the cap.
+        let server_task = tokio::spawn(async move {
+            let mut held = Vec::new();
+            for _ in 0..2 {
+                let incoming = timeout(Duration::from_secs(10), server.accept())
+                    .await
+                    .expect("server accept wait")
+                    .expect("incoming connection");
+                let conn = timeout(Duration::from_secs(10), incoming)
+                    .await
+                    .expect("server handshake wait")
+                    .expect("server handshake");
+                held.push(conn);
+            }
+            // Keep the two connections alive until the client tears down.
+            timeout(Duration::from_secs(20), async {
+                for conn in held {
+                    let _ = conn.closed().await;
+                }
+            })
+            .await
+            .ok();
+        });
+
+        let mut client = Endpoint::client(([127, 0, 0, 1], 0).into()).expect("client endpoint");
+        client.set_default_client_config(client_config(&chain));
+
+        // Two connections complete; their handshakes succeeding guarantees the
+        // server has accepted (inserted) them, so the live cap is saturated.
+        let mut held = Vec::new();
+        for _ in 0..2 {
+            let conn = timeout(
+                Duration::from_secs(10),
+                client
+                    .connect(server_addr, "localhost")
+                    .expect("dial under cap"),
+            )
+            .await
+            .expect("connect wait under cap")
+            .expect("connect under cap");
+            held.push(conn);
+        }
+
+        // A third connection is past the saturated cap and must be refused: it
+        // must never establish, whether the refusal surfaces as an immediate
+        // error or a timeout (x0x#278).
+        let third = client
+            .connect(server_addr, "localhost")
+            .expect("dial past cap");
+        let outcome = timeout(Duration::from_secs(8), third).await;
+        assert!(
+            !matches!(outcome, Ok(Ok(_))),
+            "connection past the live cap must be refused, not established"
+        );
+
+        // Tear down so the server task can complete.
+        drop(held);
+        drop(client);
+        server_task.await.expect("server task");
+    }
+}
+
+fn wake_stream(stream_id: StreamId, wakers: &mut FxHashMap<StreamId, Waker>) {
+    if let Some(waker) = wakers.remove(&stream_id) {
+        waker.wake();
+    }
+}
+
+fn wake_all(wakers: &mut FxHashMap<StreamId, Waker>) {
+    wakers.drain().for_each(|(_, waker)| waker.wake())
+}
+
+fn wake_stream_notify(stream_id: StreamId, wakers: &mut FxHashMap<StreamId, Arc<Notify>>) {
+    if let Some(notify) = wakers.remove(&stream_id) {
+        notify.notify_waiters()
+    }
+}
+
+fn wake_all_notify(wakers: &mut FxHashMap<StreamId, Arc<Notify>>) {
+    wakers
+        .drain()
+        .for_each(|(_, notify)| notify.notify_waiters())
+}
+
+/// Errors that can arise when sending a datagram
+#[derive(Debug, Error, Clone, Eq, PartialEq)]
+pub enum SendDatagramError {
+    /// The peer does not support receiving datagram frames
+    #[error("datagrams not supported by peer")]
+    UnsupportedByPeer,
+    /// Datagram support is disabled locally
+    #[error("datagram support disabled")]
+    Disabled,
+    /// The datagram is larger than the connection can currently accommodate
+    ///
+    /// Indicates that the path MTU minus overhead or the limit advertised by the peer has been
+    /// exceeded.
+    #[error("datagram too large")]
+    TooLarge,
+    /// The connection was lost
+    #[error("connection lost")]
+    ConnectionLost(#[from] ConnectionError),
+}
+
+/// The maximum amount of datagrams which will be produced in a single `drive_transmit` call
+///
+/// This limits the amount of CPU resources consumed by datagram generation,
+/// and allows other tasks (like receiving ACKs) to run in between.
+const MAX_TRANSMIT_DATAGRAMS: usize = 20;
+
+/// The maximum amount of datagrams that are sent in a single transmit
+///
+/// This can be lower than the maximum platform capabilities, to avoid excessive
+/// memory allocations when calling `poll_transmit()`. Benchmarks have shown
+/// that numbers around 10 are a good compromise.
+const MAX_TRANSMIT_SEGMENTS: usize = 10;

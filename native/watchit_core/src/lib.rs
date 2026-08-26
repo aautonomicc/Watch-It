@@ -8,6 +8,7 @@
 pub mod cache;
 pub mod engine;
 pub mod mapstore;
+pub mod mywatch;
 pub mod server;
 pub mod upload;
 pub mod verify;
@@ -204,6 +205,8 @@ pub fn start(peers_override: Option<&str>, data_dir: Option<&str>) -> Result<i32
         // that lost all its peers (cable pull, phone sleep) never
         // recovers on its own.
         tokio::spawn(engine.supervise());
+        // Resume an existing My W@tch link (no-op on never-linked devices).
+        tokio::spawn(engine.mywatch.autostart());
         if let Err(e) = axum::serve(listener, app).await {
             tracing::error!("http server exited: {e}");
         }

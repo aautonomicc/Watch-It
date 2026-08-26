@@ -1,0 +1,596 @@
+// Copyright 2024 Saorsa Labs Ltd.
+//
+// This Saorsa Network Software is licensed under the General Public License (GPL), version 3.
+// Please see the file LICENSE-GPL, or visit <http://www.gnu.org/licenses/> for the full text.
+//
+// Full details available at https://saorsalabs.com/licenses
+
+//! Unified events for P2P nodes
+//!
+//! This module provides [`NodeEvent`] - a single event type that covers
+//! all significant node activities including connections, best-effort NAT
+//! behavior hints,
+//! relay sessions, and data transfer.
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! use ant_quic::Node;
+//!
+//! let node = Node::new().await?;
+//! let mut events = node.subscribe();
+//!
+//! tokio::spawn(async move {
+//!     while let Ok(event) = events.recv().await {
+//!         match event {
+//!             NodeEvent::PeerConnected { peer_id, .. } => {
+//!                 println!("Connected to: {:?}", peer_id);
+//!             }
+//!             NodeEvent::NatTypeDetected { nat_type } => {
+//!                 println!("NAT behavior hint: {:?}", nat_type);
+//!             }
+//!             _ => {}
+//!         }
+//!     }
+//! });
+//! ```
+
+use std::net::SocketAddr;
+
+use crate::mdns::MdnsPeerRecord;
+use crate::nat_traversal_api::PeerId;
+use crate::node_status::NatType;
+pub use crate::p2p_endpoint::{DirectPathStatus, DirectPathUnavailableReason};
+pub use crate::reachability::TraversalMethod;
+use crate::transport::TransportAddr;
+
+/// Reason for peer disconnection
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DisconnectReason {
+    /// Normal graceful shutdown
+    Graceful,
+    /// Connection timeout
+    Timeout,
+    /// Connection reset by peer
+    Reset,
+    /// Application-level close
+    ApplicationClose,
+    /// Idle timeout
+    Idle,
+    /// Transport error
+    TransportError(String),
+    /// Unknown reason
+    Unknown,
+}
+
+impl std::fmt::Display for DisconnectReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Graceful => write!(f, "graceful shutdown"),
+            Self::Timeout => write!(f, "connection timeout"),
+            Self::Reset => write!(f, "connection reset"),
+            Self::ApplicationClose => write!(f, "application close"),
+            Self::Idle => write!(f, "idle timeout"),
+            Self::TransportError(e) => write!(f, "transport error: {}", e),
+            Self::Unknown => write!(f, "unknown reason"),
+        }
+    }
+}
+
+/// Unified event type for all node activities
+///
+/// Subscribe to these events via `node.subscribe()` to monitor
+/// all significant node activities in real-time.
+#[derive(Debug, Clone)]
+pub enum NodeEvent {
+    // --- Peer Events ---
+    /// A peer connected successfully
+    PeerConnected {
+        /// The connected peer's ID
+        peer_id: PeerId,
+        /// The peer's address (supports all transport types)
+        addr: TransportAddr,
+        /// How the connection was established.
+        method: TraversalMethod,
+        /// Whether this is a direct connection (vs relayed or assisted)
+        direct: bool,
+    },
+
+    /// A peer disconnected
+    PeerDisconnected {
+        /// The disconnected peer's ID
+        peer_id: PeerId,
+        /// Reason for disconnection
+        reason: DisconnectReason,
+    },
+
+    /// Connection attempt failed
+    ConnectionFailed {
+        /// Target address that failed
+        addr: SocketAddr,
+        /// Error message
+        error: String,
+    },
+
+    // --- NAT Events ---
+    /// External address discovered
+    ///
+    /// This is the address as seen by other peers.
+    ExternalAddressDiscovered {
+        /// The discovered external address (supports all transport types)
+        addr: TransportAddr,
+    },
+
+    /// Best-effort router port mapping was established.
+    PortMappingEstablished {
+        /// The mapped external address.
+        external_addr: SocketAddr,
+    },
+
+    /// Best-effort router port mapping was renewed.
+    PortMappingRenewed {
+        /// The mapped external address.
+        external_addr: SocketAddr,
+    },
+
+    /// Best-effort router port mapping changed to a different public address.
+    PortMappingAddressChanged {
+        /// Previous mapped public address.
+        previous_addr: SocketAddr,
+        /// Current mapped public address.
+        external_addr: SocketAddr,
+    },
+
+    /// Best-effort router port mapping failed.
+    PortMappingFailed {
+        /// Human-readable failure detail.
+        error: String,
+    },
+
+    /// Best-effort router port mapping was removed or became inactive.
+    PortMappingRemoved {
+        /// The last mapped external address, when known.
+        external_addr: Option<SocketAddr>,
+    },
+
+    /// Best-effort NAT behavior hint updated.
+    NatTypeDetected {
+        /// Compatibility-oriented NAT behavior hint derived from native QUIC
+        /// observations rather than STUN-style NAT classification.
+        nat_type: NatType,
+    },
+
+    /// NAT traversal completed
+    NatTraversalComplete {
+        /// The peer we traversed to
+        peer_id: PeerId,
+        /// Whether traversal was successful
+        success: bool,
+        /// Connection method used
+        method: TraversalMethod,
+    },
+
+    /// Best-effort direct-path status for a peer.
+    DirectPathStatus {
+        /// Authenticated peer identity.
+        peer_id: PeerId,
+        /// Current direct-path status.
+        status: DirectPathStatus,
+    },
+
+    // --- Relay Events ---
+    /// Started relaying for a peer
+    RelaySessionStarted {
+        /// The peer we're relaying for
+        peer_id: PeerId,
+    },
+
+    /// Stopped relaying for a peer
+    RelaySessionEnded {
+        /// The peer we were relaying for
+        peer_id: PeerId,
+        /// Total bytes forwarded during session
+        bytes_forwarded: u64,
+    },
+
+    // --- Coordination Events ---
+    /// Started coordinating NAT traversal for peers
+    CoordinationStarted {
+        /// Peer A in the coordination
+        peer_a: PeerId,
+        /// Peer B in the coordination
+        peer_b: PeerId,
+    },
+
+    /// NAT traversal coordination completed
+    CoordinationComplete {
+        /// Peer A in the coordination
+        peer_a: PeerId,
+        /// Peer B in the coordination
+        peer_b: PeerId,
+        /// Whether coordination was successful
+        success: bool,
+    },
+
+    // --- mDNS Events ---
+    /// The local endpoint is advertising itself via first-party mDNS.
+    MdnsServiceAdvertised {
+        /// Service/application scope being advertised.
+        service: String,
+        /// Namespace/workspace scope, if configured.
+        namespace: Option<String>,
+        /// Full DNS-SD instance name being advertised.
+        instance_fullname: String,
+    },
+
+    /// A peer was discovered via first-party mDNS.
+    MdnsPeerDiscovered {
+        /// Structured mDNS discovery record.
+        peer: MdnsPeerRecord,
+    },
+
+    /// A previously discovered mDNS peer was updated.
+    MdnsPeerUpdated {
+        /// Structured mDNS discovery record.
+        peer: MdnsPeerRecord,
+    },
+
+    /// A previously discovered mDNS peer was removed.
+    MdnsPeerRemoved {
+        /// Structured mDNS discovery record.
+        peer: MdnsPeerRecord,
+    },
+
+    /// A discovered mDNS peer passed local eligibility checks.
+    MdnsPeerEligible {
+        /// Structured mDNS discovery record.
+        peer: MdnsPeerRecord,
+    },
+
+    /// A discovered mDNS peer was rejected by local eligibility checks.
+    MdnsPeerIneligible {
+        /// Structured mDNS discovery record.
+        peer: MdnsPeerRecord,
+        /// Human-readable reason for rejection.
+        reason: String,
+    },
+
+    /// A discovered mDNS peer requires explicit approval before auto-connect.
+    MdnsPeerApprovalRequired {
+        /// Structured mDNS discovery record.
+        peer: MdnsPeerRecord,
+        /// Human-readable policy reason.
+        reason: String,
+    },
+
+    /// An mDNS-driven auto-connect attempt was scheduled.
+    MdnsAutoConnectAttempted {
+        /// Structured mDNS discovery record.
+        peer: MdnsPeerRecord,
+        /// Candidate addresses routed through the unified connect path.
+        addresses: Vec<SocketAddr>,
+    },
+
+    /// An mDNS-driven auto-connect attempt succeeded.
+    MdnsAutoConnectSucceeded {
+        /// Structured mDNS discovery record.
+        peer: MdnsPeerRecord,
+        /// Authenticated peer identity learned from QUIC.
+        authenticated_peer_id: PeerId,
+        /// Connected remote transport address.
+        remote_addr: TransportAddr,
+    },
+
+    /// An mDNS-driven auto-connect attempt failed.
+    MdnsAutoConnectFailed {
+        /// Structured mDNS discovery record.
+        peer: MdnsPeerRecord,
+        /// Candidate addresses routed through the unified connect path.
+        addresses: Vec<SocketAddr>,
+        /// Human-readable failure detail.
+        error: String,
+    },
+
+    // --- Data Events ---
+    /// Data received from a peer
+    DataReceived {
+        /// The peer that sent data
+        peer_id: PeerId,
+        /// Stream ID (for multiplexed connections)
+        stream_id: u64,
+        /// Number of bytes received
+        bytes: usize,
+    },
+
+    /// Data sent to a peer
+    DataSent {
+        /// The peer we sent data to
+        peer_id: PeerId,
+        /// Stream ID
+        stream_id: u64,
+        /// Number of bytes sent
+        bytes: usize,
+    },
+}
+
+impl NodeEvent {
+    /// Check if this is a connection event
+    pub fn is_connection_event(&self) -> bool {
+        matches!(
+            self,
+            Self::PeerConnected { .. }
+                | Self::PeerDisconnected { .. }
+                | Self::ConnectionFailed { .. }
+        )
+    }
+
+    /// Check if this is a NAT-related event
+    pub fn is_nat_event(&self) -> bool {
+        matches!(
+            self,
+            Self::ExternalAddressDiscovered { .. }
+                | Self::PortMappingEstablished { .. }
+                | Self::PortMappingRenewed { .. }
+                | Self::PortMappingAddressChanged { .. }
+                | Self::PortMappingFailed { .. }
+                | Self::PortMappingRemoved { .. }
+                | Self::NatTypeDetected { .. }
+                | Self::NatTraversalComplete { .. }
+                | Self::DirectPathStatus { .. }
+        )
+    }
+
+    /// Check if this is a relay event
+    pub fn is_relay_event(&self) -> bool {
+        matches!(
+            self,
+            Self::RelaySessionStarted { .. } | Self::RelaySessionEnded { .. }
+        )
+    }
+
+    /// Check if this is a coordination event
+    pub fn is_coordination_event(&self) -> bool {
+        matches!(
+            self,
+            Self::CoordinationStarted { .. } | Self::CoordinationComplete { .. }
+        )
+    }
+
+    /// Check if this is a data event
+    pub fn is_data_event(&self) -> bool {
+        matches!(self, Self::DataReceived { .. } | Self::DataSent { .. })
+    }
+
+    /// Get the peer ID associated with this event (if any)
+    pub fn peer_id(&self) -> Option<&PeerId> {
+        match self {
+            Self::PeerConnected { peer_id, .. } => Some(peer_id),
+            Self::PeerDisconnected { peer_id, .. } => Some(peer_id),
+            Self::NatTraversalComplete { peer_id, .. } => Some(peer_id),
+            Self::DirectPathStatus { peer_id, .. } => Some(peer_id),
+            Self::RelaySessionStarted { peer_id } => Some(peer_id),
+            Self::RelaySessionEnded { peer_id, .. } => Some(peer_id),
+            Self::DataReceived { peer_id, .. } => Some(peer_id),
+            Self::DataSent { peer_id, .. } => Some(peer_id),
+            Self::MdnsAutoConnectSucceeded {
+                authenticated_peer_id,
+                ..
+            } => Some(authenticated_peer_id),
+            _ => None,
+        }
+    }
+}
+
+// Import P2pDisconnectReason for the From implementation
+use crate::p2p_endpoint::DisconnectReason as P2pDisconnectReason;
+
+/// Convert P2pDisconnectReason to NodeDisconnectReason (DisconnectReason in node_event)
+///
+/// This provides an idiomatic conversion between the two disconnect reason types
+/// used at different API layers.
+impl From<P2pDisconnectReason> for DisconnectReason {
+    fn from(reason: P2pDisconnectReason) -> Self {
+        match reason {
+            P2pDisconnectReason::Normal => Self::Graceful,
+            P2pDisconnectReason::Timeout => Self::Timeout,
+            P2pDisconnectReason::ProtocolError(e) => Self::TransportError(e),
+            P2pDisconnectReason::AuthenticationFailed => {
+                Self::TransportError("authentication failed".to_string())
+            }
+            P2pDisconnectReason::ConnectionLost => Self::Reset,
+            P2pDisconnectReason::RemoteClosed => Self::ApplicationClose,
+            // X0X-0062: a liveness-timeout disconnect maps to Timeout from
+            // the user-facing event surface — same shape as a transport
+            // idle-timeout. The LivenessTimeout-specific close reason is
+            // preserved at the lifecycle-event layer for observers that need
+            // to distinguish the two.
+            P2pDisconnectReason::LivenessTimeout => Self::Timeout,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_peer_id() -> PeerId {
+        PeerId([1u8; 32])
+    }
+
+    fn test_addr() -> SocketAddr {
+        "127.0.0.1:9000".parse().unwrap()
+    }
+
+    #[test]
+    fn test_peer_connected_event() {
+        let event = NodeEvent::PeerConnected {
+            peer_id: test_peer_id(),
+            addr: TransportAddr::Udp(test_addr()),
+            method: TraversalMethod::Direct,
+            direct: true,
+        };
+
+        assert!(event.is_connection_event());
+        assert!(!event.is_nat_event());
+        assert_eq!(event.peer_id(), Some(&test_peer_id()));
+    }
+
+    #[test]
+    fn test_peer_disconnected_event() {
+        let event = NodeEvent::PeerDisconnected {
+            peer_id: test_peer_id(),
+            reason: DisconnectReason::Graceful,
+        };
+
+        assert!(event.is_connection_event());
+        assert_eq!(event.peer_id(), Some(&test_peer_id()));
+    }
+
+    #[test]
+    fn test_nat_type_detected_event() {
+        let event = NodeEvent::NatTypeDetected {
+            nat_type: NatType::FullCone,
+        };
+
+        assert!(event.is_nat_event());
+        assert!(!event.is_connection_event());
+        assert!(event.peer_id().is_none());
+    }
+
+    #[test]
+    fn test_direct_path_status_event() {
+        let event = NodeEvent::DirectPathStatus {
+            peer_id: test_peer_id(),
+            status: DirectPathStatus::BestEffortUnavailable {
+                reason: DirectPathUnavailableReason::NatUnreachable,
+            },
+        };
+
+        assert!(event.is_nat_event());
+        assert_eq!(event.peer_id(), Some(&test_peer_id()));
+    }
+
+    #[test]
+    fn test_relay_session_events() {
+        let start = NodeEvent::RelaySessionStarted {
+            peer_id: test_peer_id(),
+        };
+
+        let end = NodeEvent::RelaySessionEnded {
+            peer_id: test_peer_id(),
+            bytes_forwarded: 1024,
+        };
+
+        assert!(start.is_relay_event());
+        assert!(end.is_relay_event());
+        assert!(!start.is_connection_event());
+    }
+
+    #[test]
+    fn test_coordination_events() {
+        let peer_a = PeerId([1u8; 32]);
+        let peer_b = PeerId([2u8; 32]);
+
+        let start = NodeEvent::CoordinationStarted { peer_a, peer_b };
+
+        let complete = NodeEvent::CoordinationComplete {
+            peer_a,
+            peer_b,
+            success: true,
+        };
+
+        assert!(start.is_coordination_event());
+        assert!(complete.is_coordination_event());
+    }
+
+    #[test]
+    fn test_data_events() {
+        let recv = NodeEvent::DataReceived {
+            peer_id: test_peer_id(),
+            stream_id: 1,
+            bytes: 1024,
+        };
+
+        let send = NodeEvent::DataSent {
+            peer_id: test_peer_id(),
+            stream_id: 1,
+            bytes: 512,
+        };
+
+        assert!(recv.is_data_event());
+        assert!(send.is_data_event());
+        assert!(!recv.is_connection_event());
+    }
+
+    #[test]
+    fn test_disconnect_reason_display() {
+        assert_eq!(
+            format!("{}", DisconnectReason::Graceful),
+            "graceful shutdown"
+        );
+        assert_eq!(
+            format!("{}", DisconnectReason::Timeout),
+            "connection timeout"
+        );
+        assert_eq!(
+            format!("{}", DisconnectReason::TransportError("test".to_string())),
+            "transport error: test"
+        );
+    }
+
+    #[test]
+    fn test_traversal_method_display() {
+        assert_eq!(format!("{}", TraversalMethod::Direct), "direct");
+        assert_eq!(format!("{}", TraversalMethod::HolePunch), "hole punch");
+        assert_eq!(format!("{}", TraversalMethod::Relay), "relay");
+        assert_eq!(
+            format!("{}", TraversalMethod::PortPrediction),
+            "port prediction"
+        );
+    }
+
+    #[test]
+    fn test_events_are_clone() {
+        let event = NodeEvent::PeerConnected {
+            peer_id: test_peer_id(),
+            addr: TransportAddr::Udp(test_addr()),
+            method: TraversalMethod::Direct,
+            direct: true,
+        };
+
+        let cloned = event.clone();
+        assert!(cloned.is_connection_event());
+    }
+
+    #[test]
+    fn test_events_are_debug() {
+        let event = NodeEvent::NatTypeDetected {
+            nat_type: NatType::Symmetric,
+        };
+
+        let debug_str = format!("{:?}", event);
+        assert!(debug_str.contains("NatTypeDetected"));
+        assert!(debug_str.contains("Symmetric"));
+    }
+
+    #[test]
+    fn test_connection_failed_event() {
+        let event = NodeEvent::ConnectionFailed {
+            addr: test_addr(),
+            error: "connection refused".to_string(),
+        };
+
+        assert!(event.is_connection_event());
+        assert!(event.peer_id().is_none());
+    }
+
+    #[test]
+    fn test_external_address_discovered() {
+        let event = NodeEvent::ExternalAddressDiscovered {
+            addr: TransportAddr::Udp("1.2.3.4:9000".parse().unwrap()),
+        };
+
+        assert!(event.is_nat_event());
+        assert!(event.peer_id().is_none());
+    }
+}

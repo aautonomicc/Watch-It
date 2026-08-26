@@ -58,6 +58,15 @@ tracing-android = "0.2"
 # Desktop only: upload is desktop-only, and on Android keyring would
 # silently use its non-persistent mock store.
 [target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dependencies]
+# My W@tch device linking (test implementation, desktop-only for now): an
+# in-process x0x agent (saorsa-gossip + ant-quic, post-quantum, mDNS LAN
+# discovery) syncs per-device records through a self-keyed CRDT KV store
+# on a secret invite topic. Android excluded until the NDK cross-build of
+# the x0x tree is proven; mywatch routes 501 there.
+x0x = "0.39"
+# CancellationToken for the mywatch heartbeat/watch task (already in the
+# x0x tree, so free on desktop).
+tokio-util = "0.7"
 keyring = { version = "3", default-features = false, features = [
     "windows-native",
     "apple-native",
@@ -70,6 +79,14 @@ keyring = { version = "3", default-features = false, features = [
     # runs every keyring call on a dedicated plain thread.
     "async-io",
 ] }
+
+# ant-quic (x0x's transport) pins unicode-width =0.2.0 while ant-core's
+# saorsa-transport pins =0.2.2 — two exact pins in one semver range is an
+# unresolvable graph. Vendored copy at ../third_party/ant-quic is the
+# published 0.27.47 tarball with ONLY that pin bumped to =0.2.2 (pure-Rust
+# width tables; no API change between the two).
+[patch.crates-io]
+ant-quic = { path = "../third_party/ant-quic" }
 
 [profile.release]
 lto = "thin"

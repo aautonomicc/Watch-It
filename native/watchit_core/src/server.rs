@@ -74,6 +74,25 @@ fn protected_router(engine: &'static Engine) -> Router {
             "/upload/{id}",
             get(move |path: Path<u64>| upload_status(engine, path)),
         )
+        // My W@tch device linking. Protected: the invite secret admits a
+        // device to the user's private link, so only the app may read it.
+        .route(
+            "/mywatch",
+            get(move || mywatch_status(engine)).delete(move || mywatch_unlink(engine)),
+        )
+        .route(
+            "/mywatch/link",
+            post(move |body: Bytes| mywatch_link(engine, body)),
+        )
+        .route(
+            "/mywatch/join",
+            post(move |body: Bytes| mywatch_join(engine, body)),
+        )
+        .route("/mywatch/invite", get(move || mywatch_invite(engine)))
+        .route(
+            "/mywatch/announce",
+            post(move |body: Bytes| mywatch_announce(engine, body)),
+        )
 }
 
 fn open_router(engine: &'static Engine) -> Router {
@@ -504,6 +523,64 @@ async fn upload_status(engine: &'static Engine, Path(id): Path<u64>) -> Response
         Some(state) => json_ok(state.to_json(id)),
         None => (StatusCode::NOT_FOUND, "no such upload job").into_response(),
     }
+}
+
+// ---- My W@tch device linking -------------------------------------------
+
+fn mywatch_result(result: Result<serde_json::Value, String>) -> Response {
+    match result {
+        Ok(body) => json_ok(body),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+/// `GET /mywatch` — link state, this device, every linked device's
+/// record, and the persisted last-sync stamp.
+async fn mywatch_status(engine: &'static Engine) -> Response {
+    json_ok(engine.mywatch.status().await)
+}
+
+/// `POST /mywatch/link` — `{"device_name": …}`: create a new link on
+/// this device; returns the invite other devices join with.
+async fn mywatch_link(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    let name = v["device_name"].as_str().unwrap_or("");
+    mywatch_result(engine.mywatch.create_link(name).await)
+}
+
+/// `POST /mywatch/join` — `{"device_name": …, "invite": …}`: join a link
+/// created on another device.
+async fn mywatch_join(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    let name = v["device_name"].as_str().unwrap_or("");
+    let invite = v["invite"].as_str().unwrap_or("");
+    mywatch_result(engine.mywatch.join_link(name, invite).await)
+}
+
+/// `GET /mywatch/invite` — the invite string for the existing link (QR
+/// display / adding another device).
+async fn mywatch_invite(engine: &'static Engine) -> Response {
+    mywatch_result(engine.mywatch.invite().await)
+}
+
+/// `POST /mywatch/announce` — `{"lists": n, "entries": n}`: the app's
+/// current library summary, published into this device's record.
+async fn mywatch_announce(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    let lists = v["lists"].as_u64().unwrap_or(0);
+    let entries = v["entries"].as_u64().unwrap_or(0);
+    mywatch_result(engine.mywatch.announce(lists, entries).await)
+}
+
+/// `DELETE /mywatch` — unlink this device and wipe its link artefacts.
+async fn mywatch_unlink(engine: &'static Engine) -> Response {
+    mywatch_result(engine.mywatch.unlink().await)
 }
 
 async fn serve_xor(

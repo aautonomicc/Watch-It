@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/media_list.dart';
 import '../screens/list_home_screen.dart';
 import '../screens/media_lists_screen.dart';
+import '../screens/my_watch_screen.dart';
 import '../screens/publish_screen.dart';
 import '../screens/settings_screen.dart';
 import '../services/library_arrangement.dart';
@@ -151,6 +152,17 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                     title: Text('Publish',
                         style: TextStyle(color: t.bone, fontSize: 14)),
                     onTap: () => _openPage(const PublishScreen()),
+                  ),
+                // Test feature, desktop-only like Publish: the Android
+                // core ships without the x0x agent for now.
+                if (isDesktopPlatform)
+                  ListTile(
+                    dense: true,
+                    leading: Icon(Icons.devices_outlined,
+                        color: t.boneDim, size: 20),
+                    title: Text('My W@tch',
+                        style: TextStyle(color: t.bone, fontSize: 14)),
+                    onTap: () => _openPage(const MyWatchScreen()),
                   ),
                 ListTile(
                   dense: true,

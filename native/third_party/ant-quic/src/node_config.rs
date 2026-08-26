@@ -1,0 +1,727 @@
+// Copyright 2024 Saorsa Labs Ltd.
+//
+// This Saorsa Network Software is licensed under the General Public License (GPL), version 3.
+// Please see the file LICENSE-GPL, or visit <http://www.gnu.org/licenses/> for the full text.
+//
+// Full details available at https://saorsalabs.com/licenses
+
+//! Minimal configuration for zero-config P2P nodes
+//!
+//! This module provides [`NodeConfig`] - a simple configuration struct
+//! with only 3 optional fields. Most applications need zero configuration.
+//!
+//! # Zero Configuration
+//!
+//! ```rust,ignore
+//! use ant_quic::Node;
+//!
+//! // No configuration needed - just create a node
+//! let node = Node::new().await?;
+//! ```
+//!
+//! # Optional Configuration
+//!
+//! ```rust,ignore
+//! use ant_quic::{Node, NodeConfig};
+//!
+//! // Only configure what you need
+//! let config = NodeConfig::builder()
+//!     .known_peer("quic.saorsalabs.com:9000".parse()?)
+//!     .build();
+//!
+//! let node = Node::with_config(config).await?;
+//! ```
+
+use std::path::Path;
+use std::sync::Arc;
+
+use crate::bootstrap_cache::BootstrapCacheConfig;
+use crate::crypto::pqc::types::{MlDsaPublicKey, MlDsaSecretKey};
+use crate::host_identity::HostIdentity;
+use crate::transport::{TransportAddr, TransportProvider, TransportRegistry};
+use crate::unified_config::load_or_generate_endpoint_keypair;
+
+/// Minimal configuration for P2P nodes
+///
+/// All fields are optional - the node will auto-configure everything.
+/// - `bind_addr`: Defaults to `0.0.0.0:0` (random port)
+/// - `known_peers`: Defaults to empty (node can still accept connections)
+/// - `keypair`: Defaults to fresh generated keypair
+/// - `transport_providers`: Defaults to UDP plus best-effort constrained transports
+///   such as BLE when available
+///
+/// # Example
+///
+/// ```rust,ignore
+/// // Zero configuration
+/// let config = NodeConfig::default();
+///
+/// // Or with known peers
+/// let config = NodeConfig::builder()
+///     .known_peer("peer1.example.com:9000".parse()?)
+///     .build();
+///
+/// // Or with additional transport providers
+/// #[cfg(feature = "ble")]
+/// let config = NodeConfig::builder()
+///     .transport_provider(Arc::new(BleTransport::new().await?))
+///     .build();
+/// ```
+#[derive(Clone, Default)]
+pub struct NodeConfig {
+    /// Bind address. Default: 0.0.0.0:0 (random port)
+    pub bind_addr: Option<TransportAddr>,
+
+    /// Known peers for initial discovery. Default: empty
+    /// When empty, node can still accept incoming connections.
+    pub known_peers: Vec<TransportAddr>,
+
+    /// Identity keypair (ML-DSA-65). Default: fresh generated
+    /// Provide for persistent identity across restarts.
+    pub keypair: Option<(MlDsaPublicKey, MlDsaSecretKey)>,
+
+    /// Additional transport providers beyond the default transport set.
+    ///
+    /// UDP is always included, and constrained transports such as BLE are
+    /// registered automatically when compiled in and available at runtime.
+    /// Use this to add additional transports like LoRa, serial, etc.
+    ///
+    /// Transport capabilities are propagated to peer advertisements and
+    /// used for routing decisions.
+    pub transport_providers: Vec<Arc<dyn TransportProvider>>,
+
+    /// Data channel capacity (bounded mpsc between reader tasks and recv).
+    /// Default: 256.
+    pub data_channel_capacity: Option<usize>,
+
+    /// Maximum concurrent unidirectional QUIC streams per connection.
+    /// Default: 100.
+    pub max_concurrent_uni_streams: Option<u32>,
+
+    /// Maximum bytes accepted for a single message read from a stream.
+    /// Default: [`crate::unified_config::P2pConfig::DEFAULT_MAX_MESSAGE_SIZE`].
+    pub max_message_size: Option<usize>,
+
+    /// Reviewer P2 #2: surface ant-quic's best-effort UPnP IGD port-mapping
+    /// toggle at the simpler `NodeConfig` builder layer (the existing knob
+    /// is only on `P2pConfigBuilder`). When `Some(false)`, the UPnP
+    /// discovery + port-mapping task is skipped. When `None`, the ant-quic
+    /// default applies (currently enabled).
+    pub port_mapping_enabled: Option<bool>,
+
+    /// Enable or disable first-party mDNS discovery for this node.
+    ///
+    /// When `Some(false)`, mDNS browsing and advertising are disabled so
+    /// co-located daemons on the same LAN cannot discover and auto-connect
+    /// to this node via mDNS. When `None`, the ant-quic default applies
+    /// (currently enabled with auto-connect).
+    pub mdns_enabled: Option<bool>,
+
+    /// mDNS namespace isolating this node from other logical planes.
+    ///
+    /// When set, the namespace is advertised in the mDNS TXT record and
+    /// discovered services advertising a different (or no) namespace are
+    /// rejected as dial candidates. Callers running multiple logical
+    /// planes on one host (e.g. prod + testnet daemons) MUST set a
+    /// distinct namespace per plane, otherwise the daemons discover each
+    /// other via the shared `ant-quic` service and auto-connect, bridging
+    /// gossip across planes. When `None`, the ant-quic default applies
+    /// (no namespace; every `ant-quic` service on the LAN is eligible).
+    pub mdns_namespace: Option<String>,
+
+    /// Bootstrap peer cache configuration for the node's endpoint.
+    ///
+    /// The endpoint always owns exactly one [`BootstrapCacheConfig`]-backed
+    /// cache used for quality-scored reconnection, coordinator selection and
+    /// bootstrap tokens. When `None`, the ant-quic default applies — a
+    /// **host-shared** directory (`$TMPDIR/ant-quic-cache` or the platform
+    /// cache dir). Embedders running multiple nodes per host (or wanting
+    /// per-instance persistence) should set an explicit per-instance
+    /// `cache_dir`, or `persist(false)` for an in-memory-only cache.
+    /// Access the resulting shared cache via [`crate::Node::bootstrap_cache`].
+    pub bootstrap_cache: Option<BootstrapCacheConfig>,
+}
+
+impl std::fmt::Debug for NodeConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NodeConfig")
+            .field("bind_addr", &self.bind_addr)
+            .field("known_peers", &self.known_peers)
+            .field("keypair", &self.keypair.as_ref().map(|_| "[REDACTED]"))
+            .field("transport_providers", &self.transport_providers.len())
+            .finish()
+    }
+}
+
+impl NodeConfig {
+    /// Create a new config with defaults
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a builder for fluent construction
+    pub fn builder() -> NodeConfigBuilder {
+        NodeConfigBuilder::default()
+    }
+
+    /// Create config with a specific bind address
+    pub fn with_bind_addr(addr: impl Into<TransportAddr>) -> Self {
+        Self {
+            bind_addr: Some(addr.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Create config with known peers
+    pub fn with_known_peers(peers: impl IntoIterator<Item = impl Into<TransportAddr>>) -> Self {
+        Self {
+            known_peers: peers.into_iter().map(|p| p.into()).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// Create config with a specific ML-DSA-65 keypair
+    pub fn with_keypair(public_key: MlDsaPublicKey, secret_key: MlDsaSecretKey) -> Self {
+        Self {
+            keypair: Some((public_key, secret_key)),
+            ..Default::default()
+        }
+    }
+}
+
+/// Builder for [`NodeConfig`]
+#[derive(Default)]
+pub struct NodeConfigBuilder {
+    bind_addr: Option<TransportAddr>,
+    known_peers: Vec<TransportAddr>,
+    keypair: Option<(MlDsaPublicKey, MlDsaSecretKey)>,
+    transport_providers: Vec<Arc<dyn TransportProvider>>,
+    data_channel_capacity: Option<usize>,
+    max_concurrent_uni_streams: Option<u32>,
+    max_message_size: Option<usize>,
+    port_mapping_enabled: Option<bool>,
+    mdns_enabled: Option<bool>,
+    mdns_namespace: Option<String>,
+    bootstrap_cache: Option<BootstrapCacheConfig>,
+}
+
+impl NodeConfigBuilder {
+    /// Set the local address to bind to
+    ///
+    /// Accepts any type implementing `Into<TransportAddr>`:
+    /// - `SocketAddr` - Auto-converts to `TransportAddr::Udp` (backward compatible)
+    /// - `TransportAddr` - Enables multi-transport support (BLE, LoRa, etc.)
+    ///
+    /// If not specified, defaults to `0.0.0.0:0` (random ephemeral port).
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use ant_quic::NodeConfig;
+    /// use std::net::SocketAddr;
+    ///
+    /// // Backward compatible: SocketAddr
+    /// let config = NodeConfig::builder()
+    ///     .bind_addr("0.0.0.0:9000".parse::<SocketAddr>().unwrap())
+    ///     .build();
+    ///
+    /// // Multi-transport: Explicit TransportAddr
+    /// use ant_quic::transport::TransportAddr;
+    /// let config = NodeConfig::builder()
+    ///     .bind_addr(TransportAddr::Udp("0.0.0.0:0".parse().unwrap()))
+    ///     .build();
+    /// ```
+    pub fn bind_addr(mut self, addr: impl Into<TransportAddr>) -> Self {
+        self.bind_addr = Some(addr.into());
+        self
+    }
+
+    /// Add a known peer for initial network connectivity
+    ///
+    /// Known peers are used for initial discovery and connection establishment.
+    /// The node will learn about additional peers through the network.
+    ///
+    /// Accepts any type implementing `Into<TransportAddr>`:
+    /// - `SocketAddr` - Auto-converts to `TransportAddr::Udp`
+    /// - `TransportAddr` - Supports multiple transport types
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use ant_quic::NodeConfig;
+    /// use std::net::SocketAddr;
+    ///
+    /// // Backward compatible: SocketAddr
+    /// let config = NodeConfig::builder()
+    ///     .known_peer("peer.example.com:9000".parse::<SocketAddr>().unwrap())
+    ///     .build();
+    ///
+    /// // Multi-transport: Mix different transport types
+    /// use ant_quic::transport::TransportAddr;
+    /// let config = NodeConfig::builder()
+    ///     .known_peer(TransportAddr::Udp("192.168.1.1:9000".parse().unwrap()))
+    ///     .known_peer(TransportAddr::ble([0x11, 0x22, 0x33, 0x44, 0x55, 0x66], None))
+    ///     .build();
+    /// ```
+    pub fn known_peer(mut self, addr: impl Into<TransportAddr>) -> Self {
+        self.known_peers.push(addr.into());
+        self
+    }
+
+    /// Add multiple known peers at once
+    ///
+    /// Convenient method to add a collection of peers. Each item is automatically
+    /// converted via `Into<TransportAddr>`, supporting both `SocketAddr` and
+    /// `TransportAddr` for backward compatibility and multi-transport scenarios.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use ant_quic::NodeConfig;
+    /// use std::net::SocketAddr;
+    ///
+    /// // Backward compatible: Vec<SocketAddr>
+    /// let peers: Vec<SocketAddr> = vec![
+    ///     "peer1.example.com:9000".parse().unwrap(),
+    ///     "peer2.example.com:9000".parse().unwrap(),
+    /// ];
+    /// let config = NodeConfig::builder()
+    ///     .known_peers(peers)
+    ///     .build();
+    ///
+    /// // Multi-transport: Heterogeneous transport list
+    /// use ant_quic::transport::TransportAddr;
+    /// let mixed = vec![
+    ///     TransportAddr::Udp("192.168.1.1:9000".parse().unwrap()),
+    ///     TransportAddr::ble([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF], None),
+    ///     TransportAddr::serial("/dev/ttyUSB0"),
+    /// ];
+    /// let config = NodeConfig::builder()
+    ///     .known_peers(mixed)
+    ///     .build();
+    /// ```
+    pub fn known_peers(
+        mut self,
+        addrs: impl IntoIterator<Item = impl Into<TransportAddr>>,
+    ) -> Self {
+        self.known_peers.extend(addrs.into_iter().map(|a| a.into()));
+        self
+    }
+
+    /// Set the identity keypair (ML-DSA-65)
+    pub fn keypair(mut self, public_key: MlDsaPublicKey, secret_key: MlDsaSecretKey) -> Self {
+        self.keypair = Some((public_key, secret_key));
+        self
+    }
+
+    /// Set the identity from a HostIdentity with encrypted storage
+    ///
+    /// This loads or generates a keypair using the HostIdentity for encryption.
+    /// The keypair is stored encrypted at rest in the specified directory.
+    ///
+    /// # Arguments
+    ///
+    /// * `host` - The HostIdentity for key derivation
+    /// * `network_id` - Network identifier for per-network keypair isolation
+    /// * `storage_dir` - Directory to store the encrypted keypair
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the keypair cannot be loaded or generated.
+    pub fn with_host_identity(
+        mut self,
+        host: &HostIdentity,
+        network_id: &[u8],
+        storage_dir: &Path,
+    ) -> Result<Self, String> {
+        let (public_key, secret_key) =
+            load_or_generate_endpoint_keypair(host, network_id, storage_dir)
+                .map_err(|e| format!("Failed to load/generate keypair: {e}"))?;
+        self.keypair = Some((public_key, secret_key));
+        Ok(self)
+    }
+
+    /// Add a transport provider
+    ///
+    /// Transport providers are used for multi-transport P2P networking.
+    /// UDP is always included, and constrained transports such as BLE are
+    /// registered automatically when compiled in and available at runtime.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// #[cfg(feature = "ble")]
+    /// let config = NodeConfig::builder()
+    ///     .transport_provider(Arc::new(BleTransport::new().await?))
+    ///     .build();
+    /// ```
+    pub fn transport_provider(mut self, provider: Arc<dyn TransportProvider>) -> Self {
+        self.transport_providers.push(provider);
+        self
+    }
+
+    /// Add multiple transport providers
+    pub fn transport_providers(
+        mut self,
+        providers: impl IntoIterator<Item = Arc<dyn TransportProvider>>,
+    ) -> Self {
+        self.transport_providers.extend(providers);
+        self
+    }
+
+    /// Set the data channel capacity (bounded mpsc between reader tasks and recv).
+    ///
+    /// Higher values reduce backpressure on reader tasks. Default: 256.
+    pub fn data_channel_capacity(mut self, capacity: usize) -> Self {
+        self.data_channel_capacity = Some(capacity);
+        self
+    }
+
+    /// Set the maximum concurrent unidirectional QUIC streams per connection.
+    ///
+    /// Each `send()` call opens a new unidirectional stream. Applications with
+    /// high message throughput should increase this. Default: 100.
+    pub fn max_concurrent_uni_streams(mut self, count: u32) -> Self {
+        self.max_concurrent_uni_streams = Some(count);
+        self
+    }
+
+    /// Set the maximum bytes accepted for a single message read from a stream.
+    ///
+    /// This mirrors [`crate::unified_config::P2pConfigBuilder::max_message_size`]
+    /// for applications using the simpler [`NodeConfig`] builder. Values must be
+    /// at least 1; [`crate::Node::with_config`] rejects zero with a configuration
+    /// error before constructing the endpoint.
+    pub fn max_message_size(mut self, bytes: usize) -> Self {
+        self.max_message_size = Some(bytes);
+        self
+    }
+
+    /// Reviewer P2 #2: enable or disable the best-effort UPnP IGD
+    /// port-mapping task. Default (when not called) follows the global
+    /// ant-quic default — currently enabled. Use `false` on networks
+    /// without IGD support, or where operator policy prohibits unsolicited
+    /// router port mappings.
+    pub fn port_mapping_enabled(mut self, enabled: bool) -> Self {
+        self.port_mapping_enabled = Some(enabled);
+        self
+    }
+
+    /// Enable or disable first-party mDNS discovery (see
+    /// [`NodeConfig::mdns_enabled`]). Use `false` to keep co-located
+    /// daemons on other planes from discovering this node via mDNS.
+    pub fn mdns_enabled(mut self, enabled: bool) -> Self {
+        self.mdns_enabled = Some(enabled);
+        self
+    }
+
+    /// Set the mDNS namespace isolating this node's logical plane (see
+    /// [`NodeConfig::mdns_namespace`]). Callers running multiple planes on
+    /// one host MUST set a distinct namespace per plane.
+    pub fn mdns_namespace(mut self, namespace: impl Into<String>) -> Self {
+        self.mdns_namespace = Some(namespace.into());
+        self
+    }
+
+    /// Configure the endpoint's bootstrap peer cache (see
+    /// [`NodeConfig::bootstrap_cache`])
+    pub fn bootstrap_cache(mut self, config: BootstrapCacheConfig) -> Self {
+        self.bootstrap_cache = Some(config);
+        self
+    }
+
+    /// Build the configuration
+    pub fn build(self) -> NodeConfig {
+        NodeConfig {
+            bind_addr: self.bind_addr,
+            known_peers: self.known_peers,
+            keypair: self.keypair,
+            transport_providers: self.transport_providers,
+            data_channel_capacity: self.data_channel_capacity,
+            max_concurrent_uni_streams: self.max_concurrent_uni_streams,
+            max_message_size: self.max_message_size,
+            port_mapping_enabled: self.port_mapping_enabled,
+            mdns_enabled: self.mdns_enabled,
+            mdns_namespace: self.mdns_namespace,
+            bootstrap_cache: self.bootstrap_cache,
+        }
+    }
+}
+
+impl NodeConfig {
+    /// Build a transport registry from this configuration
+    ///
+    /// Creates a registry containing all configured transport providers.
+    /// If no providers are configured, returns an empty registry (UDP
+    /// should be added by the caller based on bind_addr).
+    pub fn build_transport_registry(&self) -> TransportRegistry {
+        let mut registry = TransportRegistry::new();
+        for provider in &self.transport_providers {
+            registry.register(provider.clone());
+        }
+        registry
+    }
+
+    /// Check if this configuration has any non-UDP transport providers
+    pub fn has_constrained_transports(&self) -> bool {
+        use crate::transport::TransportType;
+        self.transport_providers
+            .iter()
+            .any(|p| p.transport_type() != TransportType::Udp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::SocketAddr;
+
+    #[test]
+    fn test_default_config() {
+        let config = NodeConfig::default();
+        assert!(config.bind_addr.is_none());
+        assert!(config.known_peers.is_empty());
+        assert!(config.keypair.is_none());
+        assert!(config.transport_providers.is_empty());
+        assert!(config.max_message_size.is_none());
+    }
+
+    /// The endpoint always opens exactly one bootstrap cache from
+    /// `NodeConfig::bootstrap_cache`; without this plumbing embedders were
+    /// forced to open a *second* cache instance (host-shared default dir)
+    /// that diverged from the endpoint's own.
+    #[test]
+    fn builder_plumbs_bootstrap_cache_config() {
+        let cache_config = BootstrapCacheConfig::builder()
+            .cache_dir("/tmp/per-instance-peers")
+            .persist(false)
+            .build();
+        let config = NodeConfig::builder().bootstrap_cache(cache_config).build();
+
+        let plumbed = config.bootstrap_cache.expect("bootstrap cache config set");
+        assert_eq!(
+            plumbed.cache_dir,
+            std::path::PathBuf::from("/tmp/per-instance-peers")
+        );
+        assert!(!plumbed.persist);
+        // Default stays None so existing embedders keep ant-quic's default.
+        assert!(NodeConfig::default().bootstrap_cache.is_none());
+    }
+
+    /// Issue #206: NodeConfig must expose mDNS plane-isolation knobs so
+    /// co-located daemons on different logical planes do not discover and
+    /// auto-connect to each other via the default `ant-quic` service.
+    #[test]
+    fn builder_plumbs_mdns_plane_isolation_config() {
+        let config = NodeConfig::builder()
+            .mdns_enabled(false)
+            .mdns_namespace("testnet")
+            .build();
+        assert_eq!(config.mdns_enabled, Some(false));
+        assert_eq!(config.mdns_namespace.as_deref(), Some("testnet"));
+
+        // Defaults stay None so existing embedders keep ant-quic's default.
+        let default = NodeConfig::default();
+        assert!(default.mdns_enabled.is_none());
+        assert!(default.mdns_namespace.is_none());
+    }
+
+    #[test]
+    fn test_builder_with_max_message_size() {
+        let config = NodeConfig::builder()
+            .max_message_size(10 * 1024 * 1024)
+            .build();
+        assert_eq!(config.max_message_size, Some(10 * 1024 * 1024));
+    }
+
+    #[test]
+    fn test_builder_records_zero_max_message_size_for_node_validation() {
+        let config = NodeConfig::builder().max_message_size(0).build();
+        assert_eq!(config.max_message_size, Some(0));
+    }
+
+    #[test]
+    fn test_builder_with_bind_addr() {
+        let addr: SocketAddr = "0.0.0.0:9000".parse().unwrap();
+        let config = NodeConfig::builder().bind_addr(addr).build();
+        assert_eq!(config.bind_addr, Some(TransportAddr::from(addr)));
+    }
+
+    #[test]
+    fn test_builder_with_known_peers() {
+        let peer1: SocketAddr = "127.0.0.1:9000".parse().unwrap();
+        let peer2: SocketAddr = "127.0.0.1:9001".parse().unwrap();
+
+        let config = NodeConfig::builder()
+            .known_peer(peer1)
+            .known_peer(peer2)
+            .build();
+
+        assert_eq!(config.known_peers.len(), 2);
+        assert!(config.known_peers.contains(&TransportAddr::from(peer1)));
+        assert!(config.known_peers.contains(&TransportAddr::from(peer2)));
+    }
+
+    #[test]
+    fn test_builder_with_multiple_peers() {
+        let peers: Vec<SocketAddr> = vec![
+            "127.0.0.1:9000".parse().unwrap(),
+            "127.0.0.1:9001".parse().unwrap(),
+        ];
+
+        let config = NodeConfig::builder().known_peers(peers.clone()).build();
+
+        assert_eq!(config.known_peers.len(), 2);
+        assert_eq!(
+            config.known_peers,
+            peers
+                .into_iter()
+                .map(TransportAddr::from)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_with_bind_addr() {
+        let addr: SocketAddr = "0.0.0.0:9000".parse().unwrap();
+        let config = NodeConfig::with_bind_addr(addr);
+        assert_eq!(config.bind_addr, Some(TransportAddr::from(addr)));
+        assert!(config.known_peers.is_empty());
+        assert!(config.keypair.is_none());
+    }
+
+    #[test]
+    fn test_with_known_peers() {
+        let peers: Vec<SocketAddr> = vec![
+            "127.0.0.1:9000".parse().unwrap(),
+            "127.0.0.1:9001".parse().unwrap(),
+        ];
+
+        let config = NodeConfig::with_known_peers(peers.clone());
+        assert!(config.bind_addr.is_none());
+        assert_eq!(
+            config.known_peers,
+            peers
+                .into_iter()
+                .map(TransportAddr::from)
+                .collect::<Vec<_>>()
+        );
+        assert!(config.keypair.is_none());
+    }
+
+    #[test]
+    fn test_debug_redacts_keypair() {
+        use crate::crypto::raw_public_keys::key_utils::generate_ml_dsa_keypair;
+        let (public_key, secret_key) = generate_ml_dsa_keypair().unwrap();
+        let config = NodeConfig::with_keypair(public_key, secret_key);
+        let debug_str = format!("{:?}", config);
+        assert!(debug_str.contains("[REDACTED]"));
+        assert!(!debug_str.contains(&format!("{:?}", config.keypair)));
+    }
+
+    #[test]
+    fn test_config_is_clone() {
+        let addr: SocketAddr = "0.0.0.0:9000".parse().unwrap();
+        let peer: SocketAddr = "127.0.0.1:9001".parse().unwrap();
+        let config = NodeConfig::builder()
+            .bind_addr(addr)
+            .known_peer(peer)
+            .build();
+
+        let cloned = config.clone();
+        assert_eq!(config.bind_addr, cloned.bind_addr);
+        assert_eq!(config.known_peers, cloned.known_peers);
+    }
+
+    #[test]
+    fn test_build_transport_registry() {
+        let config = NodeConfig::default();
+        let registry = config.build_transport_registry();
+        assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn test_has_constrained_transports_default() {
+        let config = NodeConfig::default();
+        assert!(!config.has_constrained_transports());
+    }
+
+    #[test]
+    fn test_debug_shows_transport_count() {
+        let config = NodeConfig::default();
+        let debug_str = format!("{:?}", config);
+        assert!(debug_str.contains("transport_providers: 0"));
+    }
+
+    #[test]
+    fn test_node_config_with_transport_addr() {
+        // Create NodeConfig with TransportAddr bind and peers
+        let bind_addr = TransportAddr::from("0.0.0.0:9000".parse::<SocketAddr>().unwrap());
+        let peer1 = TransportAddr::from("127.0.0.1:9001".parse::<SocketAddr>().unwrap());
+        let peer2 = TransportAddr::from("127.0.0.1:9002".parse::<SocketAddr>().unwrap());
+
+        let config = NodeConfig::builder()
+            .bind_addr(bind_addr.clone())
+            .known_peer(peer1.clone())
+            .known_peer(peer2.clone())
+            .build();
+
+        // Verify fields set correctly
+        assert_eq!(config.bind_addr, Some(bind_addr));
+        assert_eq!(config.known_peers.len(), 2);
+        assert!(config.known_peers.contains(&peer1));
+        assert!(config.known_peers.contains(&peer2));
+    }
+
+    #[test]
+    fn test_node_config_builder_backward_compat() {
+        // Use builder with SocketAddr (should auto-convert via Into trait)
+        let bind_socket: SocketAddr = "0.0.0.0:9000".parse().unwrap();
+        let peer_socket: SocketAddr = "127.0.0.1:9001".parse().unwrap();
+
+        let config = NodeConfig::builder()
+            .bind_addr(bind_socket)
+            .known_peer(peer_socket)
+            .build();
+
+        // Verify Into trait conversion works
+        assert_eq!(config.bind_addr, Some(TransportAddr::from(bind_socket)));
+        assert_eq!(config.known_peers.len(), 1);
+        assert_eq!(config.known_peers[0], TransportAddr::from(peer_socket));
+
+        // Verify it's the same as explicit TransportAddr usage
+        let explicit_config = NodeConfig::builder()
+            .bind_addr(TransportAddr::from(bind_socket))
+            .known_peer(TransportAddr::from(peer_socket))
+            .build();
+
+        assert_eq!(config.bind_addr, explicit_config.bind_addr);
+        assert_eq!(config.known_peers, explicit_config.known_peers);
+    }
+
+    #[test]
+    fn test_node_config_transport_addr_preservation() {
+        // Create NodeConfig with various TransportAddr types
+        let udp_bind = TransportAddr::from("0.0.0.0:0".parse::<SocketAddr>().unwrap());
+        let udp_peer = TransportAddr::from("127.0.0.1:9000".parse::<SocketAddr>().unwrap());
+        let ipv6_peer = TransportAddr::from("[::1]:9001".parse::<SocketAddr>().unwrap());
+
+        let config = NodeConfig::builder()
+            .bind_addr(udp_bind.clone())
+            .known_peer(udp_peer.clone())
+            .known_peer(ipv6_peer.clone())
+            .build();
+
+        // Verify address types preserved
+        assert_eq!(config.bind_addr, Some(udp_bind));
+        assert_eq!(config.known_peers.len(), 2);
+
+        // Check that TransportAddr types are maintained
+        assert!(matches!(config.known_peers[0], TransportAddr::Udp(_)));
+        assert!(matches!(config.known_peers[1], TransportAddr::Udp(_)));
+
+        // Verify actual addresses match
+        assert_eq!(config.known_peers[0], udp_peer);
+        assert_eq!(config.known_peers[1], ipv6_peer);
+    }
+}
