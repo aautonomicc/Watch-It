@@ -124,9 +124,45 @@ void main() {
           'Night of the Living Dead (1968) {imdb-tt0063350} [480p].mp4');
     });
 
-    test('original keeps the source name', () {
+    test('original keeps the source name when unprobed', () {
       expect(tierOutputName('Show S01E02.mkv', PublishTier.original),
           'Show S01E02.mkv');
+    });
+
+    test('universal original gains its real resolution tag', () {
+      expect(
+          tierOutputName('Movie (1968).mp4', PublishTier.original,
+              video(width: 1920, height: 1080)),
+          'Movie (1968) [1080p].mp4');
+      expect(
+          tierOutputName('Old Short.mp4', PublishTier.original,
+              video(width: 854, height: 480)),
+          'Old Short [480p].mp4');
+    });
+
+    test('universal original: existing resolution tag is normalized', () {
+      expect(
+          tierOutputName('Movie (1968) - [720p].mp4', PublishTier.original,
+              video(width: 1920, height: 1080)),
+          'Movie (1968) [1080p].mp4');
+    });
+
+    test('universal original keeps its own extension', () {
+      expect(
+          tierOutputName('Movie.m4v', PublishTier.original,
+              video(width: 1920, height: 1080)),
+          'Movie [1080p].m4v');
+    });
+
+    test('non-universal original stays untagged', () {
+      expect(
+          tierOutputName('Movie.mkv', PublishTier.original,
+              video(height: 2160, codec: 'hevc', pixFmt: 'yuv420p10le')),
+          'Movie.mkv');
+      expect(
+          tierOutputName('Movie.mp4', PublishTier.original,
+              video(height: 1080, pixFmt: 'yuv420p10le')),
+          'Movie.mp4');
     });
 
     test('sub-480p source: tag is the real output resolution', () {

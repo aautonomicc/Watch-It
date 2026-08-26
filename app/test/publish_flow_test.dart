@@ -261,19 +261,19 @@ void main() {
     expect(lists, hasLength(1));
     expect(lists.single.title, 'My uploads');
     expect(lists.single.entries, hasLength(2));
-    expect(lists.single.entries[0].name, 'Show S01E01.mp4');
+    expect(lists.single.entries[0].name, 'Show S01E01 [480p].mp4');
     expect(lists.single.entries[0].address, 'aa' * 32);
-    expect(lists.single.entries[1].name, 'Show S01E02.mp4');
+    expect(lists.single.entries[1].name, 'Show S01E02 [480p].mp4');
     expect(lists.single.entries[1].sizeBytes, 5);
 
     // Batch datamap export writes one file per published title.
     await tester.tap(find.text('Save 2 .datamap files'));
     await tester.pumpAndSettle();
     expect(
-        File('${saveDir.path}/Show S01E01.mp4.datamap').readAsBytesSync(),
+        File('${saveDir.path}/Show S01E01 [480p].mp4.datamap').readAsBytesSync(),
         [1, 2, 3]);
     expect(
-        File('${saveDir.path}/Show S01E02.mp4.datamap').readAsBytesSync(),
+        File('${saveDir.path}/Show S01E02 [480p].mp4.datamap').readAsBytesSync(),
         [4, 5, 6]);
   });
 
@@ -384,7 +384,7 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('My Film (2021).mp4 failed'), findsOneWidget);
+    expect(find.textContaining('My Film (2021) [480p].mp4 failed'), findsOneWidget);
     expect(find.textContaining('insufficient ANT balance'), findsOneWidget);
     expect(find.widgetWithText(FilledButton, 'Try again'), findsOneWidget);
     expect(find.text('Skip this file'), findsOneWidget);

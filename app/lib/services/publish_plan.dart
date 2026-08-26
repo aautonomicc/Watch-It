@@ -157,13 +157,25 @@ String tierLabel(MediaProbe? probe, PublishTier tier) {
 /// resolution tag is replaced with the real output resolution
 /// ([tierLabel]), extension becomes .mp4. `Show S01E02.mkv` →
 /// `Show S01E02 [720p].mp4`; a 360p source at Low → `… [360p].mp4`.
-/// Original keeps the source name untouched.
+/// Original keeps the source name untouched — except a universal source
+/// (already-plays-everywhere H.264, where Original stands in for the top
+/// encode tier), which gains its real resolution tag so it matches the
+/// encoded siblings: a 1080p `Movie.mp4` → `Movie [1080p].mp4`.
+/// Non-universal originals stay untagged (a tag there could collide with
+/// the same-resolution encode tier's output name).
 String tierOutputName(String sourceName, PublishTier tier,
     [MediaProbe? probe]) {
-  if (tier == PublishTier.original) return sourceName;
   final dot = sourceName.lastIndexOf('.');
   var base = dot > 0 ? sourceName.substring(0, dot) : sourceName;
   base = base.replaceAll(RegExp(r'\s*-?\s*\[\d{3,4}p\]'), '').trim();
+  if (tier == PublishTier.original) {
+    final height = probe?.height;
+    if (probe == null || !probe.isUniversal || height == null || height <= 0) {
+      return sourceName;
+    }
+    final ext = dot > 0 ? sourceName.substring(dot) : '';
+    return '$base [${height}p]$ext';
+  }
   return '$base [${tierLabel(probe, tier)}].mp4';
 }
 
