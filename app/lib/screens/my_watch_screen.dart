@@ -9,6 +9,7 @@ import '../services/library_store.dart';
 import '../services/my_watch_api.dart';
 import '../services/my_watch_sync.dart';
 import '../theme/tokens.dart';
+import 'qr_scan_screen.dart';
 
 /// My W@tch: link this device with your other devices. Linked devices
 /// sync watch lists and viewing positions automatically in the
@@ -223,6 +224,28 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                     '(starts with wtch1-)',
               ),
             ),
+            // Phones scan the desktop's QR instead of typing 70 chars.
+            if (Platform.isAndroid || Platform.isIOS)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.qr_code_scanner, size: 18),
+                  label: const Text('Scan QR code'),
+                  onPressed: () async {
+                    final code = await Navigator.of(context).push<String>(
+                      MaterialPageRoute(
+                        builder: (_) => QrScanScreen(
+                          title: 'Scan invite',
+                          hint: 'Point the camera at the QR code shown on '
+                              'your linked device',
+                          accept: (v) => v.startsWith('wtch1-'),
+                        ),
+                      ),
+                    );
+                    if (code != null) inviteController.text = code;
+                  },
+                ),
+              ),
           ],
         ),
         actions: [
