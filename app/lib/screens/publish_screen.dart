@@ -691,22 +691,88 @@ class _PublishScreenState extends State<PublishScreen> {
       return const [];
     }
     return [
-      Text(
-        'QUALITY',
-        style: TextStyle(
-            fontSize: 11,
-            letterSpacing: 1.5,
-            fontWeight: FontWeight.w700,
-            color: t.ash),
+      Row(
+        children: [
+          Text(
+            'QUALITY',
+            style: TextStyle(
+                fontSize: 11,
+                letterSpacing: 1.5,
+                fontWeight: FontWeight.w700,
+                color: t.ash),
+          ),
+          const SizedBox(width: 2),
+          IconButton(
+            tooltip: 'Why multiple versions?',
+            visualDensity: VisualDensity.compact,
+            icon: Icon(Icons.info_outline, color: t.ash, size: 16),
+            onPressed: () => _showWhyVersionsDialog(t),
+          ),
+        ],
       ),
       Text(
-        'Each ticked quality is encoded and uploaded for every file it '
-        'applies to; same-title uploads share one card with a version '
-        'picker.',
+        'Devices and connections vary — smaller versions play smoothly '
+        'where the full-quality file can\'t. Each ticked quality is '
+        'encoded and uploaded for every file it applies to; viewers see '
+        'one card with a version picker.',
         style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
       ),
       for (final tier in ordered) _tierTile(t, tier),
     ];
+  }
+
+  /// The full "why" story behind the quality tiers, one tap away from
+  /// where the choice is made. The inline helper carries the one-line
+  /// version; this covers the permanence angle that makes the choice
+  /// matter (uploads can't be swapped for a better-encoded copy later).
+  void _showWhyVersionsDialog(WiTokens t) {
+    final style = TextStyle(color: t.boneDim, fontSize: 13, height: 1.5);
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text('Why multiple versions?',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'One file rarely suits every viewer. A full-quality file '
+                'can stutter or fail entirely on phones, TVs and older '
+                'computers, and it needs a fast connection to stream '
+                'without buffering. Smaller versions play everywhere and '
+                'start quickly even on slow links.',
+                style: style,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Uploads to Autonomi are permanent — a file can\'t be '
+                'replaced with a re-encoded copy later. Any quality you '
+                'want viewers to have needs to be published now.',
+                style: style,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'The extra versions don\'t clutter anyone\'s library: '
+                'uploads of the same title share a single card, and its '
+                'page has a version picker where each viewer chooses '
+                'what plays best for them.',
+                style: style,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text('Close', style: TextStyle(color: t.accent)),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _tierTile(WiTokens t, PublishTier tier) {

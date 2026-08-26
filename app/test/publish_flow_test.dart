@@ -322,6 +322,28 @@ void main() {
     expect(find.textContaining('Movie (2020) [720p].mp4'), findsWidgets);
   });
 
+  testWidgets('quality info button explains why versions are encoded',
+      (tester) async {
+    fake.wallet = {'address': '0x1', 'storage': 'keychain'};
+    FileSelectorPlatform.instance =
+        _FakeFileSelector([mediaFile('Movie (2020).mkv')]);
+    await openPublish(
+        tester, _FakeFfmpeg({'Movie (2020).mkv': hevc4kProbe}));
+    await pickAndEstimate(tester);
+
+    expect(find.textContaining('Devices and connections vary'),
+        findsOneWidget);
+    await tester.tap(find.byTooltip('Why multiple versions?'));
+    await tester.pumpAndSettle();
+    expect(find.text('Why multiple versions?'), findsOneWidget);
+    expect(find.textContaining('replaced with a re-encoded copy'),
+        findsOneWidget);
+    expect(find.textContaining('version picker'), findsWidgets);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    expect(find.text('Why multiple versions?'), findsNothing);
+  });
+
   testWidgets('files matching no ticked quality are called out',
       (tester) async {
     fake.wallet = {'address': '0x1', 'storage': 'keychain'};
