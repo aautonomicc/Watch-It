@@ -36,6 +36,8 @@ futures = "0.3"
 hex = "0.4"
 rmp-serde = "1"
 base64 = "0.22"
+# artwork transfer integrity (already in the x0x tree, so free)
+sha2 = "0.10"
 # bundled: compiles its own SQLite, so Android/cross builds need no system lib
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json = "1"

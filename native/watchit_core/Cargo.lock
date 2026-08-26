@@ -7863,6 +7863,7 @@ dependencies = [
  "rusqlite",
  "self_encryption",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-stream",
  "tokio-util",

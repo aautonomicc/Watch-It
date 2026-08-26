@@ -98,6 +98,14 @@ fn protected_router(engine: &'static Engine) -> Router {
             get(move || mywatch_sync_get(engine))
                 .post(move |body: Bytes| mywatch_sync_put(engine, body)),
         )
+        .route(
+            "/mywatch/art/index",
+            post(move |body: Bytes| mywatch_art_index(engine, body)),
+        )
+        .route(
+            "/mywatch/art/fetch",
+            post(move |body: Bytes| mywatch_art_fetch(engine, body)),
+        )
 }
 
 fn open_router(engine: &'static Engine) -> Router {
@@ -632,6 +640,44 @@ async fn mywatch_sync_put(engine: &'static Engine, body: Bytes) -> Response {
 /// maps, for the app's merge pass.
 async fn mywatch_sync_get(engine: &'static Engine) -> Response {
     mywatch_result(engine.mywatch.sync_docs().await)
+}
+
+/// `POST /mywatch/art/index` — `{"files": [{"sha256": …, "path": …}]}`:
+/// replace the set of user-artwork files this device serves to linked
+/// peers. The app refreshes it every sync cycle.
+async fn mywatch_art_index(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    let files: Vec<(String, std::path::PathBuf)> = v["files"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|f| {
+            Some((
+                f["sha256"].as_str()?.to_string(),
+                std::path::PathBuf::from(f["path"].as_str()?),
+            ))
+        })
+        .collect();
+    mywatch_result(engine.mywatch.set_art_index(files))
+}
+
+/// `POST /mywatch/art/fetch` — `{"agent_id": …, "sha256": …}`: pull one
+/// artwork file from the (online) linked device that owns it, verify
+/// its hash, and return `{"path": …, "size": n}` of the received copy.
+async fn mywatch_art_fetch(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    let (Some(agent), Some(sha)) = (v["agent_id"].as_str(), v["sha256"].as_str()) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "\"agent_id\" and \"sha256\" are required",
+        )
+            .into_response();
+    };
+    mywatch_result(engine.mywatch.fetch_art(agent, sha).await)
 }
 
 async fn serve_xor(

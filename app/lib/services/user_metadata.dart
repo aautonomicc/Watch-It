@@ -14,10 +14,14 @@ import 'metadata_service.dart';
 /// a later match; bundle exports carry it like any other row, so
 /// recipients of a `.watch-list` see the same details offline.
 
-Future<Directory> _defaultPostersDir() async {
+/// Where poster files live — shared with the My W@tch artwork sync,
+/// which hashes and re-saves `user_` files from linked devices.
+Future<Directory> defaultPostersDir() async {
   final support = await getApplicationSupportDirectory();
   return Directory('${support.path}/posters');
 }
+
+Future<Directory> _defaultPostersDir() => defaultPostersDir();
 
 /// Poster-file prefix for [lookupKey]: `user_` + the key with every
 /// filesystem-hostile character flattened (capped so the name stays
@@ -130,6 +134,81 @@ Future<void> saveUserDetails({
           userEdited: const Value(true),
         ),
       );
+  MetadataService.instance.notifyExternalSeed();
+}
+
+/// Apply a linked device's user-edit row (My W@tch sync). Same upsert
+/// as [saveUserDetails] except the row is stamped with the *remote*
+/// edit time [updatedMs] instead of now — both devices then hold the
+/// identical stamp and the last-writer-wins comparison converges
+/// instead of ping-ponging. When the remote row carries no artwork
+/// manifest ([remoteHasArt] false) a local `user_` poster is the loser
+/// of that LWW round and is removed; TMDB artwork is never touched
+/// (a remote text-only edit keeps whatever TMDB art each device has).
+Future<void> applyRemoteUserDetails({
+  required String lookupKey,
+  required String title,
+  int? year,
+  String? overview,
+  String? episodeLabel,
+  required int updatedMs,
+  required bool remoteHasArt,
+  Future<Directory> Function()? postersDirProvider,
+}) async {
+  final db = await LibraryStore.database();
+  final existing = await metadataRowFor(lookupKey);
+  var poster = existing?.posterFile;
+  if (!remoteHasArt && poster != null && poster.startsWith('user_')) {
+    final dir = await (postersDirProvider ?? _defaultPostersDir)();
+    try {
+      File('${dir.path}/$poster').deleteSync();
+    } catch (_) {}
+    poster = null;
+  }
+  await db.into(db.metadataCache).insertOnConflictUpdate(
+        MetadataCacheCompanion.insert(
+          lookupKey: lookupKey,
+          found: true,
+          title: Value(title),
+          year: Value(year),
+          overview: Value(
+              (overview == null || overview.trim().isEmpty) ? null : overview),
+          category: Value(existing?.category),
+          episodeLabel: Value(episodeLabel ?? existing?.episodeLabel),
+          posterFile: Value(poster),
+          mediaType: Value(existing?.mediaType),
+          tmdbId: Value(existing?.tmdbId),
+          fetchedAt: updatedMs,
+          rating: Value(existing?.rating),
+          showOverview: Value(existing?.showOverview),
+          seasonOverview: Value(existing?.seasonOverview),
+          airDate: Value(existing?.airDate),
+          stillFile: Value(existing?.stillFile),
+          showPosterFile: Value(existing?.showPosterFile),
+          userEdited: const Value(true),
+        ),
+      );
+  MetadataService.instance.notifyExternalSeed();
+}
+
+/// Store synced artwork [bytes] as the user poster for [lookupKey]
+/// (fresh `user_` file, older ones deleted) without touching the row's
+/// LWW stamp — the text row was already applied with the remote's
+/// timestamp and the artwork completing later must not look like a
+/// newer local edit.
+Future<void> applyRemotePoster(
+  String lookupKey,
+  Uint8List bytes, {
+  Future<Directory> Function()? postersDirProvider,
+}) async {
+  final db = await LibraryStore.database();
+  final existing = await metadataRowFor(lookupKey);
+  if (existing == null) return;
+  final name = await saveUserPoster(lookupKey, bytes,
+      postersDirProvider: postersDirProvider);
+  await (db.update(db.metadataCache)
+        ..where((t) => t.lookupKey.equals(lookupKey)))
+      .write(MetadataCacheCompanion(posterFile: Value(name)));
   MetadataService.instance.notifyExternalSeed();
 }
 
