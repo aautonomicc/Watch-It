@@ -1,0 +1,994 @@
+// Copyright 2024 Saorsa Labs Ltd.
+//
+// This Saorsa Network Software is licensed under the General Public License (GPL), version 3.
+// Please see the file LICENSE-GPL, or visit <http://www.gnu.org/licenses/> for the full text.
+//
+// Full details available at https://saorsalabs.com/licenses
+
+//! Test connectivity to public QUIC endpoints
+//!
+//! This binary tests ant-quic's ability to connect to various public QUIC servers
+//! to verify protocol compliance and interoperability.
+
+use ant_quic::{
+    ClientConfig, ConnectionStats, Endpoint, EndpointConfig, TransportConfig, VarInt,
+    crypto::rustls::QuicClientConfig, high_level,
+};
+use clap::Parser;
+use rustls::pki_types::ServerName;
+use serde::{Deserialize, Serialize};
+// use std::collections::HashMap; // Currently unused
+use std::error::Error;
+use std::fs;
+use std::net::{SocketAddr, ToSocketAddrs};
+use std::num::NonZeroUsize;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::time::timeout;
+
+#[derive(Parser, Debug, Clone)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Path to endpoint configuration YAML file
+    #[arg(short, long, default_value = "docs/public-quic-endpoints.yaml")]
+    config: PathBuf,
+
+    /// Output file for JSON results
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+
+    /// Connection timeout in seconds
+    #[arg(short, long, default_value = "10")]
+    timeout: u64,
+
+    /// Number of parallel connections
+    #[arg(short, long, default_value = "5")]
+    parallel: NonZeroUsize,
+
+    /// Specific endpoints to test (comma-separated)
+    #[arg(short, long)]
+    endpoints: Option<String>,
+
+    /// Analyze results from JSON file
+    #[arg(short, long)]
+    analyze: Option<PathBuf>,
+
+    /// Output format for analysis (markdown, json)
+    #[arg(short, long, default_value = "markdown")]
+    format: String,
+
+    /// Enable verbose output
+    #[arg(short, long)]
+    verbose: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct EndpointDatabase {
+    endpoints: Vec<EndpointEntry>,
+    validation: ValidationConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+
+struct EndpointEntry {
+    name: String,
+    host: String,
+    port: u16,
+    protocols: Vec<String>,
+    #[serde(rename = "type")]
+    _endpoint_type: String,
+    #[serde(rename = "category")]
+    _category: String,
+    #[serde(rename = "reliability")]
+    _reliability: String,
+    features: Vec<String>,
+    #[serde(rename = "notes")]
+    _notes: String,
+    #[serde(default)]
+    _region: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+
+struct ValidationConfig {
+    timeout_seconds: u64,
+    #[serde(rename = "retry_attempts")]
+    _retry_attempts: u32,
+    #[serde(rename = "retry_delay_ms")]
+    _retry_delay_ms: u64,
+    #[serde(rename = "parallel_connections")]
+    _parallel_connections: usize,
+    #[serde(rename = "tests")]
+    _tests: Vec<TestConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+
+struct TestConfig {
+    #[serde(rename = "name")]
+    _name: String,
+    #[serde(rename = "description")]
+    _description: String,
+    #[serde(rename = "required")]
+    _required: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TestResult {
+    endpoint: String,
+    endpoint_name: String,
+    address: String,
+    success: bool,
+    handshake_time_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rtt_ms: Option<u64>,
+    quic_version: Option<u32>,
+    error: Option<String>,
+    protocols_tested: Vec<String>,
+    successful_protocols: Vec<String>,
+    features_tested: Vec<String>,
+    timestamp: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metrics: Option<EndpointMetrics>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct EndpointMetrics {
+    handshake_time_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rtt_ms: Option<u64>,
+    success_rate: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ValidationResults {
+    endpoints: Vec<TestResult>,
+    summary: ValidationSummary,
+    metadata: ResultMetadata,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ValidationSummary {
+    total_endpoints: usize,
+    passed_endpoints: usize,
+    failed_endpoints: usize,
+    success_rate: f32,
+    average_handshake_time: f32,
+    protocols_seen: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ResultMetadata {
+    ant_quic_version: String,
+    test_date: String,
+    test_duration_ms: u64,
+}
+
+fn rtt_ms_from_connection_stats(stats: &ConnectionStats) -> Option<u64> {
+    let rtt = stats.path.rtt;
+    (stats.frame_rx.acks > 0 && !rtt.is_zero()).then_some(rtt.as_millis() as u64)
+}
+
+async fn test_endpoint(
+    endpoint: &EndpointEntry,
+    client_config: ClientConfig,
+    test_config: &ValidationConfig,
+) -> TestResult {
+    let start = Instant::now();
+    let address = format!("{}:{}", endpoint.host, endpoint.port);
+    let mut protocols_tested = Vec::new();
+    let mut successful_protocols = Vec::new();
+
+    // Resolve address (prefer IPv4 for compatibility)
+    let addr = match address.to_socket_addrs() {
+        Ok(addrs) => {
+            let addrs: Vec<SocketAddr> = addrs.collect();
+            // Prefer IPv4 addresses
+            let addr = addrs
+                .iter()
+                .find(|addr| addr.is_ipv4())
+                .or_else(|| addrs.first())
+                .copied();
+
+            match addr {
+                Some(addr) => addr,
+                None => {
+                    return TestResult {
+                        endpoint: address.clone(),
+                        endpoint_name: endpoint.name.clone(),
+                        address: address.clone(),
+                        success: false,
+                        handshake_time_ms: None,
+                        rtt_ms: None,
+                        quic_version: None,
+                        error: Some("Failed to resolve address".to_string()),
+                        protocols_tested,
+                        successful_protocols,
+                        features_tested: vec![],
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        metrics: None,
+                    };
+                }
+            }
+        }
+        Err(e) => {
+            return TestResult {
+                endpoint: address.clone(),
+                endpoint_name: endpoint.name.clone(),
+                address: address.clone(),
+                success: false,
+                handshake_time_ms: None,
+                rtt_ms: None,
+                quic_version: None,
+                error: Some(format!("DNS resolution failed: {e}")),
+                protocols_tested,
+                successful_protocols,
+                features_tested: vec![],
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                metrics: None,
+            };
+        }
+    };
+
+    // Extract hostname for SNI
+    let hostname = address.split(':').next().unwrap_or(&address);
+    let _server_name = match ServerName::try_from(hostname) {
+        Ok(name) => name,
+        Err(e) => {
+            return TestResult {
+                endpoint: address.clone(),
+                endpoint_name: endpoint.name.clone(),
+                address: address.clone(),
+                success: false,
+                handshake_time_ms: None,
+                rtt_ms: None,
+                quic_version: None,
+                error: Some(format!("Invalid server name: {e}")),
+                protocols_tested,
+                successful_protocols,
+                features_tested: vec![],
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                metrics: None,
+            };
+        }
+    };
+
+    // Create endpoint (use appropriate bind address based on target)
+    #[allow(clippy::unwrap_used)]
+    let bind_addr: std::net::SocketAddr = if addr.is_ipv4() {
+        "0.0.0.0:0".parse().unwrap()
+    } else {
+        "[::]:0".parse().unwrap()
+    };
+
+    let socket = match std::net::UdpSocket::bind(bind_addr) {
+        Ok(s) => s,
+        Err(e) => {
+            return TestResult {
+                endpoint: address.clone(),
+                endpoint_name: endpoint.name.clone(),
+                address: address.clone(),
+                success: false,
+                handshake_time_ms: None,
+                rtt_ms: None,
+                quic_version: None,
+                error: Some(format!("Failed to bind socket: {e}")),
+                protocols_tested: vec![],
+                successful_protocols: vec![],
+                features_tested: vec![],
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                metrics: None,
+            };
+        }
+    };
+    let runtime = match high_level::default_runtime() {
+        Some(r) => r,
+        None => {
+            return TestResult {
+                endpoint: address.clone(),
+                endpoint_name: endpoint.name.clone(),
+                address: address.clone(),
+                success: false,
+                handshake_time_ms: None,
+                rtt_ms: None,
+                quic_version: None,
+                error: Some("No compatible async runtime found".to_string()),
+                protocols_tested: vec![],
+                successful_protocols: vec![],
+                features_tested: vec![],
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                metrics: None,
+            };
+        }
+    };
+    let quic_endpoint = match Endpoint::new(EndpointConfig::default(), None, socket, runtime) {
+        Ok(ep) => ep,
+        Err(e) => {
+            return TestResult {
+                endpoint: address.clone(),
+                endpoint_name: endpoint.name.clone(),
+                address: address.clone(),
+                success: false,
+                handshake_time_ms: None,
+                rtt_ms: None,
+                quic_version: None,
+                error: Some(format!("Failed to create endpoint: {e}")),
+                protocols_tested,
+                successful_protocols,
+                features_tested: vec![],
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                metrics: None,
+            };
+        }
+    };
+
+    // Connect with timeout
+    let connecting = match quic_endpoint.connect_with(client_config.clone(), addr, hostname) {
+        Ok(c) => c,
+        Err(e) => {
+            return TestResult {
+                endpoint: address.clone(),
+                endpoint_name: endpoint.name.clone(),
+                address: address.clone(),
+                success: false,
+                handshake_time_ms: None,
+                rtt_ms: None,
+                quic_version: None,
+                error: Some(format!("Failed to start connection: {e}")),
+                protocols_tested,
+                successful_protocols,
+                features_tested: vec![],
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                metrics: None,
+            };
+        }
+    };
+
+    // Mark protocols as tested
+    protocols_tested = endpoint.protocols.clone();
+
+    let connect_result =
+        timeout(Duration::from_secs(test_config.timeout_seconds), connecting).await;
+
+    match connect_result {
+        Ok(Ok(connection)) => {
+            let handshake_time = start.elapsed();
+            let handshake_ms = handshake_time.as_millis() as u64;
+            let _version = connection.stable_id();
+
+            // Mark successful protocols
+            successful_protocols = endpoint.protocols.clone();
+
+            let rtt_ms = rtt_ms_from_connection_stats(&connection.stats());
+
+            connection.close(0u32.into(), b"test complete");
+
+            TestResult {
+                endpoint: address.clone(),
+                endpoint_name: endpoint.name.clone(),
+                address: address.clone(),
+                success: true,
+                handshake_time_ms: Some(handshake_ms),
+                rtt_ms,
+                quic_version: Some(0x00000001), // QUIC v1
+                error: None,
+                protocols_tested,
+                successful_protocols,
+                features_tested: endpoint.features.clone(),
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                metrics: Some(EndpointMetrics {
+                    handshake_time_ms: handshake_ms,
+                    rtt_ms,
+                    success_rate: 100.0,
+                }),
+            }
+        }
+        Ok(Err(e)) => TestResult {
+            endpoint: address.clone(),
+            endpoint_name: endpoint.name.clone(),
+            address: address.clone(),
+            success: false,
+            handshake_time_ms: None,
+            rtt_ms: None,
+            quic_version: None,
+            error: Some(format!("Connect failed: {e}")),
+            protocols_tested,
+            successful_protocols,
+            features_tested: vec![],
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            metrics: None,
+        },
+        Err(_) => TestResult {
+            endpoint: address.clone(),
+            endpoint_name: endpoint.name.clone(),
+            address: address.clone(),
+            success: false,
+            handshake_time_ms: None,
+            rtt_ms: None,
+            quic_version: None,
+            error: Some("Connect timeout".to_string()),
+            protocols_tested,
+            successful_protocols,
+            features_tested: vec![],
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            metrics: None,
+        },
+    }
+}
+
+fn validation_config_with_cli_overrides(
+    mut validation: ValidationConfig,
+    args: &Args,
+) -> ValidationConfig {
+    validation.timeout_seconds = args.timeout;
+    validation
+}
+
+fn root_cert_store_from_native_certs(
+    certs: Vec<rustls::pki_types::CertificateDer<'static>>,
+    load_errors: &[rustls_native_certs::Error],
+) -> Result<rustls::RootCertStore, Box<dyn Error>> {
+    let mut roots = rustls::RootCertStore::empty();
+    let (usable_roots, ignored_roots) = roots.add_parsable_certificates(certs);
+
+    if usable_roots == 0 {
+        let reason = if load_errors.is_empty() {
+            "no native certificates could be loaded".to_string()
+        } else {
+            load_errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        };
+
+        return Err(format!("no usable platform certificate roots found: {reason}").into());
+    }
+
+    if !load_errors.is_empty() {
+        tracing::warn!(
+            ?load_errors,
+            usable_roots,
+            "failed to load some native certificate roots"
+        );
+    }
+
+    if ignored_roots > 0 {
+        tracing::warn!(
+            usable_roots,
+            ignored_roots,
+            "ignored unparsable native certificate roots"
+        );
+    }
+
+    Ok(roots)
+}
+
+fn load_native_root_cert_store() -> Result<rustls::RootCertStore, Box<dyn Error>> {
+    let cert_result = rustls_native_certs::load_native_certs();
+    root_cert_store_from_native_certs(cert_result.certs, &cert_result.errors)
+}
+
+async fn run_validation(args: Args) -> Result<ValidationResults, Box<dyn Error>> {
+    // Load configuration
+    let config_content = fs::read_to_string(&args.config)?;
+    let config: EndpointDatabase = serde_yaml::from_str(&config_content)?;
+    let EndpointDatabase {
+        endpoints,
+        validation,
+    } = config;
+    let validation = validation_config_with_cli_overrides(validation, &args);
+
+    // Create client configuration
+    let roots = load_native_root_cert_store()?;
+
+    let mut crypto = rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+
+    // Configure ALPN for HTTP/3
+    crypto.alpn_protocols = vec![b"h3".to_vec(), b"h3-29".to_vec()];
+
+    let mut client_config = ClientConfig::new(Arc::new(QuicClientConfig::try_from(crypto)?));
+
+    // Configure transport
+    let mut transport_config = TransportConfig::default();
+    transport_config.max_idle_timeout(Some(VarInt::from_u32(30_000).into()));
+    transport_config.keep_alive_interval(Some(Duration::from_secs(10)));
+
+    client_config.transport_config(Arc::new(transport_config));
+
+    // Filter endpoints if specified
+    let endpoints_to_test = if let Some(filter) = &args.endpoints {
+        let filter_list: Vec<&str> = filter.split(',').collect();
+        endpoints
+            .into_iter()
+            .filter(|e| filter_list.contains(&e.name.as_str()))
+            .collect()
+    } else {
+        endpoints
+    };
+
+    if endpoints_to_test.is_empty() {
+        let filter = args.endpoints.as_deref().unwrap_or("all");
+        return Err(format!(
+            "no public QUIC endpoints configured for filter '{filter}' in {}",
+            args.config.display()
+        )
+        .into());
+    }
+
+    // Test endpoints
+    let mut results = Vec::new();
+    let test_start = Instant::now();
+
+    // Run tests in batches
+    for chunk in endpoints_to_test.chunks(args.parallel.get()) {
+        let mut handles = vec![];
+
+        for endpoint in chunk {
+            let client_config = client_config.clone();
+            let endpoint = endpoint.clone();
+            let test_config = validation.clone();
+
+            let handle =
+                tokio::spawn(
+                    async move { test_endpoint(&endpoint, client_config, &test_config).await },
+                );
+            handles.push(handle);
+        }
+
+        // Wait for batch to complete
+        for handle in handles {
+            let result = handle.await?;
+            results.push(result);
+        }
+
+        // Brief delay between batches
+        if !chunk.is_empty() {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    }
+
+    let test_duration = test_start.elapsed();
+    let summary = summarize_results(&results);
+
+    let validation_results = ValidationResults {
+        endpoints: results,
+        summary,
+        metadata: ResultMetadata {
+            ant_quic_version: env!("CARGO_PKG_VERSION").to_string(),
+            test_date: chrono::Utc::now().to_rfc3339(),
+            test_duration_ms: test_duration.as_millis() as u64,
+        },
+    };
+
+    Ok(validation_results)
+}
+
+fn summarize_results(results: &[TestResult]) -> ValidationSummary {
+    let successful = results.iter().filter(|r| r.success).count();
+    let total = results.len();
+    let success_rate = if total > 0 {
+        (successful as f32 / total as f32) * 100.0
+    } else {
+        0.0
+    };
+
+    let average_handshake_time = if successful > 0 {
+        let sum: u64 = results
+            .iter()
+            .filter(|r| r.success)
+            .filter_map(|r| r.handshake_time_ms)
+            .sum();
+        sum as f32 / successful as f32
+    } else {
+        0.0
+    };
+
+    let mut protocols_seen = std::collections::HashSet::new();
+    for result in results {
+        protocols_seen.extend(result.successful_protocols.iter().cloned());
+    }
+    let mut protocols_seen: Vec<_> = protocols_seen.into_iter().collect();
+    protocols_seen.sort();
+
+    ValidationSummary {
+        total_endpoints: total,
+        passed_endpoints: successful,
+        failed_endpoints: total - successful,
+        success_rate,
+        average_handshake_time,
+        protocols_seen,
+    }
+}
+
+fn generate_markdown_report(results: &ValidationResults) -> String {
+    let mut report = String::new();
+
+    report.push_str("# QUIC Endpoint Validation Report\n\n");
+    report.push_str(&format!("**Date**: {}\n", results.metadata.test_date));
+    report.push_str(&format!(
+        "**ant-quic Version**: {}\n",
+        results.metadata.ant_quic_version
+    ));
+    report.push_str(&format!(
+        "**Test Duration**: {}ms\n\n",
+        results.metadata.test_duration_ms
+    ));
+
+    report.push_str("## Summary\n\n");
+    report.push_str(&format!(
+        "- **Total Endpoints**: {}\n",
+        results.summary.total_endpoints
+    ));
+    report.push_str(&format!(
+        "- **Successful**: {}\n",
+        results.summary.passed_endpoints
+    ));
+    report.push_str(&format!(
+        "- **Failed**: {}\n",
+        results.summary.failed_endpoints
+    ));
+    report.push_str(&format!(
+        "- **Success Rate**: {:.1}%\n",
+        results.summary.success_rate
+    ));
+    report.push_str(&format!(
+        "- **Average Handshake Time**: {:.1}ms\n",
+        results.summary.average_handshake_time
+    ));
+    report.push_str(&format!(
+        "- **Protocols Seen**: {}\n\n",
+        results.summary.protocols_seen.join(", ")
+    ));
+
+    report.push_str("## Detailed Results\n\n");
+    report.push_str("| Endpoint | Address | Status | Handshake Time | RTT | Protocols | Error |\n");
+    report.push_str("|----------|---------|--------|----------------|-----|-----------|-------|\n");
+
+    for result in &results.endpoints {
+        let status = if result.success {
+            "✅ Success"
+        } else {
+            "❌ Failed"
+        };
+        let handshake = result
+            .handshake_time_ms
+            .map(|ms| format!("{ms}ms"))
+            .unwrap_or_else(|| "N/A".to_string());
+        let rtt = result
+            .rtt_ms
+            .map(|ms| format!("{ms}ms"))
+            .unwrap_or_else(|| "N/A".to_string());
+        let protocols = result.successful_protocols.join(", ");
+        let error = result.error.as_deref().unwrap_or("");
+
+        report.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} | {} |\n",
+            result.endpoint_name, result.address, status, handshake, rtt, protocols, error
+        ));
+    }
+
+    report
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod tests {
+    use super::*;
+
+    fn result(endpoint_name: &str, success: bool, handshake_time_ms: Option<u64>) -> TestResult {
+        result_with_protocols(endpoint_name, success, handshake_time_ms, &["h3"])
+    }
+
+    fn result_with_protocols(
+        endpoint_name: &str,
+        success: bool,
+        handshake_time_ms: Option<u64>,
+        protocols: &[&str],
+    ) -> TestResult {
+        TestResult {
+            endpoint: format!("{endpoint_name}:443"),
+            endpoint_name: endpoint_name.to_string(),
+            address: format!("{endpoint_name}:443"),
+            success,
+            handshake_time_ms,
+            rtt_ms: handshake_time_ms,
+            quic_version: success.then_some(0x00000001),
+            error: (!success).then(|| "scripted failure".to_string()),
+            protocols_tested: protocols
+                .iter()
+                .map(|protocol| (*protocol).to_string())
+                .collect(),
+            successful_protocols: if success {
+                protocols
+                    .iter()
+                    .map(|protocol| (*protocol).to_string())
+                    .collect()
+            } else {
+                Vec::new()
+            },
+            features_tested: if success {
+                vec!["quic-v1".to_string()]
+            } else {
+                Vec::new()
+            },
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+            metrics: None,
+        }
+    }
+
+    fn args_with_timeout(timeout: u64) -> Args {
+        Args {
+            config: PathBuf::from("docs/public-quic-endpoints.yaml"),
+            output: None,
+            timeout,
+            parallel: NonZeroUsize::new(5).unwrap(),
+            endpoints: None,
+            analyze: None,
+            format: "markdown".to_string(),
+            verbose: false,
+        }
+    }
+
+    fn validation_config(timeout_seconds: u64) -> ValidationConfig {
+        ValidationConfig {
+            timeout_seconds,
+            _retry_attempts: 1,
+            _retry_delay_ms: 100,
+            _parallel_connections: 5,
+            _tests: Vec::new(),
+        }
+    }
+
+    fn report_for(results: Vec<TestResult>) -> ValidationResults {
+        ValidationResults {
+            summary: summarize_results(&results),
+            endpoints: results,
+            metadata: ResultMetadata {
+                ant_quic_version: "test".to_string(),
+                test_date: "2026-01-01T00:00:00Z".to_string(),
+                test_duration_ms: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn rtt_ms_from_connection_stats_requires_ack_sample() {
+        let mut stats = ConnectionStats::default();
+        stats.path.rtt = Duration::from_millis(25);
+        assert_eq!(rtt_ms_from_connection_stats(&stats), None);
+
+        stats.frame_rx.acks = 1;
+        assert_eq!(rtt_ms_from_connection_stats(&stats), Some(25));
+    }
+
+    #[test]
+    fn rtt_ms_from_connection_stats_ignores_zero_rtt() {
+        let mut stats = ConnectionStats::default();
+        stats.frame_rx.acks = 1;
+
+        assert_eq!(rtt_ms_from_connection_stats(&stats), None);
+    }
+
+    #[test]
+    fn json_result_omits_unmeasured_rtt() -> Result<(), serde_json::Error> {
+        let mut result = result("ok.example", true, Some(25));
+        result.rtt_ms = None;
+        result.metrics = Some(EndpointMetrics {
+            handshake_time_ms: 25,
+            rtt_ms: None,
+            success_rate: 100.0,
+        });
+
+        let value = serde_json::to_value(result)?;
+        assert!(value.get("rtt_ms").is_none());
+        assert!(value["metrics"].get("rtt_ms").is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn summarize_results_handles_zero_endpoints_explicitly() {
+        let summary = summarize_results(&[]);
+        assert_eq!(summary.total_endpoints, 0);
+        assert_eq!(summary.passed_endpoints, 0);
+        assert_eq!(summary.failed_endpoints, 0);
+        assert_eq!(summary.success_rate, 0.0);
+        assert_eq!(summary.average_handshake_time, 0.0);
+        assert!(summary.protocols_seen.is_empty());
+    }
+
+    #[test]
+    fn summarize_results_reports_all_success() {
+        let results = vec![
+            result("a.example", true, Some(20)),
+            result("b.example", true, Some(40)),
+        ];
+        let summary = summarize_results(&results);
+        assert_eq!(summary.total_endpoints, 2);
+        assert_eq!(summary.passed_endpoints, 2);
+        assert_eq!(summary.failed_endpoints, 0);
+        assert_eq!(summary.success_rate, 100.0);
+        assert_eq!(summary.average_handshake_time, 30.0);
+        assert_eq!(summary.protocols_seen, vec!["h3".to_string()]);
+    }
+
+    #[test]
+    fn summarize_results_reports_partial_failure_below_threshold() {
+        let results = vec![
+            result("a.example", true, Some(10)),
+            result("b.example", false, None),
+            result("c.example", false, None),
+        ];
+        let summary = summarize_results(&results);
+        assert_eq!(summary.total_endpoints, 3);
+        assert_eq!(summary.passed_endpoints, 1);
+        assert_eq!(summary.failed_endpoints, 2);
+        assert!((summary.success_rate - 33.333336).abs() < f32::EPSILON);
+        assert_eq!(summary.average_handshake_time, 10.0);
+    }
+
+    #[test]
+    fn summarize_results_deduplicates_and_sorts_successful_protocols() {
+        let results = vec![
+            result_with_protocols("a.example", true, Some(20), &["h3-29", "h3"]),
+            result_with_protocols("b.example", true, Some(40), &["h3"]),
+            result_with_protocols("c.example", false, None, &["failed-proto"]),
+        ];
+        let summary = summarize_results(&results);
+        assert_eq!(
+            summary.protocols_seen,
+            vec!["h3".to_string(), "h3-29".to_string()]
+        );
+    }
+
+    #[test]
+    fn summarize_results_counts_success_without_handshake_time() {
+        let results = vec![
+            result("a.example", true, None),
+            result("b.example", true, Some(40)),
+        ];
+        let summary = summarize_results(&results);
+        assert_eq!(summary.total_endpoints, 2);
+        assert_eq!(summary.passed_endpoints, 2);
+        assert_eq!(summary.success_rate, 100.0);
+        assert_eq!(summary.average_handshake_time, 20.0);
+    }
+
+    #[test]
+    fn cli_rejects_zero_parallelism() {
+        let error = Args::try_parse_from(["test_public_endpoints", "--parallel", "0"])
+            .expect_err("zero parallelism should be rejected");
+        assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn cli_timeout_overrides_validation_config_timeout() {
+        let args = args_with_timeout(42);
+        let validation = validation_config_with_cli_overrides(validation_config(10), &args);
+        assert_eq!(validation.timeout_seconds, 42);
+    }
+
+    #[test]
+    fn invalid_native_root_returns_error_instead_of_panicking() {
+        let certs = vec![rustls::pki_types::CertificateDer::from(vec![0_u8])];
+        let error = root_cert_store_from_native_certs(certs, &[])
+            .err()
+            .map(|error| error.to_string());
+
+        assert!(matches!(
+            error.as_deref(),
+            Some(message) if message.contains("no usable platform certificate roots found")
+        ));
+    }
+
+    #[test]
+    fn markdown_report_includes_zero_endpoint_summary() {
+        let results = report_for(Vec::new());
+        let report = generate_markdown_report(&results);
+        assert!(report.contains("Total Endpoints"));
+        assert!(report.contains("Success Rate"));
+        assert!(report.contains("0.0%"));
+    }
+
+    #[test]
+    fn markdown_report_includes_success_and_failure_rows() {
+        let results = report_for(vec![
+            result("ok.example", true, Some(25)),
+            result("bad.example", false, None),
+        ]);
+        let report = generate_markdown_report(&results);
+        assert!(
+            report.contains("| ok.example | ok.example:443 | ✅ Success | 25ms | 25ms | h3 |  |")
+        );
+        assert!(report.contains(
+            "| bad.example | bad.example:443 | ❌ Failed | N/A | N/A |  | scripted failure |"
+        ));
+    }
+
+    #[test]
+    fn markdown_report_includes_metadata_and_protocol_summary() {
+        let results = report_for(vec![result_with_protocols(
+            "proto.example",
+            true,
+            Some(5),
+            &["h3-29", "h3"],
+        )]);
+        let report = generate_markdown_report(&results);
+        assert!(report.contains("**ant-quic Version**: test"));
+        assert!(report.contains("**Test Duration**: 0ms"));
+        assert!(report.contains("**Protocols Seen**: h3, h3-29"));
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let args = Args::parse();
+
+    // Initialize logging
+    let log_level = if args.verbose { "debug" } else { "info" };
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(format!("ant_quic={log_level}").parse()?)
+                .add_directive(format!("test_public_endpoints={log_level}").parse()?),
+        )
+        .init();
+
+    // Check if we're in analysis mode
+    if let Some(analyze_path) = &args.analyze {
+        // Load and analyze results
+        let results_content = fs::read_to_string(analyze_path)?;
+        let results: ValidationResults = serde_json::from_str(&results_content)?;
+
+        match args.format.as_str() {
+            "markdown" => {
+                println!("{}", generate_markdown_report(&results));
+            }
+            "json" => {
+                println!("{}", serde_json::to_string_pretty(&results.summary)?);
+            }
+            _ => {
+                eprintln!("Unsupported format: {}", args.format);
+                std::process::exit(1);
+            }
+        }
+        return Ok(());
+    }
+
+    println!("================================================");
+    println!("ant-quic Public Endpoint Validation");
+    println!("================================================");
+    println!();
+
+    // Run validation
+    let results = run_validation(args.clone()).await?;
+
+    // Print summary
+    println!("\nValidation Summary:");
+    println!(
+        "Total endpoints tested: {}",
+        results.summary.total_endpoints
+    );
+    println!(
+        "Successful connections: {} ({:.1}%)",
+        results.summary.passed_endpoints, results.summary.success_rate
+    );
+    println!(
+        "Average handshake time: {:.1}ms",
+        results.summary.average_handshake_time
+    );
+
+    // Save results if output specified
+    if let Some(output_path) = &args.output {
+        let json_output = serde_json::to_string_pretty(&results)?;
+        fs::write(output_path, json_output)?;
+        println!("\nResults saved to: {}", output_path.display());
+    }
+
+    Ok(())
+}

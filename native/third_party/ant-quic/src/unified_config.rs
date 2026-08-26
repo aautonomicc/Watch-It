@@ -1,0 +1,1925 @@
+// Copyright 2024 Saorsa Labs Ltd.
+//
+// This Saorsa Network Software is licensed under the General Public License (GPL), version 3.
+// Please see the file LICENSE-GPL, or visit <http://www.gnu.org/licenses/> for the full text.
+//
+// Full details available at https://saorsalabs.com/licenses
+
+//! Configuration for ant-quic P2P endpoints
+//!
+//! This module provides `P2pConfig` with builder pattern support for
+//! configuring endpoints, NAT traversal, MTU, PQC, and other settings.
+//!
+//! # v0.13.0 Symmetric P2P API
+//!
+//! ```rust,ignore
+//! use ant_quic::P2pConfig;
+//!
+//! // All nodes are symmetric - no client/server roles
+//! let config = P2pConfig::builder()
+//!     .bind_addr("0.0.0.0:9000".parse()?)
+//!     .known_peer("peer1.example.com:9000".parse()?)
+//!     .known_peer("peer2.example.com:9000".parse()?)
+//!     .build()?;
+//! ```
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::time::Duration;
+
+// v0.2: AuthConfig removed - TLS handles peer authentication via ML-DSA-65
+use crate::bootstrap_cache::BootstrapCacheConfig;
+use crate::config::nat_timeouts::TimeoutConfig;
+use crate::crypto::pqc::PqcConfig;
+use crate::crypto::pqc::types::{MlDsaPublicKey, MlDsaSecretKey};
+use crate::host_identity::HostIdentity;
+use crate::nat_traversal_api::PeerId;
+use crate::transport::{TransportAddr, TransportProvider, TransportRegistry};
+
+/// Policy controlling whether discovered peers should be connected automatically.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AutoConnectPolicy {
+    /// Do not automatically connect to newly discovered peers.
+    #[default]
+    Disabled,
+    /// Surface discovered peers for explicit approval before auto-dialing.
+    ApprovalRequired,
+    /// Allow automatically connecting to discovered peers.
+    Enabled,
+}
+
+impl AutoConnectPolicy {
+    /// Whether this policy allows the transport to dial automatically.
+    pub const fn allows_automatic_dial(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+
+    /// Whether this policy requires an explicit approval step before auto-dialing.
+    pub const fn requires_approval(self) -> bool {
+        matches!(self, Self::ApprovalRequired)
+    }
+}
+
+/// Mode controlling whether the local node browses, advertises, or does both via mDNS.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MdnsMode {
+    /// Browse for peers and advertise this local endpoint.
+    #[default]
+    Both,
+    /// Browse for peers without advertising the local endpoint.
+    BrowseOnly,
+    /// Advertise the local endpoint without browsing for peers.
+    AdvertiseOnly,
+}
+
+impl MdnsMode {
+    /// Returns whether browsing is enabled in this mode.
+    pub const fn browse_enabled(self) -> bool {
+        matches!(self, Self::Both | Self::BrowseOnly)
+    }
+
+    /// Returns whether advertising is enabled in this mode.
+    pub const fn advertise_enabled(self) -> bool {
+        matches!(self, Self::Both | Self::AdvertiseOnly)
+    }
+}
+
+/// Configuration for optional first-party mDNS discovery/runtime integration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MdnsConfig {
+    /// Whether mDNS discovery is enabled.
+    pub enabled: bool,
+
+    /// Service/application scope to browse and advertise.
+    ///
+    /// This becomes the mDNS service type label. It should be a short DNS-SD
+    /// service identifier such as `ant-quic` or `x0x`.
+    pub service: Option<String>,
+
+    /// Optional namespace/workspace scope.
+    ///
+    /// When set, discovered services must advertise the same namespace before
+    /// they are treated as eligible dial candidates.
+    pub namespace: Option<String>,
+
+    /// Whether the local node should browse, advertise, or do both.
+    pub mode: MdnsMode,
+
+    /// Whether discovered peers should auto-connect.
+    pub auto_connect: AutoConnectPolicy,
+
+    /// Optional application metadata to publish in TXT records.
+    ///
+    /// Internal ant-quic keys such as `peer_id` and `namespace` are reserved
+    /// and will override user-provided values if they conflict.
+    pub metadata: BTreeMap<String, String>,
+}
+
+impl Default for MdnsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            service: Some("ant-quic".to_string()),
+            namespace: None,
+            mode: MdnsMode::Both,
+            auto_connect: AutoConnectPolicy::Enabled,
+            metadata: BTreeMap::new(),
+        }
+    }
+}
+
+/// Public discovery policy for zero-config and policy-driven discovery inputs.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DiscoveryPolicy {
+    /// Whether statically configured known peers are enabled as a discovery source.
+    pub static_known_peers: bool,
+    /// Optional mDNS discovery configuration.
+    pub mdns: Option<MdnsConfig>,
+    /// Default auto-connect policy for discovered peers.
+    pub auto_connect: AutoConnectPolicy,
+}
+
+impl DiscoveryPolicy {
+    /// Create the default zero-config discovery policy.
+    pub fn current_default() -> Self {
+        Self {
+            static_known_peers: true,
+            mdns: Some(MdnsConfig::default()),
+            auto_connect: AutoConnectPolicy::Enabled,
+        }
+    }
+}
+
+/// Lightweight trust policy scaffold for the unified connectivity plan.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum TrustPolicy {
+    /// Require authenticated peers but apply no additional discovery scoping.
+    #[default]
+    AuthenticateOnly,
+    /// Only allow discovered peers whose durable identity is in the allowlist.
+    AllowedPeerIds(Vec<PeerId>),
+}
+
+impl TrustPolicy {
+    /// Return the configured allowlist, if any.
+    pub fn allowed_peer_ids(&self) -> Option<&[PeerId]> {
+        match self {
+            Self::AuthenticateOnly => None,
+            Self::AllowedPeerIds(peer_ids) => Some(peer_ids.as_slice()),
+        }
+    }
+
+    /// Whether a discovered peer ID is allowed by this policy.
+    pub fn allows_discovered_peer(&self, peer_id: Option<PeerId>) -> bool {
+        match self {
+            Self::AuthenticateOnly => true,
+            Self::AllowedPeerIds(peer_ids) => {
+                peer_id.is_some_and(|peer_id| peer_ids.contains(&peer_id))
+            }
+        }
+    }
+}
+
+/// Configuration for ant-quic P2P endpoints
+///
+/// This struct provides all configuration options for P2P networking including
+/// NAT traversal, authentication, MTU settings, and post-quantum cryptography.
+///
+/// Named `P2pConfig` to avoid collision with the low-level `config::EndpointConfig`
+/// which is used for QUIC protocol settings.
+///
+/// # Pure P2P Design (v0.13.0+)
+/// All nodes are symmetric - they can connect, accept connections, and coordinate
+/// NAT traversal for peers. There is no role distinction.
+#[derive(Debug, Clone)]
+pub struct P2pConfig {
+    /// Local address to bind to. If `None`, an ephemeral port is auto-assigned
+    /// with enhanced security through port randomization.
+    pub bind_addr: Option<TransportAddr>,
+
+    /// Known peers for initial discovery/bootstrap input and NAT traversal coordination.
+    ///
+    /// These are preconfigured contact hints that seed discovery and initial
+    /// connectivity. They are not transport-strategy knobs and do not imply any
+    /// privileged peer role.
+    pub known_peers: Vec<TransportAddr>,
+
+    /// Discovery policy for static peers and zero-config local discovery.
+    pub discovery: DiscoveryPolicy,
+
+    /// Trust policy for discovered/authenticated peers.
+    ///
+    /// Defaults to `AuthenticateOnly`, matching current behavior.
+    pub trust: TrustPolicy,
+
+    /// Maximum number of concurrent connections
+    pub max_connections: usize,
+
+    // v0.2: auth field removed - TLS handles peer authentication via ML-DSA-65
+    /// NAT traversal configuration
+    pub nat: NatConfig,
+
+    /// Timeout configuration for all operations
+    pub timeouts: TimeoutConfig,
+
+    /// Post-quantum cryptography configuration
+    pub pqc: PqcConfig,
+
+    /// MTU configuration for network packet sizing
+    pub mtu: MtuConfig,
+
+    /// Interval for collecting and reporting statistics
+    pub stats_interval: Duration,
+
+    /// Identity keypair for persistent peer identity (ML-DSA-65).
+    /// If `None`, a fresh keypair is generated on startup.
+    /// Provide this for persistent identity across restarts.
+    pub keypair: Option<(MlDsaPublicKey, MlDsaSecretKey)>,
+
+    /// Bootstrap cache configuration
+    pub bootstrap_cache: BootstrapCacheConfig,
+
+    /// Transport registry for multi-transport support
+    ///
+    /// Contains all registered transport providers (UDP, BLE, etc.) that this
+    /// endpoint can use for connectivity. If empty, a default transport set is
+    /// created automatically with UDP plus best-effort constrained transports
+    /// such as BLE when compiled in and available at runtime.
+    pub transport_registry: TransportRegistry,
+
+    /// Capacity of the data channel shared between background reader tasks and `recv()`.
+    ///
+    /// This controls the bounded `mpsc` buffer that reader tasks push into.
+    /// Higher values allow more in-flight messages before back-pressure is applied.
+    /// Default: [`Self::DEFAULT_DATA_CHANNEL_CAPACITY`].
+    pub data_channel_capacity: usize,
+
+    /// Maximum application-layer message size in bytes.
+    ///
+    /// This is a **read-side guard only**: it caps the number of bytes
+    /// `read_to_end()` will accept on any single uni-directional stream.
+    /// Streams carrying more data than this limit are rejected with
+    /// `ReadToEndError::TooLong`.
+    ///
+    /// QUIC flow-control windows (`stream_receive_window`, `send_window`) are
+    /// **not** derived from this value — they use the transport-layer defaults
+    /// calculated from bandwidth-delay products (see `TransportConfig`).
+    /// A message of any size flows through the window; the window only governs
+    /// how much data can be in-flight at once.
+    ///
+    /// Default: [`Self::DEFAULT_MAX_MESSAGE_SIZE`] (4 MiB).
+    pub max_message_size: usize,
+
+    /// Maximum concurrent unidirectional QUIC streams per connection.
+    ///
+    /// Each `send()` call opens a new unidirectional stream. Applications with
+    /// high message throughput should increase this to avoid stream exhaustion.
+    /// Default: 100.
+    pub max_concurrent_uni_streams: u32,
+
+    /// #255 fix C: per-stream read deadline for the per-connection reader's
+    /// spawned stream tasks. A stream whose sender stalls mid-message (never
+    /// sends FIN — congested, wedged, or malicious) is stopped after this
+    /// deadline instead of pinning one of the bounded concurrent-read permits
+    /// forever. Default: 60 s. Dropping the stream also issues QUIC
+    /// STOP_SENDING, so a genuinely wedged sender observes the stop rather
+    /// than retransmitting into a dead lane.
+    pub stream_read_deadline: Duration,
+}
+// v0.13.0: enable_coordinator removed - all nodes are coordinators
+
+/// NAT traversal specific configuration
+///
+/// These options control how the endpoint discovers external addresses,
+/// coordinates hole punching, and handles NAT traversal failures.
+#[derive(Debug, Clone)]
+pub struct NatConfig {
+    /// Best-effort router port-mapping policy for improved inbound reachability.
+    pub port_mapping: PortMappingConfig,
+
+    /// Maximum number of address candidates to track
+    pub max_candidates: usize,
+
+    /// Enable symmetric NAT prediction algorithms (legacy flag, always true)
+    pub enable_symmetric_nat: bool,
+
+    /// Enable automatic relay fallback when direct connection fails (legacy flag, always true)
+    pub enable_relay_fallback: bool,
+
+    /// Enable relay service for other peers (legacy flag, always true)
+    /// When true, this node will accept and forward CONNECT-UDP Bind requests from peers.
+    /// Per ADR-004: All nodes are equal and participate in relaying with resource budgets.
+    pub enable_relay_service: bool,
+
+    /// Known relay nodes for MASQUE CONNECT-UDP Bind fallback
+    pub relay_nodes: Vec<std::net::SocketAddr>,
+
+    /// Maximum concurrent NAT traversal attempts
+    pub max_concurrent_attempts: usize,
+
+    /// Prefer RFC-compliant NAT traversal frame format
+    pub prefer_rfc_nat_traversal: bool,
+}
+
+/// Best-effort policy for router-assisted port mapping.
+///
+/// This is intentionally framed as a policy surface instead of exposing raw
+/// UPnP knobs directly. The initial implementation uses UPnP IGD internally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PortMappingConfig {
+    /// Whether best-effort router port mapping is enabled.
+    pub enabled: bool,
+
+    /// Lease duration requested from the gateway, in seconds.
+    pub lease_duration_secs: u32,
+
+    /// Whether a random external port may be used if same-port mapping fails.
+    pub allow_random_external_port: bool,
+}
+
+impl Default for PortMappingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            lease_duration_secs: 3600,
+            allow_random_external_port: true,
+        }
+    }
+}
+
+impl Default for NatConfig {
+    fn default() -> Self {
+        Self {
+            port_mapping: PortMappingConfig::default(),
+            max_candidates: 10,
+            enable_symmetric_nat: true,
+            enable_relay_fallback: true,
+            enable_relay_service: true, // Symmetric P2P: every node provides relay services
+            relay_nodes: Vec::new(),
+            max_concurrent_attempts: 3,
+            prefer_rfc_nat_traversal: true,
+        }
+    }
+}
+
+/// MTU (Maximum Transmission Unit) configuration
+///
+/// Controls packet sizing for optimal network performance. Post-quantum
+/// cryptography requires larger packets due to bigger key sizes:
+/// - ML-KEM-768: 1,184 byte public key + 1,088 byte ciphertext
+/// - ML-DSA-65: 1,952 byte public key + 3,309 byte signature
+///
+/// The default configuration enables MTU discovery which automatically
+/// finds the optimal packet size for the network path.
+#[derive(Debug, Clone)]
+pub struct MtuConfig {
+    /// Initial MTU to use before discovery (default: 1200)
+    ///
+    /// Must be at least 1200 bytes per QUIC specification.
+    /// For PQC-enabled connections, consider using 1500+ if network allows.
+    pub initial_mtu: u16,
+
+    /// Minimum MTU that must always work (default: 1200)
+    ///
+    /// The connection will fall back to this if larger packets are lost.
+    /// Must not exceed `initial_mtu`.
+    pub min_mtu: u16,
+
+    /// Enable path MTU discovery (default: true)
+    ///
+    /// When enabled, the connection probes for larger packet sizes
+    /// to optimize throughput. Disable for constrained networks.
+    pub discovery_enabled: bool,
+
+    /// Upper bound for MTU discovery probing (default: 1452)
+    ///
+    /// For PQC connections, consider higher values (up to 4096) if the
+    /// network path supports jumbo frames.
+    pub max_mtu: u16,
+
+    /// Automatically adjust MTU for PQC handshakes (default: true)
+    ///
+    /// When enabled, the connection will use larger MTU settings
+    /// during PQC handshakes to accommodate large key exchanges.
+    pub auto_pqc_adjustment: bool,
+}
+
+impl Default for MtuConfig {
+    fn default() -> Self {
+        Self {
+            initial_mtu: 1200,
+            min_mtu: 1200,
+            discovery_enabled: true,
+            max_mtu: 1452, // Ethernet MTU minus IP/UDP headers
+            auto_pqc_adjustment: true,
+        }
+    }
+}
+
+impl MtuConfig {
+    /// Configuration optimized for PQC (larger MTUs)
+    pub fn pqc_optimized() -> Self {
+        Self {
+            initial_mtu: 1500,
+            min_mtu: 1200,
+            discovery_enabled: true,
+            max_mtu: 4096, // Higher bound for PQC key exchange
+            auto_pqc_adjustment: true,
+        }
+    }
+
+    /// Configuration for constrained networks (no discovery)
+    pub fn constrained() -> Self {
+        Self {
+            initial_mtu: 1200,
+            min_mtu: 1200,
+            discovery_enabled: false,
+            max_mtu: 1200,
+            auto_pqc_adjustment: false,
+        }
+    }
+
+    /// Configuration for high-bandwidth networks with jumbo frames
+    pub fn jumbo_frames() -> Self {
+        Self {
+            initial_mtu: 1500,
+            min_mtu: 1200,
+            discovery_enabled: true,
+            max_mtu: 9000, // Jumbo frame MTU
+            auto_pqc_adjustment: true,
+        }
+    }
+}
+
+impl Default for P2pConfig {
+    fn default() -> Self {
+        Self {
+            bind_addr: None,
+            known_peers: Vec::new(),
+            max_connections: 256,
+            discovery: DiscoveryPolicy::current_default(),
+            trust: TrustPolicy::default(),
+            // v0.2: auth removed
+            nat: NatConfig::default(),
+            timeouts: TimeoutConfig::default(),
+            pqc: PqcConfig::default(),
+            mtu: MtuConfig::default(),
+            stats_interval: Duration::from_secs(30),
+            keypair: None,
+            bootstrap_cache: BootstrapCacheConfig::default(),
+            transport_registry: TransportRegistry::new(),
+            data_channel_capacity: Self::DEFAULT_DATA_CHANNEL_CAPACITY,
+            max_message_size: Self::DEFAULT_MAX_MESSAGE_SIZE,
+            max_concurrent_uni_streams: 100,
+            stream_read_deadline: Duration::from_secs(60),
+        }
+    }
+}
+
+impl P2pConfig {
+    /// Default capacity of the data channel between reader tasks and `recv()`.
+    ///
+    /// Bumped 256 → 8192 in X0X-0039 (SOTA-Borrow Phase A) to match
+    /// saorsa-gossip's per-subscriber buffer (raised 128 → 10_000 in v0.18.3
+    /// for the same class of mesh-burst back-pressure). The single shared
+    /// `mpsc` is fed by every per-connection reader task; on a 12-peer mesh
+    /// under burst, 256 is a known historical choke point that produces
+    /// false-positive ACK admission timeouts. See
+    /// `x0x/docs/design/sota-borrow-plan.md` §4 X0X-0039.
+    pub const DEFAULT_DATA_CHANNEL_CAPACITY: usize = 8192;
+
+    /// Default maximum message size (4 MiB).
+    ///
+    /// This is a read-side guard for `read_to_end()`. It does **not** affect
+    /// QUIC flow-control windows — those use transport-layer defaults based on
+    /// bandwidth-delay products. Increase this if your application sends
+    /// messages larger than 4 MiB on a single stream.
+    pub const DEFAULT_MAX_MESSAGE_SIZE: usize = 4 * 1024 * 1024;
+
+    /// Create a new configuration builder
+    pub fn builder() -> P2pConfigBuilder {
+        P2pConfigBuilder::default()
+    }
+
+    /// Convert to `NatTraversalConfig` for internal use
+    pub fn to_nat_config(&self) -> crate::nat_traversal_api::NatTraversalConfig {
+        crate::nat_traversal_api::NatTraversalConfig {
+            known_peers: self
+                .known_peers
+                .iter()
+                .filter_map(|addr: &TransportAddr| addr.as_socket_addr())
+                .collect(),
+            max_candidates: self.nat.max_candidates,
+            coordination_timeout: self.timeouts.nat_traversal.coordination_timeout,
+            enable_symmetric_nat: true,
+            enable_relay_fallback: true,
+            enable_relay_service: true,
+            relay_nodes: self.nat.relay_nodes.clone(),
+            max_concurrent_attempts: self.nat.max_concurrent_attempts,
+            bind_addr: self
+                .bind_addr
+                .as_ref()
+                .and_then(|addr: &TransportAddr| addr.as_socket_addr()),
+            prefer_rfc_nat_traversal: self.nat.prefer_rfc_nat_traversal,
+            pqc: Some(self.pqc.clone()),
+            timeouts: self.timeouts.clone(),
+            identity_key: None,
+            allow_ipv4_mapped: true, // Required for dual-stack socket support
+            transport_registry: Some(Arc::new(self.transport_registry.clone())),
+            max_message_size: self.max_message_size,
+            max_concurrent_uni_streams: self.max_concurrent_uni_streams,
+            additional_bind_addrs: Vec::new(),
+        }
+    }
+
+    /// Convert to `NatTraversalConfig` with a specific identity key
+    ///
+    /// This ensures the same ML-DSA-65 keypair is used for both P2pEndpoint
+    /// authentication and TLS/RPK identity in NatTraversalEndpoint.
+    pub fn to_nat_config_with_key(
+        &self,
+        public_key: MlDsaPublicKey,
+        secret_key: MlDsaSecretKey,
+    ) -> crate::nat_traversal_api::NatTraversalConfig {
+        let mut config = self.to_nat_config();
+        config.identity_key = Some((public_key, secret_key));
+        config
+    }
+}
+
+/// Builder for `P2pConfig`
+#[derive(Debug, Clone, Default)]
+pub struct P2pConfigBuilder {
+    bind_addr: Option<TransportAddr>,
+    known_peers: Vec<TransportAddr>,
+    discovery: Option<DiscoveryPolicy>,
+    trust: Option<TrustPolicy>,
+    max_connections: Option<usize>,
+    // v0.2: auth removed
+    nat: Option<NatConfig>,
+    timeouts: Option<TimeoutConfig>,
+    pqc: Option<PqcConfig>,
+    mtu: Option<MtuConfig>,
+    stats_interval: Option<Duration>,
+    keypair: Option<(MlDsaPublicKey, MlDsaSecretKey)>,
+    bootstrap_cache: Option<BootstrapCacheConfig>,
+    transport_registry: Option<TransportRegistry>,
+    data_channel_capacity: Option<usize>,
+    max_message_size: Option<usize>,
+    max_concurrent_uni_streams: Option<u32>,
+    stream_read_deadline: Option<Duration>,
+}
+
+/// Error type for configuration validation
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum ConfigError {
+    /// Invalid max connections value
+    #[error("max_connections must be at least 1")]
+    InvalidMaxConnections,
+
+    /// Invalid timeout value
+    #[error("Invalid timeout: {0}")]
+    InvalidTimeout(String),
+
+    /// Invalid max message size
+    #[error("max_message_size must be at least 1")]
+    InvalidMaxMessageSize,
+
+    /// Invalid discovery configuration
+    #[error("Invalid discovery configuration: {0}")]
+    InvalidDiscovery(String),
+
+    /// PQC configuration error
+    #[error("PQC configuration error: {0}")]
+    PqcError(String),
+
+    /// Invalid MTU configuration
+    #[error("Invalid MTU configuration: {0}")]
+    InvalidMtu(String),
+}
+
+impl P2pConfigBuilder {
+    /// Set the local address to bind to
+    ///
+    /// Accepts any type implementing `Into<TransportAddr>`, including:
+    /// - `SocketAddr` - Automatically converted to `TransportAddr::Udp`
+    /// - `TransportAddr` - Used directly for multi-transport support
+    ///
+    /// If not set, the endpoint binds to `0.0.0.0:0` (random ephemeral port).
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use ant_quic::P2pConfig;
+    /// use std::net::SocketAddr;
+    ///
+    /// // Backward compatible: SocketAddr auto-converts
+    /// let config = P2pConfig::builder()
+    ///     .bind_addr("0.0.0.0:9000".parse::<SocketAddr>().unwrap())
+    ///     .build()?;
+    ///
+    /// // Multi-transport: Explicit TransportAddr
+    /// use ant_quic::transport::TransportAddr;
+    /// let config = P2pConfig::builder()
+    ///     .bind_addr(TransportAddr::Udp("0.0.0.0:9000".parse().unwrap()))
+    ///     .build()?;
+    /// ```
+    pub fn bind_addr(mut self, addr: impl Into<TransportAddr>) -> Self {
+        self.bind_addr = Some(addr.into());
+        self
+    }
+
+    /// Add a known peer for initial discovery/bootstrap input.
+    ///
+    /// In v0.13.0+ all nodes are symmetric - these are just starting points for
+    /// network connectivity and discovery. They are contact hints, not strategy
+    /// controls or privileged infrastructure roles.
+    ///
+    /// Accepts any type implementing `Into<TransportAddr>`:
+    /// - `SocketAddr` - Auto-converts to `TransportAddr::Udp`
+    /// - `TransportAddr` - Enables multi-transport (BLE, LoRa, etc.)
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use ant_quic::P2pConfig;
+    /// use std::net::SocketAddr;
+    ///
+    /// // Backward compatible: SocketAddr
+    /// let config = P2pConfig::builder()
+    ///     .known_peer("peer1.example.com:9000".parse::<SocketAddr>().unwrap())
+    ///     .known_peer("peer2.example.com:9000".parse::<SocketAddr>().unwrap())
+    ///     .build()?;
+    ///
+    /// // Multi-transport: Mix UDP and BLE
+    /// use ant_quic::transport::TransportAddr;
+    /// let config = P2pConfig::builder()
+    ///     .known_peer(TransportAddr::Udp("192.168.1.1:9000".parse().unwrap()))
+    ///     .known_peer(TransportAddr::ble([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF], None))
+    ///     .build()?;
+    /// ```
+    pub fn known_peer(mut self, addr: impl Into<TransportAddr>) -> Self {
+        self.known_peers.push(addr.into());
+        self
+    }
+
+    /// Add multiple known peers at once.
+    ///
+    /// Convenient method to add a collection of peers in one call.
+    /// Each item in the iterator is converted via `Into<TransportAddr>`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use ant_quic::P2pConfig;
+    /// use std::net::SocketAddr;
+    ///
+    /// // Backward compatible: Vec<SocketAddr>
+    /// let peers: Vec<SocketAddr> = vec![
+    ///     "peer1.example.com:9000".parse().unwrap(),
+    ///     "peer2.example.com:9000".parse().unwrap(),
+    ///     "peer3.example.com:9000".parse().unwrap(),
+    /// ];
+    /// let config = P2pConfig::builder()
+    ///     .known_peers(peers)
+    ///     .build()?;
+    ///
+    /// // Multi-transport: Mixed types
+    /// use ant_quic::transport::TransportAddr;
+    /// let mixed_peers = vec![
+    ///     TransportAddr::Udp("192.168.1.1:9000".parse().unwrap()),
+    ///     TransportAddr::ble([0x11, 0x22, 0x33, 0x44, 0x55, 0x66], None),
+    /// ];
+    /// let config = P2pConfig::builder()
+    ///     .known_peers(mixed_peers)
+    ///     .build()?;
+    /// ```
+    pub fn known_peers(
+        mut self,
+        addrs: impl IntoIterator<Item = impl Into<TransportAddr>>,
+    ) -> Self {
+        self.known_peers.extend(addrs.into_iter().map(|a| a.into()));
+        self
+    }
+
+    /// Add a bootstrap node (alias for known_peer for backwards compatibility)
+    #[doc(hidden)]
+    pub fn bootstrap(mut self, addr: impl Into<TransportAddr>) -> Self {
+        self.known_peers.push(addr.into());
+        self
+    }
+
+    /// Set the public discovery policy scaffold.
+    pub fn discovery(mut self, discovery: DiscoveryPolicy) -> Self {
+        self.discovery = Some(discovery);
+        self
+    }
+
+    /// Configure optional mDNS discovery within the public discovery policy scaffold.
+    pub fn mdns(mut self, mdns: MdnsConfig) -> Self {
+        let mut discovery = self
+            .discovery
+            .unwrap_or_else(DiscoveryPolicy::current_default);
+        discovery.mdns = Some(mdns);
+        self.discovery = Some(discovery);
+        self
+    }
+
+    /// Enable or disable first-party mDNS discovery/runtime integration.
+    pub fn mdns_enabled(mut self, enabled: bool) -> Self {
+        let mut discovery = self
+            .discovery
+            .unwrap_or_else(DiscoveryPolicy::current_default);
+        let mut mdns = discovery.mdns.unwrap_or_default();
+        mdns.enabled = enabled;
+        discovery.mdns = Some(mdns);
+        self.discovery = Some(discovery);
+        self
+    }
+
+    /// Set the mDNS service/application scope.
+    pub fn mdns_service(mut self, service: impl Into<String>) -> Self {
+        let mut discovery = self
+            .discovery
+            .unwrap_or_else(DiscoveryPolicy::current_default);
+        let mut mdns = discovery.mdns.unwrap_or_default();
+        mdns.service = Some(service.into());
+        discovery.mdns = Some(mdns);
+        self.discovery = Some(discovery);
+        self
+    }
+
+    /// Set the optional mDNS namespace/workspace scope.
+    pub fn mdns_namespace(mut self, namespace: impl Into<String>) -> Self {
+        let mut discovery = self
+            .discovery
+            .unwrap_or_else(DiscoveryPolicy::current_default);
+        let mut mdns = discovery.mdns.unwrap_or_default();
+        mdns.namespace = Some(namespace.into());
+        discovery.mdns = Some(mdns);
+        self.discovery = Some(discovery);
+        self
+    }
+
+    /// Set whether mDNS should browse, advertise, or do both.
+    pub fn mdns_mode(mut self, mode: MdnsMode) -> Self {
+        let mut discovery = self
+            .discovery
+            .unwrap_or_else(DiscoveryPolicy::current_default);
+        let mut mdns = discovery.mdns.unwrap_or_default();
+        mdns.mode = mode;
+        discovery.mdns = Some(mdns);
+        self.discovery = Some(discovery);
+        self
+    }
+
+    /// Set the auto-connect policy for mDNS discoveries.
+    pub fn mdns_auto_connect(mut self, auto_connect: AutoConnectPolicy) -> Self {
+        let mut discovery = self
+            .discovery
+            .unwrap_or_else(DiscoveryPolicy::current_default);
+        let mut mdns = discovery.mdns.unwrap_or_default();
+        mdns.auto_connect = auto_connect;
+        discovery.mdns = Some(mdns);
+        self.discovery = Some(discovery);
+        self
+    }
+
+    /// Set optional TXT metadata to publish with the mDNS service.
+    pub fn mdns_metadata(mut self, metadata: BTreeMap<String, String>) -> Self {
+        let mut discovery = self
+            .discovery
+            .unwrap_or_else(DiscoveryPolicy::current_default);
+        let mut mdns = discovery.mdns.unwrap_or_default();
+        mdns.metadata = metadata;
+        discovery.mdns = Some(mdns);
+        self.discovery = Some(discovery);
+        self
+    }
+
+    /// Set the trust policy scaffold.
+    pub fn trust_policy(mut self, trust: TrustPolicy) -> Self {
+        self.trust = Some(trust);
+        self
+    }
+
+    /// Allow a discovered peer identity for automatic discovery-driven dialing.
+    pub fn allow_discovered_peer(mut self, peer_id: PeerId) -> Self {
+        let trust = self.trust.unwrap_or_default();
+        self.trust = Some(match trust {
+            TrustPolicy::AuthenticateOnly => TrustPolicy::AllowedPeerIds(vec![peer_id]),
+            TrustPolicy::AllowedPeerIds(mut peer_ids) => {
+                if !peer_ids.contains(&peer_id) {
+                    peer_ids.push(peer_id);
+                }
+                TrustPolicy::AllowedPeerIds(peer_ids)
+            }
+        });
+        self
+    }
+
+    /// Set maximum connections
+    pub fn max_connections(mut self, max: usize) -> Self {
+        self.max_connections = Some(max);
+        self
+    }
+
+    // v0.2: auth() method removed - TLS handles peer authentication via ML-DSA-65
+
+    /// Set NAT traversal configuration
+    pub fn nat(mut self, nat: NatConfig) -> Self {
+        self.nat = Some(nat);
+        self
+    }
+
+    /// Enable or disable best-effort router port mapping.
+    pub fn port_mapping_enabled(mut self, enabled: bool) -> Self {
+        let mut nat = self.nat.unwrap_or_default();
+        nat.port_mapping.enabled = enabled;
+        self.nat = Some(nat);
+        self
+    }
+
+    /// Set the requested router port-mapping lease duration in seconds.
+    pub fn port_mapping_lease_duration_secs(mut self, lease_duration_secs: u32) -> Self {
+        let mut nat = self.nat.unwrap_or_default();
+        nat.port_mapping.lease_duration_secs = lease_duration_secs;
+        self.nat = Some(nat);
+        self
+    }
+
+    /// Control whether a random external port may be used if same-port mapping fails.
+    pub fn port_mapping_allow_random_external_port(
+        mut self,
+        allow_random_external_port: bool,
+    ) -> Self {
+        let mut nat = self.nat.unwrap_or_default();
+        nat.port_mapping.allow_random_external_port = allow_random_external_port;
+        self.nat = Some(nat);
+        self
+    }
+
+    /// Set timeout configuration
+    pub fn timeouts(mut self, timeouts: TimeoutConfig) -> Self {
+        self.timeouts = Some(timeouts);
+        self
+    }
+
+    /// Use fast timeouts (for local networks)
+    pub fn fast_timeouts(mut self) -> Self {
+        self.timeouts = Some(TimeoutConfig::fast());
+        self
+    }
+
+    /// Use conservative timeouts (for unreliable networks)
+    pub fn conservative_timeouts(mut self) -> Self {
+        self.timeouts = Some(TimeoutConfig::conservative());
+        self
+    }
+
+    /// Set PQC configuration
+    pub fn pqc(mut self, pqc: PqcConfig) -> Self {
+        self.pqc = Some(pqc);
+        self
+    }
+
+    /// Set MTU configuration
+    pub fn mtu(mut self, mtu: MtuConfig) -> Self {
+        self.mtu = Some(mtu);
+        self
+    }
+
+    /// Use PQC-optimized MTU settings
+    ///
+    /// Enables larger MTU bounds (up to 4096) for efficient PQC handshakes.
+    pub fn pqc_optimized_mtu(mut self) -> Self {
+        self.mtu = Some(MtuConfig::pqc_optimized());
+        self
+    }
+
+    /// Use constrained network MTU settings
+    ///
+    /// Disables MTU discovery and uses minimum MTU (1200).
+    pub fn constrained_mtu(mut self) -> Self {
+        self.mtu = Some(MtuConfig::constrained());
+        self
+    }
+
+    /// Use jumbo frame MTU settings
+    ///
+    /// For high-bandwidth networks supporting larger frames (up to 9000).
+    pub fn jumbo_mtu(mut self) -> Self {
+        self.mtu = Some(MtuConfig::jumbo_frames());
+        self
+    }
+
+    /// Set statistics collection interval
+    pub fn stats_interval(mut self, interval: Duration) -> Self {
+        self.stats_interval = Some(interval);
+        self
+    }
+
+    /// Set identity keypair for persistent peer ID (ML-DSA-65)
+    ///
+    /// If not set, a fresh keypair is generated on startup.
+    /// Provide this for stable identity across restarts.
+    pub fn keypair(mut self, public_key: MlDsaPublicKey, secret_key: MlDsaSecretKey) -> Self {
+        self.keypair = Some((public_key, secret_key));
+        self
+    }
+
+    /// Configure with a HostIdentity for persistent, encrypted endpoint keypair storage
+    ///
+    /// This method:
+    /// 1. Derives an endpoint encryption key from the HostIdentity for this network
+    /// 2. Loads the existing keypair from encrypted storage if available
+    /// 3. Generates and stores a new keypair if none exists
+    ///
+    /// The keypair is stored encrypted on disk, ensuring persistent identity across
+    /// restarts while protecting the secret key at rest.
+    ///
+    /// # Arguments
+    /// * `host` - The HostIdentity for deriving encryption keys
+    /// * `network_id` - Network identifier for per-network key isolation
+    /// * `storage_dir` - Directory for encrypted keypair storage
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// use ant_quic::{P2pConfig, HostIdentity};
+    ///
+    /// let host = HostIdentity::generate();
+    /// let config = P2pConfig::builder()
+    ///     .bind_addr("0.0.0.0:9000".parse()?)
+    ///     .with_host_identity(&host, b"my-network", "/var/lib/ant-quic")?
+    ///     .build()?;
+    /// ```
+    pub fn with_host_identity(
+        mut self,
+        host: &HostIdentity,
+        network_id: &[u8],
+        storage_dir: impl AsRef<std::path::Path>,
+    ) -> Result<Self, ConfigError> {
+        let keypair = load_or_generate_endpoint_keypair(host, network_id, storage_dir.as_ref())
+            .map_err(|e| ConfigError::PqcError(format!("Failed to load/generate keypair: {e}")))?;
+        self.keypair = Some(keypair);
+        Ok(self)
+    }
+
+    /// Set bootstrap cache configuration
+    pub fn bootstrap_cache(mut self, config: BootstrapCacheConfig) -> Self {
+        self.bootstrap_cache = Some(config);
+        self
+    }
+
+    /// Add a single transport provider to the registry
+    ///
+    /// This method can be called multiple times to add multiple providers.
+    /// Providers are stored in the transport registry and used for multi-transport
+    /// connectivity (UDP, BLE, etc.).
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// use ant_quic::{P2pConfig, transport::UdpTransport};
+    /// use std::sync::Arc;
+    ///
+    /// let udp = UdpTransport::bind("0.0.0.0:0".parse()?).await?;
+    /// let config = P2pConfig::builder()
+    ///     .transport_provider(Arc::new(udp))
+    ///     .build()?;
+    /// ```
+    pub fn transport_provider(mut self, provider: Arc<dyn TransportProvider>) -> Self {
+        let registry = self
+            .transport_registry
+            .get_or_insert_with(TransportRegistry::new);
+        registry.register(provider);
+        self
+    }
+
+    /// Set the entire transport registry
+    ///
+    /// This replaces any previously registered providers. Use this when you have
+    /// a pre-configured registry with multiple providers.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// use ant_quic::{P2pConfig, transport::{TransportRegistry, UdpTransport}};
+    /// use std::sync::Arc;
+    ///
+    /// let mut registry = TransportRegistry::new();
+    /// registry.register(Arc::new(UdpTransport::bind("0.0.0.0:0".parse()?).await?));
+    /// let config = P2pConfig::builder()
+    ///     .transport_registry(registry)
+    ///     .build()?;
+    /// ```
+    pub fn transport_registry(mut self, registry: TransportRegistry) -> Self {
+        self.transport_registry = Some(registry);
+        self
+    }
+
+    /// Set the capacity of the data channel between reader tasks and `recv()`.
+    ///
+    /// Controls the bounded `mpsc` buffer size. Higher values allow more
+    /// in-flight messages before back-pressure is applied to reader tasks.
+    /// Default: [`P2pConfig::DEFAULT_DATA_CHANNEL_CAPACITY`] (8192).
+    pub fn data_channel_capacity(mut self, capacity: usize) -> Self {
+        self.data_channel_capacity = Some(capacity);
+        self
+    }
+
+    /// Set the maximum number of concurrent unidirectional QUIC streams per connection.
+    ///
+    /// Each `send()` call opens a new unidirectional stream. Applications with high
+    /// message throughput should increase this from the default (100) to avoid stream
+    /// exhaustion. Default: 100.
+    pub fn max_concurrent_uni_streams(mut self, count: u32) -> Self {
+        self.max_concurrent_uni_streams = Some(count);
+        self
+    }
+
+    /// #255 fix C: per-stream read deadline for spawned reader tasks
+    /// (default 60 s). See the field docs on [`P2pConfig`].
+    pub fn stream_read_deadline(mut self, deadline: Duration) -> Self {
+        self.stream_read_deadline = Some(deadline);
+        self
+    }
+
+    /// Set the maximum application-layer message size in bytes.
+    ///
+    /// This is a read-side guard only — it caps the bytes `read_to_end()` will
+    /// accept per stream. QUIC flow-control windows are **not** affected.
+    pub fn max_message_size(mut self, bytes: usize) -> Self {
+        self.max_message_size = Some(bytes);
+        self
+    }
+
+    /// Build the configuration with validation
+    pub fn build(self) -> Result<P2pConfig, ConfigError> {
+        // Validate max_connections
+        let max_connections = self.max_connections.unwrap_or(256);
+        if max_connections == 0 {
+            return Err(ConfigError::InvalidMaxConnections);
+        }
+
+        // Validate max_message_size
+        let max_message_size = self
+            .max_message_size
+            .unwrap_or(P2pConfig::DEFAULT_MAX_MESSAGE_SIZE);
+        if max_message_size == 0 {
+            return Err(ConfigError::InvalidMaxMessageSize);
+        }
+
+        // v0.13.0+: No role validation - all nodes are symmetric
+        // Nodes can operate without known peers (they can be connected to by others)
+
+        let discovery = self
+            .discovery
+            .unwrap_or_else(DiscoveryPolicy::current_default);
+        validate_discovery_policy(&discovery)?;
+
+        Ok(P2pConfig {
+            bind_addr: self.bind_addr,
+            known_peers: self.known_peers,
+            discovery,
+            trust: self.trust.unwrap_or_default(),
+            max_connections,
+            // v0.2: auth removed
+            nat: self.nat.unwrap_or_default(),
+            timeouts: self.timeouts.unwrap_or_default(),
+            pqc: self.pqc.unwrap_or_default(),
+            mtu: self.mtu.unwrap_or_default(),
+            stats_interval: self.stats_interval.unwrap_or(Duration::from_secs(30)),
+            keypair: self.keypair,
+            bootstrap_cache: self.bootstrap_cache.unwrap_or_default(),
+            transport_registry: self.transport_registry.unwrap_or_default(),
+            stream_read_deadline: self
+                .stream_read_deadline
+                .unwrap_or_else(|| Duration::from_secs(60)),
+            data_channel_capacity: self
+                .data_channel_capacity
+                .unwrap_or(P2pConfig::DEFAULT_DATA_CHANNEL_CAPACITY),
+            max_message_size,
+            max_concurrent_uni_streams: self.max_concurrent_uni_streams.unwrap_or(100),
+        })
+    }
+}
+
+fn validate_discovery_policy(discovery: &DiscoveryPolicy) -> Result<(), ConfigError> {
+    if let Some(mdns) = discovery.mdns.as_ref()
+        && mdns.enabled
+    {
+        let service = mdns
+            .service
+            .as_deref()
+            .map(str::trim)
+            .filter(|service| !service.is_empty())
+            .ok_or_else(|| {
+                ConfigError::InvalidDiscovery(
+                    "mDNS requires a non-empty service name when enabled".to_string(),
+                )
+            })?;
+
+        validate_mdns_service_name(service)?;
+    }
+
+    Ok(())
+}
+
+fn validate_mdns_service_name(service: &str) -> Result<(), ConfigError> {
+    if service.len() > 15 {
+        return Err(ConfigError::InvalidDiscovery(format!(
+            "mDNS service '{service}' exceeds the DNS-SD 15-byte service-type limit"
+        )));
+    }
+
+    if service.starts_with('-') || service.ends_with('-') {
+        return Err(ConfigError::InvalidDiscovery(format!(
+            "mDNS service '{service}' must not start or end with '-'"
+        )));
+    }
+
+    if !service
+        .bytes()
+        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err(ConfigError::InvalidDiscovery(format!(
+            "mDNS service '{service}' must contain only lowercase ASCII letters, digits, and '-'"
+        )));
+    }
+
+    Ok(())
+}
+
+// =============================================================================
+// Endpoint Keypair Storage (ADR-007)
+// =============================================================================
+
+/// Load or generate an endpoint keypair with encrypted storage
+///
+/// This function:
+/// 1. Derives an encryption key from the HostIdentity for the given network
+/// 2. Attempts to load an existing keypair from encrypted storage
+/// 3. If not found, generates a new ML-DSA-65 keypair and stores it encrypted
+///
+/// The keypair file is stored as `{network_id_hex}_keypair.enc` in the storage directory.
+pub fn load_or_generate_endpoint_keypair(
+    host: &HostIdentity,
+    network_id: &[u8],
+    storage_dir: &std::path::Path,
+) -> Result<(MlDsaPublicKey, MlDsaSecretKey), std::io::Error> {
+    // Derive encryption key for this network's keypair
+    let encryption_key = host.derive_endpoint_encryption_key(network_id);
+
+    // Compute filename based on network_id
+    let network_id_hex = hex::encode(network_id);
+    let keypair_file = storage_dir.join(format!("{network_id_hex}_keypair.enc"));
+
+    // Ensure storage directory exists
+    std::fs::create_dir_all(storage_dir)?;
+
+    // Try to load existing keypair
+    if keypair_file.exists() {
+        let ciphertext = std::fs::read(&keypair_file)?;
+        let plaintext = decrypt_keypair_data(&ciphertext, &encryption_key)?;
+        return deserialize_keypair(&plaintext);
+    }
+
+    // Generate new keypair
+    let (public_key, secret_key) =
+        crate::crypto::raw_public_keys::key_utils::generate_ml_dsa_keypair()
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+
+    // Serialize and encrypt
+    let plaintext = serialize_keypair(&public_key, &secret_key)?;
+    let ciphertext = encrypt_keypair_data(&plaintext, &encryption_key)?;
+
+    // Write to file atomically
+    let temp_file = keypair_file.with_extension("tmp");
+    std::fs::write(&temp_file, &ciphertext)?;
+    std::fs::rename(&temp_file, &keypair_file)?;
+
+    Ok((public_key, secret_key))
+}
+
+/// Encrypt keypair data using ChaCha20-Poly1305
+fn encrypt_keypair_data(plaintext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, std::io::Error> {
+    use aws_lc_rs::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
+
+    // Generate random nonce
+    let mut nonce_bytes = [0u8; 12];
+    aws_lc_rs::rand::fill(&mut nonce_bytes).map_err(|e| std::io::Error::other(e.to_string()))?;
+
+    // Create cipher
+    let unbound_key = UnboundKey::new(&CHACHA20_POLY1305, key)
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    let key = LessSafeKey::new(unbound_key);
+
+    // Encrypt
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+    let mut in_out = plaintext.to_vec();
+    key.seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out)
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+
+    // Prepend nonce to ciphertext
+    let mut result = nonce_bytes.to_vec();
+    result.extend(in_out);
+    Ok(result)
+}
+
+/// Decrypt keypair data using ChaCha20-Poly1305
+fn decrypt_keypair_data(ciphertext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, std::io::Error> {
+    use aws_lc_rs::aead::{Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
+
+    if ciphertext.len() < 12 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Ciphertext too short",
+        ));
+    }
+
+    // Extract nonce and ciphertext
+    let (nonce_bytes, encrypted) = ciphertext.split_at(12);
+    let mut nonce_arr = [0u8; 12];
+    nonce_arr.copy_from_slice(nonce_bytes);
+
+    // Create cipher
+    let unbound_key = UnboundKey::new(&CHACHA20_POLY1305, key)
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    let key = LessSafeKey::new(unbound_key);
+
+    // Decrypt
+    let nonce = Nonce::assume_unique_for_key(nonce_arr);
+    let mut in_out = encrypted.to_vec();
+    let plaintext = key
+        .open_in_place(nonce, Aad::empty(), &mut in_out)
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Decryption failed"))?;
+
+    Ok(plaintext.to_vec())
+}
+
+/// Serialize keypair to bytes (public key || secret key)
+fn serialize_keypair(
+    public_key: &MlDsaPublicKey,
+    secret_key: &MlDsaSecretKey,
+) -> Result<Vec<u8>, std::io::Error> {
+    let pub_bytes = public_key.as_bytes();
+    let sec_bytes = secret_key.as_bytes();
+
+    // Format: [4-byte public key length][public key bytes][secret key bytes]
+    let pub_len = pub_bytes.len() as u32;
+    let mut result = Vec::with_capacity(4 + pub_bytes.len() + sec_bytes.len());
+    result.extend_from_slice(&pub_len.to_le_bytes());
+    result.extend_from_slice(pub_bytes);
+    result.extend_from_slice(sec_bytes);
+    Ok(result)
+}
+
+/// Deserialize keypair from bytes
+fn deserialize_keypair(data: &[u8]) -> Result<(MlDsaPublicKey, MlDsaSecretKey), std::io::Error> {
+    if data.len() < 4 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Keypair data too short",
+        ));
+    }
+
+    let pub_len = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+
+    if data.len() < 4 + pub_len {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Keypair data truncated",
+        ));
+    }
+
+    let pub_bytes = &data[4..4 + pub_len];
+    let sec_bytes = &data[4 + pub_len..];
+
+    let public_key = MlDsaPublicKey::from_bytes(pub_bytes)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let secret_key = MlDsaSecretKey::from_bytes(sec_bytes)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+
+    Ok((public_key, secret_key))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::SocketAddr;
+
+    #[test]
+    fn test_default_config() {
+        let config = P2pConfig::default();
+        // v0.13.0+: No role field - all nodes are symmetric
+        assert!(config.bind_addr.is_none());
+        assert!(config.known_peers.is_empty());
+        assert_eq!(config.max_connections, 256);
+        assert_eq!(config.discovery.auto_connect, AutoConnectPolicy::Enabled);
+        let mdns = config
+            .discovery
+            .mdns
+            .as_ref()
+            .expect("default config should enable first-party mDNS");
+        assert!(mdns.enabled);
+        assert_eq!(mdns.service.as_deref(), Some("ant-quic"));
+        assert_eq!(mdns.mode, MdnsMode::Both);
+        assert_eq!(mdns.auto_connect, AutoConnectPolicy::Enabled);
+    }
+
+    #[test]
+    fn test_builder_basic() {
+        let config = P2pConfig::builder()
+            .max_connections(100)
+            .build()
+            .expect("Failed to build config");
+
+        // v0.13.0+: No role field - all nodes are symmetric
+        assert_eq!(config.max_connections, 100);
+    }
+
+    #[test]
+    fn test_builder_with_known_peers() {
+        let addr1: SocketAddr = "127.0.0.1:9000".parse().expect("valid addr");
+        let addr2: SocketAddr = "127.0.0.1:9001".parse().expect("valid addr");
+
+        let config = P2pConfig::builder()
+            .known_peer(addr1)
+            .known_peer(addr2)
+            .build()
+            .expect("Failed to build config");
+
+        assert_eq!(config.known_peers.len(), 2);
+    }
+
+    #[test]
+    fn test_invalid_max_connections() {
+        let result = P2pConfig::builder().max_connections(0).build();
+
+        assert!(matches!(result, Err(ConfigError::InvalidMaxConnections)));
+    }
+
+    #[test]
+    fn test_invalid_max_message_size() {
+        let result = P2pConfig::builder().max_message_size(0).build();
+
+        assert!(matches!(result, Err(ConfigError::InvalidMaxMessageSize)));
+    }
+
+    #[test]
+    fn test_max_message_size_default() {
+        let config = P2pConfig::default();
+        assert_eq!(config.max_message_size, P2pConfig::DEFAULT_MAX_MESSAGE_SIZE);
+    }
+
+    #[test]
+    fn test_max_message_size_builder() {
+        let config = P2pConfig::builder()
+            .max_message_size(4 * 1024 * 1024)
+            .build()
+            .expect("Failed to build config");
+
+        assert_eq!(config.max_message_size, 4 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_max_message_size_propagates_to_nat_config() {
+        let config = P2pConfig::builder()
+            .max_message_size(2 * 1024 * 1024)
+            .build()
+            .expect("Failed to build config");
+
+        let nat_config = config.to_nat_config();
+        assert_eq!(nat_config.max_message_size, 2 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_max_message_size_minimum_accepted() {
+        let config = P2pConfig::builder()
+            .max_message_size(1)
+            .build()
+            .expect("size of 1 should be valid");
+        assert_eq!(config.max_message_size, 1);
+    }
+
+    #[test]
+    fn test_max_message_size_builder_default() {
+        let config = P2pConfig::builder().build().expect("default should work");
+        assert_eq!(config.max_message_size, P2pConfig::DEFAULT_MAX_MESSAGE_SIZE);
+    }
+
+    #[test]
+    fn test_to_nat_config() {
+        let config = P2pConfig::builder()
+            .known_peer("127.0.0.1:9000".parse::<SocketAddr>().expect("valid addr"))
+            .nat(NatConfig {
+                max_candidates: 20,
+                enable_symmetric_nat: false,
+                ..Default::default()
+            })
+            .build()
+            .expect("Failed to build config");
+
+        let nat_config = config.to_nat_config();
+        assert_eq!(nat_config.max_candidates, 20);
+        assert!(nat_config.enable_symmetric_nat);
+    }
+
+    #[test]
+    fn test_nat_config_default() {
+        let nat = NatConfig::default();
+        assert!(nat.port_mapping.enabled);
+        assert_eq!(nat.port_mapping.lease_duration_secs, 3600);
+        assert!(nat.port_mapping.allow_random_external_port);
+        assert_eq!(nat.max_candidates, 10);
+        assert!(nat.enable_symmetric_nat);
+        assert!(nat.enable_relay_fallback);
+        assert_eq!(nat.max_concurrent_attempts, 3);
+        assert!(nat.prefer_rfc_nat_traversal);
+    }
+
+    #[test]
+    fn test_port_mapping_config_default() {
+        let port_mapping = PortMappingConfig::default();
+        assert!(port_mapping.enabled);
+        assert_eq!(port_mapping.lease_duration_secs, 3600);
+        assert!(port_mapping.allow_random_external_port);
+    }
+
+    #[test]
+    fn test_port_mapping_builder_overrides() {
+        let config = P2pConfig::builder()
+            .port_mapping_enabled(false)
+            .port_mapping_lease_duration_secs(120)
+            .port_mapping_allow_random_external_port(false)
+            .build()
+            .expect("Failed to build config");
+
+        assert!(!config.nat.port_mapping.enabled);
+        assert_eq!(config.nat.port_mapping.lease_duration_secs, 120);
+        assert!(!config.nat.port_mapping.allow_random_external_port);
+    }
+
+    #[test]
+    fn test_mdns_builder_overrides() {
+        let mut metadata = BTreeMap::new();
+        metadata.insert("role".to_string(), "dev".to_string());
+
+        let config = P2pConfig::builder()
+            .mdns_enabled(true)
+            .mdns_service("ant-quic")
+            .mdns_namespace("workspace-a")
+            .mdns_mode(MdnsMode::BrowseOnly)
+            .mdns_auto_connect(AutoConnectPolicy::Enabled)
+            .mdns_metadata(metadata.clone())
+            .build()
+            .expect("valid mDNS config should build");
+
+        let mdns = config.discovery.mdns.expect("mDNS config should exist");
+        assert!(mdns.enabled);
+        assert_eq!(mdns.service.as_deref(), Some("ant-quic"));
+        assert_eq!(mdns.namespace.as_deref(), Some("workspace-a"));
+        assert_eq!(mdns.mode, MdnsMode::BrowseOnly);
+        assert_eq!(mdns.auto_connect, AutoConnectPolicy::Enabled);
+        assert_eq!(mdns.metadata, metadata);
+    }
+
+    #[test]
+    fn test_mdns_builder_supports_approval_required() {
+        let config = P2pConfig::builder()
+            .mdns_auto_connect(AutoConnectPolicy::ApprovalRequired)
+            .build()
+            .expect("approval-required mDNS config should build");
+
+        let mdns = config.discovery.mdns.expect("mDNS config should exist");
+        assert_eq!(mdns.auto_connect, AutoConnectPolicy::ApprovalRequired);
+        assert!(mdns.auto_connect.requires_approval());
+        assert!(!mdns.auto_connect.allows_automatic_dial());
+    }
+
+    #[test]
+    fn test_allow_discovered_peer_builder_deduplicates_allowlist() {
+        let peer_id = PeerId([0x42; 32]);
+        let config = P2pConfig::builder()
+            .allow_discovered_peer(peer_id)
+            .allow_discovered_peer(peer_id)
+            .build()
+            .expect("allowlist config should build");
+
+        assert_eq!(
+            config.trust,
+            TrustPolicy::AllowedPeerIds(vec![peer_id]),
+            "allowlist builder should deduplicate peer IDs"
+        );
+    }
+
+    #[test]
+    fn test_trust_policy_allows_discovered_peer() {
+        let allowed = PeerId([0x43; 32]);
+        let denied = PeerId([0x44; 32]);
+        let policy = TrustPolicy::AllowedPeerIds(vec![allowed]);
+
+        assert_eq!(policy.allowed_peer_ids(), Some(&[allowed][..]));
+        assert!(policy.allows_discovered_peer(Some(allowed)));
+        assert!(!policy.allows_discovered_peer(Some(denied)));
+        assert!(!policy.allows_discovered_peer(None));
+    }
+
+    #[test]
+    fn test_mdns_enabled_requires_service_name() {
+        let error = P2pConfig::builder()
+            .mdns(MdnsConfig {
+                enabled: true,
+                service: None,
+                ..MdnsConfig::default()
+            })
+            .build()
+            .expect_err("enabled mDNS without a service name should fail");
+
+        assert!(matches!(error, ConfigError::InvalidDiscovery(_)));
+    }
+
+    #[test]
+    fn test_mdns_service_name_validation() {
+        let error = P2pConfig::builder()
+            .mdns_enabled(true)
+            .mdns_service("Ant Quic")
+            .build()
+            .expect_err("invalid service name should fail");
+
+        assert!(matches!(error, ConfigError::InvalidDiscovery(_)));
+    }
+
+    #[test]
+    fn test_mtu_config_default() {
+        let mtu = MtuConfig::default();
+        assert_eq!(mtu.initial_mtu, 1200);
+        assert_eq!(mtu.min_mtu, 1200);
+        assert!(mtu.discovery_enabled);
+        assert_eq!(mtu.max_mtu, 1452);
+        assert!(mtu.auto_pqc_adjustment);
+    }
+
+    #[test]
+    fn test_mtu_config_pqc_optimized() {
+        let mtu = MtuConfig::pqc_optimized();
+        assert_eq!(mtu.initial_mtu, 1500);
+        assert_eq!(mtu.min_mtu, 1200);
+        assert!(mtu.discovery_enabled);
+        assert_eq!(mtu.max_mtu, 4096);
+        assert!(mtu.auto_pqc_adjustment);
+    }
+
+    #[test]
+    fn test_mtu_config_constrained() {
+        let mtu = MtuConfig::constrained();
+        assert_eq!(mtu.initial_mtu, 1200);
+        assert_eq!(mtu.min_mtu, 1200);
+        assert!(!mtu.discovery_enabled);
+        assert_eq!(mtu.max_mtu, 1200);
+        assert!(!mtu.auto_pqc_adjustment);
+    }
+
+    #[test]
+    fn test_mtu_config_jumbo_frames() {
+        let mtu = MtuConfig::jumbo_frames();
+        assert_eq!(mtu.initial_mtu, 1500);
+        assert_eq!(mtu.min_mtu, 1200);
+        assert!(mtu.discovery_enabled);
+        assert_eq!(mtu.max_mtu, 9000);
+        assert!(mtu.auto_pqc_adjustment);
+    }
+
+    #[test]
+    fn test_builder_with_mtu_config() {
+        // v0.13.0+: No role - all nodes are symmetric P2P nodes
+        let config = P2pConfig::builder()
+            .mtu(MtuConfig::pqc_optimized())
+            .build()
+            .expect("Failed to build config");
+
+        assert_eq!(config.mtu.initial_mtu, 1500);
+        assert_eq!(config.mtu.max_mtu, 4096);
+    }
+
+    #[test]
+    fn test_builder_pqc_optimized_mtu() {
+        // v0.13.0+: No role - all nodes are symmetric P2P nodes
+        let config = P2pConfig::builder()
+            .pqc_optimized_mtu()
+            .build()
+            .expect("Failed to build config");
+
+        assert_eq!(config.mtu.initial_mtu, 1500);
+        assert_eq!(config.mtu.max_mtu, 4096);
+    }
+
+    #[test]
+    fn test_builder_constrained_mtu() {
+        // v0.13.0+: No role - all nodes are symmetric P2P nodes
+        let config = P2pConfig::builder()
+            .constrained_mtu()
+            .build()
+            .expect("Failed to build config");
+
+        assert!(!config.mtu.discovery_enabled);
+        assert_eq!(config.mtu.max_mtu, 1200);
+    }
+
+    #[test]
+    fn test_builder_jumbo_mtu() {
+        // v0.13.0+: No role - all nodes are symmetric P2P nodes
+        let config = P2pConfig::builder()
+            .jumbo_mtu()
+            .build()
+            .expect("Failed to build config");
+
+        assert_eq!(config.mtu.max_mtu, 9000);
+    }
+
+    #[test]
+    fn test_default_config_has_mtu() {
+        let config = P2pConfig::default();
+        assert_eq!(config.mtu.initial_mtu, 1200);
+        assert!(config.mtu.discovery_enabled);
+    }
+
+    // ==========================================================================
+    // Transport Registry Tests (Phase 1.1 Task 3)
+    // ==========================================================================
+
+    #[tokio::test]
+    async fn test_p2p_config_builder_transport_provider() {
+        use crate::transport::{TransportType, UdpTransport};
+        use std::sync::Arc;
+
+        // Create a real UdpTransport provider
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().expect("valid addr");
+        let transport = UdpTransport::bind(addr)
+            .await
+            .expect("Failed to bind UdpTransport");
+        let provider: Arc<dyn crate::transport::TransportProvider> = Arc::new(transport);
+
+        // Build config with single transport_provider() call
+        let config = P2pConfig::builder()
+            .transport_provider(provider)
+            .build()
+            .expect("Failed to build config");
+
+        // Verify registry has exactly 1 provider
+        assert_eq!(config.transport_registry.len(), 1);
+        assert!(!config.transport_registry.is_empty());
+
+        // Verify it's a UDP provider
+        let udp_providers = config
+            .transport_registry
+            .providers_by_type(TransportType::Udp);
+        assert_eq!(udp_providers.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_p2p_config_builder_multiple_providers() {
+        use crate::transport::{TransportType, UdpTransport};
+        use std::sync::Arc;
+
+        // Create two UDP transports on different ports
+        let addr1: std::net::SocketAddr = "127.0.0.1:0".parse().expect("valid addr");
+        let addr2: std::net::SocketAddr = "127.0.0.1:0".parse().expect("valid addr");
+
+        let transport1 = UdpTransport::bind(addr1)
+            .await
+            .expect("Failed to bind transport 1");
+        let transport2 = UdpTransport::bind(addr2)
+            .await
+            .expect("Failed to bind transport 2");
+
+        let provider1: Arc<dyn crate::transport::TransportProvider> = Arc::new(transport1);
+        let provider2: Arc<dyn crate::transport::TransportProvider> = Arc::new(transport2);
+
+        // Build config with multiple transport_provider() calls
+        let config = P2pConfig::builder()
+            .transport_provider(provider1)
+            .transport_provider(provider2)
+            .build()
+            .expect("Failed to build config");
+
+        // Verify registry has both providers
+        assert_eq!(config.transport_registry.len(), 2);
+        assert_eq!(
+            config
+                .transport_registry
+                .providers_by_type(TransportType::Udp)
+                .len(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn test_p2p_config_builder_transport_registry() {
+        use crate::transport::{TransportRegistry, TransportType, UdpTransport};
+        use std::sync::Arc;
+
+        // Create a registry and add multiple providers
+        let mut registry = TransportRegistry::new();
+
+        let addr1: std::net::SocketAddr = "127.0.0.1:0".parse().expect("valid addr");
+        let addr2: std::net::SocketAddr = "127.0.0.1:0".parse().expect("valid addr");
+
+        let transport1 = UdpTransport::bind(addr1)
+            .await
+            .expect("Failed to bind transport 1");
+        let transport2 = UdpTransport::bind(addr2)
+            .await
+            .expect("Failed to bind transport 2");
+
+        registry.register(Arc::new(transport1));
+        registry.register(Arc::new(transport2));
+
+        // Build config with transport_registry() method
+        let config = P2pConfig::builder()
+            .transport_registry(registry)
+            .build()
+            .expect("Failed to build config");
+
+        // Verify all providers present
+        assert_eq!(config.transport_registry.len(), 2);
+        assert_eq!(
+            config
+                .transport_registry
+                .providers_by_type(TransportType::Udp)
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn test_p2p_config_default_has_empty_registry() {
+        let config = P2pConfig::default();
+        assert!(config.transport_registry.is_empty());
+        assert_eq!(config.transport_registry.len(), 0);
+    }
+
+    #[test]
+    fn test_p2p_config_builder_default_has_empty_registry() {
+        let config = P2pConfig::builder()
+            .build()
+            .expect("Failed to build config");
+        assert!(config.transport_registry.is_empty());
+        assert_eq!(config.transport_registry.len(), 0);
+    }
+
+    // ==========================================================================
+    // TransportAddr Field Tests (Phase 1.2)
+    // ==========================================================================
+
+    #[test]
+    fn test_p2p_config_with_transport_addr() {
+        use crate::transport::TransportAddr;
+
+        // Create config with TransportAddr::Udp bind address
+        let bind_addr: std::net::SocketAddr = "0.0.0.0:9000".parse().expect("valid addr");
+        let peer1: std::net::SocketAddr = "192.168.1.100:9000".parse().expect("valid addr");
+        let peer2: std::net::SocketAddr = "192.168.1.101:9000".parse().expect("valid addr");
+
+        let config = P2pConfig::builder()
+            .bind_addr(TransportAddr::Udp(bind_addr))
+            .known_peer(TransportAddr::Udp(peer1))
+            .known_peer(TransportAddr::Udp(peer2))
+            .build()
+            .expect("Failed to build config");
+
+        // Verify bind_addr is set correctly
+        assert!(config.bind_addr.is_some());
+        assert_eq!(
+            config.bind_addr.as_ref().unwrap().as_socket_addr(),
+            Some(bind_addr)
+        );
+
+        // Verify known_peers are set correctly
+        assert_eq!(config.known_peers.len(), 2);
+        assert_eq!(config.known_peers[0].as_socket_addr(), Some(peer1));
+        assert_eq!(config.known_peers[1].as_socket_addr(), Some(peer2));
+    }
+
+    #[test]
+    fn test_p2p_config_builder_socket_addr_compat() {
+        // Test backward compatibility: SocketAddr should work via Into conversion
+        let bind_addr: std::net::SocketAddr = "127.0.0.1:8080".parse().expect("valid addr");
+        let peer_addr: std::net::SocketAddr = "127.0.0.1:8081".parse().expect("valid addr");
+
+        let config = P2pConfig::builder()
+            .bind_addr(bind_addr) // Uses Into<TransportAddr> conversion
+            .known_peer(peer_addr) // Uses Into<TransportAddr> conversion
+            .build()
+            .expect("Failed to build config");
+
+        // Verify fields were set correctly via From trait
+        assert!(config.bind_addr.is_some());
+        assert_eq!(
+            config.bind_addr.as_ref().unwrap().as_socket_addr(),
+            Some(bind_addr)
+        );
+        assert_eq!(config.known_peers.len(), 1);
+        assert_eq!(config.known_peers[0].as_socket_addr(), Some(peer_addr));
+    }
+
+    #[test]
+    fn test_p2p_config_mixed_transport_types() {
+        use crate::transport::TransportAddr;
+
+        // Add both UDP and BLE addresses to known_peers
+        let udp_peer: std::net::SocketAddr = "192.168.1.1:9000".parse().expect("valid addr");
+        let ble_device_id = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
+
+        let config = P2pConfig::builder()
+            .known_peer(TransportAddr::Udp(udp_peer))
+            .known_peer(TransportAddr::ble(ble_device_id, None))
+            .build()
+            .expect("Failed to build config");
+
+        // Verify heterogeneous transport list works
+        assert_eq!(config.known_peers.len(), 2);
+
+        // First peer is UDP
+        assert_eq!(config.known_peers[0].as_socket_addr(), Some(udp_peer));
+
+        // Second peer is BLE (no socket addr)
+        assert!(config.known_peers[1].as_socket_addr().is_none());
+        assert_eq!(
+            config.known_peers[1].transport_type(),
+            crate::transport::TransportType::Ble
+        );
+    }
+
+    #[test]
+    fn test_p2p_config_default_empty() {
+        let config = P2pConfig::default();
+
+        // Verify default config has empty known_peers
+        assert!(config.known_peers.is_empty());
+
+        // Verify None bind_addr
+        assert!(config.bind_addr.is_none());
+
+        let mdns = config
+            .discovery
+            .mdns
+            .as_ref()
+            .expect("default config should keep mDNS enabled");
+        assert!(mdns.enabled);
+        assert_eq!(mdns.service.as_deref(), Some("ant-quic"));
+    }
+
+    #[test]
+    fn test_p2p_config_builder_known_peers_iterator() {
+        // Test known_peers() method with iterator
+        let peers: Vec<std::net::SocketAddr> = vec![
+            "192.168.1.1:9000".parse().expect("valid addr"),
+            "192.168.1.2:9000".parse().expect("valid addr"),
+            "192.168.1.3:9000".parse().expect("valid addr"),
+        ];
+
+        let config = P2pConfig::builder()
+            .known_peers(peers.clone())
+            .build()
+            .expect("Failed to build config");
+
+        // Verify all peers were added
+        assert_eq!(config.known_peers.len(), 3);
+        for (i, peer) in peers.iter().enumerate() {
+            assert_eq!(config.known_peers[i].as_socket_addr(), Some(*peer));
+        }
+    }
+
+    #[test]
+    fn test_p2p_config_ipv6_bind_and_peers() {
+        use crate::transport::TransportAddr;
+
+        // Test IPv6 addresses in bind_addr and known_peers
+        let bind_addr: std::net::SocketAddr = "[::]:9000".parse().expect("valid addr");
+        let peer_addr: std::net::SocketAddr = "[::1]:9000".parse().expect("valid addr");
+
+        let config = P2pConfig::builder()
+            .bind_addr(TransportAddr::Udp(bind_addr))
+            .known_peer(TransportAddr::Udp(peer_addr))
+            .build()
+            .expect("Failed to build config");
+
+        // Verify IPv6 addresses work correctly
+        assert!(config.bind_addr.is_some());
+        assert_eq!(
+            config.bind_addr.as_ref().unwrap().as_socket_addr(),
+            Some(bind_addr)
+        );
+        assert_eq!(config.known_peers[0].as_socket_addr(), Some(peer_addr));
+
+        // Verify they're actually IPv6
+        match bind_addr {
+            std::net::SocketAddr::V6(_) => {} // Expected
+            std::net::SocketAddr::V4(_) => panic!("Expected IPv6 bind address"),
+        }
+        match peer_addr {
+            std::net::SocketAddr::V6(_) => {} // Expected
+            std::net::SocketAddr::V4(_) => panic!("Expected IPv6 peer address"),
+        }
+    }
+}

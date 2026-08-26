@@ -33,6 +33,21 @@ class FakeEmbeddedHttp extends HttpOverrides {
   /// assert generate→import consistency without real key math.
   Map<String, dynamic>? wallet;
 
+  /// My W@tch state `GET /mywatch` plays back; link/join/unlink mutate it
+  /// the way the Rust core would. Tests override it for the linked views.
+  Map<String, dynamic> myWatchStatus = {
+    'supported': true,
+    'linked': false,
+    'state': 'off',
+    'devices': const [],
+  };
+
+  /// Invite `POST /mywatch/link` and `GET /mywatch/invite` hand out.
+  String myWatchInvite = 'wtch1-${'cd' * 32}';
+
+  /// Raw bodies of every `POST /mywatch/announce`.
+  final List<String> myWatchAnnounces = [];
+
   /// Mnemonic that `POST /wallet/generate` hands out.
   String generatedMnemonic =
       'test test test test test test test test test test test junk';
@@ -101,6 +116,9 @@ class FakeEmbeddedHttp extends HttpOverrides {
     }
     if (path == '/wallet' || path.startsWith('/wallet/')) {
       return _handleWallet(method, path, body);
+    }
+    if (path == '/mywatch' || path.startsWith('/mywatch/')) {
+      return _handleMyWatch(method, path, body);
     }
     if (method == 'POST' && path == '/upload/estimate') {
       final fail = estimateFailure;
@@ -174,6 +192,69 @@ class FakeEmbeddedHttp extends HttpOverrides {
       }
       rootmapPuts[path.substring('/rootmap/'.length)] = body;
       return (204, const <int>[]);
+    }
+    return (404, const <int>[]);
+  }
+
+  (int, List<int>) _handleMyWatch(String method, String path, List<int> body) {
+    if (method == 'GET' && path == '/mywatch') {
+      return (200, utf8.encode(jsonEncode(myWatchStatus)));
+    }
+    if (method == 'POST' && path == '/mywatch/link') {
+      final json = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
+      final name = (json['device_name'] as String? ?? '').trim();
+      if (name.isEmpty) return (400, utf8.encode('device name is required'));
+      if (myWatchStatus['linked'] == true) {
+        return (400, utf8.encode('this device is already linked — unlink first'));
+      }
+      myWatchStatus = {
+        'supported': true,
+        'linked': true,
+        'state': 'ready',
+        'device_name': name,
+        'agent_id': 'aa' * 32,
+        'last_sync_ms': 0,
+        'devices': const [],
+      };
+      return (200, utf8.encode(jsonEncode({'invite': myWatchInvite})));
+    }
+    if (method == 'POST' && path == '/mywatch/join') {
+      final json = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
+      final name = (json['device_name'] as String? ?? '').trim();
+      final invite = (json['invite'] as String? ?? '').trim();
+      if (name.isEmpty) return (400, utf8.encode('device name is required'));
+      if (!invite.startsWith('wtch1-')) {
+        return (400, utf8.encode('not a My W@tch invite code'));
+      }
+      myWatchStatus = {
+        'supported': true,
+        'linked': true,
+        'state': 'ready',
+        'device_name': name,
+        'agent_id': 'bb' * 32,
+        'last_sync_ms': 0,
+        'devices': const [],
+      };
+      return (200, utf8.encode(jsonEncode({'joined': true})));
+    }
+    if (method == 'GET' && path == '/mywatch/invite') {
+      if (myWatchStatus['linked'] != true) {
+        return (400, utf8.encode('this device is not linked'));
+      }
+      return (200, utf8.encode(jsonEncode({'invite': myWatchInvite})));
+    }
+    if (method == 'POST' && path == '/mywatch/announce') {
+      myWatchAnnounces.add(utf8.decode(body));
+      return (200, utf8.encode(jsonEncode({'announced': true})));
+    }
+    if (method == 'DELETE' && path == '/mywatch') {
+      myWatchStatus = {
+        'supported': true,
+        'linked': false,
+        'state': 'off',
+        'devices': const [],
+      };
+      return (200, utf8.encode(jsonEncode({'unlinked': true})));
     }
     return (404, const <int>[]);
   }

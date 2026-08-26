@@ -126,6 +126,8 @@ pub struct Engine {
     pub wallet: crate::wallet::WalletStore,
     /// Publish upload jobs (`POST /upload` → poll `GET /upload/{id}`).
     pub uploads: crate::upload::UploadManager,
+    /// My W@tch device linking (x0x agent; test implementation).
+    pub mywatch: crate::mywatch::MyWatchStore,
 }
 
 impl Engine {
@@ -163,6 +165,7 @@ impl Engine {
             attempts: AtomicU32::new(0),
             wallet: crate::wallet::WalletStore::new(data_dir, true),
             uploads: crate::upload::UploadManager::default(),
+            mywatch: crate::mywatch::MyWatchStore::new(data_dir),
         }
     }
 
