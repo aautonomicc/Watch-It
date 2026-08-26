@@ -7,11 +7,12 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../services/library_store.dart';
 import '../services/my_watch_api.dart';
+import '../services/my_watch_sync.dart';
 import '../theme/tokens.dart';
 
-/// My W@tch: link this device with your other devices (test
-/// implementation — linking + per-device status only; watch-list sync
-/// rides the same channel later).
+/// My W@tch: link this device with your other devices. Linked devices
+/// sync watch lists and viewing positions automatically in the
+/// background ([MyWatchSync]) and show each other's presence here.
 ///
 /// Unlinked, the page offers "create a link" (mints the invite, shows it
 /// as QR + copyable code) or "join with a code" (paste the invite from
@@ -122,6 +123,16 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
     await _runBusy(() async {
       await _api.joinLink(result.$1, result.$2);
       await _announceLibrary();
+    });
+  }
+
+  Future<void> _syncNow() async {
+    await _runBusy(() async {
+      final summary = await MyWatchSync.instance.syncNow();
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(summary)));
+      }
     });
   }
 
@@ -339,17 +350,16 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
   List<Widget> _unlinkedBody(WiTokens t) {
     return [
       Text(
-        'Link your own devices — desktop and, later, phone — into a '
-        'private "My W@tch". Linked devices find each other over the '
-        'network (or the local Wi-Fi), see each other\'s status, and '
-        'will keep watch lists and viewing positions in sync in a '
-        'future release.',
+        'Link your own devices into a private "My W@tch". Linked '
+        'devices find each other over the network (or the local '
+        'Wi-Fi) and keep your watch lists and viewing positions in '
+        'sync automatically.',
         style: TextStyle(fontSize: 14, color: t.boneDim, height: 1.4),
       ),
       const SizedBox(height: 8),
       Text(
-        'Test feature: for now, linking shares device presence and '
-        'library counts only.',
+        'Adding or removing a title, or watching part of something, '
+        'shows up on your other devices within a minute or so.',
         style: TextStyle(fontSize: 12, color: t.ash),
       ),
       const SizedBox(height: 20),
@@ -445,6 +455,12 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
       else
         for (final device in status.devices) _deviceTile(t, device),
       const SizedBox(height: 16),
+      OutlinedButton.icon(
+        icon: const Icon(Icons.sync),
+        label: const Text('Sync now'),
+        onPressed: _busy || starting ? null : _syncNow,
+      ),
+      const SizedBox(height: 12),
       OutlinedButton.icon(
         icon: const Icon(Icons.qr_code),
         label: const Text('Show invite (add a device)'),

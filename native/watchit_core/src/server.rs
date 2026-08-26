@@ -93,6 +93,11 @@ fn protected_router(engine: &'static Engine) -> Router {
             "/mywatch/announce",
             post(move |body: Bytes| mywatch_announce(engine, body)),
         )
+        .route(
+            "/mywatch/sync",
+            get(move || mywatch_sync_get(engine))
+                .post(move |body: Bytes| mywatch_sync_put(engine, body)),
+        )
 }
 
 fn open_router(engine: &'static Engine) -> Router {
@@ -581,6 +586,52 @@ async fn mywatch_announce(engine: &'static Engine, body: Bytes) -> Response {
 /// `DELETE /mywatch` — unlink this device and wipe its link artefacts.
 async fn mywatch_unlink(engine: &'static Engine) -> Response {
     mywatch_result(engine.mywatch.unlink().await)
+}
+
+/// `POST /mywatch/sync` — `{"doc": …}`: publish this device's library
+/// sync document. The route walks the doc's entry addresses, attaches
+/// the shrunk data map for every one held in the local map store (small
+/// — the ant-cli `.datamap`-file form, base64), and hands both to the
+/// link store, so another device can import a synced entry and actually
+/// play it.
+async fn mywatch_sync_put(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    let doc = v["doc"].clone();
+    if !doc.is_object() {
+        return (StatusCode::BAD_REQUEST, "\"doc\" must be an object").into_response();
+    }
+    use base64::Engine as _;
+    let mut seen = std::collections::HashSet::new();
+    let mut maps = Vec::new();
+    for list in doc["lists"].as_array().into_iter().flatten() {
+        for entry in list["entries"].as_array().into_iter().flatten() {
+            let Some(addr_hex) = entry["address"].as_str() else { continue };
+            let addr_hex = addr_hex.trim().to_lowercase();
+            let mut addr = [0u8; 32];
+            if hex::decode_to_slice(&addr_hex, &mut addr).is_err()
+                || !seen.insert(addr_hex.clone())
+            {
+                continue;
+            }
+            let Some(root) = engine.stored_root_map(&addr) else { continue };
+            match crate::verify::shrunk_map_bytes(&root) {
+                Ok(bytes) => maps.push((
+                    addr_hex,
+                    base64::engine::general_purpose::STANDARD.encode(bytes),
+                )),
+                Err(e) => tracing::debug!("mywatch sync: map for {addr_hex} skipped: {e}"),
+            }
+        }
+    }
+    mywatch_result(engine.mywatch.publish_sync(doc, maps).await)
+}
+
+/// `GET /mywatch/sync` — every remote device's sync document and entry
+/// maps, for the app's merge pass.
+async fn mywatch_sync_get(engine: &'static Engine) -> Response {
+    mywatch_result(engine.mywatch.sync_docs().await)
 }
 
 async fn serve_xor(

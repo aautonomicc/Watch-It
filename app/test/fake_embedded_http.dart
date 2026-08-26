@@ -48,6 +48,13 @@ class FakeEmbeddedHttp extends HttpOverrides {
   /// Raw bodies of every `POST /mywatch/announce`.
   final List<String> myWatchAnnounces = [];
 
+  /// Raw bodies of every `POST /mywatch/sync` (published sync docs).
+  final List<String> myWatchSyncPublishes = [];
+
+  /// Devices `GET /mywatch/sync` returns
+  /// (`[{agent_id, doc, maps}]` — see RemoteSyncDoc).
+  List<Map<String, dynamic>> myWatchSyncDevices = [];
+
   /// Mnemonic that `POST /wallet/generate` hands out.
   String generatedMnemonic =
       'test test test test test test test test test test test junk';
@@ -255,6 +262,26 @@ class FakeEmbeddedHttp extends HttpOverrides {
         'devices': const [],
       };
       return (200, utf8.encode(jsonEncode({'unlinked': true})));
+    }
+    if (method == 'POST' && path == '/mywatch/sync') {
+      if (myWatchStatus['linked'] != true) {
+        return (400, utf8.encode('this device is not linked'));
+      }
+      myWatchSyncPublishes.add(utf8.decode(body));
+      return (200, utf8.encode(jsonEncode({'published': true, 'maps': 0})));
+    }
+    if (method == 'GET' && path == '/mywatch/sync') {
+      if (myWatchStatus['linked'] != true) {
+        return (400, utf8.encode('this device is not linked'));
+      }
+      return (
+        200,
+        utf8.encode(jsonEncode({
+          'agent_id': myWatchStatus['agent_id'] ?? 'aa' * 32,
+          'last_sync_ms': myWatchStatus['last_sync_ms'] ?? 0,
+          'devices': myWatchSyncDevices,
+        }))
+      );
     }
     return (404, const <int>[]);
   }

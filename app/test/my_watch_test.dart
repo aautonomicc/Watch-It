@@ -61,7 +61,7 @@ void main() {
       await open(tester);
       expect(find.text('Create a link on this device'), findsOneWidget);
       expect(find.text('Join with invite code'), findsOneWidget);
-      expect(find.textContaining('Test feature'), findsOneWidget);
+      expect(find.textContaining('in sync automatically'), findsOneWidget);
       // Opening the page announces the (empty) library.
       expect(fake.requests, contains('POST /mywatch/announce'));
       await close(tester);

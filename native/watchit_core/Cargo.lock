@@ -7849,6 +7849,7 @@ dependencies = [
  "alloy-signer-local",
  "ant-core",
  "axum 0.8.9",
+ "base64 0.22.1",
  "blake3",
  "bytes",
  "cc",

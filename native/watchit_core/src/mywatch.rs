@@ -40,6 +40,13 @@ mod imp {
     /// Seconds between store polls watching for remote-record changes
     /// (drives the persisted last-sync stamp).
     const WATCH_SECS: u64 = 5;
+    /// Ceiling for one published KV value; the store's hard cap is
+    /// 64 KiB (`MAX_INLINE_SIZE`), this leaves protocol headroom.
+    const MAX_VALUE_BYTES: usize = 60_000;
+    /// How many `<agent>/maps/N` part keys a device may publish. Bounded
+    /// by the store's 256 KiB per-agent byte quota: presence record +
+    /// sync doc + 3 map parts stays under it with margin.
+    const MAX_MAP_PARTS: usize = 3;
 
     fn now_ms() -> u64 {
         SystemTime::now()
@@ -280,6 +287,140 @@ mod imp {
             Ok(json!({ "announced": true }))
         }
 
+        /// Publish this device's library sync document (lists, entries,
+        /// tombstones, watch states — built by the app) plus the shrunk
+        /// data maps for the entries it holds (collected by the server
+        /// route from the local map store), under this device's bound
+        /// keys `<agent>/sync` and `<agent>/maps/N`. Maps that do not
+        /// fit the per-agent byte quota are dropped, most-recent first
+        /// kept — membership and progress still sync, the dropped maps
+        /// just cannot make the entry playable remotely.
+        pub async fn publish_sync(
+            &self,
+            doc: Value,
+            maps: Vec<(String, String)>,
+        ) -> Result<Value, String> {
+            let doc_bytes = doc.to_string();
+            if doc_bytes.len() > MAX_VALUE_BYTES {
+                return Err(format!(
+                    "sync document too large ({} bytes > {MAX_VALUE_BYTES})",
+                    doc_bytes.len()
+                ));
+            }
+            let phase = self.phase.lock().await;
+            let Phase::Ready(running) = &*phase else {
+                return Err(match &*phase {
+                    Phase::Off => "this device is not linked".into(),
+                    _ => "the link is still starting — try again shortly".to_string(),
+                });
+            };
+            let own = hex::encode(running.agent.agent_id().as_bytes());
+            running
+                .store
+                .put(
+                    format!("{own}/sync"),
+                    doc_bytes.into_bytes(),
+                    "application/json".into(),
+                )
+                .await
+                .map_err(|e| format!("sync publish failed: {e}"))?;
+            // Greedy-pack the maps into value-capped parts.
+            let mut parts: Vec<serde_json::Map<String, Value>> = vec![Default::default()];
+            let mut part_bytes = 2usize;
+            let mut attached = 0usize;
+            let mut dropped = 0usize;
+            for (addr, b64) in maps {
+                // `"addr":"b64",` — 8 bytes of JSON punctuation.
+                let cost = addr.len() + b64.len() + 8;
+                if part_bytes + cost > MAX_VALUE_BYTES {
+                    if parts.len() >= MAX_MAP_PARTS {
+                        dropped += 1;
+                        continue;
+                    }
+                    parts.push(Default::default());
+                    part_bytes = 2;
+                }
+                part_bytes += cost;
+                parts.last_mut().unwrap().insert(addr, Value::String(b64));
+                attached += 1;
+            }
+            if dropped > 0 {
+                tracing::warn!(
+                    "mywatch sync: {dropped} entry maps over the store quota were not published"
+                );
+            }
+            for (i, part) in parts.iter().enumerate() {
+                running
+                    .store
+                    .put(
+                        format!("{own}/maps/{i}"),
+                        Value::Object(part.clone()).to_string().into_bytes(),
+                        "application/json".into(),
+                    )
+                    .await
+                    .map_err(|e| format!("map publish failed: {e}"))?;
+            }
+            // A shrinking library frees stale part keys (tombstones do
+            // not count against the quota).
+            for i in parts.len()..MAX_MAP_PARTS {
+                let _ = running.store.remove(&format!("{own}/maps/{i}")).await;
+            }
+            Ok(json!({ "published": true, "maps": attached, "dropped": dropped }))
+        }
+
+        /// Every *remote* device's sync document and entry maps, for the
+        /// app's merge pass. Contains whatever the CRDT last converged
+        /// on; an offline device's doc is simply its last published one.
+        pub async fn sync_docs(&self) -> Result<Value, String> {
+            let phase = self.phase.lock().await;
+            let Phase::Ready(running) = &*phase else {
+                return Err(match &*phase {
+                    Phase::Off => "this device is not linked".into(),
+                    _ => "the link is still starting — try again shortly".to_string(),
+                });
+            };
+            let own = hex::encode(running.agent.agent_id().as_bytes());
+            let entries = running
+                .store
+                .keys()
+                .await
+                .map_err(|e| format!("store read failed: {e}"))?;
+            let mut docs: std::collections::HashMap<String, Value> = Default::default();
+            let mut maps: std::collections::HashMap<String, serde_json::Map<String, Value>> =
+                Default::default();
+            for entry in entries {
+                let Some((agent, suffix)) = entry.key.split_once('/') else {
+                    continue;
+                };
+                if agent == own {
+                    continue;
+                }
+                if suffix == "sync" {
+                    if let Ok(doc) = serde_json::from_slice::<Value>(&entry.value) {
+                        docs.insert(agent.to_string(), doc);
+                    }
+                } else if suffix.starts_with("maps/") {
+                    if let Ok(Value::Object(part)) =
+                        serde_json::from_slice::<Value>(&entry.value)
+                    {
+                        maps.entry(agent.to_string()).or_default().extend(part);
+                    }
+                }
+            }
+            let devices: Vec<Value> = docs
+                .into_iter()
+                .map(|(agent, doc)| {
+                    let m = maps.remove(&agent).unwrap_or_default();
+                    json!({ "agent_id": agent, "doc": doc, "maps": m })
+                })
+                .collect();
+            Ok(json!({
+                "agent_id": own,
+                "last_sync_ms": self.shared.last_sync_ms.load(Ordering::SeqCst),
+                "devices": devices,
+            }))
+        }
+
         /// Tear the link down on this device: stop the agent and delete
         /// every mywatch artefact (secret, identity, KV snapshots). Other
         /// devices keep the link; this device's stale record ages out on
@@ -431,10 +572,12 @@ mod imp {
                         }
                     }
                     // Watch: any remote record new/changed => we synced.
+                    // Keys under our own prefix (`<own>/sync`, `<own>/maps/N`)
+                    // are our publishes, not evidence of a sync.
                     let Ok(entries) = store.keys().await else { continue };
                     let mut changed = false;
                     for entry in entries {
-                        if entry.key == own_key {
+                        if entry.key.starts_with(&own_key) {
                             continue;
                         }
                         if seen.get(&entry.key) != Some(&entry.content_hash) {
@@ -477,6 +620,12 @@ mod imp {
                     .collect();
                 if let Ok(entries) = running.store.keys().await {
                     for entry in entries {
+                        // Presence records are the bare agent-id keys;
+                        // `<agent>/sync` and `<agent>/maps/N` are the
+                        // sync payloads, not devices.
+                        if entry.key.contains('/') {
+                            continue;
+                        }
                         let v: Value =
                             serde_json::from_slice(&entry.value).unwrap_or(Value::Null);
                         let is_self = entry.key == own_id;
@@ -589,6 +738,16 @@ mod imp {
             Err(UNSUPPORTED.into())
         }
         pub async fn announce(&self, _l: u64, _e: u64) -> Result<Value, String> {
+            Err(UNSUPPORTED.into())
+        }
+        pub async fn publish_sync(
+            &self,
+            _doc: Value,
+            _maps: Vec<(String, String)>,
+        ) -> Result<Value, String> {
+            Err(UNSUPPORTED.into())
+        }
+        pub async fn sync_docs(&self) -> Result<Value, String> {
             Err(UNSUPPORTED.into())
         }
         pub async fn unlink(&self) -> Result<Value, String> {
