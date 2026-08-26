@@ -9,11 +9,12 @@
 //! holding name/platform/library counts/heartbeat time. Merging is the
 //! CRDT's, so it is bidirectional and order-free by construction.
 //!
-//! Test-implementation scope: linking + per-device presence records
-//! only. Actual watch-list/viewpoint sync would ride the same store (or
-//! an MLS group for stronger confidentiality) and is deliberately not
-//! here yet. Desktop-only for now: the x0x tree is not yet proven under
-//! the Android NDK, so Android builds get the stub at the bottom which
+//! Besides the presence records, each device publishes a library sync
+//! document and its entries' shrunk data maps under its bound
+//! `<agent>/sync` and `<agent>/maps/N` keys (see `publish_sync`); the
+//! app's `MyWatchSync` service merges the remote documents. Built for
+//! desktop and Android (the NDK build links against API 24+ for
+//! `getifaddrs`); other platforms get the stub at the bottom which
 //! reports `supported: false`.
 
 /// Invite string prefix; version-bumped if the format ever changes.
