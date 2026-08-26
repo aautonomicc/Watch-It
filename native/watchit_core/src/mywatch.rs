@@ -22,7 +22,12 @@ pub const INVITE_PREFIX: &str = "wtch1-";
 /// Everything the routes call, real on desktop, stub elsewhere.
 pub use imp::MyWatchStore;
 
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
 mod imp {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -710,9 +715,15 @@ mod imp {
     }
 }
 
-/// Android (and any other non-desktop) stub: same surface, everything
-/// reports unsupported so the UI can say so instead of erroring blind.
-#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+/// Stub for platforms without the x0x tree (iOS for now): same surface,
+/// everything reports unsupported so the UI can say so instead of
+/// erroring blind.
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+)))]
 mod imp {
     use serde_json::{json, Value};
 

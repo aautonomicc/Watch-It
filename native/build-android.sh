@@ -13,5 +13,7 @@ export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$(ls -d "$ANDROID_HOME"/ndk/* | sor
 
 JNILIBS="../../app/android/app/src/main/jniLibs"
 
-cargo ndk -t arm64-v8a -o "$JNILIBS" build --release
+# --platform 24 matches the app's minSdk (Flutter's default): the x0x
+# tree's if_addrs needs getifaddrs, which Android's libc gained in 24.
+cargo ndk -t arm64-v8a --platform 24 -o "$JNILIBS" build --release
 echo "Built: $JNILIBS/arm64-v8a/libwatchit_core.so"

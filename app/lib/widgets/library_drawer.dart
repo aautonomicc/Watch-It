@@ -153,17 +153,16 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                         style: TextStyle(color: t.bone, fontSize: 14)),
                     onTap: () => _openPage(const PublishScreen()),
                   ),
-                // Test feature, desktop-only like Publish: the Android
-                // core ships without the x0x agent for now.
-                if (isDesktopPlatform)
-                  ListTile(
-                    dense: true,
-                    leading: Icon(Icons.devices_outlined,
-                        color: t.boneDim, size: 20),
-                    title: Text('My W@tch',
-                        style: TextStyle(color: t.bone, fontSize: 14)),
-                    onTap: () => _openPage(const MyWatchScreen()),
-                  ),
+                // All platforms since the Android core gained the x0x
+                // agent; iOS builds get the screen's unsupported notice.
+                ListTile(
+                  dense: true,
+                  leading: Icon(Icons.devices_outlined,
+                      color: t.boneDim, size: 20),
+                  title: Text('My W@tch',
+                      style: TextStyle(color: t.bone, fontSize: 14)),
+                  onTap: () => _openPage(const MyWatchScreen()),
+                ),
                 ListTile(
                   dense: true,
                   leading: Icon(Icons.settings_outlined,
