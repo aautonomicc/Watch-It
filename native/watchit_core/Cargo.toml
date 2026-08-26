@@ -58,16 +58,17 @@ tracing-android = "0.2"
 # libdbus link, matching the alpha.53 lesson about system-lib deps).
 # Desktop only: upload is desktop-only, and on Android keyring would
 # silently use its non-persistent mock store.
-[target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dependencies]
-# My W@tch device linking (test implementation, desktop-only for now): an
-# in-process x0x agent (saorsa-gossip + ant-quic, post-quantum, mDNS LAN
-# discovery) syncs per-device records through a self-keyed CRDT KV store
-# on a secret invite topic. Android excluded until the NDK cross-build of
-# the x0x tree is proven; mywatch routes 501 there.
+[target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos", target_os = "android"))'.dependencies]
+# My W@tch device linking: an in-process x0x agent (saorsa-gossip +
+# ant-quic, post-quantum, mDNS LAN discovery) syncs lists/viewpoints
+# through a self-keyed CRDT KV store on a secret invite topic. Android
+# included since the NDK cross-build of the x0x tree was proven.
 x0x = "0.39"
 # CancellationToken for the mywatch heartbeat/watch task (already in the
 # x0x tree, so free on desktop).
 tokio-util = "0.7"
+
+[target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dependencies]
 keyring = { version = "3", default-features = false, features = [
     "windows-native",
     "apple-native",
