@@ -15,6 +15,7 @@ import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata_service.dart';
 import 'package:watchit/services/watch_state.dart';
 import 'package:watchit/theme/tokens.dart';
+import 'package:watchit/services/terms.dart';
 
 String _addr(int i) => i.toRadixString(16).padLeft(64, '0');
 
@@ -43,7 +44,8 @@ void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
   setUp(() async {
-    SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
+    SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion});
     await LibraryStore.useForTesting(
         AppDatabase.forTesting(NativeDatabase.memory()));
     // Offline: no API key, so tiles render from parsed file names.

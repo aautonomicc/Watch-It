@@ -12,6 +12,7 @@ import 'package:watchit/services/home_sections.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata_service.dart';
 import 'package:watchit/services/watch_state.dart';
+import 'package:watchit/services/terms.dart';
 
 String _addr(int i) => i.toRadixString(16).padLeft(64, '0');
 
@@ -19,6 +20,7 @@ String _addr(int i) => i.toRadixString(16).padLeft(64, '0');
 /// exactly what each test stores.
 const _basePrefs = {
   'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion,
   'tmdb_nudge_dismissed_v1': true,
 };
 

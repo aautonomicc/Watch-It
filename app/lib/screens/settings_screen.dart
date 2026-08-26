@@ -20,6 +20,7 @@ import 'downloads_screen.dart';
 import 'home_layout_screen.dart';
 import 'media_lists_screen.dart';
 import 'publish_screen.dart' show isDesktopPlatform;
+import 'terms_screen.dart';
 import 'wallet_screen.dart';
 
 /// Settings: library, streaming, metadata, and about sections.
@@ -731,6 +732,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     context: context,
                     applicationName: 'W@tch',
                     applicationVersion: _version,
+                  ),
+                ),
+                ListTile(
+                  leading: Icon(Icons.policy_outlined, color: t.accent),
+                  title: Text('Terms of Use & Disclaimer',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    'The terms you accepted on first launch',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  trailing: Icon(Icons.chevron_right, color: t.ash),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const TermsScreen()),
                   ),
                 ),
                 ListTile(

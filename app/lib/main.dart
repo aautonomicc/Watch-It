@@ -10,6 +10,7 @@ import 'screens/detail_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/show_screen.dart';
+import 'screens/terms_screen.dart';
 import 'services/app_settings.dart';
 import 'services/connectivity.dart';
 import 'services/download_foreground.dart';
@@ -27,6 +28,7 @@ import 'services/network_events.dart';
 import 'services/metadata_seeder.dart';
 import 'services/rootmap_seeder.dart';
 import 'services/season_grouping.dart';
+import 'services/terms.dart';
 import 'services/update_check.dart';
 import 'services/watch_state.dart';
 import 'theme/tokens.dart';
@@ -141,8 +143,47 @@ class WatchItApp extends StatelessWidget {
       scaffoldMessengerKey: wiMessengerKey,
       navigatorObservers: [wiRouteObserver],
       theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
-      home: const HomeScreen(),
+      home: const TermsGate(child: HomeScreen()),
     );
+  }
+}
+
+/// First-launch gate: holds the app on the Terms of Use & Disclaimer
+/// until the current [kTermsVersion] has been accepted (re-shown after a
+/// terms bump). Everything behind it — including the network client
+/// started in main() — keeps warming up; only the UI waits.
+class TermsGate extends StatefulWidget {
+  const TermsGate({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<TermsGate> createState() => _TermsGateState();
+}
+
+class _TermsGateState extends State<TermsGate> {
+  int? _acceptedVersion;
+
+  @override
+  void initState() {
+    super.initState();
+    AppSettings.termsAcceptedVersion().then((v) {
+      if (mounted) setState(() => _acceptedVersion = v);
+    });
+  }
+
+  Future<void> _accept() async {
+    await AppSettings.setTermsAccepted(kTermsVersion);
+    if (mounted) setState(() => _acceptedVersion = kTermsVersion);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accepted = _acceptedVersion;
+    // One frame of blank scaffold while the pref loads (local read).
+    if (accepted == null) return const Scaffold(body: SizedBox.shrink());
+    if (accepted >= kTermsVersion) return widget.child;
+    return TermsScreen(onAccept: _accept);
   }
 }
 

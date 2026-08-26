@@ -186,6 +186,22 @@ class AppSettings {
     await prefs.setBool(_samsungTipDismissedKey, true);
   }
 
+  static const _termsAcceptedKey = 'terms_accepted_version_v1';
+
+  /// The terms version the user accepted on the first-launch gate
+  /// (0 = never accepted). The gate shows whenever this is below the
+  /// current [kTermsVersion] in services/terms.dart, so bumping that
+  /// constant re-prompts everyone after a material change.
+  static Future<int> termsAcceptedVersion() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_termsAcceptedKey) ?? 0;
+  }
+
+  static Future<void> setTermsAccepted(int version) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_termsAcceptedKey, version);
+  }
+
   static const _pauseDownloadsOnPlayKey = 'pause_downloads_on_play_v1';
 
   /// What to do with active downloads when streaming playback starts

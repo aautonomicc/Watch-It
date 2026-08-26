@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart' show LicenseRegistry;
 
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/screens/settings_screen.dart';
+import 'package:watchit/screens/terms_screen.dart';
 import 'package:watchit/services/bundle.dart' show kTmdbAttributionNotice;
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/licenses.dart';
@@ -86,6 +87,18 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.byType(LicensePage), findsOneWidget);
+  });
+
+  testWidgets('About shows the terms tile and opens the read-only terms '
+      'page', (tester) async {
+    await pumpSettings(tester);
+    expect(find.text('Terms of Use & Disclaimer'), findsOneWidget);
+    await tester.tap(find.text('Terms of Use & Disclaimer'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TermsScreen), findsOneWidget);
+    // Read-only: no accept bar, back navigation present.
+    expect(find.text('I agree'), findsNothing);
+    expect(find.byType(BackButton), findsOneWidget);
   });
 
   testWidgets('registered native licenses carry the GPL text for '
