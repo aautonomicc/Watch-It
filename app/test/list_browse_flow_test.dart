@@ -20,6 +20,7 @@ import 'package:watchit/services/watch_state.dart';
 import 'package:watchit/theme/tokens.dart';
 import 'package:watchit/widgets/library_drawer.dart';
 import 'package:watchit/widgets/poster_cards.dart';
+import 'package:watchit/services/terms.dart';
 
 String _addr(int i) => i.toRadixString(16).padLeft(64, '0');
 
@@ -35,7 +36,8 @@ void main() {
 
   setUp(() async {
     // Skip default seeding so surfaces only hold what each test stores.
-    SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
+    SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion});
     await LibraryStore.useForTesting(
         AppDatabase.forTesting(NativeDatabase.memory()));
     // Offline: no API key, so screens render from parsed file names plus
@@ -94,6 +96,7 @@ void main() {
       (tester) async {
     SharedPreferences.setMockInitialValues({
       'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion,
       'library_arrangement_v1': 'autoByType',
     });
     await seedLibrary();
@@ -150,6 +153,7 @@ void main() {
   testWidgets('drawer in auto mode lists the virtual pair', (tester) async {
     SharedPreferences.setMockInitialValues({
       'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion,
       'library_arrangement_v1': 'autoByType',
     });
     await seedLibrary();
@@ -175,6 +179,7 @@ void main() {
       (tester) async {
     SharedPreferences.setMockInitialValues({
       'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion,
       'library_arrangement_v1': 'autoByType',
     });
     await seedLibrary();
@@ -209,6 +214,7 @@ void main() {
       (tester) async {
     SharedPreferences.setMockInitialValues({
       'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion,
       'library_arrangement_v1': 'autoByType',
       'auto_hidden_lists_v1': [kAutoTvShowsListId],
     });
@@ -233,6 +239,7 @@ void main() {
       'Added', (tester) async {
     SharedPreferences.setMockInitialValues({
       'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion,
       'library_arrangement_v1': 'autoByType',
       'auto_hidden_lists_v1': [kAutoTvShowsListId],
     });
@@ -256,6 +263,7 @@ void main() {
       (tester) async {
     SharedPreferences.setMockInitialValues({
       'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion,
       'library_arrangement_v1': 'autoByType',
       'auto_hidden_lists_v1': [kAutoMoviesListId, kAutoTvShowsListId],
     });
@@ -275,6 +283,7 @@ void main() {
   testWidgets('user mode ignores the auto-mode hide set', (tester) async {
     SharedPreferences.setMockInitialValues({
       'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion,
       'auto_hidden_lists_v1': [kAutoMoviesListId, kAutoTvShowsListId],
     });
     await seedLibrary();

@@ -14,6 +14,7 @@ import 'package:watchit/services/metadata_service.dart';
 import 'package:watchit/services/season_grouping.dart';
 import 'package:watchit/services/watch_state.dart';
 import 'package:watchit/theme/tokens.dart';
+import 'package:watchit/services/terms.dart';
 
 String _addr(int i) => i.toRadixString(16).padLeft(64, '0');
 
@@ -28,7 +29,8 @@ void main() {
 
   setUp(() async {
     // Skip default seeding so surfaces only hold what each test stores.
-    SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
+    SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion});
     await LibraryStore.useForTesting(
         AppDatabase.forTesting(NativeDatabase.memory()));
     // Offline: no API key, so screens render from parsed file names.
@@ -200,6 +202,7 @@ void main() {
   testWidgets('stored favourites load on a fresh start', (tester) async {
     SharedPreferences.setMockInitialValues({
       'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion,
       'favourites_v1': [_addr(2)],
     });
     await seedLibrary();

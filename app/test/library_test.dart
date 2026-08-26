@@ -16,6 +16,7 @@ import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata.dart';
 import 'package:watchit/services/seed_catalog.dart';
 import 'package:watchit/services/embedded_client.dart';
+import 'package:watchit/services/terms.dart';
 
 const _addr =
     'a3f1c9e07b6d5a4f2e8c1b0d9f7a6e5c4b3a2d1e0f9c8b7a6d5e4f3c2b1a0d9e';
@@ -26,7 +27,8 @@ void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
   setUp(() async {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues(
+        {'terms_accepted_version_v1': kTermsVersion});
     await LibraryStore.useForTesting(
         AppDatabase.forTesting(NativeDatabase.memory()));
   });
@@ -433,7 +435,8 @@ void main() {
       // Already-seeded install: the flag is set, the old title persists.
       // Additions flag too — this test pins the rename, not the seeding.
       SharedPreferences.setMockInitialValues(
-          {'defaults_seeded_v4': true, 'seed_additions_v1': true});
+          {'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion, 'seed_additions_v1': true});
       await LibraryStore.save([
         MediaList(
           id: 'default-test-movies',
@@ -450,7 +453,8 @@ void main() {
     });
 
     test('a user-renamed default list keeps its name', () async {
-      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
+      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion});
       await LibraryStore.save([
         const MediaList(id: 'default-test-movies', title: 'My Flicks'),
       ]);
@@ -540,6 +544,7 @@ void main() {
         () async {
       SharedPreferences.setMockInitialValues({
         'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion,
         'seed_fileinfo_v1': true,
       });
       await LibraryStore.save([
@@ -563,6 +568,7 @@ void main() {
     test('appends at the end when the sibling entry is gone', () async {
       SharedPreferences.setMockInitialValues({
         'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion,
         'seed_fileinfo_v1': true,
       });
       await LibraryStore.save([
@@ -579,6 +585,7 @@ void main() {
     test('an addition the user already holds is not re-added', () async {
       SharedPreferences.setMockInitialValues({
         'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion,
         'seed_fileinfo_v1': true,
       });
       await LibraryStore.save([
@@ -603,6 +610,7 @@ void main() {
     test('a deleted seed list is not recreated for an addition', () async {
       SharedPreferences.setMockInitialValues({
         'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion,
         'seed_fileinfo_v1': true,
       });
       await LibraryStore.save([
@@ -622,6 +630,7 @@ void main() {
     test('runs once — the flag short-circuits later launches', () async {
       SharedPreferences.setMockInitialValues({
         'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion,
         'seed_fileinfo_v1': true,
         'seed_additions_v1': true,
       });
@@ -853,7 +862,8 @@ void main() {
 
     testWidgets('home shows the list after returning from settings',
         (tester) async {
-      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
+      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion});
       await LibraryStore.save([
         MediaList(
           id: '7',
@@ -876,7 +886,8 @@ void main() {
 
   group('Media Lists page', () {
     testWidgets('unchecking a list hides it from home', (tester) async {
-      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
+      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion});
       await LibraryStore.save([
         MediaList(
           id: 'm',
@@ -930,7 +941,8 @@ void main() {
     });
 
     testWidgets('delete a list from its 3-dot menu', (tester) async {
-      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
+      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion});
       await LibraryStore.save([
         const MediaList(id: 'm', title: 'Movies'),
       ]);
@@ -957,7 +969,8 @@ void main() {
     });
 
     testWidgets('rename a list from its 3-dot menu', (tester) async {
-      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
+      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion});
       await LibraryStore.save([
         const MediaList(id: 'm', title: 'Movies'),
       ]);
@@ -986,7 +999,8 @@ void main() {
   group('Season grouping on home', () {
     testWidgets('episodes fold into a season card that opens the episodes',
         (tester) async {
-      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
+      SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion});
       await LibraryStore.save([
         MediaList(
           id: 's',

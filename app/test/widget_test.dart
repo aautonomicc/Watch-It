@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/main.dart';
 import 'package:watchit/services/library_store.dart';
+import 'package:watchit/services/terms.dart';
 import 'package:watchit/theme/tokens.dart';
 import 'package:watchit/widgets/brand_mark.dart';
 
@@ -15,13 +16,21 @@ void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
   setUp(() async {
-    SharedPreferences.setMockInitialValues({});
+    // Terms pre-accepted (the gate has its own tests) and seeding
+    // skipped so the empty state is deterministic across pumps.
+    SharedPreferences.setMockInitialValues({
+      'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion,
+    });
     await LibraryStore.useForTesting(
         AppDatabase.forTesting(NativeDatabase.memory()));
   });
 
   testWidgets('home screen shows lockup and empty state', (tester) async {
     await tester.pumpWidget(const WatchItApp());
+    // Let the TermsGate's pref read resolve and rebuild into home.
+    await tester.pump();
+    await tester.pump();
 
     expect(find.byType(BrandMark), findsOneWidget);
     expect(find.byType(BrandWordmark), findsOneWidget);

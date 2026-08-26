@@ -20,6 +20,7 @@ import 'package:watchit/services/season_grouping.dart';
 import 'package:watchit/services/watch_state.dart';
 import 'package:watchit/theme/tokens.dart';
 import 'package:watchit/widgets/watch_progress.dart';
+import 'package:watchit/services/terms.dart';
 
 String _addr(int i) => i.toRadixString(16).padLeft(64, '0');
 
@@ -37,7 +38,8 @@ void main() {
 
   setUp(() async {
     // Skip default seeding so the wall only holds what each test stores.
-    SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
+    SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion});
     await LibraryStore.useForTesting(
         AppDatabase.forTesting(NativeDatabase.memory()));
     MetadataService.instance = MetadataService(apiKeyProvider: () async => '');
