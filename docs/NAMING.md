@@ -58,9 +58,13 @@ source name with the resolution tag replaced by the *real* output height —
 `Title (Year) [720p].mp4` for the Medium tier, or `[360p]` for a 360p
 source on the Low tier (the encoder never upscales) — and the extension
 switched to `.mp4`. Episode markers (`SxxEyy`) are preserved, so multiple
-tiers of one title fold into the same card's version picker. Name your
-source files per this convention before publishing and the tags take care
-of themselves.
+tiers of one title fold into the same card's version picker. A file
+published **as-is** (the Original tier) normally keeps its name, but when
+it already plays everywhere (H.264 8-bit MP4, ≤1080p — the case where
+Original stands in for an encode tier) it gains its real resolution tag
+too, so a 1080p `Movie.mp4` publishes as `Movie [1080p].mp4` and lines up
+with any encoded siblings. Name your source files per this convention
+before publishing and the tags take care of themselves.
 
 ## Encoding note
 
