@@ -28,6 +28,21 @@ pub fn derive_address(root: &DataMap) -> Result<[u8; 32], String> {
     shrunk_map_address(&shrunk)
 }
 
+/// The shrunk serialization of a stored root map — the exact bytes an
+/// ant-cli private upload writes to its `.datamap` file, so another
+/// device imports them through `POST /datamap` like any shared map
+/// (expanding the wrapper chunks over the network when it is a child
+/// map). A few hundred bytes regardless of file size, which is what lets
+/// entry maps ride the My W@tch sync store's 64 KiB value cap.
+pub fn shrunk_map_bytes(root: &DataMap) -> Result<Vec<u8>, String> {
+    if root.is_child() {
+        return Err("map is a shrunk child map, not a root map".to_string());
+    }
+    let (shrunk, _) = self_encryption::shrink_data_map(root.clone(), |_, _| Ok(()))
+        .map_err(|e| format!("re-shrink failed: {e}"))?;
+    rmp_serde::to_vec(&shrunk).map_err(|e| format!("serialize failed: {e}"))
+}
+
 /// Address of an already-shrunk map — the hash of its own serialization,
 /// no shrink round. This is what ant-cli's private upload wrote to the
 /// `.datamap` file (it persists the shrunk result verbatim), so for a

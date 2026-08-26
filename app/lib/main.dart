@@ -26,6 +26,7 @@ import 'services/metadata.dart';
 import 'services/metadata_service.dart';
 import 'services/network_events.dart';
 import 'services/metadata_seeder.dart';
+import 'services/my_watch_sync.dart';
 import 'services/rootmap_seeder.dart';
 import 'services/season_grouping.dart';
 import 'services/terms.dart';
@@ -106,6 +107,10 @@ Future<void> main() async {
     ));
   });
   unawaited(UpdateCheck.instance.maybeCheck());
+  // My W@tch background sync: publishes this device's lists/viewpoints
+  // into the link store and merges the other devices' changes, every 30s
+  // while linked (a silent no-op otherwise).
+  MyWatchSync.instance.start();
   runApp(const WatchItApp());
 }
 
@@ -207,6 +212,8 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     // Watch states change while a player is open on top of this screen —
     // refresh the Continue Watching row as they land.
     WatchStateStore.instance.addListener(_reloadRows);
+    // A background My W@tch sync can add/remove list entries under us.
+    MyWatchSync.revision.addListener(_reload);
     // Wall cards badge their download state — have the queue loaded.
     unawaited(DownloadManager.instance.ensureLoaded());
     _reload();
@@ -222,6 +229,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   void dispose() {
     wiRouteObserver.unsubscribe(this);
     WatchStateStore.instance.removeListener(_reloadRows);
+    MyWatchSync.revision.removeListener(_reload);
     super.dispose();
   }
 

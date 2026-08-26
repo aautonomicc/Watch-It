@@ -1,0 +1,577 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
+
+import '../models/media_list.dart';
+import 'datamap_import.dart';
+import 'embedded_client.dart';
+import 'library_store.dart';
+import 'my_watch_api.dart';
+import 'watch_state.dart';
+
+/// Background sync of watch lists and viewpoints (resume points) between
+/// My W@tch linked devices, riding the link's CRDT key-value store.
+///
+/// Each device periodically publishes a *sync document* — its lists
+/// (matched across devices by title, the same rule the import merge
+/// uses), each entry with the time it was added, removal tombstones, and
+/// its watch states — plus the shrunk data map of every entry it holds,
+/// so a synced entry is importable and playable on the receiving device
+/// (the map expands over the network at import, exactly like a shared
+/// `.datamap` file).
+///
+/// Merging is a last-writer-wins element set per `(list title, address)`:
+/// the newest add beats an older remove and vice versa, so deletions
+/// propagate without resurrections. Watch states merge newest-`updatedAt`
+/// wins per address ([WatchStateStore.mergeAll] — an import never
+/// regresses local progress). Tombstones come from a locally persisted
+/// membership snapshot: whatever disappeared from the library since the
+/// last cycle was removed here, and is stamped now.
+///
+/// The service is quiet unless the device is linked; every cycle checks.
+class MyWatchSync {
+  MyWatchSync({MyWatchApi? api}) : _api = api ?? MyWatchApi();
+
+  /// Replaceable for tests.
+  static MyWatchSync instance = MyWatchSync();
+
+  final MyWatchApi _api;
+  Timer? _timer;
+  bool _cycling = false;
+
+  /// Bumped after a merge changed the library, so screens showing list
+  /// content can refresh without a route pop.
+  static final ValueNotifier<int> revision = ValueNotifier(0);
+
+  /// Seconds between sync cycles. A change propagates in at most two
+  /// intervals (publish on one device, merge on the other).
+  static const periodSecs = 30;
+
+  /// Caps keeping the published document under the store's 64 KiB value
+  /// limit: entries beyond these are dropped from the doc (log only —
+  /// they stay local, they just do not sync).
+  static const maxDocEntries = 400;
+  static const maxDocWatchStates = 300;
+
+  /// Tombstones older than this are garbage-collected — every linked
+  /// device that syncs at all will have applied them long before.
+  static const tombstoneTtlMs = 90 * 24 * 3600 * 1000;
+
+  /// Failed map imports (offline, network miss) retry no sooner than
+  /// this, so a dead map does not hammer the network every cycle.
+  static const mapRetryMs = 10 * 60 * 1000;
+
+  final Map<String, int> _mapRetryAt = {};
+
+  /// For tests: pins the persisted sync-state file somewhere writable.
+  @visibleForTesting
+  static String? statePathOverride;
+
+  /// Start the periodic cycle (called once from main; runs for the whole
+  /// app lifetime and no-ops while the device is not linked).
+  void start() {
+    _timer ??= Timer.periodic(
+      const Duration(seconds: periodSecs),
+      (_) => _cycle(),
+    );
+    // First cycle soon after launch, once the link autostart has had a
+    // moment to come up.
+    Timer(const Duration(seconds: 8), _cycle);
+  }
+
+  void stop() {
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  /// One immediate cycle (the screen's Sync now action). Returns a
+  /// user-readable summary, or throws [MyWatchApiException].
+  Future<String> syncNow() async {
+    final result = await _cycle(rethrowErrors: true);
+    if (result == null) return 'Nothing to sync.';
+    final parts = <String>[
+      if (result.entriesAdded > 0) '${result.entriesAdded} added',
+      if (result.entriesRemoved > 0) '${result.entriesRemoved} removed',
+      if (result.watchStatesApplied > 0)
+        '${result.watchStatesApplied} watch position(s) updated',
+      if (result.mapsImported > 0) '${result.mapsImported} map(s) fetched',
+    ];
+    return parts.isEmpty ? 'Everything is in sync.' : 'Synced: ${parts.join(', ')}.';
+  }
+
+  Future<SyncCycleResult?> _cycle({bool rethrowErrors = false}) async {
+    if (_cycling) return null;
+    _cycling = true;
+    try {
+      final status = await _api.status();
+      if (!status.supported || !status.linked || status.state != 'ready') {
+        return null;
+      }
+      return await _runCycle();
+    } catch (e) {
+      if (rethrowErrors) rethrow;
+      debugPrint('mywatch sync cycle failed: $e');
+      return null;
+    } finally {
+      _cycling = false;
+    }
+  }
+
+  Future<SyncCycleResult> _runCycle() async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final state = await _loadState();
+    var lists = await LibraryStore.load();
+
+    // 1. Locally deleted entries since the last cycle become tombstones.
+    final current = membershipOf(lists);
+    state.tombstones = updatedTombstones(
+      previous: state.snapshot,
+      current: current,
+      tombstones: state.tombstones,
+      nowMs: now,
+      ttlMs: tombstoneTtlMs,
+    );
+
+    // 2. Merge every remote document in.
+    final remote = await _api.syncDocs();
+    final merge = mergeRemoteDocs(
+      lists: lists,
+      tombstones: state.tombstones,
+      remoteDocs: [for (final d in remote) d.doc],
+    );
+    var result = SyncCycleResult(
+      entriesAdded: merge.entriesAdded,
+      entriesRemoved: merge.entriesRemoved,
+    );
+    if (merge.changed) {
+      lists = merge.lists;
+      state.tombstones = merge.tombstones;
+      await LibraryStore.save(lists);
+      revision.value++;
+    }
+
+    // 3. Viewpoints: newest-updatedAt-wins per address, never regressing.
+    final states = [
+      for (final d in remote) ...watchStatesFromDoc(d.doc),
+    ];
+    if (states.isNotEmpty) {
+      result = result.copyWith(
+        watchStatesApplied: await WatchStateStore.instance.mergeAll(states),
+      );
+    }
+
+    // 4. Fetch missing data maps for entries we now hold, so they play.
+    result = result.copyWith(
+      mapsImported: await _importMissingMaps(lists, remote, now),
+    );
+
+    // 5. Publish our (possibly just-merged) state.
+    state.snapshot = membershipOf(lists);
+    final doc = buildDoc(
+      lists: lists,
+      tombstones: state.tombstones,
+      watchStates: await WatchStateStore.instance.all(),
+      nowMs: now,
+    );
+    final fingerprint = jsonEncode(doc..remove('updated_ms'));
+    if (fingerprint != state.lastPublished) {
+      doc['updated_ms'] = now;
+      await _api.publishSync(doc);
+      state.lastPublished = fingerprint;
+      var entries = 0;
+      for (final l in lists) {
+        entries += l.entries.length;
+      }
+      try {
+        await _api.announce(lists: lists.length, entries: entries);
+      } on Exception {
+        // Presence counts are cosmetic; the sync itself succeeded.
+      }
+    }
+    await _saveState(state);
+    return result;
+  }
+
+  /// Import every remote shrunk map for an address our library holds but
+  /// the local map store does not. Known maps import offline; child maps
+  /// need a one-time network expansion and are retried with backoff.
+  Future<int> _importMissingMaps(
+    List<MediaList> lists,
+    List<RemoteSyncDoc> remote,
+    int nowMs,
+  ) async {
+    final held = <String>{
+      for (final l in lists)
+        for (final e in l.entries) e.address.toLowerCase(),
+    };
+    final maps = <String, String>{};
+    for (final d in remote) {
+      for (final e in d.maps.entries) {
+        maps.putIfAbsent(e.key.toLowerCase(), () => e.value);
+      }
+    }
+    var imported = 0;
+    for (final entry in maps.entries) {
+      final addr = entry.key;
+      if (!held.contains(addr)) continue;
+      if ((_mapRetryAt[addr] ?? 0) > nowMs) continue;
+      if (await _mapStored(addr)) continue;
+      try {
+        await importDatamapBytes(base64.decode(entry.value));
+        imported++;
+      } catch (e) {
+        _mapRetryAt[addr] = nowMs + mapRetryMs;
+        debugPrint('mywatch sync: map import for $addr failed: $e');
+      }
+    }
+    return imported;
+  }
+
+  Future<bool> _mapStored(String addr) async {
+    final base = EmbeddedClient.baseUrl();
+    if (base == null) return true; // cannot check — do not spam imports
+    try {
+      final res = await HttpClient()
+          .getUrl(Uri.parse('$base/resolve/$addr'))
+          .then((r) => r.close());
+      final stored = res.statusCode == 200;
+      await res.drain<void>();
+      return stored;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  // ---- pure merge/publish logic (unit-tested directly) ------------------
+
+  /// `title(lower) → address(lower) → added_ms` for the whole library.
+  /// A pre-column add time of 0/null publishes as 1, so any real
+  /// tombstone beats it.
+  static Map<String, Map<String, int>> membershipOf(List<MediaList> lists) => {
+        for (final l in lists)
+          l.title.toLowerCase(): {
+            for (final e in l.entries)
+              e.address.toLowerCase():
+                  (e.addedAt == null || e.addedAt == 0) ? 1 : e.addedAt!,
+          },
+      };
+
+  /// Roll the tombstone set forward: whatever [previous] held that
+  /// [current] no longer does was deleted here since the last cycle
+  /// (stamped [nowMs]); an address re-added after its tombstone clears
+  /// it; stones older than [ttlMs] fall off.
+  static Map<String, Map<String, int>> updatedTombstones({
+    required Map<String, Map<String, int>> previous,
+    required Map<String, Map<String, int>> current,
+    required Map<String, Map<String, int>> tombstones,
+    required int nowMs,
+    required int ttlMs,
+  }) {
+    final out = {
+      for (final e in tombstones.entries)
+        e.key: Map<String, int>.of(e.value),
+    };
+    for (final listEntry in previous.entries) {
+      final title = listEntry.key;
+      final have = current[title] ?? const {};
+      for (final addr in listEntry.value.keys) {
+        if (!have.containsKey(addr)) {
+          out.putIfAbsent(title, () => {})[addr] = nowMs;
+        }
+      }
+    }
+    for (final listEntry in current.entries) {
+      final stones = out[listEntry.key];
+      if (stones == null) continue;
+      for (final e in listEntry.value.entries) {
+        final stone = stones[e.key];
+        if (stone != null && e.value > stone) stones.remove(e.key);
+      }
+    }
+    out.removeWhere((_, stones) {
+      stones.removeWhere((_, ms) => nowMs - ms > ttlMs);
+      return stones.isEmpty;
+    });
+    return out;
+  }
+
+  /// The published document. Lists match across devices by title;
+  /// entries carry their add time for the LWW merge; `removed` carries
+  /// this device's tombstones so deletions propagate.
+  static Map<String, dynamic> buildDoc({
+    required List<MediaList> lists,
+    required Map<String, Map<String, int>> tombstones,
+    required List<WatchState> watchStates,
+    required int nowMs,
+  }) {
+    var entryBudget = maxDocEntries;
+    final listDocs = <Map<String, dynamic>>[];
+    for (final l in lists) {
+      final title = l.title.toLowerCase();
+      final take = l.entries.take(entryBudget).toList();
+      entryBudget -= take.length;
+      if (take.length < l.entries.length) {
+        debugPrint(
+            'mywatch sync: list "${l.title}" truncated in the sync doc '
+            '(${l.entries.length - take.length} entries over the cap)');
+      }
+      listDocs.add({
+        'title': l.title,
+        'entries': [
+          for (final e in take)
+            {
+              'name': e.name,
+              'address': e.address.toLowerCase(),
+              'added_ms':
+                  (e.addedAt == null || e.addedAt == 0) ? 1 : e.addedAt,
+              if (e.sizeBytes != null) 'size': e.sizeBytes,
+              if (e.videoInfo != null) 'video': e.videoInfo,
+            },
+        ],
+        if (tombstones[title]?.isNotEmpty ?? false)
+          'removed': tombstones[title],
+      });
+    }
+    // Tombstoned lists we no longer hold at all still need their stones
+    // published, or the deletion never reaches the other devices.
+    final held = {for (final l in lists) l.title.toLowerCase()};
+    for (final e in tombstones.entries) {
+      if (held.contains(e.key) || e.value.isEmpty) continue;
+      listDocs.add({'title': e.key, 'entries': const [], 'removed': e.value});
+    }
+    return {
+      'v': 1,
+      'updated_ms': nowMs,
+      'lists': listDocs,
+      'watch': [
+        for (final s in watchStates.take(maxDocWatchStates))
+          {
+            'address': s.address,
+            'pos_ms': s.positionMs,
+            'dur_ms': s.durationMs,
+            'completed': s.completed,
+            'updated_ms': s.updatedAt,
+          },
+      ],
+    };
+  }
+
+  /// The remote document's watch states, ready for
+  /// [WatchStateStore.mergeAll].
+  static List<WatchState> watchStatesFromDoc(Map<String, dynamic> doc) => [
+        for (final w in doc['watch'] as List? ?? const [])
+          if (w is Map<String, dynamic> && w['address'] is String)
+            WatchState(
+              address: (w['address'] as String).toLowerCase(),
+              positionMs: w['pos_ms'] as int? ?? 0,
+              durationMs: w['dur_ms'] as int? ?? 0,
+              completed: w['completed'] as bool? ?? false,
+              updatedAt: w['updated_ms'] as int? ?? 0,
+            ),
+      ];
+
+  /// Merge remote documents into the local library — the LWW element
+  /// set. Newest add vs newest remove wins per `(title, address)`; a
+  /// list emptied purely by remote tombstones is deleted; remote
+  /// tombstones are adopted locally so they keep propagating.
+  static SyncMergeResult mergeRemoteDocs({
+    required List<MediaList> lists,
+    required Map<String, Map<String, int>> tombstones,
+    required List<Map<String, dynamic>> remoteDocs,
+  }) {
+    final out = [for (final l in lists) l];
+    final stones = {
+      for (final e in tombstones.entries)
+        e.key: Map<String, int>.of(e.value),
+    };
+    var changed = false;
+    var added = 0;
+    var removed = 0;
+
+    int indexOf(String titleLower) =>
+        out.indexWhere((l) => l.title.toLowerCase() == titleLower);
+
+    for (final doc in remoteDocs) {
+      for (final rl in doc['lists'] as List? ?? const []) {
+        if (rl is! Map<String, dynamic>) continue;
+        final title = (rl['title'] as String? ?? '').trim();
+        if (title.isEmpty) continue;
+        final titleLower = title.toLowerCase();
+
+        // Remote tombstones first: adopt them, then let newer adds win.
+        final removedMap = rl['removed'] as Map<String, dynamic>? ?? const {};
+        for (final e in removedMap.entries) {
+          final addr = e.key.toLowerCase();
+          final ms = e.value as int? ?? 0;
+          if (ms <= 0) continue;
+          final mine = stones[titleLower]?[addr] ?? 0;
+          if (ms > mine) {
+            stones.putIfAbsent(titleLower, () => {})[addr] = ms;
+          }
+        }
+
+        for (final re in rl['entries'] as List? ?? const []) {
+          if (re is! Map<String, dynamic>) continue;
+          final addr = (re['address'] as String? ?? '').toLowerCase();
+          if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(addr)) continue;
+          final addedMs = re['added_ms'] as int? ?? 1;
+          final stone = stones[titleLower]?[addr] ?? 0;
+          if (stone >= addedMs) continue; // removed later than added
+          final i = indexOf(titleLower);
+          final holds = i != -1 &&
+              out[i].entries.any((x) => x.address.toLowerCase() == addr);
+          if (holds) continue;
+          final entry = MediaEntry(
+            name: re['name'] as String? ?? addr,
+            address: addr,
+            addedAt: addedMs,
+            sizeBytes: re['size'] as int?,
+            videoInfo: re['video'] as String?,
+          );
+          if (i == -1) {
+            out.add(MediaList(
+              id: '${DateTime.now().microsecondsSinceEpoch}-$titleLower',
+              title: title,
+              entries: [entry],
+            ));
+          } else {
+            out[i] = out[i].copyWith(entries: [...out[i].entries, entry]);
+          }
+          changed = true;
+          added++;
+        }
+      }
+    }
+
+    // Apply the (merged) tombstones to what we hold: anything removed
+    // more recently than it was added goes.
+    for (var i = out.length - 1; i >= 0; i--) {
+      final titleLower = out[i].title.toLowerCase();
+      final listStones = stones[titleLower];
+      if (listStones == null || listStones.isEmpty) continue;
+      final hadEntries = out[i].entries.isNotEmpty;
+      final kept = [
+        for (final e in out[i].entries)
+          if ((listStones[e.address.toLowerCase()] ?? 0) <
+              ((e.addedAt == null || e.addedAt == 0) ? 1 : e.addedAt!))
+            e,
+      ];
+      if (kept.length != out[i].entries.length) {
+        removed += out[i].entries.length - kept.length;
+        changed = true;
+        if (kept.isEmpty && hadEntries) {
+          // Emptied purely by remote deletions — the list is gone.
+          out.removeAt(i);
+        } else {
+          out[i] = out[i].copyWith(entries: kept);
+        }
+      }
+    }
+
+    return SyncMergeResult(
+      lists: out,
+      tombstones: stones,
+      changed: changed,
+      entriesAdded: added,
+      entriesRemoved: removed,
+    );
+  }
+
+  // ---- persisted sync state ---------------------------------------------
+
+  Future<File> _stateFile() async {
+    final path = statePathOverride ??
+        '${(await getApplicationSupportDirectory()).path}/mywatch_sync.json';
+    return File(path);
+  }
+
+  Future<_SyncState> _loadState() async {
+    try {
+      final file = await _stateFile();
+      if (!await file.exists()) return _SyncState();
+      final json =
+          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      return _SyncState()
+        ..snapshot = _nestedIntMap(json['snapshot'])
+        ..tombstones = _nestedIntMap(json['tombstones'])
+        ..lastPublished = json['last_published'] as String?;
+    } catch (_) {
+      return _SyncState();
+    }
+  }
+
+  Future<void> _saveState(_SyncState state) async {
+    try {
+      final file = await _stateFile();
+      await file.writeAsString(jsonEncode({
+        'snapshot': state.snapshot,
+        'tombstones': state.tombstones,
+        'last_published': state.lastPublished,
+      }));
+    } catch (e) {
+      debugPrint('mywatch sync: state save failed: $e');
+    }
+  }
+
+  static Map<String, Map<String, int>> _nestedIntMap(dynamic value) => {
+        for (final e in (value as Map<String, dynamic>? ?? const {}).entries)
+          e.key: {
+            for (final inner in (e.value as Map<String, dynamic>).entries)
+              inner.key: inner.value as int,
+          },
+      };
+}
+
+class _SyncState {
+  /// `title(lower) → address → added_ms` as of the last cycle — the diff
+  /// base that turns local deletions into tombstones.
+  Map<String, Map<String, int>> snapshot = {};
+
+  /// `title(lower) → address → removed_ms`.
+  Map<String, Map<String, int>> tombstones = {};
+
+  /// Fingerprint of the last published doc (minus its timestamp), so an
+  /// unchanged library publishes nothing.
+  String? lastPublished;
+}
+
+class SyncMergeResult {
+  const SyncMergeResult({
+    required this.lists,
+    required this.tombstones,
+    required this.changed,
+    required this.entriesAdded,
+    required this.entriesRemoved,
+  });
+
+  final List<MediaList> lists;
+  final Map<String, Map<String, int>> tombstones;
+  final bool changed;
+  final int entriesAdded;
+  final int entriesRemoved;
+}
+
+class SyncCycleResult {
+  const SyncCycleResult({
+    this.entriesAdded = 0,
+    this.entriesRemoved = 0,
+    this.watchStatesApplied = 0,
+    this.mapsImported = 0,
+  });
+
+  final int entriesAdded;
+  final int entriesRemoved;
+  final int watchStatesApplied;
+  final int mapsImported;
+
+  SyncCycleResult copyWith({int? watchStatesApplied, int? mapsImported}) =>
+      SyncCycleResult(
+        entriesAdded: entriesAdded,
+        entriesRemoved: entriesRemoved,
+        watchStatesApplied: watchStatesApplied ?? this.watchStatesApplied,
+        mapsImported: mapsImported ?? this.mapsImported,
+      );
+}

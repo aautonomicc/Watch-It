@@ -93,6 +93,48 @@ class MyWatchApi {
   /// Unlink this device and wipe its link artefacts (other devices keep
   /// the link).
   Future<void> unlink() => _request('DELETE', '/mywatch');
+
+  /// Publish this device's library sync document. The embedded client
+  /// attaches the shrunk data maps for the entries it holds locally
+  /// before putting both into the link store.
+  Future<void> publishSync(Map<String, dynamic> doc) =>
+      _request('POST', '/mywatch/sync', body: {'doc': doc});
+
+  /// Every remote device's sync document and entry maps, for the merge
+  /// pass. Fails while the link is off or still starting.
+  Future<List<RemoteSyncDoc>> syncDocs() async {
+    final json = await _request('GET', '/mywatch/sync');
+    return [
+      for (final d in json['devices'] as List? ?? const [])
+        RemoteSyncDoc.fromJson(d as Map<String, dynamic>),
+    ];
+  }
+}
+
+/// One remote device's published sync state: its document plus the
+/// base64 shrunk data maps for the entries it holds.
+class RemoteSyncDoc {
+  const RemoteSyncDoc({
+    required this.agentId,
+    required this.doc,
+    required this.maps,
+  });
+
+  factory RemoteSyncDoc.fromJson(Map<String, dynamic> json) => RemoteSyncDoc(
+        agentId: json['agent_id'] as String? ?? '',
+        doc: json['doc'] as Map<String, dynamic>? ?? const {},
+        maps: {
+          for (final e in (json['maps'] as Map<String, dynamic>? ?? const {})
+              .entries)
+            e.key: e.value as String,
+        },
+      );
+
+  final String agentId;
+  final Map<String, dynamic> doc;
+
+  /// address → base64 shrunk data map.
+  final Map<String, String> maps;
 }
 
 class MyWatchStatus {
