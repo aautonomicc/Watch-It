@@ -12,7 +12,11 @@
 //! Besides the presence records, each device publishes a library sync
 //! document and its entries' shrunk data maps under its bound
 //! `<agent>/sync` and `<agent>/maps/N` keys (see `publish_sync`); the
-//! app's `MyWatchSync` service merges the remote documents. Built for
+//! app's `MyWatchSync` service merges the remote documents. User-made
+//! artwork syncs at full quality outside the store: the sync doc only
+//! carries a manifest (sha256/size), and a device missing the bytes
+//! pulls them from the owning device over x0x direct messages while it
+//! is online (`fetch_art` / the art_req listener). Built for
 //! desktop and Android (the NDK build links against API 24+ for
 //! `getifaddrs`); other platforms get the stub at the bottom which
 //! reports `supported: false`.
@@ -53,6 +57,21 @@ mod imp {
     /// by the store's 256 KiB per-agent byte quota: presence record +
     /// sync doc + 3 map parts stays under it with margin.
     const MAX_MAP_PARTS: usize = 3;
+    /// Raw bytes per artwork chunk DM. Base64 in a small JSON wrapper
+    /// lands around 40 KB — inside the DM envelope cap (x0x's own file
+    /// protocol uses 32 KiB chunks the same way).
+    const ART_CHUNK_BYTES: usize = 30_000;
+    /// Ceiling for one artwork file (matches the app's 10 MB image-pick
+    /// cap) — refuses runaway transfers on both ends.
+    const MAX_ART_BYTES: u64 = 10 * 1024 * 1024;
+    /// Whole-transfer deadline for one artwork fetch. Chunks are pulled
+    /// one round trip at a time, so a large poster on a slow link needs
+    /// real time.
+    const ART_FETCH_TIMEOUT: Duration = Duration::from_secs(120);
+    /// How long to wait for one requested chunk before asking again.
+    const ART_CHUNK_TIMEOUT: Duration = Duration::from_secs(10);
+    /// Requests per chunk before the fetch gives up.
+    const ART_CHUNK_RETRIES: u32 = 3;
 
     fn now_ms() -> u64 {
         SystemTime::now()
@@ -81,7 +100,7 @@ mod imp {
     }
 
     struct Running {
-        agent: x0x::Agent,
+        agent: Arc<x0x::Agent>,
         store: x0x::KvStoreHandle,
         config: LinkConfig,
         cancel: tokio_util::sync::CancellationToken,
@@ -110,6 +129,9 @@ mod imp {
         lists: AtomicU64,
         entries: AtomicU64,
         state_path: Option<PathBuf>,
+        /// sha256(hex) → local file path of user artwork this device can
+        /// serve to its linked peers (set by the app each sync cycle).
+        art_index: std::sync::Mutex<std::collections::HashMap<String, PathBuf>>,
     }
 
     impl Shared {
@@ -134,6 +156,9 @@ mod imp {
         /// Last startup/sync problem, for the status UI.
         message: std::sync::Mutex<Option<String>>,
         shared: Arc<Shared>,
+        /// One artwork fetch at a time — posters are small and the app
+        /// requests them sequentially anyway.
+        art_fetch: Mutex<()>,
     }
 
     impl MyWatchStore {
@@ -147,10 +172,12 @@ mod imp {
                     lists: AtomicU64::new(0),
                     entries: AtomicU64::new(0),
                     state_path: dir.as_ref().map(|d| d.join("state.json")),
+                    art_index: std::sync::Mutex::new(Default::default()),
                 }),
                 dir,
                 phase: Mutex::new(Phase::Off),
                 message: std::sync::Mutex::new(None),
+                art_fetch: Mutex::new(()),
             };
             let persisted = store.load_state();
             store
@@ -427,6 +454,162 @@ mod imp {
             }))
         }
 
+        /// Replace the set of user-artwork files this device serves to
+        /// its linked peers (`sha256(hex) → path`). The app refreshes it
+        /// whenever its artwork changes; requests for anything else are
+        /// refused.
+        pub fn set_art_index(&self, files: Vec<(String, PathBuf)>) -> Result<Value, String> {
+            let mut idx = self.shared.art_index.lock().unwrap();
+            idx.clear();
+            for (sha, path) in files {
+                let sha = sha.trim().to_lowercase();
+                if sha.len() == 64 && hex::decode(&sha).is_ok() {
+                    idx.insert(sha, path);
+                }
+            }
+            Ok(json!({ "indexed": idx.len() }))
+        }
+
+        /// Pull one artwork file from linked device [`agent_hex`] over
+        /// x0x direct messages, one chunk per request (proving link
+        /// membership with a tag derived from the invite secret), verify
+        /// the whole file's sha256, park it under `<dir>/art/<sha256>`
+        /// and return `{path, size}`. The transfer is pull-based on
+        /// purpose: firing the chunks as a back-to-back DM stream loses
+        /// messages beyond a ~4-message burst (observed live between two
+        /// devservers — the sends succeed but only the tail arrives), so
+        /// the receiver requests each chunk and retries the ones that go
+        /// missing. The owning device must be online; the app checks
+        /// presence first.
+        pub async fn fetch_art(&self, agent_hex: &str, sha256: &str) -> Result<Value, String> {
+            let sha = sha256.trim().to_lowercase();
+            if sha.len() != 64 || hex::decode(&sha).is_err() {
+                return Err("sha256 must be 64 hex characters".into());
+            }
+            let mut id = [0u8; 32];
+            if hex::decode_to_slice(agent_hex.trim(), &mut id).is_err() {
+                return Err("agent id must be 64 hex characters".into());
+            }
+            let (agent, secret, dir) = {
+                let phase = self.phase.lock().await;
+                let Phase::Ready(running) = &*phase else {
+                    return Err(match &*phase {
+                        Phase::Off => "this device is not linked".into(),
+                        _ => "the link is still starting — try again shortly".to_string(),
+                    });
+                };
+                (
+                    Arc::clone(&running.agent),
+                    running.config.secret_hex.clone(),
+                    self.dir.clone().ok_or("no data dir")?,
+                )
+            };
+            let _one_at_a_time = self.art_fetch.lock().await;
+            let to = x0x::identity::AgentId(id);
+            // Subscribe before the first request so no reply can slip
+            // past, then make sure a direct path exists.
+            let mut rx = agent.subscribe_direct();
+            let _ = agent.connect_to_agent(&to).await;
+            let auth = art_auth(&secret, &sha);
+
+            use base64::Engine as _;
+            let deadline = tokio::time::Instant::now() + ART_FETCH_TIMEOUT;
+            let mut out: Vec<u8> = Vec::new();
+            let mut next_seq: usize = 0;
+            let mut total: Option<usize> = None;
+            while total.is_none_or(|t| next_seq < t) {
+                let mut attempts = 0;
+                'chunk: loop {
+                    attempts += 1;
+                    let req = json!({
+                        "wtch": "art_req",
+                        "v": 2,
+                        "sha256": sha,
+                        "auth": auth,
+                        "seq": next_seq,
+                    });
+                    agent
+                        .send_direct(&to, req.to_string().into_bytes())
+                        .await
+                        .map_err(|e| format!("artwork request failed: {e}"))?;
+                    let retry_at = tokio::time::Instant::now() + ART_CHUNK_TIMEOUT;
+                    loop {
+                        let msg = tokio::select! {
+                            _ = tokio::time::sleep_until(deadline) => {
+                                return Err("artwork transfer timed out".into());
+                            }
+                            _ = tokio::time::sleep_until(retry_at) => {
+                                if attempts >= ART_CHUNK_RETRIES {
+                                    return Err(format!(
+                                        "artwork chunk {next_seq} never arrived"
+                                    ));
+                                }
+                                continue 'chunk;
+                            }
+                            m = rx.recv() => {
+                                m.ok_or("the link shut down mid-transfer")?
+                            }
+                        };
+                        if msg.sender != to {
+                            continue;
+                        }
+                        let Ok(v) = serde_json::from_slice::<Value>(&msg.payload) else {
+                            continue;
+                        };
+                        if v["sha256"].as_str() != Some(sha.as_str()) {
+                            continue;
+                        }
+                        match v["wtch"].as_str() {
+                            Some("art_err") => {
+                                let e = v["error"].as_str().unwrap_or("remote error");
+                                return Err(format!("the other device refused: {e}"));
+                            }
+                            Some("art_chunk") => {
+                                // A retried request can produce a duplicate
+                                // reply; anything but the chunk we are
+                                // waiting for is stale — drop it.
+                                if v["seq"].as_u64() != Some(next_seq as u64) {
+                                    continue;
+                                }
+                                let Some(data) = v["data"].as_str() else { continue };
+                                let raw = base64::engine::general_purpose::STANDARD
+                                    .decode(data)
+                                    .map_err(|_| "artwork chunk was not valid base64")?;
+                                let t = v["total"].as_u64().unwrap_or(0) as usize;
+                                if t == 0 || total.is_some_and(|known| known != t) {
+                                    return Err(
+                                        "artwork chunk carried a bad chunk count".into()
+                                    );
+                                }
+                                total = Some(t);
+                                out.extend_from_slice(&raw);
+                                if out.len() as u64 > MAX_ART_BYTES {
+                                    return Err("artwork exceeds the 10 MB limit".into());
+                                }
+                                next_seq += 1;
+                                break 'chunk;
+                            }
+                            _ => continue,
+                        }
+                    }
+                }
+            }
+            let bytes = out;
+            if sha256_hex(&bytes) != sha {
+                return Err("artwork failed its integrity check".into());
+            }
+            let art_dir = dir.join("art");
+            std::fs::create_dir_all(&art_dir)
+                .map_err(|e| format!("artwork dir create failed: {e}"))?;
+            let path = art_dir.join(&sha);
+            std::fs::write(&path, &bytes)
+                .map_err(|e| format!("artwork save failed: {e}"))?;
+            Ok(json!({
+                "path": path.to_string_lossy(),
+                "size": bytes.len(),
+            }))
+        }
+
         /// Tear the link down on this device: stop the agent and delete
         /// every mywatch artefact (secret, identity, KV snapshots). Other
         /// devices keep the link; this device's stale record ages out on
@@ -532,7 +715,7 @@ mod imp {
                 .await
                 .map_err(|e| format!("sync store join failed: {e}"))?;
             Ok(Running {
-                agent,
+                agent: Arc::new(agent),
                 store,
                 config: cfg.clone(),
                 cancel: tokio_util::sync::CancellationToken::new(),
@@ -598,6 +781,46 @@ mod imp {
                         shared.save();
                     }
                     first_scan = false;
+                }
+            });
+            // Artwork server: answer linked peers' art_req DMs, one
+            // chunk per request (the receiver pulls and retries — see
+            // fetch_art). Requests must carry the membership tag derived
+            // from the invite secret — a stranger who somehow learns our
+            // agent-id still gets nothing.
+            let cancel = running.cancel.clone();
+            let agent = Arc::clone(&running.agent);
+            let shared = Arc::clone(&self.shared);
+            let secret = running.config.secret_hex.clone();
+            tokio::spawn(async move {
+                let mut rx = agent.subscribe_direct();
+                loop {
+                    let msg = tokio::select! {
+                        _ = cancel.cancelled() => return,
+                        m = rx.recv() => match m {
+                            Some(m) => m,
+                            None => return,
+                        },
+                    };
+                    let Ok(v) = serde_json::from_slice::<Value>(&msg.payload) else {
+                        continue;
+                    };
+                    if v["wtch"].as_str() != Some("art_req") {
+                        continue;
+                    }
+                    let (Some(sha), Some(auth)) = (v["sha256"].as_str(), v["auth"].as_str())
+                    else {
+                        continue;
+                    };
+                    if auth != art_auth(&secret, sha) {
+                        tracing::debug!("mywatch art: request with a bad link tag ignored");
+                        continue;
+                    }
+                    let seq = v["seq"].as_u64().unwrap_or(0) as usize;
+                    let path = shared.art_index.lock().unwrap().get(sha).cloned();
+                    if let Err(e) = serve_art(&agent, &msg.sender, sha, seq, path).await {
+                        tracing::debug!("mywatch art: serve failed: {e}");
+                    }
                 }
             });
         }
@@ -681,6 +904,83 @@ mod imp {
         Ok(hex_part.to_lowercase())
     }
 
+    /// Membership tag for an artwork request: proves the requester holds
+    /// the link's invite secret without putting the secret on the wire.
+    /// Domain-separated from [`topic_for`], and bound to the requested
+    /// hash so tags cannot be replayed for other files.
+    fn art_auth(secret_hex: &str, sha256: &str) -> String {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"watchit mywatch v1 art");
+        hasher.update(secret_hex.as_bytes());
+        hasher.update(sha256.as_bytes());
+        hasher.finalize().to_hex().to_string()
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        use sha2::Digest;
+        hex::encode(sha2::Sha256::digest(bytes))
+    }
+
+    /// Answer one pull request with exactly one chunk DM (the file is
+    /// re-read and re-hashed per request so a file replaced on disk
+    /// mid-transfer can never ship under the old name — the requester's
+    /// final whole-file hash check backstops the cross-chunk case).
+    /// Problems the requester should hear about (unknown file, changed
+    /// file, out-of-range chunk) go back as `art_err`; transport
+    /// failures just log — the requester's retry covers them.
+    async fn serve_art(
+        agent: &x0x::Agent,
+        to: &x0x::identity::AgentId,
+        sha: &str,
+        seq: usize,
+        path: Option<PathBuf>,
+    ) -> Result<(), String> {
+        use base64::Engine as _;
+        let refuse = |why: &str| {
+            json!({ "wtch": "art_err", "sha256": sha, "error": why })
+                .to_string()
+                .into_bytes()
+        };
+        let Some(path) = path else {
+            let _ = agent.send_direct(to, refuse("artwork not available")).await;
+            return Ok(());
+        };
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                let _ = agent.send_direct(to, refuse("artwork not available")).await;
+                return Err(format!("read {} failed: {e}", path.display()));
+            }
+        };
+        if bytes.is_empty()
+            || bytes.len() as u64 > MAX_ART_BYTES
+            || sha256_hex(&bytes) != sha
+        {
+            let _ = agent.send_direct(to, refuse("artwork changed on disk")).await;
+            return Ok(());
+        }
+        let total = bytes.len().div_ceil(ART_CHUNK_BYTES);
+        if seq >= total {
+            let _ = agent.send_direct(to, refuse("no such chunk")).await;
+            return Ok(());
+        }
+        let start = seq * ART_CHUNK_BYTES;
+        let chunk = &bytes[start..(start + ART_CHUNK_BYTES).min(bytes.len())];
+        let payload = json!({
+            "wtch": "art_chunk",
+            "sha256": sha,
+            "seq": seq,
+            "total": total,
+            "size": bytes.len(),
+            "data": base64::engine::general_purpose::STANDARD.encode(chunk),
+        });
+        agent
+            .send_direct(to, payload.to_string().into_bytes())
+            .await
+            .map_err(|e| format!("chunk {seq} send failed: {e}"))?;
+        Ok(())
+    }
+
     /// Gossip topic for a link. Derived, so the raw invite secret never
     /// appears in topic-shaped places on the wire, and a future encrypted
     /// payload could key itself from the same secret independently.
@@ -689,6 +989,29 @@ mod imp {
         hasher.update(b"watchit mywatch v1 topic");
         hasher.update(secret_hex.as_bytes());
         format!("wtch-mywatch-{}", hasher.finalize().to_hex())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn art_auth_is_stable_and_bound_to_hash_and_secret() {
+            let a = art_auth("aa".repeat(32).as_str(), &"11".repeat(32));
+            assert_eq!(a, art_auth(&"aa".repeat(32), &"11".repeat(32)));
+            assert_ne!(a, art_auth(&"aa".repeat(32), &"22".repeat(32)));
+            assert_ne!(a, art_auth(&"bb".repeat(32), &"11".repeat(32)));
+            // Domain-separated from the gossip topic derivation.
+            assert!(!topic_for(&"aa".repeat(32)).contains(&a));
+        }
+
+        #[test]
+        fn sha256_hex_matches_known_vector() {
+            assert_eq!(
+                sha256_hex(b"abc"),
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+            );
+        }
     }
 
     fn record_json(device_name: &str, lists: u64, entries: u64) -> String {
@@ -760,6 +1083,15 @@ mod imp {
             Err(UNSUPPORTED.into())
         }
         pub async fn sync_docs(&self) -> Result<Value, String> {
+            Err(UNSUPPORTED.into())
+        }
+        pub fn set_art_index(
+            &self,
+            _files: Vec<(String, std::path::PathBuf)>,
+        ) -> Result<Value, String> {
+            Err(UNSUPPORTED.into())
+        }
+        pub async fn fetch_art(&self, _agent: &str, _sha: &str) -> Result<Value, String> {
             Err(UNSUPPORTED.into())
         }
         pub async fn unlink(&self) -> Result<Value, String> {

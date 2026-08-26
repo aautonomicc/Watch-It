@@ -2,14 +2,17 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../db/app_database.dart';
 import '../models/media_list.dart';
 import 'datamap_import.dart';
 import 'embedded_client.dart';
 import 'library_store.dart';
 import 'my_watch_api.dart';
+import 'user_metadata.dart';
 import 'watch_state.dart';
 
 /// Background sync of watch lists and viewpoints (resume points) between
@@ -30,6 +33,16 @@ import 'watch_state.dart';
 /// regresses local progress). Tombstones come from a locally persisted
 /// membership snapshot: whatever disappeared from the library since the
 /// last cycle was removed here, and is stamped now.
+///
+/// User edits (Edit details) sync too: the doc carries a `meta` section
+/// with every `userEdited` metadata row — title/year/description/episode
+/// name inline, artwork as a *manifest only* (sha256 + size), because
+/// the store's value cap would force downscaling. A device missing the
+/// artwork bytes pulls the original file from the owning device over
+/// x0x direct messages while that device is online, verifies the hash,
+/// and stores it under the normal `user_` poster naming — full quality,
+/// byte-identical. Rows merge last-writer-wins by their edit time (the
+/// remote stamp is adopted on apply, so comparisons converge).
 ///
 /// The service is quiet unless the device is linked; every cycle checks.
 class MyWatchSync {
@@ -56,6 +69,18 @@ class MyWatchSync {
   static const maxDocEntries = 400;
   static const maxDocWatchStates = 300;
 
+  /// Byte budget for the whole published doc (the server refuses at
+  /// 60 000); meta rows are dropped oldest-first until it fits.
+  static const maxDocBytes = 56000;
+
+  /// A synced description is capped here — the doc has to share its
+  /// byte budget with the library itself.
+  static const maxMetaOverviewChars = 2000;
+
+  /// Artwork files above this never sync (matches the editor's 10 MB
+  /// image-pick cap and the native transfer limit).
+  static const maxArtBytes = 10 * 1024 * 1024;
+
   /// Tombstones older than this are garbage-collected — every linked
   /// device that syncs at all will have applied them long before.
   static const tombstoneTtlMs = 90 * 24 * 3600 * 1000;
@@ -66,9 +91,26 @@ class MyWatchSync {
 
   final Map<String, int> _mapRetryAt = {};
 
+  /// Failed artwork fetches (owner went offline mid-transfer, …) retry
+  /// with the same backoff as maps.
+  final Map<String, int> _artRetryAt = {};
+
+  /// sha256/size per poster file path — poster files are never edited
+  /// in place (every save gets a fresh name), so entries never go
+  /// stale.
+  final Map<String, ({String sha256, int size})> _artInfoByPath = {};
+
+  /// Fingerprint of the art index last handed to the embedded client,
+  /// so an unchanged set is not re-posted every cycle.
+  String? _lastArtIndex;
+
   /// For tests: pins the persisted sync-state file somewhere writable.
   @visibleForTesting
   static String? statePathOverride;
+
+  /// For tests: pins the posters directory somewhere writable.
+  @visibleForTesting
+  static Future<Directory> Function()? postersDirOverride;
 
   /// Start the periodic cycle (called once from main; runs for the whole
   /// app lifetime and no-ops while the device is not linked).
@@ -98,6 +140,9 @@ class MyWatchSync {
       if (result.watchStatesApplied > 0)
         '${result.watchStatesApplied} watch position(s) updated',
       if (result.mapsImported > 0) '${result.mapsImported} map(s) fetched',
+      if (result.detailsApplied > 0)
+        '${result.detailsApplied} detail edit(s) applied',
+      if (result.artFetched > 0) '${result.artFetched} artwork file(s) fetched',
     ];
     return parts.isEmpty ? 'Everything is in sync.' : 'Synced: ${parts.join(', ')}.';
   }
@@ -110,7 +155,7 @@ class MyWatchSync {
       if (!status.supported || !status.linked || status.state != 'ready') {
         return null;
       }
-      return await _runCycle();
+      return await _runCycle(status);
     } catch (e) {
       if (rethrowErrors) rethrow;
       debugPrint('mywatch sync cycle failed: $e');
@@ -120,7 +165,7 @@ class MyWatchSync {
     }
   }
 
-  Future<SyncCycleResult> _runCycle() async {
+  Future<SyncCycleResult> _runCycle(MyWatchStatus status) async {
     final now = DateTime.now().millisecondsSinceEpoch;
     final state = await _loadState();
     var lists = await LibraryStore.load();
@@ -168,14 +213,65 @@ class MyWatchSync {
       mapsImported: await _importMissingMaps(lists, remote, now),
     );
 
-    // 5. Publish our (possibly just-merged) state.
+    // 5. Detail edits: newest remote row per key, applied when it beats
+    // the local state (a TMDB row always loses to a user edit).
+    final winners = remoteMetaWinners(remote);
+    var detailsApplied = 0;
+    for (final w in winners) {
+      final local = await metadataRowFor(w.key);
+      if (!shouldApplyRemoteRow(
+        localExists: local != null,
+        localUserEdited: local?.userEdited ?? false,
+        localUpdatedMs: local?.fetchedAt ?? 0,
+        remoteUpdatedMs: w.updatedMs,
+      )) {
+        continue;
+      }
+      await applyRemoteUserDetails(
+        lookupKey: w.key,
+        title: w.title ?? local?.title ?? w.key,
+        year: w.year,
+        overview: w.overview,
+        episodeLabel: w.episodeLabel,
+        updatedMs: w.updatedMs,
+        remoteHasArt: w.art != null,
+        postersDirProvider: postersDirOverride,
+      );
+      detailsApplied++;
+    }
+    result = result.copyWith(detailsApplied: detailsApplied);
+
+    // 6. Artwork: the doc only carries manifests; pull missing bytes
+    // from a linked device that is online right now.
+    result = result.copyWith(
+      artFetched: await _fetchMissingArt(winners, remote, status, now),
+    );
+
+    // 7. Publish our (possibly just-merged) state.
     state.snapshot = membershipOf(lists);
-    final doc = buildDoc(
+    var metaRows = await _localMetaRows();
+    final ourWatchStates = await WatchStateStore.instance.all();
+    var doc = buildDoc(
       lists: lists,
       tombstones: state.tombstones,
-      watchStates: await WatchStateStore.instance.all(),
+      watchStates: ourWatchStates,
       nowMs: now,
+      metaRows: metaRows,
     );
+    while (jsonEncode(doc).length > maxDocBytes && metaRows.isNotEmpty) {
+      // Newest-first order, so the oldest edit drops first; it syncs
+      // again once the doc has room.
+      metaRows = metaRows.sublist(0, metaRows.length - 1);
+      debugPrint('mywatch sync: doc over budget, dropped a meta row');
+      doc = buildDoc(
+        lists: lists,
+        tombstones: state.tombstones,
+        watchStates: ourWatchStates,
+        nowMs: now,
+        metaRows: metaRows,
+      );
+    }
+    await _publishArtIndex();
     final fingerprint = jsonEncode(doc..remove('updated_ms'));
     if (fingerprint != state.lastPublished) {
       doc['updated_ms'] = now;
@@ -245,6 +341,126 @@ class MyWatchSync {
     }
   }
 
+  // ---- detail edits + artwork -------------------------------------------
+
+  /// This device's `userEdited` metadata rows as publishable meta rows,
+  /// newest edit first (the doc byte budget drops from the tail).
+  Future<List<Map<String, dynamic>>> _localMetaRows() async {
+    final db = await LibraryStore.database();
+    final rows = await (db.select(db.metadataCache)
+          ..where((t) => t.userEdited.equals(true)))
+        .get();
+    rows.sort((a, b) => b.fetchedAt.compareTo(a.fetchedAt));
+    final artByFile = <String, ({String sha256, int size})>{};
+    for (final r in rows) {
+      final poster = r.posterFile;
+      if (poster == null || !poster.startsWith('user_')) continue;
+      final info = await _posterInfo(poster);
+      if (info != null && info.size <= maxArtBytes) artByFile[poster] = info;
+    }
+    return metaRowsFrom(rows, artByFile);
+  }
+
+  /// sha256/size of a poster-dir file, cached — file names are unique
+  /// per save, so a cache hit can never be stale.
+  Future<({String sha256, int size})?> _posterInfo(String fileName) async {
+    final dir = await (postersDirOverride ?? defaultPostersDir)();
+    final path = '${dir.path}/$fileName';
+    final cached = _artInfoByPath[path];
+    if (cached != null) return cached;
+    final file = File(path);
+    if (!file.existsSync()) return null;
+    final bytes = await file.readAsBytes();
+    final info =
+        (sha256: crypto.sha256.convert(bytes).toString(), size: bytes.length);
+    _artInfoByPath[path] = info;
+    return info;
+  }
+
+  /// Hand the embedded client the current `sha256 → path` set of our
+  /// user artwork so it can answer linked peers' requests. Skipped when
+  /// unchanged since the last post.
+  Future<void> _publishArtIndex() async {
+    final dir = await (postersDirOverride ?? defaultPostersDir)();
+    final db = await LibraryStore.database();
+    final rows = await (db.select(db.metadataCache)
+          ..where((t) => t.userEdited.equals(true)))
+        .get();
+    final files = <({String sha256, String path})>[];
+    for (final r in rows) {
+      final poster = r.posterFile;
+      if (poster == null || !poster.startsWith('user_')) continue;
+      final info = await _posterInfo(poster);
+      if (info == null || info.size > maxArtBytes) continue;
+      files.add((sha256: info.sha256, path: '${dir.path}/$poster'));
+    }
+    files.sort((a, b) => a.sha256.compareTo(b.sha256));
+    final fingerprint = [for (final f in files) '${f.sha256}:${f.path}'].join();
+    if (fingerprint == _lastArtIndex) return;
+    try {
+      await _api.setArtIndex(files);
+      _lastArtIndex = fingerprint;
+    } catch (e) {
+      debugPrint('mywatch sync: art index publish failed: $e');
+    }
+  }
+
+  /// Pull every wanted-but-missing artwork file whose owner is online.
+  /// Any device whose meta row for the key names the same hash can
+  /// serve it — once a device has synced the artwork it re-serves it,
+  /// so the original editor need not stay online forever.
+  Future<int> _fetchMissingArt(
+    List<RemoteMetaRow> winners,
+    List<RemoteSyncDoc> remote,
+    MyWatchStatus status,
+    int nowMs,
+  ) async {
+    final online = {
+      for (final d in status.devices)
+        if (!d.isSelf && d.online) d.agentId,
+    };
+    if (online.isEmpty) return 0;
+    var fetched = 0;
+    for (final w in winners) {
+      final art = w.art;
+      if (art == null || art.size > maxArtBytes) continue;
+      final local = await metadataRowFor(w.key);
+      // Only rows we actually adopted want this artwork; a newer local
+      // edit wins the LWW round and keeps its own art.
+      if (local == null || !local.userEdited) continue;
+      if (local.fetchedAt > w.updatedMs) continue;
+      final current = local.posterFile;
+      if (current != null && current.startsWith('user_')) {
+        final info = await _posterInfo(current);
+        if (info != null && info.sha256 == art.sha256) continue;
+      }
+      if ((_artRetryAt[art.sha256] ?? 0) > nowMs) continue;
+      final owners = [
+        for (final d in remote)
+          if (online.contains(d.agentId))
+            for (final r in remoteMetaWinners([d]))
+              if (r.key == w.key && r.art?.sha256 == art.sha256) d.agentId,
+      ];
+      if (owners.isEmpty) continue;
+      try {
+        final path =
+            await _api.fetchArt(agentId: owners.first, sha256: art.sha256);
+        final file = File(path);
+        final bytes = await file.readAsBytes();
+        await applyRemotePoster(w.key, bytes,
+            postersDirProvider: postersDirOverride);
+        try {
+          file.deleteSync();
+        } catch (_) {}
+        fetched++;
+      } catch (e) {
+        _artRetryAt[art.sha256] = nowMs + mapRetryMs;
+        debugPrint('mywatch sync: artwork ${art.sha256} fetch failed: $e');
+      }
+    }
+    return fetched;
+  }
+
   // ---- pure merge/publish logic (unit-tested directly) ------------------
 
   /// `title(lower) → address(lower) → added_ms` for the whole library.
@@ -306,6 +522,7 @@ class MyWatchSync {
     required Map<String, Map<String, int>> tombstones,
     required List<WatchState> watchStates,
     required int nowMs,
+    List<Map<String, dynamic>> metaRows = const [],
   }) {
     var entryBudget = maxDocEntries;
     final listDocs = <Map<String, dynamic>>[];
@@ -356,7 +573,84 @@ class MyWatchSync {
             'updated_ms': s.updatedAt,
           },
       ],
+      if (metaRows.isNotEmpty) 'meta': {'v': 1, 'rows': metaRows},
     };
+  }
+
+  /// `userEdited` cache rows as sync-doc meta rows. Text fields ride
+  /// inline (descriptions capped); artwork becomes a manifest from
+  /// [artByFile] (`posterFile name → sha256/size`) — files not in the
+  /// map (missing, oversized, TMDB-owned) publish no manifest.
+  static List<Map<String, dynamic>> metaRowsFrom(
+    Iterable<MetadataCacheRow> rows,
+    Map<String, ({String sha256, int size})> artByFile,
+  ) =>
+      [
+        for (final r in rows)
+          if (r.userEdited && r.lookupKey.isNotEmpty)
+            {
+              'key': r.lookupKey,
+              'updated_ms': r.fetchedAt,
+              if (r.title != null) 'title': r.title,
+              if (r.year != null) 'year': r.year,
+              if (r.overview case final o?)
+                'overview': o.length > maxMetaOverviewChars
+                    ? o.substring(0, maxMetaOverviewChars)
+                    : o,
+              if (r.episodeLabel != null) 'episode': r.episodeLabel,
+              if (r.posterFile case final p? when artByFile.containsKey(p))
+                'art': {
+                  'sha256': artByFile[p]!.sha256,
+                  'size': artByFile[p]!.size,
+                },
+            },
+      ];
+
+  /// The newest remote meta row per lookup key across every device's
+  /// document, tagged with the publishing device.
+  static List<RemoteMetaRow> remoteMetaWinners(List<RemoteSyncDoc> remote) {
+    final best = <String, RemoteMetaRow>{};
+    for (final d in remote) {
+      final meta = d.doc['meta'];
+      final rows = meta is Map<String, dynamic> ? meta['rows'] : null;
+      for (final r in rows is List ? rows : const []) {
+        if (r is! Map<String, dynamic>) continue;
+        final key = r['key'] as String? ?? '';
+        final updatedMs = r['updated_ms'] as int? ?? 0;
+        if (key.isEmpty || updatedMs <= 0) continue;
+        final artMap = r['art'] as Map<String, dynamic>?;
+        final artSha = (artMap?['sha256'] as String? ?? '').toLowerCase();
+        final row = RemoteMetaRow(
+          agentId: d.agentId,
+          key: key,
+          updatedMs: updatedMs,
+          title: r['title'] as String?,
+          year: r['year'] as int?,
+          overview: r['overview'] as String?,
+          episodeLabel: r['episode'] as String?,
+          art: artMap == null || !RegExp(r'^[0-9a-f]{64}$').hasMatch(artSha)
+              ? null
+              : (sha256: artSha, size: artMap['size'] as int? ?? 0),
+        );
+        final cur = best[key];
+        if (cur == null || row.updatedMs > cur.updatedMs) best[key] = row;
+      }
+    }
+    return best.values.toList();
+  }
+
+  /// Last-writer-wins for one detail row: a remote user edit beats a
+  /// missing row and any TMDB match, and beats a local user edit only
+  /// when strictly newer (ties keep local, on both devices — stable).
+  static bool shouldApplyRemoteRow({
+    required bool localExists,
+    required bool localUserEdited,
+    required int localUpdatedMs,
+    required int remoteUpdatedMs,
+  }) {
+    if (!localExists) return true;
+    if (!localUserEdited) return true;
+    return remoteUpdatedMs > localUpdatedMs;
   }
 
   /// The remote document's watch states, ready for
@@ -554,24 +848,61 @@ class SyncMergeResult {
   final int entriesRemoved;
 }
 
+/// One remote device's user-edit row after the cross-device
+/// newest-wins pass, ready to compare against the local cache.
+class RemoteMetaRow {
+  const RemoteMetaRow({
+    required this.agentId,
+    required this.key,
+    required this.updatedMs,
+    this.title,
+    this.year,
+    this.overview,
+    this.episodeLabel,
+    this.art,
+  });
+
+  final String agentId;
+  final String key;
+  final int updatedMs;
+  final String? title;
+  final int? year;
+  final String? overview;
+  final String? episodeLabel;
+
+  /// Artwork manifest — the bytes travel separately, in full quality.
+  final ({String sha256, int size})? art;
+}
+
 class SyncCycleResult {
   const SyncCycleResult({
     this.entriesAdded = 0,
     this.entriesRemoved = 0,
     this.watchStatesApplied = 0,
     this.mapsImported = 0,
+    this.detailsApplied = 0,
+    this.artFetched = 0,
   });
 
   final int entriesAdded;
   final int entriesRemoved;
   final int watchStatesApplied;
   final int mapsImported;
+  final int detailsApplied;
+  final int artFetched;
 
-  SyncCycleResult copyWith({int? watchStatesApplied, int? mapsImported}) =>
+  SyncCycleResult copyWith({
+    int? watchStatesApplied,
+    int? mapsImported,
+    int? detailsApplied,
+    int? artFetched,
+  }) =>
       SyncCycleResult(
         entriesAdded: entriesAdded,
         entriesRemoved: entriesRemoved,
         watchStatesApplied: watchStatesApplied ?? this.watchStatesApplied,
         mapsImported: mapsImported ?? this.mapsImported,
+        detailsApplied: detailsApplied ?? this.detailsApplied,
+        artFetched: artFetched ?? this.artFetched,
       );
 }

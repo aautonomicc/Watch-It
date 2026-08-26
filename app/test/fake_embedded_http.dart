@@ -55,6 +55,13 @@ class FakeEmbeddedHttp extends HttpOverrides {
   /// (`[{agent_id, doc, maps}]` — see RemoteSyncDoc).
   List<Map<String, dynamic>> myWatchSyncDevices = [];
 
+  /// Raw bodies of every `POST /mywatch/art/index`.
+  final List<String> myWatchArtIndexPosts = [];
+
+  /// `POST /mywatch/art/fetch` responses: sha256 → served file path
+  /// (missing sha → 400, like an offline/refusing owner).
+  Map<String, String> myWatchArtFiles = {};
+
   /// Mnemonic that `POST /wallet/generate` hands out.
   String generatedMnemonic =
       'test test test test test test test test test test test junk';
@@ -269,6 +276,19 @@ class FakeEmbeddedHttp extends HttpOverrides {
       }
       myWatchSyncPublishes.add(utf8.decode(body));
       return (200, utf8.encode(jsonEncode({'published': true, 'maps': 0})));
+    }
+    if (method == 'POST' && path == '/mywatch/art/index') {
+      myWatchArtIndexPosts.add(utf8.decode(body));
+      return (200, utf8.encode(jsonEncode({'indexed': 0})));
+    }
+    if (method == 'POST' && path == '/mywatch/art/fetch') {
+      final json = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
+      final sha = (json['sha256'] as String? ?? '').toLowerCase();
+      final served = myWatchArtFiles[sha];
+      if (served == null) {
+        return (400, utf8.encode('the other device refused: artwork not available'));
+      }
+      return (200, utf8.encode(jsonEncode({'path': served, 'size': 0})));
     }
     if (method == 'GET' && path == '/mywatch/sync') {
       if (myWatchStatus['linked'] != true) {

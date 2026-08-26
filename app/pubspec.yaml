@@ -52,6 +52,8 @@ dependencies:
   connectivity_plus: ^7.3.1
   qr_flutter: ^4.1.0
   mobile_scanner: ^7.4.0
+  # sha256 manifests for My W@tch artwork sync
+  crypto: ^3.0.6
 
 # Vendored media_kit_video 2.0.1 with a Linux H/W-rendering fix: upstream
 # reads Flutter's EGL display via eglGetCurrentDisplay() on the platform

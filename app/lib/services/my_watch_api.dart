@@ -109,6 +109,28 @@ class MyWatchApi {
         RemoteSyncDoc.fromJson(d as Map<String, dynamic>),
     ];
   }
+
+  /// Replace the set of user-artwork files this device serves to its
+  /// linked peers (`sha256 → local file path`).
+  Future<void> setArtIndex(List<({String sha256, String path})> files) =>
+      _request('POST', '/mywatch/art/index', body: {
+        'files': [
+          for (final f in files) {'sha256': f.sha256, 'path': f.path},
+        ],
+      });
+
+  /// Pull one artwork file from the linked device [agentId] (which must
+  /// be online) and return the local path of the verified copy.
+  Future<String> fetchArt({
+    required String agentId,
+    required String sha256,
+  }) async {
+    final json = await _request('POST', '/mywatch/art/fetch',
+        body: {'agent_id': agentId, 'sha256': sha256});
+    final path = json['path'] as String? ?? '';
+    if (path.isEmpty) throw MyWatchApiException('artwork fetch returned no file');
+    return path;
+  }
 }
 
 /// One remote device's published sync state: its document plus the
