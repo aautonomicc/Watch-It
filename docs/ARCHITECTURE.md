@@ -236,6 +236,20 @@ LAN plus public bootstrap for remote devices), implemented in
   messages, hash-verified) — full quality, byte-identical, never
   downscaled. Any device that completes the pull re-serves the file, so
   the original editor doesn't have to stay online forever.
+- **TMDB metadata for keyless devices (post-alpha.62)**: full TMDB
+  matches (titles, descriptions, ratings, categories, episode stills,
+  show/season texts) and their poster files sync between linked devices
+  too, so a device *without* a TMDB API key gets the complete
+  experience from one that has a key. Each doc publishes a compact
+  `have` list (8-hex hashes of the library keys whose metadata and
+  artwork the device already holds); a device publishes its TMDB rows
+  — with per-show/per-season texts deduplicated and a sha256 file
+  manifest — only for keys some linked device still reports missing,
+  so the section drains to nothing at steady state. Receivers fill
+  only missing rows and cached misses (a user edit or an own TMDB
+  match always wins) and pull the artwork bytes over the same x0x
+  transfer, saved under the original TMDB file names — a synced
+  device re-serves both rows and files to devices joining later.
 - **Presence & status**: 60 s heartbeats drive the My W@tch screen's
   per-device online dots, last-heard times, and the persisted "Last sync"
   stamp. Server routes (`GET/DELETE /mywatch`, `POST /mywatch/link|join|

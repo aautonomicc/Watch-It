@@ -47,13 +47,18 @@ class MyWatchApi {
         'DELETE' => await client.delete(uri, headers: _headers),
         _ => throw ArgumentError(method),
       };
+      // Decode as UTF-8 explicitly: the server sends application/json
+      // without a charset parameter, which package:http decodes as
+      // latin1 — mojibake for any non-ASCII synced text ("Amélie",
+      // "S01E02 · Pilot").
+      final text = utf8.decode(res.bodyBytes);
       if (res.statusCode != 200) {
-        throw MyWatchApiException(res.body.trim().isEmpty
+        throw MyWatchApiException(text.trim().isEmpty
             ? 'request failed (${res.statusCode})'
-            : res.body.trim());
+            : text.trim());
       }
-      if (res.body.isEmpty) return const {};
-      return jsonDecode(res.body) as Map<String, dynamic>;
+      if (text.isEmpty) return const {};
+      return jsonDecode(text) as Map<String, dynamic>;
     } on MyWatchApiException {
       rethrow;
     } catch (e) {

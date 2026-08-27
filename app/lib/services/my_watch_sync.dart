@@ -11,6 +11,8 @@ import '../models/media_list.dart';
 import 'datamap_import.dart';
 import 'embedded_client.dart';
 import 'library_store.dart';
+import 'metadata.dart';
+import 'metadata_service.dart';
 import 'my_watch_api.dart';
 import 'user_metadata.dart';
 import 'watch_state.dart';
@@ -43,6 +45,18 @@ import 'watch_state.dart';
 /// and stores it under the normal `user_` poster naming — full quality,
 /// byte-identical. Rows merge last-writer-wins by their edit time (the
 /// remote stamp is adopted on apply, so comparisons converge).
+///
+/// TMDB metadata syncs the same way, so a KEYLESS device gets the full
+/// experience (posters, descriptions, ratings, episode stills) from a
+/// linked device that has a TMDB key. Each doc carries a compact `have`
+/// list (hashes of the library keys whose metadata + artwork this
+/// device already holds); a device publishes a `tmdb` section — full
+/// cache rows plus per-show/per-season shared texts and a file
+/// manifest — only for keys some linked device still lacks, so the
+/// section drains to nothing once everyone has everything. Receivers
+/// fill only missing rows and cached misses (a user edit or an own
+/// TMDB match always wins) and pull the artwork bytes over the same
+/// x0x transfer, saved under the original TMDB file names.
 ///
 /// The service is quiet unless the device is linked; every cycle checks.
 class MyWatchSync {
@@ -101,9 +115,11 @@ class MyWatchSync {
 
   final Map<String, int> _mapRetryAt = {};
 
-  /// Failed artwork fetches (owner went offline mid-transfer, …) retry
-  /// with the same backoff as maps.
+  /// Failed artwork fetches retry with a PROGRESSIVE backoff — see
+  /// [artRetryDelayMs]. Keyed by manifest sha256; the counter clears on
+  /// success.
   final Map<String, int> _artRetryAt = {};
+  final Map<String, int> _artFailures = {};
 
   /// sha256/size per poster file path — poster files are never edited
   /// in place (every save gets a fresh name), so entries never go
@@ -156,6 +172,8 @@ class MyWatchSync {
       if (result.mapsImported > 0) '${result.mapsImported} map(s) fetched',
       if (result.detailsApplied > 0)
         '${result.detailsApplied} detail edit(s) applied',
+      if (result.tmdbApplied > 0)
+        '${result.tmdbApplied} title detail(s) synced',
       if (result.artFetched > 0) '${result.artFetched} artwork file(s) fetched',
     ];
     return parts.isEmpty ? 'Everything is in sync.' : 'Synced: ${parts.join(', ')}.';
@@ -340,20 +358,63 @@ class MyWatchSync {
     }
     result = result.copyWith(detailsApplied: detailsApplied);
 
+    // 5b. TMDB rows other devices published for keys we lack: the
+    // keyless half of full metadata sync. Only missing rows and cached
+    // misses are filled — a user edit, an own TMDB match, or a bundled
+    // seed row always wins, so this can never overwrite anything.
+    var tmdbApplied = 0;
+    for (final w in remoteTmdbWinners(remote)) {
+      try {
+        final local = await metadataRowFor(w.key);
+        if (local != null && local.found) continue;
+        await applyRemoteTmdbDetails(
+          lookupKey: w.key,
+          updatedMs: w.updatedMs,
+          title: w.title,
+          year: w.year,
+          overview: w.overview,
+          category: w.category,
+          episodeLabel: w.episodeLabel,
+          mediaType: w.mediaType,
+          tmdbId: w.tmdbId,
+          rating: w.rating,
+          airDate: w.airDate,
+          showOverview: w.showOverview,
+          seasonOverview: w.seasonOverview,
+          posterFile: w.posterFile,
+          stillFile: w.stillFile,
+          showPosterFile: w.showPosterFile,
+        );
+        tmdbApplied++;
+      } catch (e) {
+        _problems.add('Syncing details for "${w.title ?? w.key}" failed: $e');
+      }
+    }
+    result = result.copyWith(tmdbApplied: tmdbApplied);
+
     // 6. Artwork: the doc only carries manifests; pull missing bytes
-    // from a linked device.
+    // from a linked device — user posters under fresh `user_` names,
+    // TMDB files under their original shared names.
+    var artFetched = 0;
     try {
-      result = result.copyWith(
-        artFetched: await _fetchMissingArt(winners, remote, status, now),
-      );
+      artFetched += await _fetchMissingArt(winners, remote, status, now);
     } catch (e) {
       _problems.add('Fetching artwork failed: $e');
     }
+    try {
+      artFetched += await _fetchMissingTmdbArt(remote, status, now);
+    } catch (e) {
+      _problems.add('Fetching artwork failed: $e');
+    }
+    result = result.copyWith(artFetched: artFetched);
 
     // 7. Publish our (possibly just-merged) state.
     _setActivity("Publishing this device's library…");
     state.snapshot = membershipOf(lists);
     final metaRows = await _localMetaRows();
+    final libKeys = libraryLookupKeys(lists);
+    final haveHashes = await _localHaveHashes(libKeys);
+    final tmdbSection = await _localTmdbSection(libKeys, remote);
     // Newest-first from the store, so a budget trim drops the stalest.
     final ourWatchStates = await WatchStateStore.instance.all();
     final built = buildDocWithinBudget(
@@ -362,11 +423,19 @@ class MyWatchSync {
       watchStates: ourWatchStates,
       nowMs: now,
       metaRows: metaRows,
+      haveHashes: haveHashes,
+      tmdbSection: tmdbSection,
     );
     final doc = built.doc;
     if (built.metaDropped > 0) {
       _problems.add('${built.metaDropped} detail edit(s) did not fit in the '
           'sync document this cycle');
+    }
+    if (built.tmdbDropped > 0) {
+      // Self-healing: applied rows join the receivers' `have` lists,
+      // which shrinks the section until the dropped tail fits.
+      debugPrint('mywatch sync: ${built.tmdbDropped} TMDB rows over the doc '
+          'budget wait for a later cycle');
     }
     await _publishArtIndex();
     final fingerprint = jsonEncode(doc..remove('updated_ms'));
@@ -478,22 +547,25 @@ class MyWatchSync {
     return info;
   }
 
-  /// Hand the embedded client the current `sha256 → path` set of our
-  /// user artwork so it can answer linked peers' requests. Skipped when
-  /// unchanged since the last post.
+  /// Hand the embedded client the current `sha256 → path` set of every
+  /// artwork file our metadata rows reference — user posters and TMDB
+  /// files alike — so it can answer linked peers' requests. Skipped
+  /// when unchanged since the last post.
   Future<void> _publishArtIndex() async {
     final dir = await (postersDirOverride ?? defaultPostersDir)();
     final db = await LibraryStore.database();
     final rows = await (db.select(db.metadataCache)
-          ..where((t) => t.userEdited.equals(true)))
+          ..where((t) => t.found.equals(true)))
         .get();
     final files = <({String sha256, String path})>[];
+    final seen = <String>{};
     for (final r in rows) {
-      final poster = r.posterFile;
-      if (poster == null || !poster.startsWith('user_')) continue;
-      final info = await _posterInfo(poster);
-      if (info == null || info.size > maxArtBytes) continue;
-      files.add((sha256: info.sha256, path: '${dir.path}/$poster'));
+      for (final name in [r.posterFile, r.stillFile, r.showPosterFile]) {
+        if (name == null || !seen.add(name)) continue;
+        final info = await _posterInfo(name);
+        if (info == null || info.size > maxArtBytes) continue;
+        files.add((sha256: info.sha256, path: '${dir.path}/$name'));
+      }
     }
     files.sort((a, b) => a.sha256.compareTo(b.sha256));
     final fingerprint = [for (final f in files) '${f.sha256}:${f.path}'].join();
@@ -562,6 +634,7 @@ class MyWatchSync {
             file.deleteSync();
           } catch (_) {}
           fetched++;
+          _artFailures.remove(art.sha256);
           failure = null;
           break;
         } catch (e) {
@@ -569,13 +642,205 @@ class MyWatchSync {
         }
       }
       if (failure != null) {
-        _artRetryAt[art.sha256] = nowMs + mapRetryMs;
+        _artFetchFailed(art.sha256, nowMs);
         _problems.add(
             'Artwork for "${w.title ?? w.key}" could not be fetched: $failure');
         debugPrint('mywatch sync: artwork ${art.sha256} fetch failed: $failure');
       }
     }
     return fetched;
+  }
+
+  // ---- TMDB metadata for keyless devices --------------------------------
+
+  /// The compact `have` list for our published doc: hashes of every
+  /// library lookup key whose metadata this device holds in full — a
+  /// found row with every referenced artwork file on disk, or any user
+  /// edit (its artwork travels via the meta-row manifest instead).
+  /// Linked devices publish TMDB rows only for keys absent from this
+  /// list; a row applied without its art keeps its key OFF the list, so
+  /// the file manifests stay published until the bytes finally land.
+  Future<List<String>> _localHaveHashes(Set<String> libKeys) async {
+    if (libKeys.isEmpty) return const [];
+    final db = await LibraryStore.database();
+    final rows = await (db.select(db.metadataCache)
+          ..where((t) => t.found.equals(true)))
+        .get();
+    final dir = await (postersDirOverride ?? defaultPostersDir)();
+    final out = <String>[];
+    for (final r in rows) {
+      if (!libKeys.contains(r.lookupKey)) continue;
+      if (!r.userEdited) {
+        var complete = true;
+        for (final name in [r.posterFile, r.stillFile, r.showPosterFile]) {
+          if (name != null && !File('${dir.path}/$name').existsSync()) {
+            complete = false;
+          }
+        }
+        if (!complete) continue;
+      }
+      out.add(metaKeyHash(r.lookupKey));
+    }
+    return out..sort();
+  }
+
+  /// The `tmdb` doc section: full TMDB cache rows for the library keys
+  /// some linked device reports missing (via its `have` list), newest
+  /// match first, with per-show/per-season shared texts published once
+  /// and a `sha256/size` manifest for every referenced artwork file.
+  /// Null when nobody needs anything — the steady state. Devices whose
+  /// docs carry no `have` list (older app versions) are skipped: they
+  /// could not apply the rows anyway.
+  Future<Map<String, dynamic>?> _localTmdbSection(
+    Set<String> libKeys,
+    List<RemoteSyncDoc> remote,
+  ) async {
+    final needed = <String>{};
+    for (final d in remote) {
+      final have = d.doc['have'];
+      if (have is! List) continue;
+      final haveSet = have.whereType<String>().toSet();
+      for (final k in libKeys) {
+        if (!haveSet.contains(metaKeyHash(k))) needed.add(k);
+      }
+    }
+    if (needed.isEmpty) return null;
+    final db = await LibraryStore.database();
+    final all = await (db.select(db.metadataCache)
+          ..where((t) => t.found.equals(true)))
+        .get();
+    final rows = [
+      for (final r in all)
+        if (!r.userEdited && needed.contains(r.lookupKey)) r,
+    ]..sort((a, b) => b.fetchedAt.compareTo(a.fetchedAt));
+    if (rows.isEmpty) return null;
+
+    final out = <Map<String, dynamic>>[];
+    final shows = <String, dynamic>{};
+    final seasons = <String, dynamic>{};
+    final files = <String, dynamic>{};
+    String? cap(String? s) => s == null || s.length <= maxMetaOverviewChars
+        ? s
+        : s.substring(0, maxMetaOverviewChars);
+    Future<void> addFile(String? name) async {
+      if (name == null || name.startsWith('user_')) return;
+      if (files.containsKey(name)) return;
+      final info = await _posterInfo(name);
+      if (info == null || info.size > maxArtBytes) return;
+      files[name] = {'sha256': info.sha256, 'size': info.size};
+    }
+
+    for (final r in rows) {
+      out.add({
+        'key': r.lookupKey,
+        'updated_ms': r.fetchedAt,
+        if (r.title != null) 'title': r.title,
+        if (r.year != null) 'year': r.year,
+        if (r.overview case final o?) 'overview': cap(o),
+        if (r.category != null) 'category': r.category,
+        if (r.episodeLabel != null) 'episode': r.episodeLabel,
+        if (r.mediaType != null) 'type': r.mediaType,
+        if (r.tmdbId != null) 'tmdb_id': r.tmdbId,
+        if (r.rating != null) 'rating': r.rating,
+        if (r.airDate != null) 'air_date': r.airDate,
+        if (r.posterFile != null) 'poster': r.posterFile,
+        if (r.stillFile != null) 'still': r.stillFile,
+      });
+      await addFile(r.posterFile);
+      await addFile(r.stillFile);
+      final ep = episodeKeyPattern.firstMatch(r.lookupKey);
+      if (ep == null) continue;
+      final showKey = ep.group(1)!;
+      final seasonKey = '$showKey:s${ep.group(2)}';
+      if (!shows.containsKey(showKey) &&
+          (r.showOverview != null || r.showPosterFile != null)) {
+        shows[showKey] = {
+          if (r.showOverview case final o?) 'overview': cap(o),
+          if (r.showPosterFile != null) 'poster': r.showPosterFile,
+        };
+        await addFile(r.showPosterFile);
+      }
+      if (!seasons.containsKey(seasonKey) && r.seasonOverview != null) {
+        seasons[seasonKey] = {'overview': cap(r.seasonOverview)};
+      }
+    }
+    return {
+      'v': 1,
+      'rows': out,
+      if (shows.isNotEmpty) 'shows': shows,
+      if (seasons.isNotEmpty) 'seasons': seasons,
+      if (files.isNotEmpty) 'files': files,
+    };
+  }
+
+  /// Pull every TMDB artwork file that remote `tmdb` sections manifest,
+  /// a local metadata row references, and the posters dir lacks. Saved
+  /// under the original TMDB name — episodes of one season share their
+  /// season poster through it — with the same online-first owner
+  /// ordering and retry backoff as the user-artwork pull.
+  Future<int> _fetchMissingTmdbArt(
+    List<RemoteSyncDoc> remote,
+    MyWatchStatus status,
+    int nowMs,
+  ) async {
+    final manifest = remoteTmdbFiles(remote);
+    if (manifest.isEmpty) return 0;
+    final wanted = await _referencedArtFiles();
+    final online = {
+      for (final d in status.devices)
+        if (!d.isSelf && d.online) d.agentId,
+    };
+    final dir = await (postersDirOverride ?? defaultPostersDir)();
+    var fetched = 0;
+    for (final f in manifest.values) {
+      if (!wanted.contains(f.name) || f.size > maxArtBytes) continue;
+      final target = File('${dir.path}/${f.name}');
+      if (target.existsSync()) continue;
+      if ((_artRetryAt[f.sha256] ?? 0) > nowMs) continue;
+      _setActivity('Fetching artwork…');
+      final owners = [...f.owners]..sort((a, b) =>
+          (online.contains(b) ? 1 : 0) - (online.contains(a) ? 1 : 0));
+      Object? failure;
+      for (final owner in owners.take(2)) {
+        try {
+          final path = await _api.fetchArt(agentId: owner, sha256: f.sha256);
+          final file = File(path);
+          final bytes = await file.readAsBytes();
+          dir.createSync(recursive: true);
+          target.writeAsBytesSync(bytes, flush: true);
+          try {
+            file.deleteSync();
+          } catch (_) {}
+          fetched++;
+          _artFailures.remove(f.sha256);
+          failure = null;
+          break;
+        } catch (e) {
+          failure = e;
+        }
+      }
+      if (failure != null) {
+        _artFetchFailed(f.sha256, nowMs);
+        _problems.add('Artwork "${f.name}" could not be fetched: $failure');
+        debugPrint('mywatch sync: artwork ${f.sha256} fetch failed: $failure');
+      }
+    }
+    if (fetched > 0) MetadataService.instance.notifyExternalSeed();
+    return fetched;
+  }
+
+  /// TMDB-named artwork files any found cache row references — the set
+  /// worth pulling (user `user_` files ride the meta-row flow instead).
+  Future<Set<String>> _referencedArtFiles() async {
+    final db = await LibraryStore.database();
+    final rows = await (db.select(db.metadataCache)
+          ..where((t) => t.found.equals(true)))
+        .get();
+    return {
+      for (final r in rows)
+        for (final name in [r.posterFile, r.stillFile, r.showPosterFile])
+          if (name != null && !name.startsWith('user_')) name,
+    };
   }
 
   // ---- pure merge/publish logic (unit-tested directly) ------------------
@@ -591,6 +856,189 @@ class MyWatchSync {
                   (e.addedAt == null || e.addedAt == 0) ? 1 : e.addedAt!,
           },
       };
+
+  /// Splits an episode lookup key (`tv:title:year:sN:eM`) into its show
+  /// key (group 1) and season number (group 2).
+  static final episodeKeyPattern = RegExp(r'^(.+):s(\d+):e\d+$');
+
+  /// The lookup keys the library's entries resolve under — the keys
+  /// whose metadata is worth syncing.
+  static Set<String> libraryLookupKeys(List<MediaList> lists) => {
+        for (final l in lists)
+          for (final e in l.entries) parseMediaName(e.name).lookupKey,
+      };
+
+  /// Backoff before retrying a failed artwork fetch: 1 min after the
+  /// first failure, doubling to the [mapRetryMs] cap. The first fetch
+  /// right after a link comes up routinely fails with "agent not
+  /// found" (x0x key material still exchanging) — a flat 10-minute
+  /// wait there made first-link artwork look broken.
+  static int artRetryDelayMs(int failures) {
+    final delay = 60000 * (1 << (failures - 1).clamp(0, 10));
+    return delay > mapRetryMs ? mapRetryMs : delay;
+  }
+
+  /// Record an artwork fetch failure and stamp the next-allowed retry.
+  void _artFetchFailed(String sha256, int nowMs) {
+    final n = (_artFailures[sha256] ?? 0) + 1;
+    _artFailures[sha256] = n;
+    _artRetryAt[sha256] = nowMs + artRetryDelayMs(n);
+  }
+
+  /// 8-hex FNV-1a of a lookup key — the compact element of the doc's
+  /// `have` list (full keys would cost ~4× the bytes; a 32-bit clash
+  /// merely leaves one title's metadata unpublished).
+  static String metaKeyHash(String key) {
+    var h = 0x811c9dc5;
+    for (final c in key.codeUnits) {
+      h = ((h ^ c) * 0x01000193) & 0xFFFFFFFF;
+    }
+    return h.toRadixString(16).padLeft(8, '0');
+  }
+
+  /// Only plain file names may be written into the posters dir on a
+  /// linked device's say-so — no separators, nothing dot-led.
+  static bool safeArtFileName(String name) =>
+      RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,150}$').hasMatch(name) &&
+      !name.contains('..');
+
+  /// The newest remote TMDB row per lookup key across every device's
+  /// `tmdb` section, with the show/season shared texts resolved back
+  /// onto each row and unsafe artwork file names dropped.
+  static List<RemoteTmdbRow> remoteTmdbWinners(List<RemoteSyncDoc> remote) {
+    final best = <String, RemoteTmdbRow>{};
+    for (final d in remote) {
+      final tmdb = d.doc['tmdb'];
+      if (tmdb is! Map<String, dynamic>) continue;
+      final shows = tmdb['shows'] is Map<String, dynamic>
+          ? tmdb['shows'] as Map<String, dynamic>
+          : const <String, dynamic>{};
+      final seasons = tmdb['seasons'] is Map<String, dynamic>
+          ? tmdb['seasons'] as Map<String, dynamic>
+          : const <String, dynamic>{};
+      String? file(dynamic v) => v is String && safeArtFileName(v) ? v : null;
+      for (final r in tmdb['rows'] is List ? tmdb['rows'] as List : const []) {
+        if (r is! Map<String, dynamic>) continue;
+        final key = r['key'] as String? ?? '';
+        final updatedMs = r['updated_ms'] as int? ?? 0;
+        if (key.isEmpty || updatedMs <= 0) continue;
+        Map<String, dynamic>? show;
+        Map<String, dynamic>? season;
+        final ep = episodeKeyPattern.firstMatch(key);
+        if (ep != null) {
+          final showKey = ep.group(1)!;
+          show = shows[showKey] is Map<String, dynamic>
+              ? shows[showKey] as Map<String, dynamic>
+              : null;
+          final s = seasons['$showKey:s${ep.group(2)}'];
+          season = s is Map<String, dynamic> ? s : null;
+        }
+        final row = RemoteTmdbRow(
+          agentId: d.agentId,
+          key: key,
+          updatedMs: updatedMs,
+          title: r['title'] as String?,
+          year: r['year'] as int?,
+          overview: r['overview'] as String?,
+          category: r['category'] as String?,
+          episodeLabel: r['episode'] as String?,
+          mediaType: r['type'] as String?,
+          tmdbId: r['tmdb_id'] as int?,
+          rating: (r['rating'] as num?)?.toDouble(),
+          airDate: r['air_date'] as String?,
+          posterFile: file(r['poster']),
+          stillFile: file(r['still']),
+          showOverview: show?['overview'] as String?,
+          seasonOverview: season?['overview'] as String?,
+          showPosterFile: file(show?['poster']),
+        );
+        final cur = best[key];
+        if (cur == null || row.updatedMs > cur.updatedMs) best[key] = row;
+      }
+    }
+    return best.values.toList();
+  }
+
+  /// Every artwork file the remote `tmdb` sections manifest, with the
+  /// devices that can serve it. The first-seen manifest pins a file's
+  /// hash; a device naming the same file with different bytes is not a
+  /// valid owner of this one.
+  static Map<String, RemoteArtFile> remoteTmdbFiles(
+      List<RemoteSyncDoc> remote) {
+    final out = <String, RemoteArtFile>{};
+    for (final d in remote) {
+      final tmdb = d.doc['tmdb'];
+      if (tmdb is! Map<String, dynamic>) continue;
+      final files = tmdb['files'];
+      if (files is! Map<String, dynamic>) continue;
+      for (final e in files.entries) {
+        final m = e.value;
+        if (!safeArtFileName(e.key) || m is! Map<String, dynamic>) continue;
+        final sha = (m['sha256'] as String? ?? '').toLowerCase();
+        if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(sha)) continue;
+        final cur = out[e.key];
+        if (cur == null) {
+          out[e.key] = RemoteArtFile(
+            name: e.key,
+            sha256: sha,
+            size: m['size'] as int? ?? 0,
+            owners: [d.agentId],
+          );
+        } else if (cur.sha256 == sha) {
+          cur.owners.add(d.agentId);
+        }
+      }
+    }
+    return out;
+  }
+
+  /// [tmdb] with the oldest quarter of its rows dropped and the shared
+  /// shows/seasons texts and file manifests pruned to what the kept
+  /// rows still reference; null once nothing is left. The budget loop's
+  /// trim step — dropped rows return in a later cycle, once applied
+  /// rows have joined the receivers' `have` lists and shrunk the
+  /// section.
+  static Map<String, dynamic>? shrunkenTmdbSection(Map<String, dynamic> tmdb) {
+    final rows = (tmdb['rows'] as List? ?? const []).cast<Map<String, dynamic>>();
+    final keep =
+        rows.length - (rows.length / 4).ceil().clamp(1, rows.length);
+    if (keep <= 0) return null;
+    final kept = rows.sublist(0, keep);
+    final srcShows = tmdb['shows'] as Map<String, dynamic>? ?? const {};
+    final srcSeasons = tmdb['seasons'] as Map<String, dynamic>? ?? const {};
+    final srcFiles = tmdb['files'] as Map<String, dynamic>? ?? const {};
+    final shows = <String, dynamic>{};
+    final seasons = <String, dynamic>{};
+    final files = <String, dynamic>{};
+    void keepFile(dynamic name) {
+      if (name is String && srcFiles.containsKey(name)) {
+        files[name] = srcFiles[name];
+      }
+    }
+
+    for (final r in kept) {
+      keepFile(r['poster']);
+      keepFile(r['still']);
+      final ep = episodeKeyPattern.firstMatch(r['key'] as String? ?? '');
+      if (ep == null) continue;
+      final showKey = ep.group(1)!;
+      final seasonKey = '$showKey:s${ep.group(2)}';
+      if (srcShows[showKey] case final Map<String, dynamic> show) {
+        shows[showKey] = show;
+        keepFile(show['poster']);
+      }
+      if (srcSeasons.containsKey(seasonKey)) {
+        seasons[seasonKey] = srcSeasons[seasonKey];
+      }
+    }
+    return {
+      'v': 1,
+      'rows': kept,
+      if (shows.isNotEmpty) 'shows': shows,
+      if (seasons.isNotEmpty) 'seasons': seasons,
+      if (files.isNotEmpty) 'files': files,
+    };
+  }
 
   /// Roll the tombstone set forward: whatever [previous] held that
   /// [current] no longer does was deleted here since the last cycle
@@ -640,6 +1088,8 @@ class MyWatchSync {
     required List<WatchState> watchStates,
     required int nowMs,
     List<Map<String, dynamic>> metaRows = const [],
+    List<String> haveHashes = const [],
+    Map<String, dynamic>? tmdbSection,
   }) {
     var entryBudget = maxDocEntries;
     final listDocs = <Map<String, dynamic>>[];
@@ -680,6 +1130,9 @@ class MyWatchSync {
       'v': 1,
       'updated_ms': nowMs,
       'lists': listDocs,
+      // Always published, even empty: its presence tells linked devices
+      // this build understands TMDB metadata sync at all.
+      'have': haveHashes,
       'watch': [
         for (final s in watchStates.take(maxDocWatchStates))
           {
@@ -691,57 +1144,68 @@ class MyWatchSync {
           },
       ],
       if (metaRows.isNotEmpty) 'meta': {'v': 1, 'rows': metaRows},
+      'tmdb': ?tmdbSection,
     };
   }
 
   /// [buildDoc] kept under [maxDocBytes]: when the doc is over budget,
   /// watch states drop first (stalest-played last quarter per round — a
   /// stale resume point is the cheapest loss and returns once the doc
-  /// has room), and the user's detail edits drop only when no watch
-  /// state is left. Before this reprioritisation a long viewing history
-  /// (300 states ≈ 45 KB alone) could permanently crowd every detail
-  /// edit out of the doc while list entries kept syncing fine — the
-  /// "publishes sync, edits don't" failure. [watchStates] must arrive
-  /// newest-first (the store's order).
-  static ({Map<String, dynamic> doc, int watchDropped, int metaDropped})
-      buildDocWithinBudget({
+  /// has room), then the TMDB section shrinks (it self-heals: applied
+  /// rows join the receivers' `have` lists and stop being needed), and
+  /// the user's detail edits drop only when nothing else is left.
+  /// Before this reprioritisation a long viewing history (300 states ≈
+  /// 45 KB alone) could permanently crowd every detail edit out of the
+  /// doc while list entries kept syncing fine — the "publishes sync,
+  /// edits don't" failure. [watchStates] must arrive newest-first (the
+  /// store's order).
+  static ({
+    Map<String, dynamic> doc,
+    int watchDropped,
+    int metaDropped,
+    int tmdbDropped,
+  }) buildDocWithinBudget({
     required List<MediaList> lists,
     required Map<String, Map<String, int>> tombstones,
     required List<WatchState> watchStates,
     required int nowMs,
     List<Map<String, dynamic>> metaRows = const [],
+    List<String> haveHashes = const [],
+    Map<String, dynamic>? tmdbSection,
   }) {
+    final tmdbRows = (tmdbSection?['rows'] as List?)?.length ?? 0;
     var watch = watchStates;
     var meta = metaRows;
-    var doc = buildDoc(
-      lists: lists,
-      tombstones: tombstones,
-      watchStates: watch,
-      nowMs: nowMs,
-      metaRows: meta,
-    );
+    var tmdb = tmdbSection;
+    Map<String, dynamic> build() => buildDoc(
+          lists: lists,
+          tombstones: tombstones,
+          watchStates: watch,
+          nowMs: nowMs,
+          metaRows: meta,
+          haveHashes: haveHashes,
+          tmdbSection: tmdb,
+        );
+    var doc = build();
     while (jsonEncode(doc).length > maxDocBytes) {
       if (watch.isNotEmpty) {
         watch = watch.sublist(
             0, watch.length - (watch.length / 4).ceil().clamp(1, watch.length));
+      } else if (tmdb != null) {
+        tmdb = shrunkenTmdbSection(tmdb);
       } else if (meta.isNotEmpty) {
         // Newest-first order, so the oldest edit drops first.
         meta = meta.sublist(0, meta.length - 1);
       } else {
         break;
       }
-      doc = buildDoc(
-        lists: lists,
-        tombstones: tombstones,
-        watchStates: watch,
-        nowMs: nowMs,
-        metaRows: meta,
-      );
+      doc = build();
     }
     return (
       doc: doc,
       watchDropped: watchStates.length - watch.length,
       metaDropped: metaRows.length - meta.length,
+      tmdbDropped: tmdbRows - ((tmdb?['rows'] as List?)?.length ?? 0),
     );
   }
 
@@ -1042,6 +1506,69 @@ class RemoteMetaRow {
   final ({String sha256, int size})? art;
 }
 
+/// One remote device's TMDB metadata row after the cross-device
+/// newest-wins pass, show/season shared texts already resolved — ready
+/// to fill a gap in the local cache.
+class RemoteTmdbRow {
+  const RemoteTmdbRow({
+    required this.agentId,
+    required this.key,
+    required this.updatedMs,
+    this.title,
+    this.year,
+    this.overview,
+    this.category,
+    this.episodeLabel,
+    this.mediaType,
+    this.tmdbId,
+    this.rating,
+    this.airDate,
+    this.posterFile,
+    this.stillFile,
+    this.showOverview,
+    this.seasonOverview,
+    this.showPosterFile,
+  });
+
+  final String agentId;
+  final String key;
+  final int updatedMs;
+  final String? title;
+  final int? year;
+  final String? overview;
+  final String? category;
+  final String? episodeLabel;
+  final String? mediaType;
+  final int? tmdbId;
+  final double? rating;
+  final String? airDate;
+
+  /// TMDB file names in the posters dir (for episode rows [posterFile]
+  /// is the season-art slot, exactly as the origin device stored it);
+  /// the bytes ride the artwork transfer, keyed by the doc's manifest.
+  final String? posterFile;
+  final String? stillFile;
+  final String? showPosterFile;
+  final String? showOverview;
+  final String? seasonOverview;
+}
+
+/// One artwork file some linked device can serve: its manifest plus the
+/// devices whose docs published it.
+class RemoteArtFile {
+  RemoteArtFile({
+    required this.name,
+    required this.sha256,
+    required this.size,
+    required this.owners,
+  });
+
+  final String name;
+  final String sha256;
+  final int size;
+  final List<String> owners;
+}
+
 /// Snapshot of the background sync for indicator UIs (the My W@tch
 /// screen's activity card, the home status bar segment). Published on
 /// [MyWatchSync.status] at every cycle boundary and stage change.
@@ -1091,6 +1618,7 @@ class SyncCycleResult {
     this.watchStatesApplied = 0,
     this.mapsImported = 0,
     this.detailsApplied = 0,
+    this.tmdbApplied = 0,
     this.artFetched = 0,
   });
 
@@ -1099,12 +1627,14 @@ class SyncCycleResult {
   final int watchStatesApplied;
   final int mapsImported;
   final int detailsApplied;
+  final int tmdbApplied;
   final int artFetched;
 
   SyncCycleResult copyWith({
     int? watchStatesApplied,
     int? mapsImported,
     int? detailsApplied,
+    int? tmdbApplied,
     int? artFetched,
   }) =>
       SyncCycleResult(
@@ -1113,6 +1643,7 @@ class SyncCycleResult {
         watchStatesApplied: watchStatesApplied ?? this.watchStatesApplied,
         mapsImported: mapsImported ?? this.mapsImported,
         detailsApplied: detailsApplied ?? this.detailsApplied,
+        tmdbApplied: tmdbApplied ?? this.tmdbApplied,
         artFetched: artFetched ?? this.artFetched,
       );
 }

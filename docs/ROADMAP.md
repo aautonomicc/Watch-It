@@ -483,6 +483,11 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       carries a sha256 manifest and the bytes are pulled directly from
       any online linked device that has them, hash-verified, never
       downscaled; a device that synced a poster re-serves it
+- [x] TMDB metadata + posters for keyless devices (post-alpha.62):
+      full TMDB matches (descriptions, ratings, stills, show/season
+      texts) and their poster files sync to linked devices without a
+      TMDB key, need-driven via a compact per-doc `have` list so the
+      traffic drains to nothing once every device has everything
 - [ ] My W@tch on iOS (stubbed out today)
 - [ ] Sync while apart: devices must currently be online together —
       no relay/mailbox in the middle (by design, for now)
