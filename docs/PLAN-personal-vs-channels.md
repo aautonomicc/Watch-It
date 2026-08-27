@@ -52,7 +52,9 @@ Pointer/Scratchpad/Register; chunks + datamaps are all we get)
 - **Channel identity**: an Ed25519 keypair generated at "Create channel".
   Channel code `wchn1-<base32(pubkey)>` (distinct prefix from `wtch1-`
   invites on purpose — visually different kind of thing). Secret key in the
-  OS keychain beside the wallet key.
+  OS keychain beside the wallet key. Derived from its own 12-word phrase —
+  see "Channel master key backup" below; backup is part of creation, not
+  an afterthought.
 - **Channel manifest**: a `.watch-list`-style zip (bundle spec v2 reused:
   `datamaps/`, `list.txt`, `metadata.json`, `posters/`) plus
   `channel.json` — name, description, pubkey, sequence number, previous
@@ -83,6 +85,74 @@ Pointer/Scratchpad/Register; chunks + datamaps are all we get)
 - **Update cost**: each channel update = one manifest upload (small; ANT
   from the existing wallet). Deletion is impossible — removing an entry
   from the manifest only stops *new* subscribers seeing it.
+
+### Channel master key backup — REQUIRED, part of channel creation
+
+Losing the channel secret key is worse than losing the wallet key:
+
+- The channel code **is** the pubkey. No secret key → no signed head → the
+  channel is **frozen forever** at its last manifest. There is no recovery,
+  no re-issue: a replacement channel is a new code every subscriber must
+  manually re-add.
+- A **leaked** key is worse still: anyone holding it publishes as you,
+  publicly and irrevocably, and there is no revocation mechanism.
+
+Plan (reuses the shipped wallet machinery wholesale):
+
+1. **The channel key is generated from its own 12-word BIP-39 phrase**
+   (Ed25519 via SLIP-0010 from the seed). "Create channel" runs the exact
+   full-screen ceremony Publish's wallet already ships (show words →
+   retype 3 words → only then persist) — so by the time a channel exists,
+   its backup exists. Restoring on a new machine = "Restore channel" →
+   type phrase → same keypair, same code, publishing resumes.
+2. **Deliberately a separate phrase from the wallet phrase.** The wallet is
+   a disposable hot wallet (rotate/abandon at will, holds funds); the
+   channel key must live as long as the channel and holds *identity*.
+   Tying them means one leak/rotation drags the other down. Two phrases,
+   each labelled clearly ("this restores your channel, not your money" and
+   vice versa).
+3. My Channel screen shows a **backup status row** ("Recovery phrase backed
+   up ✓ / Show recovery phrase" behind a confirm), mirroring wallet UX.
+4. Secret stored in the OS keychain (file fallback 0600, same as wallet.rs
+   today); the phrase itself is never stored — display-once + re-derive.
+
+### Metadata for channel content — fresh content is NOT in TMDB
+
+Self-made media has no TMDB entry, so a channel manifest must be
+**self-describing**: title, description, artwork, category all travel in
+the manifest or subscribers see bare filenames. Nearly all machinery
+exists:
+
+- The manifest reuses bundle spec v2, which already carries
+  `metadata.json` rows + `posters/` files, and bundle import already
+  gap-fills the receiver's metadata cache and posters dir (shipped:
+  seed catalog, .watch-list import, alpha.57 `userEdited` rows).
+- Rows travel flagged `userEdited: true`, so the receiver's TMDB matcher
+  never queries for or overwrites them (shipped semantics: a found cache
+  row short-circuits the fetch). Keyless receivers render fully offline.
+
+What's new is a **required metadata step in the add-to-channel flow**,
+*before* the rights attestation:
+
+1. Pick the item (from your uploads) → **"Describe this item"** page:
+   title, year (optional), description, category (Movie / Show episode /
+   Other), artwork. All prefilled from local metadata when present (user
+   edits, or a TMDB match for the rare case the content is indexed).
+2. Artwork comes from the shipped Edit-details pickers: image file, or
+   the video-frame picker + poster crop (alpha.57/.59) — for self-made
+   video, "grab a frame" is the natural poster source.
+3. **Title, description, and artwork are required** — the Add button stays
+   disabled until present. Rationale shown inline: "Subscribers only see
+   what you write here — fresh content is not in any database."
+4. Saving also writes the same rows locally as a normal Edit-details save,
+   so the publisher's own library and the channel stay consistent, and a
+   later manifest rebuild re-exports them unchanged.
+5. Editing an item's details later = normal Edit details + "Update
+   channel" (new manifest, one small upload). Old manifest stays fetchable
+   (permanence), but subscribers follow the newest signed head.
+
+Episode support: SxxEyy in the file name + per-episode rows fold into the
+existing show/season grouping on the subscriber side for free.
 
 ### v1 scope cuts
 
@@ -129,15 +199,87 @@ it's "sharing my library", and it's public, attributable, and permanent.
    existing Terms stance — client-only, user responsibility — with the
    friction above making the public/private line impossible to miss.
 
+## Part 4 — Proposed menu layout
+
+Principle: the two **actions** (Upload, Channels) are top-level drawer
+doors with opposite color coding; everything configurational lives under
+Settings. Subscribed channel *content* is not a separate silo — it lands
+on the normal home wall / drawer as badged read-only lists, because
+subscribers just want to watch.
+
+```
+Home (poster wall — channel lists appear as rows like any list,
+ │                   amber "CHANNEL" badge on the row header)
+ └ drawer
+    ├ [your lists…]                     (as today)
+    ├ [subscribed channels…]            amber dot + channel name, read-only
+    ├ ──────────
+    ├ Media                             (as today; import/export/lists)
+    ├ Upload                            ← renamed from Publish. Blue icon,
+    │                                     subtitle "Private · only your
+    │                                     devices". Flow unchanged.
+    ├ Channels                          ← NEW, amber icon
+    └ Settings
+
+Channels screen (two segments, mirroring "My lists | Auto" pattern):
+    ├ Subscribed                        default segment
+    │    ├ channel cards: name, description, item count, updated X ago,
+    │    │   auto-update state; tap → channel list page; long-press/menu →
+    │    │   Unsubscribe
+    │    └ [+ Add channel]              paste wchn1- code / scan QR
+    └ My Channel
+         ├ (none yet) → "Create channel" + "Restore channel"
+         │     Create = name/description → key ceremony (Part 2 backup)
+         │     → first-publish warning ceremony (Part 3)
+         ├ (exists) → channel name + code + QR ("share this code")
+         ├ items list (what subscribers see, manifest order)
+         ├ [+ Publish an item] → pick from uploads → Describe this item
+         │     (required metadata, Part 2) → rights attestation (Part 3)
+         │     → cost preview → publish (new signed manifest + head)
+         ├ "Update channel" appears when local items/details changed
+         └ Recovery phrase backed up ✓ / Show recovery phrase
+
+Settings
+    ├ Home screen                       (as today; channel rows hideable
+    │                                    like any list)
+    ├ Media                             (as today)
+    ├ Metadata                          (as today — TMDB key; note: channel
+    │                                    content never queries TMDB)
+    ├ Downloads                         (as today; channel entries download
+    │                                    like any entry)
+    ├ Network
+    │    └ My W@tch                     (device sync — unchanged, stays
+    │                                    the private-space control panel)
+    ├ Wallet                            ← section renamed from PUBLISHING
+    │                                    (one wallet funds both Upload and
+    │                                    channel manifest updates)
+    └ About                             (Terms v2 lives here as today)
+```
+
+Deliberate choices:
+
+- **Upload and Channels are separate drawer tiles**, never one screen with
+  a mode switch — the "separate doors" wall from Part 3. Upload keeps blue
+  everywhere; every Channels surface is amber + "PUBLIC" badged.
+- **My Channel lives inside Channels, not Settings** — publishing is an
+  activity, not a setting; and the ceremony/attestation gates sit on its
+  entry paths.
+- **Settings → PUBLISHING renames to Wallet** once "Publish" (the feature
+  name) becomes "Upload": the section only ever held the wallet, which now
+  serves both spaces.
+- Mobile: Channels tile shows Subscribed only (channel *creation* is
+  desktop-only in v1, like Upload); Add channel + QR scan work everywhere.
+
 ## Suggested build order
 
 1. **Rename release** (Part 1, small): Publish→Upload + copy + docs.
    Ships alone so the vocabulary is settled *before* Channels lands.
-2. **Channels core**: identity + manifest + public upload + x0x head topic
-   + subscribe/import + auto-update. Desktop publish, all-platform
-   subscribe.
-3. **Safety rails**: attestation, first-publish ceremony, terms v2, badges
-   (ships in the same release as 2 — core never ships without rails).
+2. **Channels core**: identity + key-phrase ceremony/restore + manifest +
+   public upload + x0x head topic + subscribe/import + auto-update.
+   Desktop publish, all-platform subscribe. Menu layout per Part 4.
+3. **Safety rails + metadata step**: attestation, first-publish ceremony,
+   the required Describe-this-item page, terms v2, badges (ships in the
+   same release as 2 — core never ships without rails).
 4. Later: directory (separate repo), mobile publish, channel avatars,
    multi-quality per channel entry (version-picker already folds them).
 
@@ -150,3 +292,9 @@ it's "sharing my library", and it's public, attributable, and permanent.
 3. Subscribe on Android/iOS in v1, or desktop-everything first?
 4. Should a channel publish require a minimum wallet balance check + cost
    preview per update (recommend yes, reuse /upload/estimate)?
+5. Channel key backup: separate 12-word phrase (recommended, Part 2
+   rationale) vs deriving it from the wallet phrase (one backup covers
+   both, but couples identity to a disposable hot wallet) — agreed on
+   separate?
+6. Menu layout in Part 4 (Upload + Channels as sibling drawer tiles,
+   My Channel inside Channels, PUBLISHING → Wallet rename) — agreed?
