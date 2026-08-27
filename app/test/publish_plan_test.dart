@@ -215,6 +215,43 @@ void main() {
     });
   });
 
+  group('tierVideoInfo', () {
+    test('encode tiers: real output height, always H.264', () {
+      expect(tierVideoInfo(video(height: 2160, codec: 'hevc'),
+          PublishTier.high), '1080p H.264');
+      expect(tierVideoInfo(video(height: 720), PublishTier.medium),
+          '720p H.264');
+      expect(
+          tierVideoInfo(video(height: 240), PublishTier.low), '240p H.264');
+    });
+
+    test('original: probed height and codec', () {
+      expect(tierVideoInfo(video(height: 1080), PublishTier.original),
+          '1080p H.264');
+      expect(
+          tierVideoInfo(
+              video(height: 2160, codec: 'hevc'), PublishTier.original),
+          '2160p HEVC');
+    });
+
+    test('original with nothing known: null', () {
+      expect(tierVideoInfo(null, PublishTier.original), null);
+      expect(
+          tierVideoInfo(const MediaProbe(hasAudio: true, audioCodec: 'mp3'),
+              PublishTier.original),
+          null);
+    });
+  });
+
+  group('videoCodecName', () {
+    test('maps known codecs, uppercases the rest, passes null through', () {
+      expect(videoCodecName('h264'), 'H.264');
+      expect(videoCodecName('av1'), 'AV1');
+      expect(videoCodecName('mpeg2video'), 'MPEG2VIDEO');
+      expect(videoCodecName(null), null);
+    });
+  });
+
   group('size + cost prediction', () {
     test('predicted size from tier bitrate × duration', () {
       // (2500+128) kbps over an hour, +2% overhead.

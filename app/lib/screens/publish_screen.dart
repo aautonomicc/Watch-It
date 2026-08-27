@@ -393,6 +393,7 @@ class _PublishScreenState extends State<PublishScreen> {
           name: e.item.outputName,
           address: e.result!.address,
           sizeBytes: e.result!.size,
+          videoInfo: tierVideoInfo(e.item.source.probe, e.item.tier),
         ),
     ];
     for (final title in chosen) {
