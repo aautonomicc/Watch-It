@@ -40,6 +40,8 @@ class ChannelService extends ChangeNotifier {
 
   static const _subsKey = 'channel_subs_v1';
   static const _itemsKey = 'my_channel_items_v1';
+  static const _stonesKey = 'channel_sub_stones_v1';
+  static const _ownKey = 'channel_own_import_v1';
 
   /// How often the background loop checks subscribed channels' heads.
   /// Heads arrive by gossip into the local store, so this poll is a
@@ -117,14 +119,16 @@ class ChannelService extends ChangeNotifier {
 
   /// Subscribe to [code]: the core joins the gossip topic, a display
   /// record is created, and the first import runs as soon as a verified
-  /// head is visible (usually seconds on a live channel).
-  Future<void> subscribe(String code) async {
+  /// head is visible (usually seconds on a live channel). [addedMs] lets
+  /// My W@tch sync preserve the original subscribe time (so its LWW
+  /// against unsubscribe tombstones converges); user actions omit it.
+  Future<void> subscribe(String code, {int? addedMs}) async {
     final pubkey = await api.subscribe(code.trim());
     final subs = await _loadSubs();
     subs[pubkey.toLowerCase()] = {
       'name': '',
       'description': '',
-      'addedMs': DateTime.now().millisecondsSinceEpoch,
+      'addedMs': addedMs ?? DateTime.now().millisecondsSinceEpoch,
       'importedSeq': 0,
     };
     await _saveSubs(subs);
@@ -135,8 +139,10 @@ class ChannelService extends ChangeNotifier {
 
   /// Unsubscribe: drop the topic in the core, the display record, and
   /// the read-only channel list (the content itself was never "owned" —
-  /// downloaded files remain like any downloads).
-  Future<void> unsubscribe(String pubkey) async {
+  /// downloaded files remain like any downloads). Leaves a tombstone so
+  /// My W@tch sync propagates the unsubscribe instead of resurrecting
+  /// the channel from another device.
+  Future<void> unsubscribe(String pubkey, {int? removedMs}) async {
     final key = pubkey.toLowerCase();
     try {
       await api.unsubscribe(key);
@@ -147,6 +153,12 @@ class ChannelService extends ChangeNotifier {
     final subs = await _loadSubs();
     subs.remove(key);
     await _saveSubs(subs);
+    final stones = await subStones();
+    final stone = removedMs ?? DateTime.now().millisecondsSinceEpoch;
+    if (stone > (stones[key] ?? 0)) {
+      stones[key] = stone;
+      await _saveStones(stones);
+    }
     final lists = await LibraryStore.load();
     final remaining =
         [for (final l in lists) if (l.channelPubkey != key) l];
@@ -156,6 +168,80 @@ class ChannelService extends ChangeNotifier {
     }
     lastProblem.remove(key);
     notifyListeners();
+  }
+
+  /// Unsubscribe tombstones (`pubkey → removed_ms`), published through
+  /// My W@tch sync so an unsubscribe reaches the user's other devices.
+  Future<Map<String, int>> subStones() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_stonesKey);
+    if (raw == null) return {};
+    try {
+      return {
+        for (final e in (jsonDecode(raw) as Map<String, dynamic>).entries)
+          if (e.value is int) e.key: e.value as int,
+      };
+    } on FormatException {
+      return {};
+    }
+  }
+
+  Future<void> _saveStones(Map<String, int> stones) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_stonesKey, jsonEncode(stones));
+  }
+
+  /// Adopt newer remote unsubscribe tombstones so they keep propagating
+  /// through this device's own sync doc.
+  Future<void> adoptSubStones(Map<String, int> remote) async {
+    final stones = await subStones();
+    var changed = false;
+    for (final e in remote.entries) {
+      final key = e.key.toLowerCase();
+      if (e.value > (stones[key] ?? 0)) {
+        stones[key] = e.value;
+        changed = true;
+      }
+    }
+    if (changed) await _saveStones(stones);
+  }
+
+  /// Everything My W@tch sync carries about channels: subscriptions with
+  /// the `wchn1-` code another device needs to subscribe itself, the
+  /// unsubscribe tombstones, and this device's own channel (announced so
+  /// linked devices auto-subscribe and see it amber-badged, not as a
+  /// copy of a personal list). Null while channels are unsupported or
+  /// the core is not up.
+  Future<ChannelSyncView?> syncView() async {
+    final ChannelsStatus status;
+    try {
+      status = await api.status();
+    } on PublishApiException {
+      return null;
+    }
+    if (!status.supported) return null;
+    final records = await _loadSubs();
+    final subs = <String, ChannelSyncSub>{};
+    for (final sub in status.subs) {
+      final key = sub.pubkey.toLowerCase();
+      if (key.isEmpty || sub.code.isEmpty) continue;
+      final raw = records[key];
+      final addedMs =
+          raw is Map<String, dynamic> ? raw['addedMs'] as int? ?? 1 : 1;
+      subs[key] = ChannelSyncSub(
+          code: sub.code, addedMs: addedMs < 1 ? 1 : addedMs);
+    }
+    final own = status.own;
+    final hasOwn = own != null && own.pubkey.isNotEmpty && own.code.isNotEmpty;
+    return ChannelSyncView(
+      subs: subs,
+      stones: await subStones(),
+      ownPubkey: hasOwn ? own.pubkey.toLowerCase() : null,
+      ownCode: hasOwn ? own.code : null,
+      // A restore re-stamps this, so a re-created channel beats old
+      // unsubscribe tombstones on the other devices.
+      ownAddedMs: hasOwn && own.createdAtMs > 0 ? own.createdAtMs : 1,
+    );
   }
 
   // ---- auto-update loop --------------------------------------------------
@@ -197,12 +283,108 @@ class ChannelService extends ChangeNotifier {
       }
       if (changed) {
         await _saveSubs(subs);
+      }
+      var ownChanged = false;
+      try {
+        ownChanged = await _syncOwnChannel(status.own);
+      } catch (e) {
+        final key = status.own?.pubkey.toLowerCase();
+        if (key != null && key.isNotEmpty) lastProblem[key] = '$e';
+      }
+      if (changed || ownChanged) {
         revision.value++;
       }
       notifyListeners();
     } finally {
       _syncing = false;
     }
+  }
+
+  /// Keep the library's view of this device's OWN channel current: the
+  /// creator sees the same amber read-only list subscribers get — empty
+  /// the moment the channel is created, mirroring the manifest after
+  /// each published update — and it leaves the library when the channel
+  /// is removed. Returns whether the library changed.
+  Future<bool> _syncOwnChannel(OwnChannel? own) async {
+    final prefs = await SharedPreferences.getInstance();
+    Map<String, dynamic> record;
+    try {
+      final raw = prefs.getString(_ownKey);
+      record = raw == null ? {} : jsonDecode(raw) as Map<String, dynamic>;
+    } on FormatException {
+      record = {};
+    }
+    final recorded = (record['pubkey'] as String? ?? '').toLowerCase();
+    if (own == null || own.pubkey.isEmpty) {
+      // Channel removed from this device — its list goes too. A device
+      // that never had a channel has no record and nothing to do.
+      if (recorded.isEmpty) return false;
+      await prefs.remove(_ownKey);
+      lastProblem.remove(recorded);
+      return _removeChannelList(recorded);
+    }
+    final pubkey = own.pubkey.toLowerCase();
+    var changed = false;
+    if (recorded.isNotEmpty && recorded != pubkey) {
+      // A different channel replaced the old one (remove + restore).
+      changed = await _removeChannelList(recorded);
+    }
+    var importedSeq =
+        recorded == pubkey ? record['importedSeq'] as int? ?? 0 : 0;
+
+    // The list itself exists from creation, so the channel shows up —
+    // with its badge — before anything is published.
+    final lists = await LibraryStore.load();
+    final title = own.name.trim().isEmpty
+        ? 'Channel ${pubkey.substring(0, 8)}'
+        : own.name.trim();
+    final i = lists.indexWhere((l) => l.channelPubkey == pubkey);
+    if (i < 0) {
+      lists.add(MediaList(
+        id: 'channel-${pubkey.substring(0, 16)}',
+        title: title,
+        entries: const [],
+        channelPubkey: pubkey,
+      ));
+      await LibraryStore.save(lists);
+      changed = true;
+    } else if (importedSeq == 0 && lists[i].title != title) {
+      // Renamed before the first publish — follow the config name (after
+      // a publish the imported manifest is the naming authority).
+      lists[i] = MediaList(
+        id: lists[i].id,
+        title: title,
+        entries: lists[i].entries,
+        enabled: lists[i].enabled,
+        channelPubkey: pubkey,
+      );
+      await LibraryStore.save(lists);
+      changed = true;
+    }
+
+    final head = own.head;
+    if (head != null && head.seq > importedSeq) {
+      try {
+        await _importManifest(pubkey, head);
+        importedSeq = head.seq;
+        lastProblem.remove(pubkey);
+        changed = true;
+      } catch (e) {
+        lastProblem[pubkey] = '$e';
+      }
+    }
+    await prefs.setString(
+        _ownKey, jsonEncode({'pubkey': pubkey, 'importedSeq': importedSeq}));
+    return changed;
+  }
+
+  Future<bool> _removeChannelList(String pubkey) async {
+    final lists = await LibraryStore.load();
+    final remaining =
+        [for (final l in lists) if (l.channelPubkey != pubkey) l];
+    if (remaining.length == lists.length) return false;
+    await LibraryStore.save(remaining);
+    return true;
   }
 
   /// Fetch + verify + import one channel manifest as the channel's
@@ -419,6 +601,37 @@ class MyChannelItem {
         name: json['name'] as String? ?? '',
         addedMs: json['addedMs'] as int? ?? 0,
       );
+}
+
+/// One subscription as My W@tch sync sees it: the code another device
+/// needs to subscribe, and when this device subscribed (for the LWW
+/// against unsubscribe tombstones).
+class ChannelSyncSub {
+  const ChannelSyncSub({required this.code, required this.addedMs});
+  final String code;
+  final int addedMs;
+}
+
+/// Snapshot of the channel state My W@tch sync publishes and merges —
+/// see [ChannelService.syncView].
+class ChannelSyncView {
+  const ChannelSyncView({
+    required this.subs,
+    required this.stones,
+    this.ownPubkey,
+    this.ownCode,
+    this.ownAddedMs = 1,
+  });
+
+  /// `pubkey → (code, addedMs)` for every subscription.
+  final Map<String, ChannelSyncSub> subs;
+
+  /// `pubkey → removed_ms` unsubscribe tombstones.
+  final Map<String, int> stones;
+
+  final String? ownPubkey;
+  final String? ownCode;
+  final int ownAddedMs;
 }
 
 /// Display record of a subscription (app-side bookkeeping).

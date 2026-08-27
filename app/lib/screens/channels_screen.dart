@@ -701,6 +701,8 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     try {
       await _api.removeOwn();
       await ChannelService.instance.clearMyItems();
+      // Drops the channel's amber list from the library too.
+      unawaited(ChannelService.instance.syncNow());
       _snack('Channel removed from this computer');
     } catch (e) {
       _snack('$e');
@@ -789,6 +791,8 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
       if (result != null) {
         _snack('Published v${result.seq ?? '?'} — subscribers update '
             'automatically');
+        // Refresh this machine's own amber list from the new manifest.
+        unawaited(ChannelService.instance.syncNow());
       }
     } catch (e) {
       _snack('$e');
@@ -1310,6 +1314,9 @@ class _FirstPublishGateScreenState extends State<FirstPublishGateScreen> {
         description: widget.description,
         mnemonic: widget.mnemonic,
       );
+      // The new channel appears on the home wall (as its amber list)
+      // right away, not on the next 5-minute tick.
+      unawaited(ChannelService.instance.syncNow());
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) {

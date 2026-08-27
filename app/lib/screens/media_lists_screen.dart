@@ -1090,6 +1090,23 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
 
   Future<void> _unsubscribeChannel(MediaList list) async {
     final t = WiTokens.of(context);
+    // The user's OWN channel also lives here as an amber list — it has
+    // no subscription to drop, and would only be recreated by the next
+    // channel check. Point at the Channels screen instead.
+    try {
+      final view = await ChannelService.instance.syncView();
+      if (view != null && view.ownPubkey == list.channelPubkey) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('This is your own channel — manage it from '
+                  'the Channels page')));
+        }
+        return;
+      }
+    } on Exception {
+      // Status unavailable — fall through to the normal unsubscribe.
+    }
+    if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(

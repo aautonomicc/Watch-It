@@ -518,6 +518,14 @@ implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → Channels.
       tiers, describe (TMDB check included), attest, upload; finished
       uploads are auto-staged and can optionally join a library list
       (already-uploaded library items keep a secondary picker path)
+- [x] The creator's own channel shows as its amber list too
+      (2026-08-27): empty at creation, mirroring each published
+      manifest via the subscriber import path
+- [x] Channel subscriptions sync over My W@tch (2026-08-27): the sync
+      doc carries codes + unsubscribe tombstones, so a channel arrives
+      on linked devices amber-badged and auto-updating — never as a
+      copy of a personal list; the own channel is announced the same
+      way and followed by the user's other devices
 - [ ] Channel directory (deliberately NOT in v1 — codes only; a curated
       directory would be a separate repo/site with its own vetting)
 - [ ] Mobile channel creation (subscribe works everywhere; publishing

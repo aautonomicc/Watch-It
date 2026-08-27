@@ -250,6 +250,17 @@ LAN plus public bootstrap for remote devices), implemented in
   match always wins) and pull the artwork bytes over the same x0x
   transfer, saved under the original TMDB file names — a synced
   device re-serves both rows and files to devices joining later.
+- **Channel subscriptions (post-alpha.65)**: channels sync *as
+  subscriptions*, never as content. Channel lists (the amber read-only
+  mirrors of a channel manifest) stay out of the personal sync doc
+  entirely; instead a `channels` section carries each subscription's
+  `wchn1-` code + subscribe time and unsubscribe tombstones, merged
+  last-writer-wins per channel. A linked device subscribes by code, so
+  the channel arrives with its badge and auto-updates from the
+  channel's own signed heads — and a device's OWN channel is announced
+  the same way, so the user's other devices follow it as subscribers.
+  Unsubscribing anywhere unsubscribes everywhere (tombstone), and a
+  later re-subscribe wins back.
 - **Presence & status**: 60 s heartbeats drive the My W@tch screen's
   per-device online dots, last-heard times, and the persisted "Last sync"
   stamp. Server routes (`GET/DELETE /mywatch`, `POST /mywatch/link|join|
@@ -299,6 +310,10 @@ ships, and stored in the OS keychain beside the wallet key
   schema v10) that renders on the normal home wall/drawer and replaces
   wholesale when a newer signed head arrives (5-min background check +
   manual refresh). Unsubscribe deletes the list + replicated store.
+  The creator's own machine shows the same amber list for its OWN
+  channel — empty the moment the channel is created, mirroring the
+  manifest after each published update (imported through the exact
+  subscriber fetch+verify path), gone when the channel is removed.
 - **Publishing** (desktop-only, needs the wallet): items enter one
   explicit pick at a time, starting from a LOCAL FILE (the Upload
   flow's shape, screens/channel_publish_screen.dart): choose a file →
