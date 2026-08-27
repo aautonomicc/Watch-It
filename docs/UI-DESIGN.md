@@ -119,8 +119,9 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   public/permanent/attributable gate confirmed by typing the channel
   name; then code + QR to share, backup-status row, the item list
   subscribers see, "Publish an item" (pick → required
-  Describe-this-item → rights attestation) and "Publish update" with a
-  live cost preview; Restore channel by phrase
+  Describe-this-item, whose Check TMDB button fills title/description/
+  artwork from a previewed TMDB match → rights attestation) and
+  "Publish update" with a live cost preview; Restore channel by phrase
 - Settings is untouched — publishing is an activity, not a setting
 
 ## Layout adaptation

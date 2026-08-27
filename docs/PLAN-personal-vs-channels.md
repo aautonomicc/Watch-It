@@ -17,7 +17,14 @@ chain. The Describe-this-item category dropdown was dropped — category
 derives from the file name (SxxEyy = episode) exactly like everywhere
 else in the app. User agreed to all open questions' recommendations
 (separate channel phrase, no directory in v1, subscribe everywhere,
-cost preview, Part 4 menu layout). Defines the two
+cost preview, Part 4 menu layout). Post-alpha.65 extension (2026-08-27,
+user ask — a public-domain movies channel should be able to use TMDB):
+Describe-this-item gained a **Check TMDB** button that looks the item
+up with the typed title/year (falling back to the parsed file name,
+IMDb tag included), previews the match, and on accept stores the full
+TMDB row — rating/genres/poster included — through the normal metadata
+pipeline before prefilling the required fields, so subscribers get the
+complete metadata from the manifest without their own key. Defines the two
 content spaces, how each works technically, and the naming/safety wall
 between them so nobody publishes copyrighted material publicly by accident.
 
