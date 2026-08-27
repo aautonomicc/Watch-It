@@ -118,19 +118,39 @@ String probeVerdict(MediaProbe? probe) {
         : 'Not a media file — published as-is.';
   }
   final bits = probe.pixelFormat?.contains('10') ?? false ? ' 10-bit' : '';
-  final codecName = switch (probe.videoCodec) {
-    'h264' => 'H.264',
-    'hevc' => 'HEVC',
-    'av1' => 'AV1',
-    'vp9' => 'VP9',
-    final c => c?.toUpperCase() ?? 'unknown codec',
-  };
+  final codecName = videoCodecName(probe.videoCodec) ?? 'unknown codec';
   final res = probe.height != null ? '${probe.height}p ' : '';
   if (probe.isUniversal) {
     return '$res$codecName — plays everywhere.';
   }
   return '$res$codecName$bits — many devices can\'t play this; '
       'the encoded qualities are recommended.';
+}
+
+/// Display name for an ffprobe video codec, `h264 → H.264`. Null in,
+/// null out; unrecognized codecs are uppercased.
+String? videoCodecName(String? codec) => switch (codec) {
+      'h264' => 'H.264',
+      'hevc' => 'HEVC',
+      'av1' => 'AV1',
+      'vp9' => 'VP9',
+      null => null,
+      final c => c.toUpperCase(),
+    };
+
+/// `480p H.264` — the format label a published output should carry as its
+/// library entry's videoInfo (the version picker and cards show it next
+/// to the size, same style as the seed catalog's). Encode tiers are
+/// always H.264 at their real output height; Original keeps the source's
+/// probed height/codec. Null when nothing is known about the source.
+String? tierVideoInfo(MediaProbe? probe, PublishTier tier) {
+  if (tier != PublishTier.original) return '${tierLabel(probe, tier)} H.264';
+  if (probe == null || !probe.hasVideo) return null;
+  final parts = [
+    if ((probe.height ?? 0) > 0) '${probe.height}p',
+    ?videoCodecName(probe.videoCodec),
+  ];
+  return parts.isEmpty ? null : parts.join(' ');
 }
 
 /// Real encoded height for an encode tier of a given source: the tier

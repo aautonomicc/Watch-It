@@ -263,6 +263,7 @@ void main() {
     expect(lists.single.entries, hasLength(2));
     expect(lists.single.entries[0].name, 'Show S01E01 [480p].mp4');
     expect(lists.single.entries[0].address, 'aa' * 32);
+    expect(lists.single.entries[0].videoInfo, '480p H.264');
     expect(lists.single.entries[1].name, 'Show S01E02 [480p].mp4');
     expect(lists.single.entries[1].sizeBytes, 5);
 
