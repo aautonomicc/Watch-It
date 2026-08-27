@@ -191,6 +191,57 @@ Future<void> applyRemoteUserDetails({
   MetadataService.instance.notifyExternalSeed();
 }
 
+/// Apply a linked device's TMDB metadata row (My W@tch sync) — the
+/// full-fat match a keyless device cannot fetch itself. The sync loop
+/// only calls this when the local cache has nothing better (no row, or
+/// a cached miss); the row is stamped with the remote's fetch time and
+/// NOT marked userEdited, so a later local edit — or a real TMDB
+/// re-match once a key is configured — still wins. The artwork file
+/// names are stored as-is; the bytes arrive separately over the art
+/// transfer and land in the posters dir under those exact names.
+Future<void> applyRemoteTmdbDetails({
+  required String lookupKey,
+  required int updatedMs,
+  String? title,
+  int? year,
+  String? overview,
+  String? category,
+  String? episodeLabel,
+  String? mediaType,
+  int? tmdbId,
+  double? rating,
+  String? airDate,
+  String? showOverview,
+  String? seasonOverview,
+  String? posterFile,
+  String? stillFile,
+  String? showPosterFile,
+}) async {
+  final db = await LibraryStore.database();
+  await db.into(db.metadataCache).insertOnConflictUpdate(
+        MetadataCacheCompanion.insert(
+          lookupKey: lookupKey,
+          found: true,
+          title: Value(title),
+          year: Value(year),
+          overview: Value(overview),
+          category: Value(category),
+          episodeLabel: Value(episodeLabel),
+          posterFile: Value(posterFile),
+          mediaType: Value(mediaType),
+          tmdbId: Value(tmdbId),
+          fetchedAt: updatedMs,
+          rating: Value(rating),
+          showOverview: Value(showOverview),
+          seasonOverview: Value(seasonOverview),
+          airDate: Value(airDate),
+          stillFile: Value(stillFile),
+          showPosterFile: Value(showPosterFile),
+        ),
+      );
+  MetadataService.instance.notifyExternalSeed();
+}
+
 /// Store synced artwork [bytes] as the user poster for [lookupKey]
 /// (fresh `user_` file, older ones deleted) without touching the row's
 /// LWW stamp — the text row was already applied with the remote's

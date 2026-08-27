@@ -74,13 +74,15 @@ dates and descriptions, plus a one-tap Download season.*
 4. **Stream or download.** Hit play to stream straight from the network, or download
    an item to the device for offline watching. Downloaded items play with the full
    library experience, no connectivity needed.
-5. **Link your devices (optional).** The drawer's **My W@tch** page links
-   your own devices into a private sync group: create a link on one device,
-   scan the QR code (or paste the invite) on the others. From then on watch
-   lists, viewing positions, and your Edit-details changes — including
-   custom artwork at full quality — sync automatically in the background
-   whenever the devices are online, device-to-device over a post-quantum
-   encrypted channel. No account, no server, and nothing about the group is
+5. **Link your devices (optional).** The **My W@tch** page (Settings →
+   Network) links your own devices into a private sync group: create a link
+   on one device, scan the QR code (or paste the invite) on the others. From
+   then on watch lists, viewing positions, and your Edit-details changes —
+   including custom artwork at full quality — sync automatically in the
+   background whenever the devices are online, device-to-device over a
+   post-quantum encrypted channel. TMDB posters and descriptions travel
+   too, so a device without its own TMDB key still gets the full
+   experience. No account, no server, and nothing about the group is
    discoverable on the network; the invite code *is* the key, so share it
    only with your own devices.
 
