@@ -509,6 +509,10 @@ implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → Channels.
 - [x] Safety rails: Describe-this-item (required title/description/
       artwork), per-item rights attestation, first-publish typed-name
       gate, cost preview, Terms v2, amber/PUBLIC vs blue/private
+- [x] Check TMDB on Describe-this-item: look the item up with the
+      typed title/year (public-domain classics are in the database),
+      preview, and fill title/description/artwork + rating/genres from
+      the match — subscribers get the full metadata keylessly
 - [ ] Channel directory (deliberately NOT in v1 — codes only; a curated
       directory would be a separate repo/site with its own vetting)
 - [ ] Mobile channel creation (subscribe works everywhere; publishing

@@ -301,7 +301,12 @@ ships, and stored in the OS keychain beside the wallet key
   manual refresh). Unsubscribe deletes the list + replicated store.
 - **Publishing** (desktop-only, needs the wallet): items enter one
   explicit pick at a time — pick → required Describe-this-item (title,
-  description, artwork mandatory; saved as a normal Edit-details row)
+  description, artwork mandatory; saved as a normal Edit-details row;
+  a **Check TMDB** button looks the item up with the typed title/year
+  when a TMDB key is configured — public-domain classics ARE in the
+  database — previews the match, and on accept stores the full row
+  incl. rating/genres/poster through the normal metadata pipeline, so
+  those extras reach keyless subscribers via the manifest)
   → per-item rights attestation → staged; Publish update builds the
   manifest, shows a live cost preview (`/upload/estimate` + balance),
   runs the paid public upload job (`POST /channel/publish`, same job

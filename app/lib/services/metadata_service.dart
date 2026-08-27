@@ -252,8 +252,8 @@ class MetadataService extends ChangeNotifier {
     final client = TmdbClient(apiKey: apiKey, client: _httpClient);
     try {
       final match = await client.lookup(parseMediaName(fileName));
-      final db = await LibraryStore.database();
       if (match == null) {
+        final db = await LibraryStore.database();
         await db.into(db.metadataCache).insertOnConflictUpdate(
               MetadataCacheCompanion.insert(
                 lookupKey: key,
@@ -263,85 +263,147 @@ class MetadataService extends ChangeNotifier {
             );
         return null;
       }
-      final dir = await _postersDirProvider();
-      // Download one CDN image into the posters dir, skipping files that
-      // are already on disk (episodes of one season share the season
-      // poster and the show poster). Artwork is decoration — a failed
-      // fetch keeps the textual match without it.
-      Future<(String, String)?> saveImage(String? cdnPath, String file,
-          Future<List<int>> Function(String) fetch) async {
-        if (cdnPath == null) return null;
-        try {
-          final f = File('${dir.path}/$file');
-          if (!f.existsSync()) {
-            final bytes = await fetch(cdnPath);
-            await dir.create(recursive: true);
-            await f.writeAsBytes(bytes, flush: true);
-          }
-          return (file, f.path);
-        } on TmdbException catch (e) {
-          debugPrint('metadata: image fetch failed for "$fileName": $e');
-          return null;
-        }
-      }
-
-      // Episode matches carry season artwork — one file per season, so a
-      // show-level match keeps its own show poster.
-      final id = '${match.mediaType}_${match.tmdbId}';
-      final poster = await saveImage(
-          match.posterPath,
-          match.season == null ? '$id.jpg' : '${id}_s${match.season}.jpg',
-          client.fetchPoster);
-      final showPoster = match.season == null
-          ? null
-          : await saveImage(match.showPosterPath, '$id.jpg',
-              client.fetchPoster);
-      final still = match.season == null
-          ? null
-          : await saveImage(
-              match.stillPath,
-              '${id}_s${match.season}e${match.episode}_still.jpg',
-              client.fetchStill);
-      await db.into(db.metadataCache).insertOnConflictUpdate(
-            MetadataCacheCompanion.insert(
-              lookupKey: key,
-              found: true,
-              title: Value(match.title),
-              year: Value(match.year),
-              overview: Value(match.overview),
-              category: Value(match.category),
-              episodeLabel: Value(match.episodeLabel),
-              posterFile: Value(poster?.$1),
-              mediaType: Value(match.mediaType),
-              tmdbId: Value(match.tmdbId),
-              fetchedAt: DateTime.now().millisecondsSinceEpoch,
-              rating: Value(match.rating),
-              showOverview: Value(match.showOverview),
-              seasonOverview: Value(match.seasonOverview),
-              airDate: Value(match.airDate),
-              stillFile: Value(still?.$1),
-              showPosterFile: Value(showPoster?.$1),
-            ),
-          );
-      return MediaMetadata(
-        title: match.title,
-        year: match.year,
-        overview: match.overview,
-        category: match.category,
-        episodeLabel: match.episodeLabel,
-        posterFilePath: poster?.$2,
-        rating: match.rating,
-        showOverview: match.showOverview,
-        seasonOverview: match.seasonOverview,
-        airDate: match.airDate,
-        stillFilePath: still?.$2,
-        showPosterFilePath: showPoster?.$2,
-        mediaType: match.mediaType,
-      );
+      return await _persistMatch(key, match, client);
     } finally {
       // Only close clients we created — injected ones belong to the test.
       if (_httpClient == null) client.close();
     }
+  }
+
+  /// Whether TMDB lookups can run at all (a key is configured).
+  Future<bool> get hasTmdbKey async => (await _apiKeyProvider()).isNotEmpty;
+
+  /// Explicit TMDB lookup for [parsed] — the Describe-this-item "Check
+  /// TMDB" button, searching with whatever title/year the publisher
+  /// typed. Nothing is cached or written; the caller previews the match
+  /// and commits it via [adoptTmdbMatch]. Returns `null` on a genuine
+  /// miss; throws [TmdbException] on transport/API errors.
+  Future<TmdbMatch?> lookupTmdb(ParsedName parsed) async {
+    final client =
+        TmdbClient(apiKey: await _apiKeyProvider(), client: _httpClient);
+    try {
+      return await client.lookup(parsed);
+    } finally {
+      if (_httpClient == null) client.close();
+    }
+  }
+
+  /// Poster bytes for a [lookupTmdb] preview; `null` when the match has
+  /// no poster or the CDN fetch fails (artwork is decoration).
+  Future<Uint8List?> tmdbPosterBytes(TmdbMatch match) async {
+    if (match.posterPath == null) return null;
+    final client =
+        TmdbClient(apiKey: await _apiKeyProvider(), client: _httpClient);
+    try {
+      return Uint8List.fromList(await client.fetchPoster(match.posterPath!));
+    } on TmdbException {
+      return null;
+    } finally {
+      if (_httpClient == null) client.close();
+    }
+  }
+
+  /// Commit a previewed [match] for [key] through the normal fetch
+  /// pipeline: full cache row (rating/genres/TMDB id included — they
+  /// travel in channel manifests and bundle exports) plus artwork files
+  /// under the shared TMDB naming. Replaces whatever row the key held —
+  /// the user explicitly chose this match.
+  Future<MediaMetadata> adoptTmdbMatch(String key, TmdbMatch match) async {
+    final client =
+        TmdbClient(apiKey: await _apiKeyProvider(), client: _httpClient);
+    try {
+      final resolved = await _persistMatch(key, match, client);
+      _memory[key] = resolved;
+      notifyListeners();
+      return resolved;
+    } finally {
+      if (_httpClient == null) client.close();
+    }
+  }
+
+  /// Write [match] into the cache row for [key] and its images into the
+  /// posters dir. File IO is synchronous on purpose — this runs from
+  /// widget flows exercised under fake-async tests, where pending real
+  /// async IO never completes (same rule as services/user_metadata.dart).
+  Future<MediaMetadata> _persistMatch(
+      String key, TmdbMatch match, TmdbClient client) async {
+    final db = await LibraryStore.database();
+    final dir = await _postersDirProvider();
+    // Download one CDN image into the posters dir, skipping files that
+    // are already on disk (episodes of one season share the season
+    // poster and the show poster). Artwork is decoration — a failed
+    // fetch keeps the textual match without it.
+    Future<(String, String)?> saveImage(String? cdnPath, String file,
+        Future<List<int>> Function(String) fetch) async {
+      if (cdnPath == null) return null;
+      try {
+        final f = File('${dir.path}/$file');
+        if (!f.existsSync()) {
+          final bytes = await fetch(cdnPath);
+          dir.createSync(recursive: true);
+          f.writeAsBytesSync(bytes, flush: true);
+        }
+        return (file, f.path);
+      } on TmdbException catch (e) {
+        debugPrint('metadata: image fetch failed for "$key": $e');
+        return null;
+      }
+    }
+
+    // Episode matches carry season artwork — one file per season, so a
+    // show-level match keeps its own show poster.
+    final id = '${match.mediaType}_${match.tmdbId}';
+    final poster = await saveImage(
+        match.posterPath,
+        match.season == null ? '$id.jpg' : '${id}_s${match.season}.jpg',
+        client.fetchPoster);
+    final showPoster = match.season == null
+        ? null
+        : await saveImage(match.showPosterPath, '$id.jpg',
+            client.fetchPoster);
+    final still = match.season == null
+        ? null
+        : await saveImage(
+            match.stillPath,
+            '${id}_s${match.season}e${match.episode}_still.jpg',
+            client.fetchStill);
+    await db.into(db.metadataCache).insertOnConflictUpdate(
+          MetadataCacheCompanion.insert(
+            lookupKey: key,
+            found: true,
+            title: Value(match.title),
+            year: Value(match.year),
+            overview: Value(match.overview),
+            category: Value(match.category),
+            episodeLabel: Value(match.episodeLabel),
+            posterFile: Value(poster?.$1),
+            mediaType: Value(match.mediaType),
+            tmdbId: Value(match.tmdbId),
+            fetchedAt: DateTime.now().millisecondsSinceEpoch,
+            rating: Value(match.rating),
+            showOverview: Value(match.showOverview),
+            seasonOverview: Value(match.seasonOverview),
+            airDate: Value(match.airDate),
+            stillFile: Value(still?.$1),
+            showPosterFile: Value(showPoster?.$1),
+            userEdited: const Value(false),
+          ),
+        );
+    return MediaMetadata(
+      title: match.title,
+      year: match.year,
+      overview: match.overview,
+      category: match.category,
+      episodeLabel: match.episodeLabel,
+      posterFilePath: poster?.$2,
+      rating: match.rating,
+      showOverview: match.showOverview,
+      seasonOverview: match.seasonOverview,
+      airDate: match.airDate,
+      stillFilePath: still?.$2,
+      showPosterFilePath: showPoster?.$2,
+      mediaType: match.mediaType,
+    );
   }
 }
 

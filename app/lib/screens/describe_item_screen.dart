@@ -12,12 +12,31 @@ import '../services/embedded_client.dart';
 import '../services/ffmpeg.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
+import '../services/tmdb_client.dart';
 import '../services/user_metadata.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/channel_badge.dart';
 import '../widgets/poster_crop_dialog.dart';
 import 'edit_details_screen.dart' show FramePickerDialog;
+
+/// What "Check TMDB" searches for: the typed title/year when the
+/// publisher changed them (their correction beats a mangled file name),
+/// else the parsed file name — which keeps an IMDb id tag's exact
+/// `/find` lookup. Season/episode markers always come from the file
+/// name; a typed title only renames the show being searched.
+ParsedName tmdbSearchName(
+    ParsedName parsed, String typedTitle, String typedYear) {
+  final title = typedTitle.trim();
+  final year = int.tryParse(typedYear.trim());
+  if (title.isEmpty ||
+      (title.toLowerCase() == parsed.title.toLowerCase() &&
+          year == parsed.year)) {
+    return parsed;
+  }
+  return ParsedName(title, year,
+      season: parsed.season, episode: parsed.episode);
+}
 
 /// "Describe this item" — the REQUIRED metadata step before an item can
 /// join a channel (docs/PLAN-personal-vs-channels.md Part 2). Fresh,
@@ -53,12 +72,13 @@ class _DescribeItemScreenState extends State<DescribeItemScreen> {
   late final TextEditingController _year;
   late final TextEditingController _overview;
 
-  late final MediaMetadata _meta;
+  late MediaMetadata _meta;
   late final ParsedName _parsed;
 
   Uint8List? _newPosterBytes;
   bool _frameSourceAvailable = false;
   bool _saving = false;
+  bool _checkingTmdb = false;
 
   @override
   void initState() {
@@ -163,6 +183,76 @@ class _DescribeItemScreenState extends State<DescribeItemScreen> {
     setState(() => _newPosterBytes = chosen);
   }
 
+  void _snack(String message) => ScaffoldMessenger.of(context)
+      .showSnackBar(SnackBar(content: Text(message)));
+
+  /// Look the item up on TMDB with the typed title/year (public-domain
+  /// classics ARE in the database), preview the match, and on accept
+  /// store it through the normal metadata pipeline — the full row
+  /// (rating, genres, TMDB id) then travels in the channel manifest —
+  /// and prefill the required fields from it.
+  Future<void> _checkTmdb() async {
+    if (_checkingTmdb) return;
+    final service = MetadataService.instance;
+    if (!await service.hasTmdbKey) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('No TMDB key'),
+          content: const Text(
+              'Looking items up needs your own (free) TMDB API key — add '
+              'one in Settings → Metadata, then come back here.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Close')),
+          ],
+        ),
+      );
+      return;
+    }
+    setState(() => _checkingTmdb = true);
+    try {
+      final search = tmdbSearchName(_parsed, _title.text, _year.text);
+      final match = await service.lookupTmdb(search);
+      if (match == null) {
+        if (mounted) {
+          _snack('TMDB has no match for “${search.title}” — check the '
+              'title and year, then try again.');
+        }
+        return;
+      }
+      final poster = await service.tmdbPosterBytes(match);
+      if (!mounted) return;
+      // Checking is over once the preview is up — an endless button
+      // spinner behind the dialog would also never settle in tests.
+      setState(() => _checkingTmdb = false);
+      final use = await showDialog<bool>(
+        context: context,
+        builder: (_) => TmdbMatchDialog(match: match, posterBytes: poster),
+      );
+      if (use != true || !mounted) return;
+      final adopted =
+          await service.adoptTmdbMatch(_parsed.lookupKey, match);
+      if (!mounted) return;
+      setState(() {
+        _meta = adopted;
+        _title.text = match.title;
+        _year.text = match.year?.toString() ?? _year.text;
+        // TMDB sometimes has no synopsis — keep whatever was typed.
+        if (match.overview != null) _overview.text = match.overview!;
+        // The adopted poster file shows through _meta; a previously
+        // picked image would hide it.
+        _newPosterBytes = null;
+      });
+    } on TmdbException catch (e) {
+      if (mounted) _snack('Could not reach TMDB ($e) — try again.');
+    } finally {
+      if (mounted) setState(() => _checkingTmdb = false);
+    }
+  }
+
   Future<void> _save() async {
     if (!_complete || _saving) return;
     setState(() => _saving = true);
@@ -243,6 +333,32 @@ class _DescribeItemScreenState extends State<DescribeItemScreen> {
               labelStyle: TextStyle(color: t.ash),
               border: const OutlineInputBorder(),
             ),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _checkingTmdb ? null : _checkTmdb,
+                icon: _checkingTmdb
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.travel_explore, size: 18),
+                label: Text(
+                    _checkingTmdb ? 'Checking TMDB…' : 'Check TMDB'),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Known films and shows — public-domain classics '
+                  'included — can be filled in from The Movie Database '
+                  'using the title and year above.',
+                  style: TextStyle(color: t.ash, fontSize: 11.5),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           TextField(
@@ -351,6 +467,102 @@ class _DescribeItemScreenState extends State<DescribeItemScreen> {
           const SizedBox(height: 24),
         ],
       ),
+    );
+  }
+}
+
+/// Preview of a "Check TMDB" match: poster, title, rating/genres,
+/// synopsis. Pops `true` when the publisher takes the details.
+class TmdbMatchDialog extends StatelessWidget {
+  const TmdbMatchDialog({super.key, required this.match, this.posterBytes});
+
+  final TmdbMatch match;
+  final Uint8List? posterBytes;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = WiTokens.of(context);
+    final year = match.year == null ? '' : ' (${match.year})';
+    final extras = [
+      if (match.rating != null) '${match.rating!.toStringAsFixed(1)}/10',
+      if (match.category != null) match.category!,
+    ].join(' · ');
+    return AlertDialog(
+      title: const Text('TMDB match'),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (posterBytes != null)
+                    Container(
+                      width: 90,
+                      height: 135,
+                      margin: const EdgeInsets.only(right: 12),
+                      clipBehavior: Clip.antiAlias,
+                      decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(6)),
+                      child:
+                          Image.memory(posterBytes!, fit: BoxFit.cover),
+                    ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${match.title}$year',
+                            style: TextStyle(
+                                color: t.bone,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600)),
+                        if (match.episodeLabel != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(match.episodeLabel!,
+                                style: TextStyle(
+                                    color: t.ash, fontSize: 12.5)),
+                          ),
+                        if (extras.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(extras,
+                                style: TextStyle(
+                                    color: t.ash, fontSize: 12.5)),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if (match.overview != null) ...[
+                const SizedBox(height: 12),
+                Text(match.overview!,
+                    style: TextStyle(
+                        color: t.bone, fontSize: 13, height: 1.4)),
+              ],
+              const SizedBox(height: 12),
+              Text(
+                'Details and artwork from The Movie Database. They fill '
+                'in the describe fields — you can still edit everything '
+                'before saving.',
+                style: TextStyle(color: t.ash, fontSize: 11.5),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel')),
+        FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Use these details')),
+      ],
     );
   }
 }
