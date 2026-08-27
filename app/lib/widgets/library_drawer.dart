@@ -148,8 +148,10 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                     dense: true,
                     leading: Icon(Icons.cloud_upload_outlined,
                         color: t.boneDim, size: 20),
-                    title: Text('Publish',
+                    title: Text('Upload',
                         style: TextStyle(color: t.bone, fontSize: 14)),
+                    subtitle: Text('Private · only your devices',
+                        style: TextStyle(color: t.ash, fontSize: 11)),
                     onTap: () => _openPage(const PublishScreen()),
                   ),
                 // My W@tch lives under Settings → Network since the

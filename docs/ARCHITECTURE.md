@@ -44,7 +44,7 @@ is the only remote source, accessed via the
 ├──────────────────────────────────────────────┤
 │               App core (Dart)                 │
 │  lists · metadata matcher · watch state       │
-│  downloads · publish · device sync (My W@tch) │
+│  downloads · upload · device sync (My W@tch)  │
 │  playback controller                          │
 ├──────────────────────┬───────────────────────┤
 │   Autonomi access    │   Metadata fetcher     │
@@ -152,7 +152,7 @@ serves deterministic decrypted bytes) to disk:
 - A downloaded item is the same library entry with a local path — stream vs
   downloaded is a playback-source detail, not a different library.
 
-### Publishing — in-app uploads (shipped alpha.55/.56, desktop)
+### Upload — in-app uploads (shipped alpha.55/.56 as "Publish", renamed Upload 2026-08-27, desktop)
 
 W@tch uploads to Autonomi itself; the `ant` CLI is no longer required for
 the write path. Desktop-only for now (needs the bundled ffmpeg and a
@@ -164,7 +164,7 @@ windowed flow). Two new Rust modules in `watchit_core`:
   available — surfaced in the UI). Create is a BIP-39 12-word ceremony
   (retype-confirm before anything persists); import accepts a raw key or a
   phrase (MetaMask-compatible `m/44'/60'/0'/0/0`); the mnemonic itself is
-  never stored. Settings → Publishing shows the address and live ANT/ETH
+  never stored. Settings → Wallet shows the address and live ANT/ETH
   balances (Arbitrum One). It is deliberately a **hot wallet** — the docs
   and UI say to fund it small.
 - **Upload** (`upload.rs`): a single-slot job around ant-core's
@@ -191,7 +191,7 @@ into the alpha.49 same-title version picker, and each created library
 entry is stamped with its "1080p H.264"-style resolution/codec label so
 the picker shows the full quality line, not just a size. ffmpeg/ffprobe
 are bundled (static builds in the AppImage, shared build in the Windows
-zip); when missing, Publish degrades gracefully to as-is-only uploads
+zip); when missing, Upload degrades gracefully to as-is-only uploads
 with a banner.
 
 Finalize note (fixed alpha.59): for any file over ~12 MiB (more than 3
@@ -254,7 +254,7 @@ LAN plus public bootstrap for remote devices), implemented in
   per-device online dots, last-heard times, and the persisted "Last sync"
   stamp. Server routes (`GET/DELETE /mywatch`, `POST /mywatch/link|join|
   announce`, `GET /mywatch/invite`, `POST /mywatch/sync|art/index|art/
-  fetch`) sit behind the same `x-watchit-auth` shared secret as Publish.
+  fetch`) sit behind the same `x-watchit-auth` shared secret as Upload.
 - **Platforms**: desktop and Android (verified end-to-end on real
   hardware, desktop AppImage ↔ Android phone); iOS is stubbed out for
   now. Devices must be online *together* for changes to travel — there is

@@ -409,7 +409,7 @@ class MyWatchSync {
     result = result.copyWith(artFetched: artFetched);
 
     // 7. Publish our (possibly just-merged) state.
-    _setActivity("Publishing this device's library…");
+    _setActivity("Sending this device's library to your devices…");
     state.snapshot = membershipOf(lists);
     final metaRows = await _localMetaRows();
     final libKeys = libraryLookupKeys(lists);
@@ -454,7 +454,7 @@ class MyWatchSync {
           // Presence counts are cosmetic; the sync itself succeeded.
         }
       } catch (e) {
-        _problems.add('Publishing to your devices failed: $e');
+        _problems.add('Sending your library to your devices failed: $e');
       }
     }
     await _saveState(state);

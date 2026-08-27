@@ -11,7 +11,7 @@ poster-wall library, rich metadata, resume-watching — but **with no server to 
 W@tch is client-only: your media library is one or more lists of files stored
 privately on the decentralized [Autonomi](https://github.com/WithAutonomi/ant-client)
 network, streamed on demand or downloaded for offline watching. And since
-alpha.55 W@tch **uploads too**: the desktop app's Publish page encodes your
+alpha.55 W@tch **uploads too**: the desktop app's Upload page encodes your
 files to universally playable quality tiers and uploads them to the network
 itself, paid from a built-in ANT wallet — no command line needed. And since
 alpha.61 **your devices stay in sync**: link them with **My W@tch** (scan a
@@ -40,13 +40,15 @@ dates and descriptions, plus a one-tap Download season.*
 
 ## How it works
 
-1. **Publish from the app — or upload with the CLI.** On desktop, the
-   drawer's **Publish** page uploads media straight from W@tch: pick one
+1. **Upload from the app — or with the CLI.** On desktop, the
+   drawer's **Upload** page (named *Publish* before 2026-08-27 — renamed
+   because uploads are private; nothing is published) puts media on the
+   network straight from W@tch: pick one
    file or a whole series, choose quality tiers (High 1080p / Medium 720p /
    Low 480p, encoded to play-everywhere H.264/AAC MP4 by the bundled
    ffmpeg — or keep the original as-is), see a live cost estimate, and pay
    with the app's built-in ANT wallet (create or import it under
-   Settings → Publishing; the key lives in the OS keychain — treat it as a
+   Settings → Wallet; the key lives in the OS keychain — treat it as a
    hot wallet and fund it small). The finished upload lands in your library
    ready to play, and its `.datamap` file can be saved to share. Prefer the
    command line? `ant file upload <file>` does the same job (private is the
@@ -65,7 +67,7 @@ dates and descriptions, plus a one-tap Download season.*
    category to organize and display the collection as a poster-wall library. Name
    files with the Plex/Jellyfin convention —
    `Title (Year) {imdb-ttXXXXXXX} - [quality].ext` — **before uploading**; see
-   [docs/NAMING.md](docs/NAMING.md) (the Publish flow keeps names in this
+   [docs/NAMING.md](docs/NAMING.md) (the Upload flow keeps names in this
    convention automatically, re-tagging encoded tiers with their real output
    resolution). For home movies and anything TMDB doesn't know, the detail
    page's **Edit details** editor takes your own title, year, description,

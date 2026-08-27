@@ -68,16 +68,20 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - Lists (manage, import/export)
 - Network (embedded client status, bandwidth limit for downloads)
 - Downloads (storage location, storage used, clear)
-- Publishing (wallet: create with 12-word ceremony + retype confirm,
-  import key/phrase, live ANT/ETH balances, remove)
+- Wallet (renamed from Publishing 2026-08-27: create with 12-word
+  ceremony + retype confirm, import key/phrase, live ANT/ETH balances,
+  remove; one wallet will fund both private uploads and the planned
+  public Channels)
 - Playback (hardware decode, default subtitle language, skip amounts)
 - Appearance (theme, poster size)
 - About / licenses (incl. TMDB attribution notice + logo; the Terms of
   Use & Disclaimer page — also gated on first launch; update-check
   toggle + "Update available" row on desktop)
 
-### 7. Publish (desktop, alpha.55/.56)
-- Drawer tile between Media and Settings (desktop-only)
+### 7. Upload (desktop, alpha.55/.56; renamed from Publish 2026-08-27)
+- Drawer tile between Media and Settings (desktop-only), subtitle
+  "Private · only your devices" — the word "publish" is reserved for
+  the planned public Channels (PLAN-personal-vs-channels.md)
 - Multi-select file pick with "Add more" / per-file remove; per-file
   probe verdict line ("1080p H.264 10-bit — many devices can't play
   this" / "480p H.264 — plays everywhere")
@@ -90,7 +94,7 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   files
 
 ### 8. My W@tch (alpha.61/.62)
-- Drawer tile between Publish and Settings (desktop + Android)
+- Lives under Settings → Network since alpha.63 (desktop + Android)
 - Unlinked: **Link this device** (names the device, shows the invite as
   a QR code + copyable `wtch1-…` code) or **Join** (paste the code, or
   scan the QR with the camera on Android/iOS)
@@ -160,8 +164,8 @@ the home app bar layout: search icon far left, library-drawer hamburger
 far right, and the settings icon removed from the bar (Settings lives
 in the drawer). Alpha.51 adds the Favourites home row (heart on detail
 pages, beside Download since alpha.52). Alpha.54 hides the mouse cursor
-when the player controls fade. Alpha.55/.56 ship the Publish screen and
-the Settings → Publishing wallet described above, plus the update-check
+when the player controls fade. Alpha.55/.56 ship the Upload screen (named Publish until 2026-08-27)
+and the Settings → Wallet section described above, plus the update-check
 toggle and badge in Settings → About. Alpha.57 adds the detail-page
 Edit details editor (pencil in the app bar): title/year/description
 plus artwork from an image file, a 12-frame video-frame picker
@@ -169,7 +173,7 @@ plus artwork from an image file, a 12-frame video-frame picker
 to show and season pages with properly scoped editors, and alpha.59
 adds a crop/zoom step after picking a poster frame. Alpha.60 adds the
 first-launch Terms of Use accept gate (and its read-only page in
-Settings → About) plus the Publish quality explainer dialog. Alpha.61
+Settings → About) plus the upload quality explainer dialog. Alpha.61
 adds the My W@tch drawer page described above (link/join with QR,
 device presence, Sync now) with camera QR scanning on Android;
 alpha.62 makes edits and full-quality artwork ride the same sync.

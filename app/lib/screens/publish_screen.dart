@@ -16,7 +16,13 @@ import '../theme/tokens.dart';
 import 'settings_screen.dart' show promptForText;
 import 'wallet_screen.dart';
 
-/// Publish: upload media files to the Autonomi network from the app.
+/// Upload: put media files on the Autonomi network from the app.
+///
+/// User-facing name is "Upload" (formerly "Publish" — renamed so the
+/// word "publish" stays reserved for the genuinely-public Channels
+/// feature; docs/PLAN-personal-vs-channels.md). Uploads are PRIVATE:
+/// Visibility::Private keeps the datamap off the network. Internal
+/// identifiers keep the Publish* names.
 ///
 /// Multi-file edition — pick one file or a whole series, see per-file
 /// probe verdicts, choose quality tiers (encoded with bundled ffmpeg;
@@ -533,7 +539,7 @@ class _PublishScreenState extends State<PublishScreen> {
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
-        title: Text('Publish', style: TextStyle(color: t.bone, fontSize: 18)),
+        title: Text('Upload', style: TextStyle(color: t.bone, fontSize: 18)),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -552,11 +558,16 @@ class _PublishScreenState extends State<PublishScreen> {
     final queue = _plannedQueue();
     return [
       Text(
-        'Publish media files to the Autonomi network — one file or a '
-        'whole series at once. Published files are permanent — they '
-        'cannot be edited or deleted — and storage is paid once, in ANT, '
-        'from your wallet.',
+        'Upload media files to the Autonomi network — one file or a '
+        'whole series at once. Uploads are private: only you and your '
+        'linked devices can watch. Nothing is published.',
         style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
+      ),
+      const SizedBox(height: 8),
+      Text(
+        'Uploaded files are permanent — they cannot be edited or '
+        'deleted — and storage is paid once, in ANT, from your wallet.',
+        style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
       ),
       const SizedBox(height: 16),
       _walletRow(t),
@@ -564,7 +575,7 @@ class _PublishScreenState extends State<PublishScreen> {
         const SizedBox(height: 12),
         Text(
           'ffmpeg was not found beside the app, so quality tiers are '
-          'unavailable — files can only be published as-is.',
+          'unavailable — files can only be uploaded as-is.',
           style: TextStyle(color: t.rust, fontSize: 12, height: 1.4),
         ),
       ],
@@ -582,10 +593,10 @@ class _PublishScreenState extends State<PublishScreen> {
           contentPadding: EdgeInsets.zero,
           controlAffinity: ListTileControlAffinity.leading,
           title: Text(
-            'I have the right to publish '
+            'I have the right to upload '
             '${_files.length == 1 ? 'this file' : 'these files'} — '
-            '${_files.length == 1 ? 'it is' : 'they are'} my own work or '
-            'verifiably public domain.',
+            '${_files.length == 1 ? 'it is' : 'they are'} my own work, '
+            'verifiably public domain, or a personal copy for private use.',
             style: TextStyle(color: t.bone, fontSize: 13),
           ),
           onChanged: (v) => setState(() => _rights = v ?? false),
@@ -595,8 +606,8 @@ class _PublishScreenState extends State<PublishScreen> {
           onPressed: _canPublish ? _publish : null,
           icon: const Icon(Icons.cloud_upload_outlined),
           label: Text(queue.length <= 1
-              ? 'Publish'
-              : 'Publish ${queue.length} uploads'),
+              ? 'Upload'
+              : 'Upload ${queue.length} files'),
         ),
       ],
     ];
@@ -608,11 +619,11 @@ class _PublishScreenState extends State<PublishScreen> {
         OutlinedButton.icon(
           onPressed: _pickFiles,
           icon: const Icon(Icons.insert_drive_file_outlined),
-          label: const Text('Choose files to publish'),
+          label: const Text('Choose files to upload'),
         ),
         const SizedBox(height: 6),
         Text(
-          'Select several files at once to publish a whole series — '
+          'Select several files at once to upload a whole series — '
           'episodes named like "Show S01E02.mkv" group under one card '
           'in the library.',
           style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
@@ -714,8 +725,8 @@ class _PublishScreenState extends State<PublishScreen> {
       Text(
         'Devices and connections vary — smaller versions play smoothly '
         'where the full-quality file can\'t. Each ticked quality is '
-        'encoded and uploaded for every file it applies to; viewers see '
-        'one card with a version picker.',
+        'encoded and uploaded for every file it applies to; your library '
+        'shows one card with a version picker.',
         style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
       ),
       for (final tier in ordered) _tierTile(t, tier),
@@ -752,15 +763,15 @@ class _PublishScreenState extends State<PublishScreen> {
               Text(
                 'Uploads to Autonomi are permanent — a file can\'t be '
                 'replaced with a re-encoded copy later. Any quality you '
-                'want viewers to have needs to be published now.',
+                'want your devices to have needs to be uploaded now.',
                 style: style,
               ),
               const SizedBox(height: 12),
               Text(
                 'The extra versions don\'t clutter anyone\'s library: '
                 'uploads of the same title share a single card, and its '
-                'page has a version picker where each viewer chooses '
-                'what plays best for them.',
+                'page has a version picker where you choose what plays '
+                'best on each device.',
                 style: style,
               ),
             ],
@@ -961,7 +972,7 @@ class _PublishScreenState extends State<PublishScreen> {
         _current < _queue.length ? _queue[_current] : _queue.last;
     return [
       Text(
-        'Publishing · task ${(_current + 1).clamp(1, _queue.length)} of '
+        'Uploading · task ${(_current + 1).clamp(1, _queue.length)} of '
         '${_queue.length}',
         style: TextStyle(
             color: t.bone, fontSize: 16, fontWeight: FontWeight.w600),
@@ -978,7 +989,7 @@ class _PublishScreenState extends State<PublishScreen> {
         ..._entryProgressSection(t, entry),
       const SizedBox(height: 4),
       Text(
-        'Keep W@tch open until publishing finishes.',
+        'Keep W@tch open until uploading finishes.',
         style: TextStyle(color: t.ash, fontSize: 12),
       ),
       const SizedBox(height: 16),
@@ -1125,7 +1136,7 @@ class _PublishScreenState extends State<PublishScreen> {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Published',
+              'Uploaded',
               style: TextStyle(
                   color: t.bone, fontSize: 18, fontWeight: FontWeight.w600),
             ),
@@ -1134,7 +1145,7 @@ class _PublishScreenState extends State<PublishScreen> {
       ),
       const SizedBox(height: 8),
       Text(
-        '${published.length} of ${_queue.length} uploads published · '
+        '${published.length} of ${_queue.length} uploads finished · '
         'paid ${formatUnits(paid)} ANT'
         '${skipped > 0 ? ' · $skipped skipped' : ''}'
         '${failed > 0 ? ' · $failed failed' : ''}',
@@ -1144,9 +1155,10 @@ class _PublishScreenState extends State<PublishScreen> {
       for (final entry in published) _publishedTile(t, entry),
       const SizedBox(height: 8),
       Text(
-        'The titles are ready to play from your library once added. To '
-        'share them, save the .datamap files and send those (or export a '
-        'list bundle from the Media page).',
+        'The titles are ready to play from your library once added, and '
+        'My W@tch sync carries them to your linked devices. They stay '
+        'private unless you share the .datamap files (or a list bundle '
+        'from the Media page) yourself.',
         style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
       ),
       const SizedBox(height: 20),
@@ -1168,7 +1180,7 @@ class _PublishScreenState extends State<PublishScreen> {
       ],
       TextButton(
         onPressed: _reset,
-        child: Text('Publish more', style: TextStyle(color: t.ash)),
+        child: Text('Upload more', style: TextStyle(color: t.ash)),
       ),
     ];
   }
@@ -1222,7 +1234,7 @@ class _PublishScreenState extends State<PublishScreen> {
   }
 }
 
-/// Desktop platforms are the only place Publish exists this edition
+/// Desktop platforms are the only place Upload exists this edition
 /// (uploads need local files, ffmpeg, and a wallet on disk).
 bool get isDesktopPlatform =>
     Platform.isLinux || Platform.isMacOS || Platform.isWindows;
