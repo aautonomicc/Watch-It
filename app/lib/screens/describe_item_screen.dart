@@ -50,12 +50,26 @@ ParsedName tmdbSearchName(
 class DescribeItemScreen extends StatefulWidget {
   const DescribeItemScreen({
     super.key,
-    required this.entry,
+    this.entry,
+    this.fileName,
+    this.localPath,
     this.ffmpeg,
     this.postersDirProvider,
-  });
+  }) : assert(entry != null || fileName != null,
+            'describe either a library entry or a local file');
 
-  final MediaEntry entry;
+  /// The library entry being described (the add-from-library path), or
+  /// null when describing a not-yet-uploaded local file.
+  final MediaEntry? entry;
+
+  /// File name to describe when there is no library entry yet (the
+  /// channel publish-from-file path) — the metadata row is keyed by the
+  /// name exactly like a library entry's would be, so the later uploads
+  /// resolve to it.
+  final String? fileName;
+
+  /// Local path of that file; frame grabs sample it directly.
+  final String? localPath;
 
   /// Injectable for tests.
   final FfmpegService? ffmpeg;
@@ -80,11 +94,14 @@ class _DescribeItemScreenState extends State<DescribeItemScreen> {
   bool _saving = false;
   bool _checkingTmdb = false;
 
+  String get _name => widget.entry?.name ?? widget.fileName!;
+
   @override
   void initState() {
     super.initState();
-    _meta = MetadataService.instance.metadataFor(widget.entry);
-    _parsed = parseMediaName(widget.entry.name);
+    _meta = MetadataService.instance.metadataFor(
+        widget.entry ?? MediaEntry(name: _name, address: ''));
+    _parsed = parseMediaName(_name);
     // Prefilled from whatever metadata already exists (user edits, or a
     // TMDB match for the rare indexed item).
     _title = TextEditingController(text: _meta.title);
@@ -113,9 +130,13 @@ class _DescribeItemScreenState extends State<DescribeItemScreen> {
   }
 
   ({String path, bool local})? _frameSource() {
-    final local = DownloadManager.instance.localPathIfDone(widget.entry);
+    final localPath = widget.localPath;
+    if (localPath != null) return (path: localPath, local: true);
+    final entry = widget.entry;
+    if (entry == null) return null;
+    final local = DownloadManager.instance.localPathIfDone(entry);
     if (local != null) return (path: local, local: true);
-    final url = streamUrl(EmbeddedClient.baseUrl(), widget.entry);
+    final url = streamUrl(EmbeddedClient.baseUrl(), entry);
     return url == null ? null : (path: url, local: false);
   }
 
@@ -150,8 +171,8 @@ class _DescribeItemScreenState extends State<DescribeItemScreen> {
     final source = _frameSource();
     if (source == null) return;
     var duration = (await _ffmpeg.probe(source.path))?.durationSeconds;
-    if (duration == null || duration <= 0) {
-      final state = await WatchStateStore.instance.stateFor(widget.entry);
+    if ((duration == null || duration <= 0) && widget.entry != null) {
+      final state = await WatchStateStore.instance.stateFor(widget.entry!);
       if (state != null && state.durationMs > 0) {
         duration = state.durationMs / 1000.0;
       }
@@ -296,7 +317,7 @@ class _DescribeItemScreenState extends State<DescribeItemScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           Text(
-            widget.entry.name,
+            _name,
             style: TextStyle(
               fontFamily: wiMonoFamily,
               fontFamilyFallback: wiMonoFallback,

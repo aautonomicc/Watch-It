@@ -90,10 +90,11 @@ dates and descriptions, plus a one-tap Download season.*
 
 6. **Channels (optional, public).** A channel is a public, signed media
    list — "a YouTube channel" for the Autonomi network. Create one on
-   desktop (its own 12-word recovery phrase IS the channel), describe
-   each item you publish — a Check TMDB button fills in title,
-   description, and artwork for known films, handy for a public-domain
-   channel — and share the `wchn1-…` code; anyone who adds
+   desktop (its own 12-word recovery phrase IS the channel), then
+   publish items straight from files on your computer: pick a file,
+   choose the qualities to encode, describe it — a Check TMDB button
+   fills in title, description, and artwork for known films, handy for
+   a public-domain channel — and share the `wchn1-…` code; anyone who adds
    the code sees the channel as a read-only list that updates
    automatically when you publish a new version. Channels are the ONLY
    public thing in W@tch, and the app makes that impossible to miss:

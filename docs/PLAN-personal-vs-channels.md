@@ -260,6 +260,11 @@ Channels screen (two segments, mirroring "My lists | Auto" pattern):
          ├ [+ Publish an item] → pick from uploads → Describe this item
          │     (required metadata, Part 2) → rights attestation (Part 3)
          │     → cost preview → publish (new signed manifest + head)
+         │     [CHANGED 2026-08-27: the primary flow now starts from a
+         │      LOCAL FILE like Upload — choose file → encode tiers →
+         │      Describe → attestation → upload → staged, optional
+         │      add-to-library; "Add an item already in the library"
+         │      keeps the pick-from-uploads path]
          ├ "Update channel" appears when local items/details changed
          └ Recovery phrase backed up ✓ / Show recovery phrase
 

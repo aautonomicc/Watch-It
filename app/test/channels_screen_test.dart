@@ -12,11 +12,18 @@ import 'package:watchit/screens/channels_screen.dart';
 import 'package:watchit/screens/describe_item_screen.dart';
 import 'package:watchit/services/channel_service.dart';
 import 'package:watchit/services/channels_api.dart';
+import 'package:watchit/services/ffmpeg.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/terms.dart';
 import 'package:watchit/theme/tokens.dart';
 
 import 'fake_embedded_http.dart';
+
+/// No-process ffmpeg stand-in — the pushed publish screen probes it.
+class _NoFfmpeg extends FfmpegService {
+  @override
+  Future<bool> get available async => false;
+}
 
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
@@ -44,7 +51,8 @@ void main() {
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(
       theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
-      home: const ChannelsScreen(apiBase: FakeEmbeddedHttp.base),
+      home: ChannelsScreen(
+          apiBase: FakeEmbeddedHttp.base, ffmpeg: _NoFfmpeg()),
     ));
     await tester.pumpAndSettle();
   }
@@ -246,30 +254,51 @@ void main() {
           FilledButton, 'Publish channel · public & permanent');
       expect(tester.widget<FilledButton>(publish).onPressed, isNull);
       expect(find.text('Publish an item'), findsOneWidget);
+      expect(find.text('Add an item already in the library'),
+          findsOneWidget);
     });
 
-    testWidgets('attestation dialog gates on the checkbox',
+    Map<String, dynamic> ownStatus(FakeEmbeddedHttp fake) => {
+          'supported': true,
+          'state': 'ready',
+          'own': {
+            'name': 'Nature Films',
+            'description': '',
+            'pubkey': fake.channelPubkey,
+            'code': fake.channelCode,
+            'seq': 1,
+            'manifest': 'aa' * 32,
+            'created_at_ms': 1,
+            'key_storage': 'keychain',
+            'key_missing': false,
+            'head': null,
+          },
+          'subs': const [],
+        };
+
+    testWidgets(
+        'Publish an item opens the file-first channel publish screen',
+        (tester) async {
+      fake.channelsStatus = ownStatus(fake);
+      await openMine(tester);
+      await tester.tap(find.text('Publish an item'));
+      await tester.pumpAndSettle();
+      // The new Upload-shaped flow: local file first, staged until
+      // Publish update.
+      expect(find.text('Choose a file'), findsOneWidget);
+      expect(find.textContaining('nothing becomes public until'),
+          findsOneWidget);
+      // No library dropdown anywhere on this path.
+      expect(find.text('Pick an item to publish'), findsNothing);
+    });
+
+    testWidgets(
+        'Add an item already in the library opens the picker',
         (tester) async {
       // Library holds one pickable entry; drive the pick → describe is
       // skipped by staging directly — here we only exercise the dialog
-      // path from "Publish an item" through the picker.
-      fake.channelsStatus = {
-        'supported': true,
-        'state': 'ready',
-        'own': {
-          'name': 'Nature Films',
-          'description': '',
-          'pubkey': fake.channelPubkey,
-          'code': fake.channelCode,
-          'seq': 1,
-          'manifest': 'aa' * 32,
-          'created_at_ms': 1,
-          'key_storage': 'keychain',
-          'key_missing': false,
-          'head': null,
-        },
-        'subs': const [],
-      };
+      // path through the picker.
+      fake.channelsStatus = ownStatus(fake);
       await LibraryStore.save([
         const MediaList(
           id: 'mine',
@@ -280,7 +309,7 @@ void main() {
         ),
       ]);
       await openMine(tester);
-      await tester.tap(find.text('Publish an item'));
+      await tester.tap(find.text('Add an item already in the library'));
       await tester.pumpAndSettle();
       expect(find.text('Pick an item to publish'), findsOneWidget);
       expect(find.text('My Film (2026).mp4'), findsOneWidget);
