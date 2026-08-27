@@ -19,6 +19,7 @@ import '../widgets/brand_mark.dart';
 import 'downloads_screen.dart';
 import 'home_layout_screen.dart';
 import 'media_lists_screen.dart';
+import 'my_watch_screen.dart';
 import 'publish_screen.dart' show isDesktopPlatform;
 import 'terms_screen.dart';
 import 'wallet_screen.dart';
@@ -490,6 +491,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     'downloads). The built-in client keeps a few idle '
                     'peer connections on any network.',
                     style: TextStyle(fontSize: 11.5, color: t.ash),
+                  ),
+                ),
+                ListTile(
+                  leading: Icon(Icons.devices_outlined, color: t.accent),
+                  title: Text('My W@tch',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    'Link your devices — watch lists, viewing positions, '
+                    'and detail edits sync automatically',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  trailing: Icon(Icons.chevron_right, color: t.ash),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const MyWatchScreen()),
                   ),
                 ),
                 Padding(

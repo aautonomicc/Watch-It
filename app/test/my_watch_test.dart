@@ -12,6 +12,7 @@ import 'package:watchit/db/app_database.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/screens/my_watch_screen.dart';
 import 'package:watchit/services/library_store.dart';
+import 'package:watchit/services/my_watch_sync.dart';
 import 'package:watchit/theme/tokens.dart';
 
 import 'fake_embedded_http.dart';
@@ -173,9 +174,39 @@ void main() {
       await close(tester);
     });
 
+    testWidgets('sync activity card shows the last outcome and problems',
+        (tester) async {
+      MyWatchSync.status.value = const MyWatchSyncStatus(
+        supported: true,
+        linked: true,
+        agentState: 'ready',
+        lastSummary: 'Synced: 2 added.',
+        problems: ['Artwork for "Custom cut" could not be fetched: refused'],
+      );
+      await open(tester);
+      expect(find.text('Synced: 2 added.'), findsOneWidget);
+      expect(find.textContaining('Artwork for "Custom cut"'), findsOneWidget);
+      // A running cycle swaps the outcome for the live stage.
+      MyWatchSync.status.value = const MyWatchSyncStatus(
+        supported: true,
+        linked: true,
+        agentState: 'ready',
+        syncing: true,
+        activity: 'Fetching artwork…',
+      );
+      await tester.pump();
+      expect(find.text('Fetching artwork…'), findsOneWidget);
+      MyWatchSync.status.value = const MyWatchSyncStatus();
+      await tester.pump();
+      await close(tester);
+    });
+
     testWidgets('unlink confirms, deletes, and returns to unlinked view',
         (tester) async {
       await open(tester);
+      // The sync activity card above can push the button off-screen.
+      await tester.ensureVisible(find.text('Unlink this device'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Unlink this device'));
       await tester.pumpAndSettle();
       expect(find.textContaining('other devices stay linked'), findsOneWidget);

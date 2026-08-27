@@ -309,6 +309,7 @@ void main() {
         apiKeyProvider: () async => '',
         httpClient: MockClient((req) async => http.Response('{}', 404)),
       );
+      MyWatchSync.status.value = const MyWatchSyncStatus();
       fake = FakeEmbeddedHttp();
       HttpOverrides.global = fake;
       fake.myWatchStatus = {
@@ -409,8 +410,8 @@ void main() {
       expect(again, 'Everything is in sync.');
     });
 
-    test('an offline owner leaves the text synced and the art pending',
-        () async {
+    test('a refusing owner leaves the text synced, the art pending, and '
+        'the failure on the status notifier', () async {
       fake.myWatchStatus['devices'] = [
         {
           'agent_id': 'bb' * 32,
@@ -447,6 +448,61 @@ void main() {
       final row = await metadataRowFor('movie:custom:2020');
       expect(row!.title, 'Custom cut');
       expect(row.posterFile, isNull);
+      // The failed pull is visible on the indicator instead of only in
+      // the debug log.
+      expect(
+        MyWatchSync.status.value.problems.single,
+        allOf(contains('Artwork'), contains('Custom cut')),
+      );
+      expect(MyWatchSync.status.value.lastSummary, summary);
+      expect(MyWatchSync.status.value.linked, isTrue);
+      expect(MyWatchSync.status.value.syncing, isFalse);
+    });
+
+    test('presence saying "offline" does not stop an artwork pull — the '
+        'owner is tried anyway', () async {
+      final artBytes = List<int>.generate(5000, (i) => (i * 7) % 251);
+      final sha = crypto.sha256.convert(artBytes).toString();
+      final served = File('${tempDir.path}/offline_owner_art')
+        ..writeAsBytesSync(artBytes);
+      fake.myWatchArtFiles = {sha: served.path};
+      // x0x presence under-reports on real networks; it must order
+      // candidates, never gate them.
+      fake.myWatchStatus['devices'] = [
+        {
+          'agent_id': 'bb' * 32,
+          'self': false,
+          'name': 'desktop',
+          'platform': 'linux',
+          'online': false,
+        },
+      ];
+      fake.myWatchSyncDevices = [
+        {
+          'agent_id': 'bb' * 32,
+          'doc': {
+            'v': 1,
+            'lists': const [],
+            'meta': {
+              'v': 1,
+              'rows': [
+                {
+                  'key': 'movie:custom:2020',
+                  'updated_ms': 7777,
+                  'title': 'Custom cut',
+                  'art': {'sha256': sha, 'size': artBytes.length},
+                },
+              ],
+            },
+          },
+          'maps': const {},
+        },
+      ];
+      final summary = await sync.syncNow();
+      expect(summary, contains('1 artwork file(s) fetched'));
+      final row = await metadataRowFor('movie:custom:2020');
+      expect(row!.posterFile, startsWith('user_'));
+      expect(MyWatchSync.status.value.problems, isEmpty);
     });
 
     test('a local user edit newer than the remote row is kept', () async {

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../models/media_list.dart';
 import '../screens/list_home_screen.dart';
 import '../screens/media_lists_screen.dart';
-import '../screens/my_watch_screen.dart';
 import '../screens/publish_screen.dart';
 import '../screens/settings_screen.dart';
 import '../services/library_arrangement.dart';
@@ -153,16 +152,9 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                         style: TextStyle(color: t.bone, fontSize: 14)),
                     onTap: () => _openPage(const PublishScreen()),
                   ),
-                // All platforms since the Android core gained the x0x
-                // agent; iOS builds get the screen's unsupported notice.
-                ListTile(
-                  dense: true,
-                  leading: Icon(Icons.devices_outlined,
-                      color: t.boneDim, size: 20),
-                  title: Text('My W@tch',
-                      style: TextStyle(color: t.bone, fontSize: 14)),
-                  onTap: () => _openPage(const MyWatchScreen()),
-                ),
+                // My W@tch lives under Settings → Network since the
+                // drawer slimmed down to library navigation + entry
+                // points (the home status bar also links to it).
                 ListTile(
                   dense: true,
                   leading: Icon(Icons.settings_outlined,

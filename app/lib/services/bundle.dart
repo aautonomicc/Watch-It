@@ -325,6 +325,10 @@ Future<BundleBuildResult> buildBundle(
       'stillFile': row.stillFile,
       'showPosterFile': row.showPosterFile,
       'userEdited': row.userEdited,
+      // For userEdited rows this is the edit time — the My W@tch sync's
+      // last-writer-wins stamp. Exporting it keeps an imported bundle
+      // from looking newer than the edits it was made from.
+      'fetchedAt': row.fetchedAt,
     });
     posterFiles.addAll([
       if (row.posterFile != null) row.posterFile!,
@@ -832,7 +836,11 @@ Future<(int, int)> seedMetadataGapFill(
                 posterFile: Value(row['posterFile'] as String?),
                 mediaType: Value(row['mediaType'] as String?),
                 tmdbId: Value(row['tmdbId'] as int?),
-                fetchedAt: now,
+                // Keep the exporter's stamp when it travelled with the
+                // row: stamping `now` made every imported userEdited row
+                // look newer than the original edit, so the real edit
+                // lost the My W@tch LWW merge forever after.
+                fetchedAt: row['fetchedAt'] as int? ?? now,
                 rating: Value((row['rating'] as num?)?.toDouble()),
                 showOverview: Value(row['showOverview'] as String?),
                 seasonOverview: Value(row['seasonOverview'] as String?),

@@ -439,6 +439,12 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
           style: TextStyle(color: t.boneDim),
         ),
       ),
+      // Live activity: what the background cycle is doing right now,
+      // then the last cycle's outcome and anything that went wrong.
+      ValueListenableBuilder<MyWatchSyncStatus>(
+        valueListenable: MyWatchSync.status,
+        builder: (context, s, _) => _syncActivityCard(t, s),
+      ),
       if (status.linkedSinceMs != null && status.linkedSinceMs != 0)
         ListTile(
           contentPadding: EdgeInsets.zero,
@@ -504,6 +510,64 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
               fontSize: 11, color: t.ash, fontFamily: 'monospace'),
         ),
     ];
+  }
+
+  /// The sync progress card: a spinner + stage while a cycle runs, the
+  /// last outcome with its time while idle, and every problem the last
+  /// cycle hit (edits that did not fit the document, artwork that could
+  /// not be fetched, publish failures) — sync trouble used to be
+  /// invisible outside the debug log.
+  Widget _syncActivityCard(WiTokens t, MyWatchSyncStatus s) {
+    final headline = s.syncing
+        ? (s.activity ?? 'Syncing…')
+        : (s.lastSummary ?? 'Waiting for the first sync cycle…');
+    return Card(
+      color: t.ink2,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                if (s.syncing)
+                  const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                else
+                  Icon(
+                    s.problems.isEmpty
+                        ? Icons.check_circle_outline
+                        : Icons.warning_amber_outlined,
+                    size: 16,
+                    color: s.problems.isEmpty ? t.signalOk : t.rust,
+                  ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(headline,
+                      style: TextStyle(fontSize: 13, color: t.bone)),
+                ),
+              ],
+            ),
+            if (!s.syncing && s.lastCycleAtMs != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4, left: 24),
+                child: Text(
+                  'Checked ${relativeTime(s.lastCycleAtMs)}',
+                  style: TextStyle(fontSize: 11.5, color: t.ash),
+                ),
+              ),
+            for (final p in s.problems)
+              Padding(
+                padding: const EdgeInsets.only(top: 6, left: 24),
+                child: Text(p, style: TextStyle(fontSize: 11.5, color: t.rust)),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _deviceTile(WiTokens t, MyWatchDevice device) {

@@ -1073,6 +1073,8 @@ void main() {
       expect(find.textContaining('supersecret'), findsNothing);
 
       // The edit dialog starts empty instead of prefilling the key.
+      await tester.ensureVisible(find.text('TMDB API key'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('TMDB API key'));
       await tester.pumpAndSettle();
       final field = tester.widget<TextField>(find.byType(TextField));

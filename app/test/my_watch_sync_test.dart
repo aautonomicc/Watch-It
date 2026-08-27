@@ -130,6 +130,84 @@ void main() {
     });
   });
 
+  group('buildDocWithinBudget', () {
+    List<WatchState> states(int n) => [
+          // Newest-first, like WatchStateStore.all().
+          for (var i = 0; i < n; i++)
+            WatchState(
+              address: _addr(1000 + i),
+              positionMs: 600000,
+              durationMs: 1200000,
+              completed: false,
+              updatedAt: 999999 - i,
+            ),
+        ];
+
+    List<Map<String, dynamic>> metaRows(int n) => [
+          // Newest-first, like _localMetaRows().
+          for (var i = 0; i < n; i++)
+            {
+              'key': 'movie:title $i:2020',
+              'updated_ms': 5000 - i,
+              'title': 'Edited title $i',
+              'overview': 'd' * 1500,
+            },
+        ];
+
+    test('nothing is dropped while the doc fits', () {
+      final built = MyWatchSync.buildDocWithinBudget(
+        lists: [
+          MediaList(id: 'a', title: 'Movies', entries: [_entry(1)]),
+        ],
+        tombstones: const {},
+        watchStates: states(20),
+        nowMs: 1,
+        metaRows: metaRows(3),
+      );
+      expect(built.watchDropped, 0);
+      expect(built.metaDropped, 0);
+      expect((built.doc['watch'] as List), hasLength(20));
+      expect(((built.doc['meta'] as Map)['rows'] as List), hasLength(3));
+    });
+
+    test('watch states drop before detail edits — a long viewing history '
+        'must not crowd the edits out of the doc', () {
+      // 300 states + 15 fat meta rows is well over the byte budget; the
+      // pre-fix code dropped every meta row and kept all 300 states.
+      final built = MyWatchSync.buildDocWithinBudget(
+        lists: const [],
+        tombstones: const {},
+        watchStates: states(MyWatchSync.maxDocWatchStates),
+        nowMs: 1,
+        metaRows: metaRows(15),
+      );
+      expect(built.metaDropped, 0);
+      expect(built.watchDropped, greaterThan(0));
+      final rows = (built.doc['meta'] as Map)['rows'] as List;
+      expect(rows, hasLength(15));
+      // The trim keeps the newest states (the head of the list).
+      final kept = built.doc['watch'] as List;
+      expect((kept.first as Map)['address'], _addr(1000));
+      expect(kept.length, lessThan(MyWatchSync.maxDocWatchStates));
+    });
+
+    test('meta rows drop oldest-first only once no watch state is left', () {
+      final built = MyWatchSync.buildDocWithinBudget(
+        lists: const [],
+        tombstones: const {},
+        watchStates: const [],
+        nowMs: 1,
+        metaRows: metaRows(60), // ~90 KB of descriptions alone
+      );
+      expect(built.watchDropped, 0);
+      expect(built.metaDropped, greaterThan(0));
+      final rows = (built.doc['meta'] as Map)['rows'] as List;
+      // Newest-first input, dropped from the tail: the newest edits stay.
+      expect((rows.first as Map)['key'], 'movie:title 0:2020');
+      expect(rows, hasLength(60 - built.metaDropped));
+    });
+  });
+
   group('mergeRemoteDocs', () {
     Map<String, dynamic> docWith({
       List<Map<String, dynamic>> entries = const [],
