@@ -1,12 +1,23 @@
 # Plan: Personal media (My W@tch) vs public Channels
 
-**Status: IN PROGRESS (2026-08-27).** Part 1 (the Publish→Upload rename
-release) is implemented: drawer tile Upload + "Private · only your
-devices" subtitle, screen copy reframed private, Settings PUBLISHING →
-WALLET, docs renamed. Parts 2–3 (Channels + safety rails) not started.
-User has agreed to all open questions' recommendations (separate
-channel phrase, no directory in v1, subscribe everywhere, cost preview,
-Part 4 menu layout). Defines the two
+**Status: IMPLEMENTED (2026-08-27).** Part 1 (the Publish→Upload rename)
+shipped as alpha.64. Parts 2–3 (Channels core + safety rails) are
+implemented together on main: Ed25519 channel identity from its own
+12-word phrase (SLIP-0010, wallet-style ceremony), signed manifests
+uploaded publicly (`file_upload_public_with_progress`), head records
+gossiped on an x0x topic derived from the channel pubkey, subscribe →
+read-only auto-updating amber-badged channel lists, Describe-this-item
++ per-item attestation + first-publish typed-name gate + cost preview,
+Terms v2. Implementation deviations from the plan text: the owner's
+signature covers the HEAD record (seq + manifest address) rather than a
+`channel.sig` member inside the zip — content addressing makes the two
+equivalent (the address IS the manifest hash) with much less zip
+machinery; `channel.json` carries advisory seq/previous for the history
+chain. The Describe-this-item category dropdown was dropped — category
+derives from the file name (SxxEyy = episode) exactly like everywhere
+else in the app. User agreed to all open questions' recommendations
+(separate channel phrase, no directory in v1, subscribe everywhere,
+cost preview, Part 4 menu layout). Defines the two
 content spaces, how each works technically, and the naming/safety wall
 between them so nobody publishes copyrighted material publicly by accident.
 

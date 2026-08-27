@@ -4,7 +4,10 @@ library;
 
 /// Bump when the terms change materially — every user is re-prompted to
 /// accept on their next launch (their stored accepted version is lower).
-const kTermsVersion = 1;
+/// v2 (2026-08-27): Channels — public channel publishing gets its own
+/// section (publisher's sole responsibility, irrevocability, the app
+/// neither hosts nor indexes channels).
+const kTermsVersion = 2;
 
 /// One-line lead-in above the sections.
 const kTermsIntro =
@@ -56,7 +59,22 @@ const kTermsSections = [
         'right to make permanently and publicly available.',
   ),
   TermsSection(
-    '5. Wallet and payments',
+    '5. Public channels',
+    'A channel publishes media publicly: anyone holding the channel '
+        'code can fetch and watch it, forever. As a channel publisher '
+        'you are solely responsible for everything your channel makes '
+        'available — only publish content you created yourself or hold '
+        'the rights to distribute publicly. Channel publishes are '
+        'signed by your channel key and are irrevocable: they cannot '
+        'be edited, taken down, or deleted by anyone, and removing an '
+        'item from a channel only stops new subscribers from seeing '
+        'it. The developers do not host, index, distribute, endorse, '
+        'or moderate any channel; channel content reaches you directly '
+        'from the public network, and the prohibited-use terms above '
+        'apply in full to what you publish, watch, and re-share.',
+  ),
+  TermsSection(
+    '6. Wallet and payments',
     'The built-in publishing wallet is a "hot" wallet stored on your '
         'device and controlled only by you. The developers never see, '
         'hold, or have access to your keys or funds, and cannot recover '
@@ -65,7 +83,7 @@ const kTermsSections = [
         'for publishing are non-refundable.',
   ),
   TermsSection(
-    '6. Third-party services',
+    '7. Third-party services',
     'Metadata and artwork can optionally be fetched from TMDB using '
         'your own API key, subject to TMDB\'s terms. On desktop, an '
         'optional update check contacts GitHub. Neither the developers '
@@ -73,14 +91,14 @@ const kTermsSections = [
         'through the app.',
   ),
   TermsSection(
-    '7. No warranty',
+    '8. No warranty',
     'W@tch is alpha software provided "as is" and "as available", '
         'without warranty of any kind, express or implied — including '
         'fitness for a particular purpose and non-infringement. It may '
         'contain bugs, and data loss is possible.',
   ),
   TermsSection(
-    '8. Limitation of liability',
+    '9. Limitation of liability',
     'To the maximum extent permitted by law, the developers and '
         'contributors are not liable for any damages or losses arising '
         'from your use of (or inability to use) the app — including '
@@ -88,13 +106,13 @@ const kTermsSections = [
         'data, or legal claims made against you.',
   ),
   TermsSection(
-    '9. Indemnity',
+    '10. Indemnity',
     'You agree to indemnify and hold the developers and contributors '
         'harmless from any claims, damages, or expenses arising from '
         'your use of the app or your violation of these terms.',
   ),
   TermsSection(
-    '10. Changes to these terms',
+    '11. Changes to these terms',
     'These terms may be updated in a future version of the app. When '
         'they change, you will be asked to accept the new terms before '
         'continuing to use the app.',

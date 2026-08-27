@@ -106,6 +106,42 @@ fn protected_router(engine: &'static Engine) -> Router {
             "/mywatch/art/fetch",
             post(move |body: Bytes| mywatch_art_fetch(engine, body)),
         )
+        // Channels. Protected: creating/publishing spends money and
+        // handles the channel signing key; even subscribe mutates
+        // persistent state only the app should touch.
+        .route("/channels", get(move || channels_status(engine)))
+        .route("/channel", axum::routing::delete(move || channel_remove(engine)))
+        .route("/channel/generate", post(channel_generate))
+        .route(
+            "/channel/create",
+            post(move |body: Bytes| channel_create(engine, body)),
+        )
+        .route(
+            "/channel/restore",
+            post(move |body: Bytes| channel_restore(engine, body)),
+        )
+        .route(
+            "/channel/meta",
+            post(move |body: Bytes| channel_meta(engine, body)),
+        )
+        .route(
+            "/channel/publish",
+            post(move |body: Bytes| channel_publish(engine, body)),
+        )
+        .route(
+            "/channel/subscribe",
+            post(move |body: Bytes| channel_subscribe(engine, body)),
+        )
+        .route(
+            "/channel/subscribe/{pubkey}",
+            axum::routing::delete(move |path: Path<String>| {
+                channel_unsubscribe(engine, path)
+            }),
+        )
+        .route(
+            "/channel/manifest/{addr}",
+            get(move |path: Path<String>| channel_manifest(engine, path)),
+        )
 }
 
 fn open_router(engine: &'static Engine) -> Router {
@@ -680,6 +716,179 @@ async fn mywatch_art_fetch(engine: &'static Engine, body: Bytes) -> Response {
     mywatch_result(engine.mywatch.fetch_art(agent, sha).await)
 }
 
+// ---- Channels -----------------------------------------------------------
+
+/// `GET /channels` — own channel, subscriptions, verified heads, agent
+/// state. Heads are signature-checked in the store; junk written into
+/// the public topics never surfaces here.
+async fn channels_status(engine: &'static Engine) -> Response {
+    json_ok(engine.channels.status().await)
+}
+
+/// `POST /channel/generate` — a fresh 12-word channel phrase + the code
+/// it derives. Nothing is stored (the backup ceremony runs first); the
+/// app POSTs the phrase back to `/channel/create` on confirm.
+async fn channel_generate() -> Response {
+    match crate::channel::generate() {
+        Ok((mnemonic, _secret, code)) => json_ok(serde_json::json!({
+            "mnemonic": mnemonic,
+            "code": code,
+        })),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+/// `POST /channel/create` — `{"name", "description", "mnemonic"}`:
+/// derive + store the channel key, persist the config, join the topic.
+async fn channel_create(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    mywatch_result(
+        engine
+            .channels
+            .create(
+                v["name"].as_str().unwrap_or(""),
+                v["description"].as_str().unwrap_or(""),
+                v["mnemonic"].as_str().unwrap_or(""),
+            )
+            .await,
+    )
+}
+
+/// `POST /channel/restore` — `{"mnemonic"}`: same key, same code,
+/// publishing resumes on this machine.
+async fn channel_restore(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    mywatch_result(
+        engine
+            .channels
+            .restore(v["mnemonic"].as_str().unwrap_or(""))
+            .await,
+    )
+}
+
+/// `POST /channel/meta` — `{"name", "description"}`: update the locally
+/// displayed copy (the canonical copy is in the published manifest).
+async fn channel_meta(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    mywatch_result(
+        engine
+            .channels
+            .set_meta(
+                v["name"].as_str().unwrap_or(""),
+                v["description"].as_str().unwrap_or(""),
+            )
+            .await,
+    )
+}
+
+/// `DELETE /channel` — remove the channel key + config from this device
+/// (the channel itself is frozen at its last head until restored).
+async fn channel_remove(engine: &'static Engine) -> Response {
+    mywatch_result(engine.channels.remove_own().await)
+}
+
+/// `POST /channel/publish` — `{"path": …}`: publish the manifest zip at
+/// `path` publicly and announce the signed head; `{"id": N}` to poll on
+/// `GET /upload/{id}` (same job surface as private uploads).
+async fn channel_publish(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    let Some(path) = v["path"].as_str() else {
+        return (StatusCode::BAD_REQUEST, "body must have \"path\"").into_response();
+    };
+    let path = std::path::PathBuf::from(path);
+    let name = v["name"]
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| "channel manifest".to_string());
+    match engine.start_channel_publish(path, name) {
+        Ok(id) => json_ok(serde_json::json!({ "id": id })),
+        Err(e) if e.contains("already running") => (StatusCode::CONFLICT, e).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+/// `POST /channel/subscribe` — `{"code": "wchn1-…"}`.
+async fn channel_subscribe(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    mywatch_result(
+        engine
+            .channels
+            .subscribe(v["code"].as_str().unwrap_or(""))
+            .await,
+    )
+}
+
+/// `DELETE /channel/subscribe/{pubkey}`.
+async fn channel_unsubscribe(
+    engine: &'static Engine,
+    Path(pubkey): Path<String>,
+) -> Response {
+    mywatch_result(engine.channels.unsubscribe(&pubkey).await)
+}
+
+/// `GET /channel/manifest/{addr}` — fetch a channel manifest from the
+/// network by its public address: data-map chunk first, then the content
+/// itself, returned as the zip bytes. The only place the app fetches a
+/// *data map* over the network — manifests are public by intent
+/// (entries stay datamap-first, docs/PLAN-datamap-privacy.md).
+async fn channel_manifest(engine: &'static Engine, Path(addr_hex): Path<String>) -> Response {
+    /// Matches the app-side bundle cap (kMaxBundleBytes).
+    const MAX_MANIFEST_BYTES: u64 = 200 * 1024 * 1024;
+    let mut addr = [0u8; 32];
+    if hex::decode_to_slice(addr_hex.trim(), &mut addr).is_err() {
+        return (StatusCode::BAD_REQUEST, "address must be 64 hex chars").into_response();
+    }
+    let client = match engine.client().await {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("not connected to the network yet: {e}"),
+            )
+                .into_response()
+        }
+    };
+    let map = match client.data_map_fetch(&addr).await {
+        Ok(m) => m,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!("manifest lookup failed: {e}"),
+            )
+                .into_response()
+        }
+    };
+    if map.original_file_size() as u64 > MAX_MANIFEST_BYTES {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "that address points at something too large to be a channel manifest",
+        )
+            .into_response();
+    }
+    match client.data_download(&map).await {
+        Ok(bytes) => (
+            [(header::CONTENT_TYPE, "application/octet-stream")],
+            bytes.to_vec(),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            format!("manifest download failed: {e}"),
+        )
+            .into_response(),
+    }
+}
+
 async fn serve_xor(
     engine: &'static Engine,
     method: Method,
@@ -1252,6 +1461,161 @@ mod wallet_api_tests {
         let (status, _) = send_auth(&app, "GET", "/upload/99", vec![], None).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
         let _ = std::fs::remove_file(&file);
+    }
+}
+
+#[cfg(test)]
+mod channel_api_tests {
+    use super::*;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    fn test_engine(name: &str) -> &'static Engine {
+        let dir = std::env::temp_dir().join(format!(
+            "wi-channel-api-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let engine: &'static Engine =
+            Box::leak(Box::new(Engine::new(None, dir.to_str())));
+        engine.wallet.disable_keychain();
+        engine.channels.disable_keychain();
+        engine
+    }
+
+    async fn send(
+        app: &Router,
+        method: &str,
+        uri: &str,
+        body: Vec<u8>,
+        token: Option<&str>,
+    ) -> (StatusCode, Vec<u8>) {
+        let mut req = axum::http::Request::builder().method(method).uri(uri);
+        if let Some(t) = token {
+            req = req.header("x-watchit-auth", t);
+        }
+        let res = app
+            .clone()
+            .oneshot(req.body(Body::from(body)).unwrap())
+            .await
+            .unwrap();
+        let status = res.status();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        (status, bytes.to_vec())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn generate_returns_phrase_and_code_without_storing() {
+        let app = router(test_engine("generate"));
+        let (status, body) =
+            send(&app, "POST", "/channel/generate", vec![], None).await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json["mnemonic"].as_str().unwrap().split_whitespace().count(),
+            12
+        );
+        let code = json["code"].as_str().unwrap();
+        assert!(code.starts_with(crate::channel::CODE_PREFIX));
+        crate::channel::pubkey_from_code(code).unwrap();
+        // Nothing was stored: status still reports no channel.
+        let (status, body) = send(&app, "GET", "/channels", vec![], None).await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["state"], serde_json::json!("off"));
+        assert!(json["own"].is_null());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bad_inputs_rejected() {
+        let app = router(test_engine("bad-inputs"));
+        // Subscribe with a My W@tch invite / garbage → 400 with the
+        // channel-code hint.
+        for code in ["wtch1-abcdef", "garbage", ""] {
+            let (status, body) = send(
+                &app,
+                "POST",
+                "/channel/subscribe",
+                serde_json::json!({ "code": code }).to_string().into_bytes(),
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{code}");
+            assert!(String::from_utf8_lossy(&body).contains("channel code"));
+        }
+        // Create with a bad phrase → 400; nothing stored.
+        let (status, _) = send(
+            &app,
+            "POST",
+            "/channel/create",
+            serde_json::json!({ "name": "x", "mnemonic": "not real words" })
+                .to_string()
+                .into_bytes(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        // Create with no name → 400.
+        let (status, body) = send(
+            &app,
+            "POST",
+            "/channel/create",
+            serde_json::json!({
+                "name": " ",
+                "mnemonic": "test test test test test test test test test test test junk",
+            })
+            .to_string()
+            .into_bytes(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(String::from_utf8_lossy(&body).contains("name"));
+        // Publish without a channel → 400.
+        let file = std::env::temp_dir().join("wi-channel-guard-test.zip");
+        std::fs::write(&file, b"PK").unwrap();
+        let (status, body) = send(
+            &app,
+            "POST",
+            "/channel/publish",
+            serde_json::json!({ "path": file.to_str().unwrap() })
+                .to_string()
+                .into_bytes(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(String::from_utf8_lossy(&body).contains("wallet")
+            || String::from_utf8_lossy(&body).contains("channel"));
+        // Unsubscribe from nothing → 400.
+        let (status, _) = send(
+            &app,
+            "DELETE",
+            &format!("/channel/subscribe/{}", "ab".repeat(32)),
+            vec![],
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let _ = std::fs::remove_file(&file);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn channel_routes_are_token_guarded() {
+        let engine = test_engine("auth");
+        let app = router_with_auth(engine, "sekrit");
+        for (method, uri) in [
+            ("GET", "/channels"),
+            ("POST", "/channel/generate"),
+            ("POST", "/channel/subscribe"),
+            ("GET", &format!("/channel/manifest/{}", "11".repeat(32))[..]),
+        ] {
+            let (status, _) = send(&app, method, uri, vec![], None).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {uri}");
+        }
+        let (status, _) =
+            send(&app, "GET", "/channels", vec![], Some("sekrit")).await;
+        assert_eq!(status, StatusCode::OK);
     }
 }
 

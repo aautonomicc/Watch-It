@@ -33,6 +33,12 @@ class WiTokens extends ThemeExtension<WiTokens> {
   /// Same hue as the dark-theme `accent` — fixed across themes.
   static const bucketBlue = Color(0xFF42A5F5);
 
+  /// Channels accent. Every PUBLIC surface (the Channels screen, channel
+  /// badges, channel rows) is amber; the private space stays blue —
+  /// vocabulary and colour are the first safety wall between the two
+  /// content spaces (docs/PLAN-personal-vs-channels.md Part 3).
+  static const channelAmber = Color(0xFFFFB300);
+
   static const dark = WiTokens(
     ink: Color(0xFF0A0A0A),
     ink2: Color(0xFF141414),

@@ -105,6 +105,24 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   positions, edits, and artwork current whenever linked devices are
   online together — the page never needs to be open
 
+### 9. Channels (2026-08-27, unreleased)
+- Drawer tile **Channels** (amber icon, "Public · anyone with the
+  code") — a separate door from the blue Upload tile on purpose; every
+  channel surface carries an amber PUBLIC/CHANNEL badge
+- **Subscribed** segment (default, all platforms): channel cards with
+  name/description/item count/update state, Add channel (paste
+  `wchn1-…` or scan QR on mobile, with the content-comes-from-the-owner
+  note); subscribed channels render on the home wall + drawer as
+  read-only amber-badged lists that update automatically
+- **My Channel** segment (desktop): Create channel → name/description →
+  12-word key ceremony (show → retype 3) → full-screen
+  public/permanent/attributable gate confirmed by typing the channel
+  name; then code + QR to share, backup-status row, the item list
+  subscribers see, "Publish an item" (pick → required
+  Describe-this-item → rights attestation) and "Publish update" with a
+  live cost preview; Restore channel by phrase
+- Settings is untouched — publishing is an activity, not a setting
+
 ## Layout adaptation
 
 | | Mobile (Android/iOS) | Desktop (Linux/Win/Mac) | TV (Android TV, 10-foot) |
@@ -119,7 +137,7 @@ TV notes: larger base type scale (readable at 3 m), no hover-only affordances, t
 entry kept to add/import flows only (paste via network share or a shown-on-TV import
 address is preferred over typing addresses with a remote).
 
-## Built so far (alpha.62)
+## Built so far (alpha.64 + unreleased Channels)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,

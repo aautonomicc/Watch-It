@@ -88,6 +88,17 @@ dates and descriptions, plus a one-tap Download season.*
    discoverable on the network; the invite code *is* the key, so share it
    only with your own devices.
 
+6. **Channels (optional, public).** A channel is a public, signed media
+   list — "a YouTube channel" for the Autonomi network. Create one on
+   desktop (its own 12-word recovery phrase IS the channel), describe
+   each item you publish, and share the `wchn1-…` code; anyone who adds
+   the code sees the channel as a read-only list that updates
+   automatically when you publish a new version. Channels are the ONLY
+   public thing in W@tch, and the app makes that impossible to miss:
+   every channel surface is amber and badged PUBLIC, publishing takes a
+   per-item rights attestation, and everything published is permanent —
+   the network has no delete. Uploads (step 1) stay private.
+
 No server, no accounts, no telemetry. There is deliberately **no Plex/Emby/Jellyfin
 server compatibility** — Autonomi *is* the backend.
 

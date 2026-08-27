@@ -18,6 +18,11 @@ use ant_core::data::{EvmNetwork, Wallet as EvmWallet};
 const KEYCHAIN_SERVICE: &str = "watchit";
 const KEYCHAIN_USER: &str = "upload-wallet";
 
+/// Keychain entry / fallback file for the channel signing key (channels.rs
+/// reuses this store wholesale — same backends, same threading rules).
+pub const CHANNEL_KEYCHAIN_USER: &str = "channel-key";
+pub const CHANNEL_KEY_FILE: &str = "channel.key";
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Storage {
     Keychain,
@@ -37,6 +42,9 @@ pub struct WalletStore {
     /// Fallback key file (`wallet.key` in the data dir); `None` when the
     /// engine runs without a data dir (devserver/tests) — keychain-only.
     file_path: Option<PathBuf>,
+    /// Keychain entry name — the upload wallet and the channel key are
+    /// separate entries in the same keychain service.
+    keychain_user: &'static str,
     /// Whether the OS keychain is tried at all. Off in tests so `cargo
     /// test` can never write into a developer's real keychain.
     use_keychain: AtomicBool,
@@ -45,10 +53,22 @@ pub struct WalletStore {
 
 impl WalletStore {
     pub fn new(data_dir: Option<&str>, use_keychain: bool) -> Self {
+        Self::named(data_dir, use_keychain, KEYCHAIN_USER, "wallet.key")
+    }
+
+    /// A store for a different secret under the same service (the
+    /// channel signing key lives beside the wallet key, never in it).
+    pub fn named(
+        data_dir: Option<&str>,
+        use_keychain: bool,
+        keychain_user: &'static str,
+        file_name: &str,
+    ) -> Self {
         Self {
             file_path: data_dir
                 .filter(|d| !d.trim().is_empty())
-                .map(|d| PathBuf::from(d).join("wallet.key")),
+                .map(|d| PathBuf::from(d).join(file_name)),
+            keychain_user,
             use_keychain: AtomicBool::new(use_keychain),
             cached: RwLock::new(None),
         }
@@ -109,8 +129,9 @@ impl WalletStore {
         if !self.use_keychain.load(Ordering::SeqCst) {
             return None;
         }
+        let user = self.keychain_user;
         std::thread::spawn(move || {
-            let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_USER).ok()?;
+            let entry = keyring::Entry::new(KEYCHAIN_SERVICE, user).ok()?;
             Some(f(entry))
         })
         .join()

@@ -260,6 +260,66 @@ LAN plus public bootstrap for remote devices), implemented in
   now. Devices must be online *together* for changes to travel — there is
   no relay in the middle, by design.
 
+### Channels — public signed media lists (2026-08-27, unreleased)
+
+The PUBLIC content space (docs/PLAN-personal-vs-channels.md; My W@tch +
+Upload are the private space). A **channel** is an Ed25519 identity:
+its code `wchn1-<base32(pubkey)>` is the subscribe handle, its secret
+key is derived from the channel's own 12-word BIP-39 phrase (SLIP-0010
+ed25519 master key — deliberately a separate phrase from the disposable
+hot wallet) via the same show-words → retype-3 ceremony the wallet
+ships, and stored in the OS keychain beside the wallet key
+(`native/watchit_core/src/channel.rs`, `channels.rs`; Dart side
+`services/channel_service.dart` + `channels_api.dart`,
+`screens/channels_screen.dart` + `describe_item_screen.dart`).
+
+- **Manifest**: a bundle-spec-v2 zip (datamap members + metadata.json +
+  posters — the required Describe-this-item edits travel as `userEdited`
+  rows, so keyless subscribers render fully offline) plus
+  `channel.json` (name/description/pubkey + advisory seq/previous
+  history chain). Uploaded PUBLICLY — ant-core's
+  `file_upload_public_with_progress` stores the serialized data map as
+  a fetchable chunk in the same payment batch, so anyone holding the
+  address fetches it via `data_map_fetch` + `data_download`
+  (`GET /channel/manifest/{addr}` — the only network data-map fetch in
+  the app; entries themselves stay datamap-first).
+- **Head distribution** (the mutability layer): the owner gossips a
+  signed head record `{seq, manifest, sig}` into a self-keyed CRDT KV
+  store on an x0x topic derived from the channel pubkey. The topic is
+  public by construction; the store accepts strangers' writes, so heads
+  are trusted purely by Ed25519 signature — readers verify and follow
+  the highest valid seq. Subscribers replicate the store, so late
+  joiners get the newest head from any online subscriber; the owner
+  need not stay online. The channels agent lives under
+  `<data>/channels/` with its own identity, independent of the My W@tch
+  agent.
+- **Subscribing** (`POST /channel/subscribe`, works on every platform):
+  the app follows the verified head, fetches + imports the manifest as
+  a read-only amber-badged **channel list** (media_lists.channel_pubkey,
+  schema v10) that renders on the normal home wall/drawer and replaces
+  wholesale when a newer signed head arrives (5-min background check +
+  manual refresh). Unsubscribe deletes the list + replicated store.
+- **Publishing** (desktop-only, needs the wallet): items enter one
+  explicit pick at a time — pick → required Describe-this-item (title,
+  description, artwork mandatory; saved as a normal Edit-details row)
+  → per-item rights attestation → staged; Publish update builds the
+  manifest, shows a live cost preview (`/upload/estimate` + balance),
+  runs the paid public upload job (`POST /channel/publish`, same job
+  surface as Upload + an `announcing` phase for the head) and bumps the
+  seq. Since self-encryption is deterministic, chunks of an
+  already-uploaded item cost nothing — only the manifest is new.
+- **Safety rails** (plan Part 3): "publish" is reserved for channels
+  ("upload" = private); every channel surface is amber with a PUBLIC
+  badge (blue = private); separate drawer doors (never a toggle on
+  Upload); full-screen public/permanent/attributable gate with
+  type-the-channel-name confirm before the channel exists; Terms v2
+  adds the channel-publishing section (kTermsVersion 2 → re-prompt).
+- **Recovery**: losing the key freezes the channel at its last head
+  forever, so backup IS creation (the ceremony runs before the channel
+  exists). "Restore channel" re-derives the same key/code from the
+  phrase, learns its own newest head from the gossip store, and pulls
+  the manifest back to repopulate the item list.
+
 ### Playback
 
 - `media_kit` (libmpv) everywhere; plays local files (downloads) and the embedded

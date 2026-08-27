@@ -17,6 +17,7 @@ import 'services/connectivity.dart';
 import 'services/download_foreground.dart';
 import 'services/download_manager.dart';
 import 'services/embedded_client.dart';
+import 'services/channel_service.dart';
 import 'services/favourites.dart';
 import 'services/home_rows.dart';
 import 'services/home_sections.dart';
@@ -36,6 +37,7 @@ import 'services/watch_state.dart';
 import 'theme/tokens.dart';
 import 'widgets/brand_mark.dart';
 import 'widgets/download_badge.dart';
+import 'widgets/channel_badge.dart';
 import 'widgets/downloads_indicator.dart';
 import 'widgets/library_drawer.dart';
 import 'widgets/messenger.dart';
@@ -112,6 +114,9 @@ Future<void> main() async {
   // into the link store and merges the other devices' changes, every 30s
   // while linked (a silent no-op otherwise).
   MyWatchSync.instance.start();
+  // Channels auto-update: follows subscribed channels' signed heads and
+  // imports newer manifests (a silent no-op with no subscriptions).
+  ChannelService.instance.start();
   runApp(const WatchItApp());
 }
 
@@ -215,6 +220,8 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     WatchStateStore.instance.addListener(_reloadRows);
     // A background My W@tch sync can add/remove list entries under us.
     MyWatchSync.revision.addListener(_reload);
+    // A channel auto-update can replace a channel list under us.
+    ChannelService.revision.addListener(_reload);
     // Wall cards badge their download state — have the queue loaded.
     unawaited(DownloadManager.instance.ensureLoaded());
     _reload();
@@ -231,6 +238,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     wiRouteObserver.unsubscribe(this);
     WatchStateStore.instance.removeListener(_reloadRows);
     MyWatchSync.revision.removeListener(_reload);
+    ChannelService.revision.removeListener(_reload);
     super.dispose();
   }
 
@@ -558,7 +566,31 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   List<Widget> _listSection(WiTokens t, MediaList? list) {
     if (list == null) return const [];
     return [
-      _sectionTitle(t, list.title),
+      // Channel rows are badged amber — public content is visibly not
+      // "your" list even where it renders like one.
+      if (list.isChannel)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Row(
+            children: [
+              Flexible(
+                child: Text(
+                  list.title,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: t.bone,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              const ChannelBadge(),
+            ],
+          ),
+        )
+      else
+        _sectionTitle(t, list.title),
       if (list.entries.isEmpty)
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
