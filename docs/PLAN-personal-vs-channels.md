@@ -1,6 +1,12 @@
 # Plan: Personal media (My W@tch) vs public Channels
 
-**Status: PLAN ONLY (2026-08-27). Nothing implemented.** Defines the two
+**Status: IN PROGRESS (2026-08-27).** Part 1 (the Publish→Upload rename
+release) is implemented: drawer tile Upload + "Private · only your
+devices" subtitle, screen copy reframed private, Settings PUBLISHING →
+WALLET, docs renamed. Parts 2–3 (Channels + safety rails) not started.
+User has agreed to all open questions' recommendations (separate
+channel phrase, no directory in v1, subscribe everywhere, cost preview,
+Part 4 menu layout). Defines the two
 content spaces, how each works technically, and the naming/safety wall
 between them so nobody publishes copyrighted material publicly by accident.
 

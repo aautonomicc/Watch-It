@@ -395,7 +395,7 @@ upgrade-flag rules, and the regeneration procedure live in
       hamburger far right, top-right settings icon removed; home
       reloads after any pushed page pops (route-observer fix)
 
-## Publish — in-app uploads (shipped 2026-08-25, v0.1.0-alpha.55/.56/.57)
+## Upload — in-app uploads (shipped 2026-08-25 as "Publish", v0.1.0-alpha.55/.56/.57; renamed Upload 2026-08-27)
 
 W@tch now uploads to Autonomi itself — no CLI needed. Desktop-only for
 now (the pipeline needs bundled ffmpeg and a windowed flow); plan and
@@ -451,7 +451,7 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       published entries are stamped with their "1080p H.264"
       resolution/codec label so the picker shows the full quality
       line, matching imported entries (post-alpha.62, next release)
-- [ ] Publish on Android/iOS (desktop-only today)
+- [ ] Upload on Android/iOS (desktop-only today)
 - [ ] External signer / WalletConnect (the internal hot wallet is the
       only signing path today)
 - [ ] True self-update (the check only notifies; AppImageUpdate/zsync
@@ -515,8 +515,10 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
 
 ## Later / ideas parking lot
 - Publish/subscribe community lists on Autonomi (curated "channels") —
-  must default private (a datamap list published at a public address
-  re-leaks every title; see PLAN-datamap-privacy.md)
+  now PLANNED as the public Channels feature: signed manifests + x0x
+  head distribution, see PLAN-personal-vs-channels.md (a datamap list
+  published at a public address re-leaks every title, so channels use
+  deliberate per-item public publishing, never a library export)
 - ~~Watch-state + list sync between devices~~ — **shipped** as My W@tch
   (alpha.61/.62, via x0x rather than Autonomi — see the section above)
 - tvOS (Apple TV) layout — Android TV is now in Phase 4

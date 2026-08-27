@@ -136,7 +136,7 @@ void main() {
   }
 
   Future<void> pickAndEstimate(WidgetTester tester) async {
-    await tester.tap(find.text('Choose files to publish'));
+    await tester.tap(find.text('Choose files to upload'));
     await tester.pumpAndSettle();
   }
 
@@ -155,7 +155,7 @@ void main() {
     await openPublish(tester, _FakeFfmpeg({}));
     expect(find.text('No wallet set up yet'), findsOneWidget);
     expect(find.text('Set up wallet'), findsOneWidget);
-    expect(find.text('Choose files to publish'), findsOneWidget);
+    expect(find.text('Choose files to upload'), findsOneWidget);
   });
 
   testWidgets(
@@ -189,7 +189,7 @@ void main() {
     expect(find.textContaining('estimated cost ≈0.25 ANT'), findsOneWidget);
 
     // Publish is gated on the rights checkbox.
-    final publishButton = find.widgetWithText(FilledButton, 'Publish');
+    final publishButton = find.widgetWithText(FilledButton, 'Upload');
     expect(tester.widget<FilledButton>(publishButton).onPressed, isNull);
     await tester.tap(find.byType(CheckboxListTile));
     await tester.pump();
@@ -209,8 +209,8 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
 
-    expect(find.text('Published'), findsOneWidget);
-    expect(find.textContaining('1 of 1 uploads published'), findsOneWidget);
+    expect(find.text('Uploaded'), findsOneWidget);
+    expect(find.textContaining('1 of 1 uploads finished'), findsOneWidget);
     expect(find.textContaining('paid 0.25 ANT'), findsOneWidget);
     expect(find.text('Add to library'), findsOneWidget);
     expect(find.text('Save .datamap file'), findsOneWidget);
@@ -242,12 +242,12 @@ void main() {
 
     await tester.tap(find.byType(CheckboxListTile).last); // rights
     await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, 'Publish 2 uploads'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Upload 2 files'));
     await tester.pump();
     await pumpUploads(tester, 2);
 
-    expect(find.text('Published'), findsOneWidget);
-    expect(find.textContaining('2 of 2 uploads published'), findsOneWidget);
+    expect(find.text('Uploaded'), findsOneWidget);
+    expect(find.textContaining('2 of 2 uploads finished'), findsOneWidget);
     expect(find.textContaining('paid 0.5 ANT'), findsOneWidget);
 
     await tester.tap(find.text('Add to library'));
@@ -309,7 +309,7 @@ void main() {
     // Rights checkbox is the last CheckboxListTile on the page.
     await tester.tap(find.byType(CheckboxListTile).last);
     await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, 'Publish 2 uploads'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Upload 2 files'));
     await tester.pump();
     await pumpUploads(tester, 2);
 
@@ -317,8 +317,8 @@ void main() {
       'Movie (2020).mkv → Movie (2020) [1080p].mp4',
       'Movie (2020).mkv → Movie (2020) [720p].mp4',
     ]);
-    expect(find.text('Published'), findsOneWidget);
-    expect(find.textContaining('2 of 2 uploads published'), findsOneWidget);
+    expect(find.text('Uploaded'), findsOneWidget);
+    expect(find.textContaining('2 of 2 uploads finished'), findsOneWidget);
     expect(find.textContaining('Movie (2020) [1080p].mp4'), findsWidgets);
     expect(find.textContaining('Movie (2020) [720p].mp4'), findsWidgets);
   });
@@ -402,7 +402,7 @@ void main() {
     await pickAndEstimate(tester);
     await tester.tap(find.byType(CheckboxListTile));
     await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, 'Publish'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Upload'));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
@@ -414,12 +414,12 @@ void main() {
 
     await tester.tap(find.text('Skip this file'));
     await tester.pumpAndSettle();
-    expect(find.text('Published'), findsOneWidget);
-    expect(find.textContaining('0 of 1 uploads published'), findsOneWidget);
+    expect(find.text('Uploaded'), findsOneWidget);
+    expect(find.textContaining('0 of 1 uploads finished'), findsOneWidget);
     expect(find.textContaining('1 skipped'), findsOneWidget);
     // Nothing published → no add-to-library offer.
     expect(find.text('Add to library'), findsNothing);
-    expect(find.text('Publish more'), findsOneWidget);
+    expect(find.text('Upload more'), findsOneWidget);
   });
 
   testWidgets('ffmpeg missing: as-is only banner, publish still works',
@@ -435,10 +435,10 @@ void main() {
     expect(find.textContaining('1 upload · estimated cost'), findsOneWidget);
     await tester.tap(find.byType(CheckboxListTile));
     await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, 'Publish'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Upload'));
     await tester.pump();
     await pumpUploads(tester, 1);
-    expect(find.text('Published'), findsOneWidget);
-    expect(find.textContaining('1 of 1 uploads published'), findsOneWidget);
+    expect(find.text('Uploaded'), findsOneWidget);
+    expect(find.textContaining('1 of 1 uploads finished'), findsOneWidget);
   });
 }

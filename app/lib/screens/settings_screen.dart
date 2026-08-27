@@ -602,13 +602,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
                 ),
-                // Desktop-only this edition (Publish is): see
-                // docs/PLAN-alpha55.md.
+                // Desktop-only this edition (Upload is): see
+                // docs/PLAN-alpha55.md. Section named WALLET (not
+                // PUBLISHING) since the Publish→Upload rename — one
+                // wallet funds both spaces
+                // (docs/PLAN-personal-vs-channels.md).
                 if (isDesktopPlatform) ...[
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
                     child: Text(
-                      'PUBLISHING',
+                      'WALLET',
                       style: TextStyle(
                         fontSize: 11,
                         letterSpacing: 1.5,
@@ -623,7 +626,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     title: Text('Wallet',
                         style: TextStyle(color: t.bone, fontSize: 15)),
                     subtitle: Text(
-                      'The ANT wallet that pays for publishing files to '
+                      'The ANT wallet that pays for uploading files to '
                       'the network',
                       style: TextStyle(color: t.ash, fontSize: 12),
                     ),

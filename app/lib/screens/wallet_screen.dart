@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import '../services/publish_api.dart';
 import '../theme/tokens.dart';
 
-/// Settings → Wallet: the internal upload wallet behind Publish.
+/// Settings → Wallet: the internal upload wallet behind Upload.
 ///
 /// Two ways in — generate (BIP-39 seed words shown once, confirm-by-
 /// retyping ceremony, only the derived key persists) or import an
@@ -182,14 +182,14 @@ class _WalletScreenState extends State<WalletScreen> {
       padding: const EdgeInsets.all(16),
       children: [
         Text(
-          'Publishing to the Autonomi network is paid in ANT, from a '
+          'Uploading to the Autonomi network is paid in ANT, from a '
           'wallet that lives on this computer.',
           style: TextStyle(color: t.bone, fontSize: 14, height: 1.4),
         ),
         const SizedBox(height: 12),
         Text(
           'Treat it as a hot wallet: use a dedicated wallet just for '
-          'publishing and keep only small amounts in it — not your main '
+          'W@tch and keep only small amounts in it — not your main '
           'holdings.',
           style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
         ),

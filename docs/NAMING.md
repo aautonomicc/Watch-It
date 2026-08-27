@@ -50,23 +50,24 @@ Rules of thumb:
   finds the show on TMDB and pulls the episode name and synopsis, the show
   poster, and genres.
 
-## Publishing from the app
+## Uploading from the app
 
-The desktop **Publish** flow (alpha.55+) applies this convention
+The desktop **Upload** flow (alpha.55+, named *Publish* before
+2026-08-27) applies this convention
 automatically. When a quality tier re-encodes a file, the output keeps the
 source name with the resolution tag replaced by the *real* output height —
 `Title (Year) [720p].mp4` for the Medium tier, or `[360p]` for a 360p
 source on the Low tier (the encoder never upscales) — and the extension
 switched to `.mp4`. Episode markers (`SxxEyy`) are preserved, so multiple
 tiers of one title fold into the same card's version picker. A file
-published **as-is** (the Original tier) normally keeps its name, but when
+uploaded **as-is** (the Original tier) normally keeps its name, but when
 it already plays everywhere (H.264 8-bit MP4, ≤1080p — the case where
 Original stands in for an encode tier) it gains its real resolution tag
-too, so a 1080p `Movie.mp4` publishes as `Movie [1080p].mp4` and lines up
+too, so a 1080p `Movie.mp4` uploads as `Movie [1080p].mp4` and lines up
 with any encoded siblings. Name your source files per this convention
-before publishing and the tags take care of themselves.
+before uploading and the tags take care of themselves.
 
-Beyond the file name, Publish also stamps each library entry it creates
+Beyond the file name, Upload also stamps each library entry it creates
 with a **resolution + codec label** ("1080p H.264") — the same label
 imported and seeded entries carry — so the detail page's version picker
 shows the full `1080p H.264 · 1.1 GB` line for every tier instead of just
