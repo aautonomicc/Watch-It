@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:watchit/models/media_list.dart';
+import 'package:watchit/services/channel_service.dart';
+import 'package:watchit/services/my_watch_api.dart';
 import 'package:watchit/services/my_watch_sync.dart';
 import 'package:watchit/services/watch_state.dart';
 
@@ -390,6 +392,225 @@ void main() {
       expect(addrs(aMerged.lists), {_addr(1), _addr(2), _addr(4)});
       expect(addrs(bMerged.lists), {_addr(1), _addr(2), _addr(4)});
       expect(bMerged.tombstones['movies']![_addr(3)], 900);
+    });
+  });
+
+  group('channel lists stay out of personal sync', () {
+    MediaList channelList({String title = 'Nature Films'}) => MediaList(
+          id: 'channel-x',
+          title: title,
+          entries: [_entry(9, addedMs: 500)],
+          channelPubkey: 'ab' * 32,
+        );
+
+    test('membershipOf and libraryLookupKeys skip channel lists', () {
+      final lists = [
+        MediaList(id: 'a', title: 'Movies', entries: [_entry(1)]),
+        channelList(),
+      ];
+      expect(MyWatchSync.membershipOf(lists).keys, ['movies']);
+      expect(MyWatchSync.libraryLookupKeys(lists),
+          MyWatchSync.libraryLookupKeys(lists.sublist(0, 1)));
+    });
+
+    test('buildDoc omits channel lists and carries the channels section',
+        () {
+      final doc = MyWatchSync.buildDoc(
+        lists: [
+          MediaList(id: 'a', title: 'Movies', entries: [_entry(1)]),
+          channelList(),
+        ],
+        tombstones: const {},
+        watchStates: const [],
+        nowMs: 1000,
+        channelSubs: {
+          'cd' * 32: const ChannelSyncSub(code: 'wchn1-abc', addedMs: 42),
+        },
+        channelStones: {'ee' * 32: 77},
+      );
+      expect([for (final l in doc['lists'] as List) l['title']], ['Movies']);
+      expect(doc['channels'], {
+        'subs': {
+          'cd' * 32: {'code': 'wchn1-abc', 'added_ms': 42},
+        },
+        'removed': {'ee' * 32: 77},
+      });
+    });
+
+    test('buildDoc has no channels section when there is nothing to say',
+        () {
+      final doc = MyWatchSync.buildDoc(
+        lists: const [],
+        tombstones: const {},
+        watchStates: const [],
+        nowMs: 1000,
+      );
+      expect(doc.containsKey('channels'), isFalse);
+    });
+
+    test('remote personal lists never merge into a channel list', () {
+      final result = MyWatchSync.mergeRemoteDocs(
+        lists: [channelList()],
+        tombstones: const {},
+        remoteDocs: [
+          {
+            'lists': [
+              {
+                'title': 'Nature Films',
+                'entries': [
+                  {'name': 'Old.mp4', 'address': _addr(7), 'added_ms': 10},
+                ],
+              },
+            ],
+          },
+        ],
+      );
+      expect(result.changed, isFalse);
+      expect(result.lists.single.entries.single.address, _addr(9));
+    });
+
+    test('tombstones never strip a channel list', () {
+      final result = MyWatchSync.mergeRemoteDocs(
+        lists: [channelList()],
+        tombstones: const {},
+        remoteDocs: [
+          {
+            'lists': [
+              {
+                'title': 'Nature Films',
+                'entries': const [],
+                'removed': {_addr(9): 999999},
+              },
+            ],
+          },
+        ],
+      );
+      expect(result.lists.single.entries.single.address, _addr(9));
+      // The stone itself is still adopted (it cleans up badge-less
+      // copies of the old sync format on other devices).
+      expect(result.tombstones['nature films']![_addr(9)], 999999);
+    });
+  });
+
+  group('channelActions', () {
+    RemoteSyncDoc docWith({
+      Map<String, dynamic> subs = const {},
+      Map<String, dynamic> removed = const {},
+    }) =>
+        RemoteSyncDoc(agentId: 'peer', doc: {
+          'channels': {'subs': subs, 'removed': removed},
+        }, maps: const {});
+
+    final pk = 'cd' * 32;
+
+    test('a remote subscription this device lacks is subscribed', () {
+      final actions = MyWatchSync.channelActions(
+        localSubs: const {},
+        localStones: const {},
+        ownPubkey: null,
+        remote: [
+          docWith(subs: {
+            pk: {'code': 'wchn1-abc', 'added_ms': 42},
+          }),
+        ],
+      );
+      expect(actions.subscribe.single.pubkey, pk);
+      expect(actions.subscribe.single.code, 'wchn1-abc');
+      expect(actions.subscribe.single.addedMs, 42);
+      expect(actions.unsubscribe, isEmpty);
+    });
+
+    test('own channel and existing subscriptions are not re-subscribed',
+        () {
+      final actions = MyWatchSync.channelActions(
+        localSubs: {
+          'ee' * 32: const ChannelSyncSub(code: 'wchn1-e', addedMs: 1),
+        },
+        localStones: const {},
+        ownPubkey: pk,
+        remote: [
+          docWith(subs: {
+            pk: {'code': 'wchn1-own', 'added_ms': 42},
+            'ee' * 32: {'code': 'wchn1-e', 'added_ms': 42},
+          }),
+        ],
+      );
+      expect(actions.subscribe, isEmpty);
+      expect(actions.unsubscribe, isEmpty);
+    });
+
+    test('a tombstone at or after the newest add wins', () {
+      final actions = MyWatchSync.channelActions(
+        localSubs: const {},
+        localStones: const {},
+        ownPubkey: null,
+        remote: [
+          docWith(subs: {
+            pk: {'code': 'wchn1-abc', 'added_ms': 42},
+          }, removed: {
+            pk: 42,
+          }),
+        ],
+      );
+      expect(actions.subscribe, isEmpty);
+      expect(actions.stones, {pk: 42});
+    });
+
+    test('a newer tombstone unsubscribes, carrying the stone time', () {
+      final actions = MyWatchSync.channelActions(
+        localSubs: {
+          pk: const ChannelSyncSub(code: 'wchn1-abc', addedMs: 40),
+        },
+        localStones: const {},
+        ownPubkey: null,
+        remote: [
+          docWith(removed: {pk: 50}),
+        ],
+      );
+      expect(actions.unsubscribe, {pk: 50});
+    });
+
+    test('a re-subscribe newer than the tombstone stands', () {
+      final actions = MyWatchSync.channelActions(
+        localSubs: {
+          pk: const ChannelSyncSub(code: 'wchn1-abc', addedMs: 60),
+        },
+        localStones: {pk: 50},
+        ownPubkey: null,
+        remote: [docWith()],
+      );
+      expect(actions.unsubscribe, isEmpty);
+    });
+
+    test('only stones newer than local ones are adopted', () {
+      final actions = MyWatchSync.channelActions(
+        localSubs: const {},
+        localStones: {pk: 100},
+        ownPubkey: null,
+        remote: [
+          docWith(removed: {pk: 90, 'ee' * 32: 10}),
+        ],
+      );
+      expect(actions.stones, {'ee' * 32: 10});
+    });
+
+    test('bad pubkeys and codes are ignored', () {
+      final actions = MyWatchSync.channelActions(
+        localSubs: const {},
+        localStones: const {},
+        ownPubkey: null,
+        remote: [
+          docWith(subs: {
+            'not-hex': {'code': 'wchn1-abc', 'added_ms': 42},
+            pk: {'code': 'https://evil', 'added_ms': 42},
+            'ff' * 32: {'code': 'wchn1-abc', 'added_ms': 0},
+          }, removed: {
+            'nope': 42,
+          }),
+        ],
+      );
+      expect(actions.subscribe, isEmpty);
+      expect(actions.stones, isEmpty);
     });
   });
 }

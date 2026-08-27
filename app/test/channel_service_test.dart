@@ -279,4 +279,157 @@ void main() {
           throwsA(isA<PublishApiException>()));
     });
   });
+
+  group('own channel in the library', () {
+    final pubkey = 'ab' * 32; // matches manifestZip's default (lowercased)
+    final manifestAddr = 'ee' * 32;
+
+    void seedOwn({Map<String, dynamic>? head, String name = 'Nature Films'}) {
+      fake.channelsStatus = {
+        'supported': true,
+        'state': 'ready',
+        'own': {
+          'name': name,
+          'description': '',
+          'pubkey': pubkey,
+          'code': 'wchn1-own',
+          'seq': head?['seq'] ?? 0,
+          'manifest': '',
+          'created_at_ms': 5,
+          'head': head,
+        },
+        'subs': const [],
+      };
+    }
+
+    test('a freshly created channel appears as an empty amber list',
+        () async {
+      seedOwn();
+      await ChannelService.instance.syncNow();
+      final lists = await LibraryStore.load();
+      final channel = lists.singleWhere((l) => l.channelPubkey == pubkey);
+      expect(channel.isChannel, isTrue);
+      expect(channel.title, 'Nature Films');
+      expect(channel.entries, isEmpty);
+    });
+
+    test('a rename before the first publish follows the config name',
+        () async {
+      seedOwn();
+      await ChannelService.instance.syncNow();
+      seedOwn(name: 'Nature Films HD');
+      await ChannelService.instance.syncNow();
+      final lists = await LibraryStore.load();
+      final channel = lists.singleWhere((l) => l.channelPubkey == pubkey);
+      expect(channel.title, 'Nature Films HD');
+      expect(lists.where((l) => l.isChannel).length, 1);
+    });
+
+    test('a published head imports the manifest into the own list',
+        () async {
+      seedOwn(head: {'seq': 1, 'manifest': manifestAddr});
+      fake.channelManifests[manifestAddr] = manifestZip(pubkey: pubkey);
+      await ChannelService.instance.syncNow();
+      final lists = await LibraryStore.load();
+      final channel = lists.singleWhere((l) => l.channelPubkey == pubkey);
+      expect(channel.title, 'Nature Films');
+      expect(channel.entries.single.address, '11' * 32);
+      expect(ChannelService.instance.lastProblem, isEmpty);
+      // The imported seq is remembered — no refetch on the next check.
+      fake.requests.clear();
+      await ChannelService.instance.syncNow();
+      expect(fake.requests.where((r) => r.contains('/channel/manifest/')),
+          isEmpty);
+    });
+
+    test('removing the channel removes its list', () async {
+      seedOwn();
+      await ChannelService.instance.syncNow();
+      fake.channelsStatus = {
+        'supported': true,
+        'state': 'ready',
+        'own': null,
+        'subs': const [],
+      };
+      await ChannelService.instance.syncNow();
+      final lists = await LibraryStore.load();
+      expect(lists.where((l) => l.isChannel), isEmpty);
+    });
+
+    test('a failed manifest fetch still leaves the list standing',
+        () async {
+      seedOwn(head: {'seq': 1, 'manifest': manifestAddr});
+      // No manifest served — the fetch 404s.
+      await ChannelService.instance.syncNow();
+      final lists = await LibraryStore.load();
+      expect(lists.singleWhere((l) => l.channelPubkey == pubkey).entries,
+          isEmpty);
+      expect(ChannelService.instance.lastProblem[pubkey], isNotNull);
+    });
+  });
+
+  group('sync view + tombstones', () {
+    test('unsubscribe leaves a tombstone; re-subscribe keeps its own time',
+        () async {
+      final code = 'wchn1-${'b' * 52}';
+      await ChannelService.instance.subscribe(code, addedMs: 111);
+      final pubkey = FakeEmbeddedHttp.subscribePubkeyFor(code);
+      final record = await ChannelService.instance.record(pubkey);
+      expect(record!.addedMs, 111);
+      await ChannelService.instance.unsubscribe(pubkey, removedMs: 222);
+      expect(await ChannelService.instance.subStones(), {pubkey: 222});
+      // An older stone never regresses a newer one.
+      await ChannelService.instance.unsubscribe(pubkey, removedMs: 5);
+      expect(await ChannelService.instance.subStones(), {pubkey: 222});
+    });
+
+    test('adoptSubStones keeps only newer stones', () async {
+      await ChannelService.instance
+          .adoptSubStones({'aa' * 32: 100, 'bb' * 32: 50});
+      await ChannelService.instance
+          .adoptSubStones({'aa' * 32: 90, 'bb' * 32: 60});
+      expect(await ChannelService.instance.subStones(),
+          {'aa' * 32: 100, 'bb' * 32: 60});
+    });
+
+    test('syncView carries subs with codes, stones, and the own channel',
+        () async {
+      final subPubkey = 'cd' * 32;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('channel_subs_v1',
+          jsonEncode({subPubkey: {'addedMs': 777, 'importedSeq': 1}}));
+      await prefs.setString(
+          'channel_sub_stones_v1', jsonEncode({'ee' * 32: 42}));
+      fake.channelsStatus = {
+        'supported': true,
+        'state': 'ready',
+        'own': {
+          'name': 'Mine',
+          'description': '',
+          'pubkey': 'ab' * 32,
+          'code': 'wchn1-own',
+          'seq': 0,
+          'manifest': '',
+          'created_at_ms': 5,
+          'head': null,
+        },
+        'subs': [
+          {'pubkey': subPubkey, 'code': 'wchn1-sub', 'head': null},
+        ],
+      };
+      final view = await ChannelService.instance.syncView();
+      expect(view, isNotNull);
+      expect(view!.subs[subPubkey]!.code, 'wchn1-sub');
+      expect(view.subs[subPubkey]!.addedMs, 777);
+      expect(view.stones, {'ee' * 32: 42});
+      expect(view.ownPubkey, 'ab' * 32);
+      expect(view.ownCode, 'wchn1-own');
+      expect(view.ownAddedMs, 5);
+    });
+
+    test('syncView is null while channels are unsupported', () async {
+      fake.channelsStatus = {'supported': false, 'state': 'off'};
+      expect(await ChannelService.instance.syncView(), isNull);
+    });
+  });
 }
