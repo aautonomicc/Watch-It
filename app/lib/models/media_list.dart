@@ -65,6 +65,7 @@ class MediaList {
     required this.title,
     this.entries = const [],
     this.enabled = true,
+    this.channelPubkey,
   });
 
   final String id;
@@ -74,6 +75,13 @@ class MediaList {
   /// Disabled lists stay in the library but are hidden from the home
   /// screen (toggled in Settings → Media Lists).
   final bool enabled;
+
+  /// Non-null marks a subscribed CHANNEL list (the channel's public key,
+  /// lowercase hex): read-only, badged amber, mirrors the channel's
+  /// published manifest and updates when a newer signed head arrives.
+  final String? channelPubkey;
+
+  bool get isChannel => channelPubkey != null;
 
   MediaList copyWith({
     String? title,
@@ -85,6 +93,7 @@ class MediaList {
         title: title ?? this.title,
         entries: entries ?? this.entries,
         enabled: enabled ?? this.enabled,
+        channelPubkey: channelPubkey,
       );
 
   Map<String, dynamic> toJson() => {
@@ -92,6 +101,7 @@ class MediaList {
         'title': title,
         'entries': entries.map((e) => e.toJson()).toList(),
         'enabled': enabled,
+        if (channelPubkey != null) 'channelPubkey': channelPubkey,
       };
 
   factory MediaList.fromJson(Map<String, dynamic> json) => MediaList(
@@ -101,6 +111,7 @@ class MediaList {
             .map((e) => MediaEntry.fromJson(e as Map<String, dynamic>))
             .toList(),
         enabled: json['enabled'] as bool? ?? true,
+        channelPubkey: json['channelPubkey'] as String?,
       );
 }
 

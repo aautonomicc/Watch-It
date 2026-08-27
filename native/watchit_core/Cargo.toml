@@ -38,6 +38,13 @@ rmp-serde = "1"
 base64 = "0.22"
 # artwork transfer integrity (already in the x0x tree, so free)
 sha2 = "0.10"
+# Channel identity (all three already in the dependency tree, so these
+# direct deps add no new code to the build): Ed25519 channel keys +
+# head-record signatures, SLIP-0010 derivation from the BIP-39 seed,
+# base32 channel codes (wchn1-…).
+ed25519-dalek = "2"
+hmac = "0.12"
+data-encoding = "2"
 # bundled: compiles its own SQLite, so Android/cross builds need no system lib
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json = "1"

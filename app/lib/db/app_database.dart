@@ -15,6 +15,12 @@ class MediaLists extends Table {
   /// Disabled lists are hidden from the home screen but kept intact.
   BoolColumn get enabled => boolean().withDefault(const Constant(true))();
 
+  /// Non-null marks this list as a subscribed CHANNEL: a read-only,
+  /// auto-updating mirror of that channel's published manifest (the
+  /// value is the channel's Ed25519 public key, lowercase hex). Channel
+  /// lists are managed by unsubscribing, never by editing.
+  TextColumn get channelPubkey => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -161,7 +167,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 10;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -199,6 +205,11 @@ class AppDatabase extends _$AppDatabase {
             // apart.
             await m.addColumn(mediaEntries, mediaEntries.sizeBytes);
             await m.addColumn(mediaEntries, mediaEntries.videoInfo);
+          }
+          if (from < 10) {
+            // Channels: subscribed channels land as read-only lists
+            // marked with the channel public key.
+            await m.addColumn(mediaLists, mediaLists.channelPubkey);
           }
           if (from >= 4 && from < 9) {
             // alpha.57: Edit details — user-authored metadata rows are

@@ -12,12 +12,15 @@ import '../services/android_saf.dart';
 import '../services/bundle.dart';
 import '../services/connectivity.dart';
 import '../services/datamap_import.dart';
+import '../services/channel_service.dart';
 import '../services/library_arrangement.dart';
 import '../services/library_store.dart';
 import '../services/list_import.dart';
 import '../services/metadata_service.dart';
 import '../theme/tokens.dart';
+import '../widgets/channel_badge.dart';
 import 'list_edit_screen.dart';
+import 'list_home_screen.dart';
 import 'settings_screen.dart' show promptForText;
 
 /// Manage media lists: show/hide on the home screen, open for editing,
@@ -1074,9 +1077,44 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
   }
 
   Future<void> _openList(MediaList list) async {
+    // Channel lists are read-only mirrors of the channel's manifest —
+    // they browse, they don't edit.
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ListEditScreen(listId: list.id)),
+      list.isChannel
+          ? MaterialPageRoute(builder: (_) => ListHomeScreen(list: list))
+          : MaterialPageRoute(
+              builder: (_) => ListEditScreen(listId: list.id)),
     );
+    await _reload();
+  }
+
+  Future<void> _unsubscribeChannel(MediaList list) async {
+    final t = WiTokens.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text('Unsubscribe from "${list.title}"?',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        content: Text(
+          'The channel\'s list disappears from your library and stops '
+          'updating. You can re-add it any time with its code.',
+          style: TextStyle(color: t.boneDim, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel', style: TextStyle(color: t.ash)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Unsubscribe', style: TextStyle(color: t.rust)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await ChannelService.instance.unsubscribe(list.channelPubkey!);
     await _reload();
   }
 
@@ -1251,47 +1289,78 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
             side: BorderSide(color: t.ash),
             onChanged: (v) => _setEnabled(list, v ?? true),
           ),
-          title: Text(
-            list.title,
-            style: TextStyle(
-              color: list.enabled ? t.bone : t.ash,
-              fontSize: 15,
-            ),
+          title: Row(
+            children: [
+              Flexible(
+                child: Text(
+                  list.title,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: list.enabled ? t.bone : t.ash,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              if (list.isChannel) ...[
+                const SizedBox(width: 8),
+                const ChannelBadge(),
+              ],
+            ],
           ),
           subtitle: Text(
             '${list.entries.length} '
             '${list.entries.length == 1 ? 'entry' : 'entries'}'
+            '${list.isChannel ? '  ·  read-only, updates automatically' : ''}'
             '${list.enabled ? '' : '  ·  hidden from home'}',
             style: TextStyle(color: t.ash, fontSize: 12),
           ),
-          trailing: PopupMenuButton<String>(
-            tooltip: 'List options',
-            icon: Icon(Icons.more_vert, color: t.ash),
-            color: t.ink2,
-            onSelected: (v) => switch (v) {
-              'rename' => _rename(list),
-              'export' => _export(list),
-              'delete' => _delete(list),
-              _ => null,
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'rename',
-                child: Text('Rename',
-                    style: TextStyle(color: t.bone, fontSize: 14)),
-              ),
-              PopupMenuItem(
-                value: 'export',
-                child: Text('Export',
-                    style: TextStyle(color: t.bone, fontSize: 14)),
-              ),
-              PopupMenuItem(
-                value: 'delete',
-                child: Text('Delete',
-                    style: TextStyle(color: t.rust, fontSize: 14)),
-              ),
-            ],
-          ),
+          // Channel lists are managed by unsubscribing — never renamed,
+          // exported, or deleted like an owned list.
+          trailing: list.isChannel
+              ? PopupMenuButton<String>(
+                  tooltip: 'Channel options',
+                  icon: Icon(Icons.more_vert, color: t.ash),
+                  color: t.ink2,
+                  onSelected: (v) => switch (v) {
+                    'unsubscribe' => _unsubscribeChannel(list),
+                    _ => null,
+                  },
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: 'unsubscribe',
+                      child: Text('Unsubscribe',
+                          style: TextStyle(color: t.rust, fontSize: 14)),
+                    ),
+                  ],
+                )
+              : PopupMenuButton<String>(
+                  tooltip: 'List options',
+                  icon: Icon(Icons.more_vert, color: t.ash),
+                  color: t.ink2,
+                  onSelected: (v) => switch (v) {
+                    'rename' => _rename(list),
+                    'export' => _export(list),
+                    'delete' => _delete(list),
+                    _ => null,
+                  },
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: 'rename',
+                      child: Text('Rename',
+                          style: TextStyle(color: t.bone, fontSize: 14)),
+                    ),
+                    PopupMenuItem(
+                      value: 'export',
+                      child: Text('Export',
+                          style: TextStyle(color: t.bone, fontSize: 14)),
+                    ),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Text('Delete',
+                          style: TextStyle(color: t.rust, fontSize: 14)),
+                    ),
+                  ],
+                ),
           onTap: () => _openList(list),
         ),
     ];

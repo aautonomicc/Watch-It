@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
+import '../screens/channels_screen.dart';
 import '../screens/list_home_screen.dart';
 import '../screens/media_lists_screen.dart';
 import '../screens/publish_screen.dart';
@@ -62,7 +63,8 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
   IconData _iconFor(MediaList list) => switch (list.id) {
         kAutoMoviesListId => Icons.movie_outlined,
         kAutoTvShowsListId => Icons.live_tv_outlined,
-        _ => Icons.video_library_outlined,
+        _ =>
+          list.isChannel ? Icons.podcasts : Icons.video_library_outlined,
       };
 
   @override
@@ -118,9 +120,13 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                       selected: list.id == widget.currentListId,
                       selectedTileColor: t.ink2,
                       leading: Icon(_iconFor(list),
-                          color: list.id == widget.currentListId
-                              ? t.accent
-                              : t.boneDim,
+                          // Channel lists are amber everywhere — the
+                          // public/private colour wall.
+                          color: list.isChannel
+                              ? WiTokens.channelAmber
+                              : list.id == widget.currentListId
+                                  ? t.accent
+                                  : t.boneDim,
                           size: 20),
                       title: Text(
                         list.title,
@@ -154,6 +160,18 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                         style: TextStyle(color: t.ash, fontSize: 11)),
                     onTap: () => _openPage(const PublishScreen()),
                   ),
+                // Channels — the PUBLIC space, amber; a separate door
+                // from Upload on purpose (never a mode toggle on it).
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.podcasts,
+                      color: WiTokens.channelAmber, size: 20),
+                  title: Text('Channels',
+                      style: TextStyle(color: t.bone, fontSize: 14)),
+                  subtitle: Text('Public · anyone with the code',
+                      style: TextStyle(color: t.ash, fontSize: 11)),
+                  onTap: () => _openPage(const ChannelsScreen()),
+                ),
                 // My W@tch lives under Settings → Network since the
                 // drawer slimmed down to library navigation + entry
                 // points (the home status bar also links to it).

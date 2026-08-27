@@ -492,6 +492,29 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
 - [ ] Sync while apart: devices must currently be online together —
       no relay/mailbox in the middle (by design, for now)
 
+## Channels — public signed media lists (implemented 2026-08-27, unreleased)
+
+Part 2+3 of [PLAN-personal-vs-channels.md](PLAN-personal-vs-channels.md);
+implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → Channels.
+
+- [x] Channel identity: Ed25519 key from its own 12-word phrase
+      (SLIP-0010) via the wallet-style backup ceremony; code
+      `wchn1-<base32(pubkey)>`; key in the OS keychain
+- [x] Signed manifests (bundle spec v2 + channel.json) uploaded
+      publicly; head records gossiped + signature-verified on an x0x
+      topic derived from the pubkey; restore-from-phrase resumes
+      publishing and recovers the item list from the network
+- [x] Subscribe everywhere: read-only amber-badged channel lists on the
+      home wall, auto-updating on a newer signed head
+- [x] Safety rails: Describe-this-item (required title/description/
+      artwork), per-item rights attestation, first-publish typed-name
+      gate, cost preview, Terms v2, amber/PUBLIC vs blue/private
+- [ ] Channel directory (deliberately NOT in v1 — codes only; a curated
+      directory would be a separate repo/site with its own vetting)
+- [ ] Mobile channel creation (subscribe works everywhere; publishing
+      needs the desktop wallet)
+- [ ] Channel avatars, multi-owner channels, comments (parking lot)
+
 ## Phase 3 — All desktop platforms
 - [x] Windows build + packaging → CI-built portable zip, shipped with
       every release since alpha.55 (unsigned: SmartScreen "More info →

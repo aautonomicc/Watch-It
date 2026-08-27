@@ -144,6 +144,7 @@ class PublishApi {
               size: result['size'] as int? ?? 0,
               chunks: result['chunks'] as int? ?? 0,
               costAtto: BigInt.parse(result['cost_atto'] as String),
+              seq: result['seq'] as int?,
             ),
     );
   }
@@ -221,11 +222,16 @@ class UploadResult {
     required this.size,
     required this.chunks,
     required this.costAtto,
+    this.seq,
   });
   final String address;
   final int size;
   final int chunks;
   final BigInt costAtto;
+
+  /// Channel-publish jobs only: the head sequence number announced for
+  /// this manifest.
+  final int? seq;
 }
 
 /// Format a raw 18-decimal base-unit amount (ANT atto / ETH wei) as a

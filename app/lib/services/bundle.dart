@@ -238,9 +238,16 @@ Future<BundleBuildResult> buildBundle(
   BundleExportOptions options, {
   String? base,
   Future<Directory> Function()? postersDirProvider,
+  Map<String, String> extraTextMembers = const {},
 }) async {
   base ??= EmbeddedClient.baseUrl();
   final archive = Archive();
+  // Extra members first (channel manifests add channel.json here);
+  // unknown members are ignored by every importer, so plain bundle
+  // consumers never notice them.
+  for (final extra in extraTextMembers.entries) {
+    archive.addFile(ArchiveFile.string(extra.key, extra.value));
+  }
 
   // datamaps/ members + list.txt, built together so the list only names
   // members that exist. One member may be referenced by several lists

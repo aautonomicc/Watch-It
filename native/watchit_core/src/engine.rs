@@ -128,6 +128,9 @@ pub struct Engine {
     pub uploads: crate::upload::UploadManager,
     /// My W@tch device linking (x0x agent; test implementation).
     pub mywatch: crate::mywatch::MyWatchStore,
+    /// Channels: public signed manifests + gossiped heads (x0x agent of
+    /// its own, independent lifecycle from the My W@tch link).
+    pub channels: crate::channels::ChannelStore,
 }
 
 impl Engine {
@@ -166,6 +169,7 @@ impl Engine {
             wallet: crate::wallet::WalletStore::new(data_dir, true),
             uploads: crate::upload::UploadManager::default(),
             mywatch: crate::mywatch::MyWatchStore::new(data_dir),
+            channels: crate::channels::ChannelStore::new(data_dir),
         }
     }
 
