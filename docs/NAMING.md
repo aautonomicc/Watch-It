@@ -66,6 +66,15 @@ too, so a 1080p `Movie.mp4` publishes as `Movie [1080p].mp4` and lines up
 with any encoded siblings. Name your source files per this convention
 before publishing and the tags take care of themselves.
 
+Beyond the file name, Publish also stamps each library entry it creates
+with a **resolution + codec label** ("1080p H.264") — the same label
+imported and seeded entries carry — so the detail page's version picker
+shows the full `1080p H.264 · 1.1 GB` line for every tier instead of just
+a size. Encode tiers are labelled with their real output height (always
+H.264); an Original-tier upload gets its probed height and codec. Entries
+published before this shipped stay size-only until their first playback
+backfills the resolution.
+
 ## Encoding note
 
 Prefer widely hardware-decodable codecs — **H.264 8-bit** plays everywhere,

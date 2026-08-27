@@ -13,7 +13,11 @@ privately on the decentralized [Autonomi](https://github.com/WithAutonomi/ant-cl
 network, streamed on demand or downloaded for offline watching. And since
 alpha.55 W@tch **uploads too**: the desktop app's Publish page encodes your
 files to universally playable quality tiers and uploads them to the network
-itself, paid from a built-in ANT wallet — no command line needed.
+itself, paid from a built-in ANT wallet — no command line needed. And since
+alpha.61 **your devices stay in sync**: link them with **My W@tch** (scan a
+QR code) and watch lists, viewing positions, and your own edits and artwork
+travel between them automatically — peer-to-peer and end-to-end encrypted,
+with no account and no cloud.
 
 ![W@tch home screen on Linux — connected to the live Autonomi network, browsing a library of public-domain films and shows](docs/screenshots/home-linux.jpg)
 
@@ -70,6 +74,15 @@ dates and descriptions, plus a one-tap Download season.*
 4. **Stream or download.** Hit play to stream straight from the network, or download
    an item to the device for offline watching. Downloaded items play with the full
    library experience, no connectivity needed.
+5. **Link your devices (optional).** The drawer's **My W@tch** page links
+   your own devices into a private sync group: create a link on one device,
+   scan the QR code (or paste the invite) on the others. From then on watch
+   lists, viewing positions, and your Edit-details changes — including
+   custom artwork at full quality — sync automatically in the background
+   whenever the devices are online, device-to-device over a post-quantum
+   encrypted channel. No account, no server, and nothing about the group is
+   discoverable on the network; the invite code *is* the key, so share it
+   only with your own devices.
 
 No server, no accounts, no telemetry. There is deliberately **no Plex/Emby/Jellyfin
 server compatibility** — Autonomi *is* the backend.
@@ -170,7 +183,24 @@ day, toggle in Settings → About — the app's only phone-home).
 Alpha.57 adds **Edit details**: your own title, year, description, and
 artwork — from an image file, a picked video frame, or the player's
 camera button — for anything TMDB doesn't know, never overwritten by
-TMDB and carried along in shared bundles.
+TMDB and carried along in shared bundles. Alpha.58 extends Edit details
+to TV: shows and seasons get their own edit pencil, and editing an
+episode edits *that episode* (name, synopsis, artwork) instead of the
+series. Alpha.59 fixes Publish for files over ~12 MiB (every
+real-length movie — the upload succeeded but the final bookkeeping
+step failed; re-publishing the same file on .59+ finishes it free) and
+adds a crop/zoom step after picking a poster frame. Alpha.60 adds the
+Terms of Use & Disclaimer (first-launch accept, readable later under
+Settings → About) and a "Why multiple versions?" explainer on the
+Publish quality section. Alpha.61 introduces **My W@tch** device sync
+(see How it works step 5): link devices by QR code or invite, and
+watch lists and viewing positions sync in the background — synced
+entries arrive playable, because the entries' data maps travel too.
+It also brings My W@tch to Android (verified desktop ↔ phone on real
+hardware). Alpha.62 completes the picture: your Edit-details changes
+(titles, years, descriptions, episode names) and custom artwork sync
+between linked devices as well — artwork travels at **full quality**,
+byte-identical, fetched directly from whichever linked device has it.
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users

@@ -44,7 +44,8 @@ is the only remote source, accessed via the
 ├──────────────────────────────────────────────┤
 │               App core (Dart)                 │
 │  lists · metadata matcher · watch state       │
-│  downloads · publish · playback controller    │
+│  downloads · publish · device sync (My W@tch) │
+│  playback controller                          │
 ├──────────────────────┬───────────────────────┤
 │   Autonomi access    │   Metadata fetcher     │
 │  (ant-client: fetch  │  (filename → TMDB →    │
@@ -186,11 +187,64 @@ upscaling) and a summed live cost estimate scaled per-chunk from one
 `/upload/estimate` call; then a sequential encode→upload queue with
 per-item retry/skip. Encoded outputs are named per
 [NAMING.md](NAMING.md) with the *real* output height tag, so tiers fold
-into the alpha.49 same-title version picker. ffmpeg/ffprobe are bundled
-(static builds in the AppImage, shared build in the Windows zip); when
-missing, Publish degrades gracefully to as-is-only uploads with a banner. when the OS network vanishes entirely, ant-core's
-`/health` can keep reporting ready with stale peers, so airplane-mode-style
-loss may go undetected (VPN-cut / handshake-timeout loss is detected fine).
+into the alpha.49 same-title version picker, and each created library
+entry is stamped with its "1080p H.264"-style resolution/codec label so
+the picker shows the full quality line, not just a size. ffmpeg/ffprobe
+are bundled (static builds in the AppImage, shared build in the Windows
+zip); when missing, Publish degrades gracefully to as-is-only uploads
+with a banner.
+
+Finalize note (fixed alpha.59): for any file over ~12 MiB (more than 3
+chunks) ant-core's upload returns the *shrunk child* data map, which the
+finalize step now expands to the root map exactly like `.datamap` import
+does. Because the error fired *after* payment and storage, a file caught
+by the old bug is fully on the network — re-publishing it finishes the
+bookkeeping at no extra cost (already-stored chunks are free).
+
+### My W@tch — device linking & sync (shipped alpha.61/.62)
+
+Keeps a user's **own devices** in sync — watch lists, viewing positions,
+and Edit-details changes including artwork — with no account and no
+server. It deliberately does *not* ride Autonomi: sync is device-to-device
+over an in-process [x0x](https://crates.io/crates/x0x) agent
+(saorsa-gossip over ant-quic — post-quantum QUIC; mDNS discovery on the
+LAN plus public bootstrap for remote devices), implemented in
+`native/watchit_core/src/mywatch.rs` with the Dart side in
+`services/my_watch_sync.dart` and `screens/my_watch_screen.dart`.
+
+- **Linking**: one device creates a link — a 32-byte secret shared as an
+  invite code `wtch1-<hex64>`, shown as a QR code (scannable in-app on
+  Android/iOS) or pasted as text. Devices holding the secret meet in a
+  self-keyed **CRDT key-value store** on a gossip topic *derived* (blake3)
+  from the secret — the secret itself never goes on the wire, and nothing
+  about the group is discoverable without it. The invite is the key:
+  share it only with your own devices. Unlink wipes the local agent state.
+- **What syncs** (background cycle every 30 s, app-wide — no screen needs
+  to be open; plus a manual "Sync now"): each device publishes a sync doc
+  under its own store keys. Watch lists merge by title with
+  last-writer-wins add/remove semantics (removal tombstones, so a delete
+  on one device deletes everywhere); viewing positions merge
+  newest-wins and never regress; entries arrive **playable**, because
+  each entry's *shrunk* data map (a few hundred bytes regardless of file
+  size) travels in the store and is expanded locally on import.
+- **User edits + artwork (alpha.62)**: `userEdited` metadata rows
+  (titles, years, descriptions, episode names) travel inline in the sync
+  doc, merged last-writer-wins by edit time. Artwork is too big for the
+  store's value caps, so the doc carries only a **sha256 manifest**; a
+  device missing the bytes pulls the file directly from any *online*
+  linked device that has it (a pull-based chunk protocol over x0x direct
+  messages, hash-verified) — full quality, byte-identical, never
+  downscaled. Any device that completes the pull re-serves the file, so
+  the original editor doesn't have to stay online forever.
+- **Presence & status**: 60 s heartbeats drive the My W@tch screen's
+  per-device online dots, last-heard times, and the persisted "Last sync"
+  stamp. Server routes (`GET/DELETE /mywatch`, `POST /mywatch/link|join|
+  announce`, `GET /mywatch/invite`, `POST /mywatch/sync|art/index|art/
+  fetch`) sit behind the same `x-watchit-auth` shared secret as Publish.
+- **Platforms**: desktop and Android (verified end-to-end on real
+  hardware, desktop AppImage ↔ Android phone); iOS is stubbed out for
+  now. Devices must be online *together* for changes to travel — there is
+  no relay in the middle, by design.
 
 ### Playback
 
@@ -206,8 +260,9 @@ loss may go undetected (VPN-cut / handshake-timeout loss is detected fine).
 - **SQLite (drift)** — lists, metadata cache, watch history, resume points, download
   index, settings.
 - **Riverpod** — app state management.
-- No accounts, no cloud. Optional future: sync lists + watch-state between devices via
-  Autonomi.
+- No accounts, no cloud. Lists, watch state, and user edits sync between a
+  user's own linked devices via My W@tch (above) — device-to-device, no
+  third party holds anything.
 
 ## Platform packaging
 
@@ -230,9 +285,10 @@ Watch-It/
 │   │   ├── services/          # embedded client FFI, library store, metadata
 │   │   │                      #   matcher, TMDB client, datamap/bundle
 │   │   │                      #   import/export, downloads, connectivity,
-│   │   │                      #   publish plan/API, ffmpeg, update check
+│   │   │                      #   publish plan/API, ffmpeg, update check,
+│   │   │                      #   My W@tch sync
 │   │   ├── screens/           # home wall, show/season/detail, player,
-│   │   │                      #   media lists, settings
+│   │   │                      #   media lists, My W@tch, publish, settings
 │   │   ├── widgets/           # shared UI (detail header, …)
 │   │   └── main.dart
 │   ├── third_party/           # vendored media_kit_video (Linux H/W patch)
