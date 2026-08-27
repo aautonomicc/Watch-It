@@ -55,9 +55,19 @@ class MyWatchSync {
   Timer? _timer;
   bool _cycling = false;
 
+  /// Problems collected while the current cycle runs — published into
+  /// [status] at the cycle boundary.
+  List<String> _problems = [];
+
   /// Bumped after a merge changed the library, so screens showing list
   /// content can refresh without a route pop.
   static final ValueNotifier<int> revision = ValueNotifier(0);
+
+  /// Live view of the background sync — link state, what the running
+  /// cycle is doing, the last cycle's outcome and problems — for the
+  /// My W@tch screen's activity card and the home status bar indicator.
+  static final ValueNotifier<MyWatchSyncStatus> status =
+      ValueNotifier(const MyWatchSyncStatus());
 
   /// Seconds between sync cycles. A change propagates in at most two
   /// intervals (publish on one device, merge on the other).
@@ -133,7 +143,11 @@ class MyWatchSync {
   /// user-readable summary, or throws [MyWatchApiException].
   Future<String> syncNow() async {
     final result = await _cycle(rethrowErrors: true);
-    if (result == null) return 'Nothing to sync.';
+    return result == null ? 'Nothing to sync.' : summarize(result);
+  }
+
+  /// One-line, user-readable outcome of a finished cycle.
+  static String summarize(SyncCycleResult result) {
     final parts = <String>[
       if (result.entriesAdded > 0) '${result.entriesAdded} added',
       if (result.entriesRemoved > 0) '${result.entriesRemoved} removed',
@@ -147,16 +161,82 @@ class MyWatchSync {
     return parts.isEmpty ? 'Everything is in sync.' : 'Synced: ${parts.join(', ')}.';
   }
 
+  /// Update the live status mid-cycle: [what] is the stage now running,
+  /// null when the cycle is over.
+  void _setActivity(String? what) {
+    final s = status.value;
+    status.value = MyWatchSyncStatus(
+      supported: s.supported,
+      linked: s.linked,
+      agentState: s.agentState,
+      lastSyncMs: s.lastSyncMs,
+      syncing: what != null,
+      activity: what,
+      lastCycleAtMs: s.lastCycleAtMs,
+      lastSummary: s.lastSummary,
+      problems: s.problems,
+    );
+  }
+
   Future<SyncCycleResult?> _cycle({bool rethrowErrors = false}) async {
     if (_cycling) return null;
     _cycling = true;
     try {
-      final status = await _api.status();
-      if (!status.supported || !status.linked || status.state != 'ready') {
+      final link = await _api.status();
+      if (!link.supported || !link.linked || link.state != 'ready') {
+        status.value = MyWatchSyncStatus(
+          supported: link.supported,
+          linked: link.linked,
+          agentState: link.state,
+          lastSyncMs: link.lastSyncMs,
+          lastCycleAtMs: status.value.lastCycleAtMs,
+          lastSummary: status.value.lastSummary,
+          problems: status.value.problems,
+        );
         return null;
       }
-      return await _runCycle(status);
+      _problems = [];
+      status.value = MyWatchSyncStatus(
+        supported: true,
+        linked: true,
+        agentState: link.state,
+        lastSyncMs: link.lastSyncMs,
+        syncing: true,
+        activity: 'Checking your other devices…',
+        lastCycleAtMs: status.value.lastCycleAtMs,
+        lastSummary: status.value.lastSummary,
+        problems: status.value.problems,
+      );
+      SyncCycleResult? result;
+      try {
+        result = await _runCycle(link);
+        return result;
+      } finally {
+        status.value = MyWatchSyncStatus(
+          supported: true,
+          linked: true,
+          agentState: link.state,
+          lastSyncMs: link.lastSyncMs,
+          lastCycleAtMs: DateTime.now().millisecondsSinceEpoch,
+          lastSummary: result == null ? null : summarize(result),
+          problems: List.unmodifiable(_problems),
+        );
+      }
     } catch (e) {
+      // The mid-cycle finally above has already published the collected
+      // problems; re-publish with the failure itself appended.
+      final s = status.value;
+      status.value = MyWatchSyncStatus(
+        supported: s.supported,
+        linked: s.linked,
+        agentState: s.agentState,
+        lastSyncMs: s.lastSyncMs,
+        lastCycleAtMs: DateTime.now().millisecondsSinceEpoch,
+        lastSummary: s.lastSummary,
+        problems: List.unmodifiable(
+            [...s.problems.where((p) => !p.startsWith('Sync failed:')),
+                'Sync failed: $e']),
+      );
       if (rethrowErrors) rethrow;
       debugPrint('mywatch sync cycle failed: $e');
       return null;
@@ -182,6 +262,7 @@ class MyWatchSync {
 
     // 2. Merge every remote document in.
     final remote = await _api.syncDocs();
+    _setActivity('Merging changes from your devices…');
     final merge = mergeRemoteDocs(
       lists: lists,
       tombstones: state.tombstones,
@@ -198,93 +279,113 @@ class MyWatchSync {
       revision.value++;
     }
 
+    // Stages 3–6 each fail on their own: a broken map import or artwork
+    // pull must not stop detail edits (or the publish below) — before
+    // this, one throw silently killed the rest of the cycle while the
+    // already-saved list merge made sync look like it worked.
     // 3. Viewpoints: newest-updatedAt-wins per address, never regressing.
     final states = [
       for (final d in remote) ...watchStatesFromDoc(d.doc),
     ];
     if (states.isNotEmpty) {
-      result = result.copyWith(
-        watchStatesApplied: await WatchStateStore.instance.mergeAll(states),
-      );
+      try {
+        result = result.copyWith(
+          watchStatesApplied: await WatchStateStore.instance.mergeAll(states),
+        );
+      } catch (e) {
+        _problems.add('Applying watch positions failed: $e');
+      }
     }
 
     // 4. Fetch missing data maps for entries we now hold, so they play.
-    result = result.copyWith(
-      mapsImported: await _importMissingMaps(lists, remote, now),
-    );
+    _setActivity('Fetching data maps…');
+    try {
+      result = result.copyWith(
+        mapsImported: await _importMissingMaps(lists, remote, now),
+      );
+    } catch (e) {
+      _problems.add('Fetching data maps failed: $e');
+    }
 
     // 5. Detail edits: newest remote row per key, applied when it beats
     // the local state (a TMDB row always loses to a user edit).
+    _setActivity('Applying detail edits…');
     final winners = remoteMetaWinners(remote);
     var detailsApplied = 0;
     for (final w in winners) {
-      final local = await metadataRowFor(w.key);
-      if (!shouldApplyRemoteRow(
-        localExists: local != null,
-        localUserEdited: local?.userEdited ?? false,
-        localUpdatedMs: local?.fetchedAt ?? 0,
-        remoteUpdatedMs: w.updatedMs,
-      )) {
-        continue;
+      try {
+        final local = await metadataRowFor(w.key);
+        if (!shouldApplyRemoteRow(
+          localExists: local != null,
+          localUserEdited: local?.userEdited ?? false,
+          localUpdatedMs: local?.fetchedAt ?? 0,
+          remoteUpdatedMs: w.updatedMs,
+        )) {
+          continue;
+        }
+        await applyRemoteUserDetails(
+          lookupKey: w.key,
+          title: w.title ?? local?.title ?? w.key,
+          year: w.year,
+          overview: w.overview,
+          episodeLabel: w.episodeLabel,
+          updatedMs: w.updatedMs,
+          remoteHasArt: w.art != null,
+          postersDirProvider: postersDirOverride,
+        );
+        detailsApplied++;
+      } catch (e) {
+        _problems.add('Applying an edit for "${w.title ?? w.key}" failed: $e');
       }
-      await applyRemoteUserDetails(
-        lookupKey: w.key,
-        title: w.title ?? local?.title ?? w.key,
-        year: w.year,
-        overview: w.overview,
-        episodeLabel: w.episodeLabel,
-        updatedMs: w.updatedMs,
-        remoteHasArt: w.art != null,
-        postersDirProvider: postersDirOverride,
-      );
-      detailsApplied++;
     }
     result = result.copyWith(detailsApplied: detailsApplied);
 
     // 6. Artwork: the doc only carries manifests; pull missing bytes
-    // from a linked device that is online right now.
-    result = result.copyWith(
-      artFetched: await _fetchMissingArt(winners, remote, status, now),
-    );
+    // from a linked device.
+    try {
+      result = result.copyWith(
+        artFetched: await _fetchMissingArt(winners, remote, status, now),
+      );
+    } catch (e) {
+      _problems.add('Fetching artwork failed: $e');
+    }
 
     // 7. Publish our (possibly just-merged) state.
+    _setActivity("Publishing this device's library…");
     state.snapshot = membershipOf(lists);
-    var metaRows = await _localMetaRows();
+    final metaRows = await _localMetaRows();
+    // Newest-first from the store, so a budget trim drops the stalest.
     final ourWatchStates = await WatchStateStore.instance.all();
-    var doc = buildDoc(
+    final built = buildDocWithinBudget(
       lists: lists,
       tombstones: state.tombstones,
       watchStates: ourWatchStates,
       nowMs: now,
       metaRows: metaRows,
     );
-    while (jsonEncode(doc).length > maxDocBytes && metaRows.isNotEmpty) {
-      // Newest-first order, so the oldest edit drops first; it syncs
-      // again once the doc has room.
-      metaRows = metaRows.sublist(0, metaRows.length - 1);
-      debugPrint('mywatch sync: doc over budget, dropped a meta row');
-      doc = buildDoc(
-        lists: lists,
-        tombstones: state.tombstones,
-        watchStates: ourWatchStates,
-        nowMs: now,
-        metaRows: metaRows,
-      );
+    final doc = built.doc;
+    if (built.metaDropped > 0) {
+      _problems.add('${built.metaDropped} detail edit(s) did not fit in the '
+          'sync document this cycle');
     }
     await _publishArtIndex();
     final fingerprint = jsonEncode(doc..remove('updated_ms'));
     if (fingerprint != state.lastPublished) {
       doc['updated_ms'] = now;
-      await _api.publishSync(doc);
-      state.lastPublished = fingerprint;
-      var entries = 0;
-      for (final l in lists) {
-        entries += l.entries.length;
-      }
       try {
-        await _api.announce(lists: lists.length, entries: entries);
-      } on Exception {
-        // Presence counts are cosmetic; the sync itself succeeded.
+        await _api.publishSync(doc);
+        state.lastPublished = fingerprint;
+        var entries = 0;
+        for (final l in lists) {
+          entries += l.entries.length;
+        }
+        try {
+          await _api.announce(lists: lists.length, entries: entries);
+        } on Exception {
+          // Presence counts are cosmetic; the sync itself succeeded.
+        }
+      } catch (e) {
+        _problems.add('Publishing to your devices failed: $e');
       }
     }
     await _saveState(state);
@@ -405,10 +506,14 @@ class MyWatchSync {
     }
   }
 
-  /// Pull every wanted-but-missing artwork file whose owner is online.
-  /// Any device whose meta row for the key names the same hash can
-  /// serve it — once a device has synced the artwork it re-serves it,
-  /// so the original editor need not stay online forever.
+  /// Pull every wanted-but-missing artwork file from the devices whose
+  /// meta row names the same hash. Any such device can serve it — once
+  /// a device has synced the artwork it re-serves it, so the original
+  /// editor need not stay online forever. Presence only *orders* the
+  /// candidates (online-looking first): x0x presence under-reports on
+  /// real networks (a reachable device often shows offline), so it must
+  /// never gate the attempt — the transfer's own timeouts and the retry
+  /// backoff bound the cost of a dead candidate.
   Future<int> _fetchMissingArt(
     List<RemoteMetaRow> winners,
     List<RemoteSyncDoc> remote,
@@ -419,7 +524,6 @@ class MyWatchSync {
       for (final d in status.devices)
         if (!d.isSelf && d.online) d.agentId,
     };
-    if (online.isEmpty) return 0;
     var fetched = 0;
     for (final w in winners) {
       final art = w.art;
@@ -437,25 +541,38 @@ class MyWatchSync {
       if ((_artRetryAt[art.sha256] ?? 0) > nowMs) continue;
       final owners = [
         for (final d in remote)
-          if (online.contains(d.agentId))
-            for (final r in remoteMetaWinners([d]))
-              if (r.key == w.key && r.art?.sha256 == art.sha256) d.agentId,
-      ];
+          for (final r in remoteMetaWinners([d]))
+            if (r.key == w.key && r.art?.sha256 == art.sha256) d.agentId,
+      ]..sort((a, b) =>
+          (online.contains(b) ? 1 : 0) - (online.contains(a) ? 1 : 0));
       if (owners.isEmpty) continue;
-      try {
-        final path =
-            await _api.fetchArt(agentId: owners.first, sha256: art.sha256);
-        final file = File(path);
-        final bytes = await file.readAsBytes();
-        await applyRemotePoster(w.key, bytes,
-            postersDirProvider: postersDirOverride);
+      _setActivity('Fetching artwork…');
+      Object? failure;
+      // Two candidates bound the worst case — every dead one costs the
+      // transfer's full chunk timeouts.
+      for (final owner in owners.take(2)) {
         try {
-          file.deleteSync();
-        } catch (_) {}
-        fetched++;
-      } catch (e) {
+          final path =
+              await _api.fetchArt(agentId: owner, sha256: art.sha256);
+          final file = File(path);
+          final bytes = await file.readAsBytes();
+          await applyRemotePoster(w.key, bytes,
+              postersDirProvider: postersDirOverride);
+          try {
+            file.deleteSync();
+          } catch (_) {}
+          fetched++;
+          failure = null;
+          break;
+        } catch (e) {
+          failure = e;
+        }
+      }
+      if (failure != null) {
         _artRetryAt[art.sha256] = nowMs + mapRetryMs;
-        debugPrint('mywatch sync: artwork ${art.sha256} fetch failed: $e');
+        _problems.add(
+            'Artwork for "${w.title ?? w.key}" could not be fetched: $failure');
+        debugPrint('mywatch sync: artwork ${art.sha256} fetch failed: $failure');
       }
     }
     return fetched;
@@ -575,6 +692,57 @@ class MyWatchSync {
       ],
       if (metaRows.isNotEmpty) 'meta': {'v': 1, 'rows': metaRows},
     };
+  }
+
+  /// [buildDoc] kept under [maxDocBytes]: when the doc is over budget,
+  /// watch states drop first (stalest-played last quarter per round — a
+  /// stale resume point is the cheapest loss and returns once the doc
+  /// has room), and the user's detail edits drop only when no watch
+  /// state is left. Before this reprioritisation a long viewing history
+  /// (300 states ≈ 45 KB alone) could permanently crowd every detail
+  /// edit out of the doc while list entries kept syncing fine — the
+  /// "publishes sync, edits don't" failure. [watchStates] must arrive
+  /// newest-first (the store's order).
+  static ({Map<String, dynamic> doc, int watchDropped, int metaDropped})
+      buildDocWithinBudget({
+    required List<MediaList> lists,
+    required Map<String, Map<String, int>> tombstones,
+    required List<WatchState> watchStates,
+    required int nowMs,
+    List<Map<String, dynamic>> metaRows = const [],
+  }) {
+    var watch = watchStates;
+    var meta = metaRows;
+    var doc = buildDoc(
+      lists: lists,
+      tombstones: tombstones,
+      watchStates: watch,
+      nowMs: nowMs,
+      metaRows: meta,
+    );
+    while (jsonEncode(doc).length > maxDocBytes) {
+      if (watch.isNotEmpty) {
+        watch = watch.sublist(
+            0, watch.length - (watch.length / 4).ceil().clamp(1, watch.length));
+      } else if (meta.isNotEmpty) {
+        // Newest-first order, so the oldest edit drops first.
+        meta = meta.sublist(0, meta.length - 1);
+      } else {
+        break;
+      }
+      doc = buildDoc(
+        lists: lists,
+        tombstones: tombstones,
+        watchStates: watch,
+        nowMs: nowMs,
+        metaRows: meta,
+      );
+    }
+    return (
+      doc: doc,
+      watchDropped: watchStates.length - watch.length,
+      metaDropped: metaRows.length - meta.length,
+    );
   }
 
   /// `userEdited` cache rows as sync-doc meta rows. Text fields ride
@@ -872,6 +1040,48 @@ class RemoteMetaRow {
 
   /// Artwork manifest — the bytes travel separately, in full quality.
   final ({String sha256, int size})? art;
+}
+
+/// Snapshot of the background sync for indicator UIs (the My W@tch
+/// screen's activity card, the home status bar segment). Published on
+/// [MyWatchSync.status] at every cycle boundary and stage change.
+class MyWatchSyncStatus {
+  const MyWatchSyncStatus({
+    this.supported = false,
+    this.linked = false,
+    this.agentState = 'off',
+    this.lastSyncMs,
+    this.syncing = false,
+    this.activity,
+    this.lastCycleAtMs,
+    this.lastSummary,
+    this.problems = const [],
+  });
+
+  /// My W@tch exists in this build (false on iOS, and until the first
+  /// cycle has asked the embedded client).
+  final bool supported;
+  final bool linked;
+
+  /// The x0x agent: `off`, `starting`, or `ready`.
+  final String agentState;
+
+  /// When another device's record last changed under us (embedded
+  /// client's stamp); null when it has never happened.
+  final int? lastSyncMs;
+
+  /// A sync cycle is running right now.
+  final bool syncing;
+
+  /// What the running cycle is doing, user-readable; null when idle.
+  final String? activity;
+
+  /// When the last cycle finished, and its one-line outcome.
+  final int? lastCycleAtMs;
+  final String? lastSummary;
+
+  /// What went wrong (or could not fit) in the last cycle.
+  final List<String> problems;
 }
 
 class SyncCycleResult {

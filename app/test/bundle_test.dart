@@ -282,6 +282,9 @@ void main() {
       expect(meta['attribution'], kTmdbAttributionNotice);
       expect((meta['entries'] as List).single['title'],
           'Night of the Living Dead');
+      // The row's stamp travels — for userEdited rows it is the My W@tch
+      // LWW edit time and must survive a bundle round trip.
+      expect((meta['entries'] as List).single['fetchedAt'], 1000);
 
       final historyBytes = archive.files
           .firstWhere((f) => f.name == 'history.json')
@@ -725,6 +728,27 @@ void main() {
           [7, 7]); // local file kept
       expect(File('${postersDir.path}/fresh.jpg').readAsBytesSync(),
           [1, 2]);
+    });
+
+    test('a bundled userEdited row keeps its edit stamp — the import must '
+        'not look like a newer edit to the My W@tch LWW merge', () async {
+      final bundle = _bundle(
+        listText: '',
+        metadataRows: {
+          _lookupKey('The Movie (2024).mkv'): {
+            'lookupKey': _lookupKey('The Movie (2024).mkv'),
+            'title': 'My cut',
+            'userEdited': true,
+            'fetchedAt': 4242,
+          },
+        },
+      );
+      await seedBundle(bundle, postersDirProvider: postersDirProvider);
+      final db = await LibraryStore.database();
+      final row = (await db.select(db.metadataCache).get()).firstWhere(
+          (r) => r.lookupKey == _lookupKey('The Movie (2024).mkv'));
+      expect(row.userEdited, isTrue);
+      expect(row.fetchedAt, 4242);
     });
 
     test('history merges newer-updatedAt-wins', () async {

@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'models/media_list.dart';
 import 'screens/detail_screen.dart';
+import 'screens/my_watch_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/show_screen.dart';
@@ -577,7 +578,10 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
 /// connection state and peer count, refreshed on a timer (fast while
 /// connecting, relaxed once ready — the poll is a localhost call).
 class NetworkStatusBar extends StatefulWidget {
-  const NetworkStatusBar({super.key});
+  const NetworkStatusBar({super.key, this.healthProvider});
+
+  /// Test override for [EmbeddedClient.health].
+  final Future<ClientHealth> Function()? healthProvider;
 
   @override
   State<NetworkStatusBar> createState() => _NetworkStatusBarState();
@@ -600,13 +604,70 @@ class _NetworkStatusBarState extends State<NetworkStatusBar> {
   }
 
   Future<void> _poll() async {
-    final health = await EmbeddedClient.health();
+    final health =
+        await (widget.healthProvider ?? EmbeddedClient.health)();
     if (!mounted) return;
     setState(() => _health = health);
     if (health.state == 'unavailable') return; // no native library; stop
     _timer = Timer(
       Duration(seconds: health.state == 'ready' ? 15 : 3),
       _poll,
+    );
+  }
+
+  /// Short "x min ago"-style stamp for the My W@tch segment.
+  static String _relative(int ms) {
+    final delta =
+        DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(ms));
+    if (delta.inSeconds < 60) return 'just now';
+    if (delta.inMinutes < 60) return '${delta.inMinutes} min ago';
+    if (delta.inHours < 48) return '${delta.inHours} h ago';
+    return '${delta.inDays} days ago';
+  }
+
+  /// The My W@tch third of the bar: x0x connection + syncing state,
+  /// fed by [MyWatchSync.status] (no extra polling — the background
+  /// cycle refreshes it). Hidden until the device is linked; tap opens
+  /// the My W@tch page.
+  Widget _myWatchSegment(WiTokens t, MyWatchSyncStatus s) {
+    if (!s.supported || !s.linked) return const SizedBox.shrink();
+    final (color, text) = switch (s) {
+      MyWatchSyncStatus(agentState: != 'ready') => (
+          t.accent,
+          'My W@tch: connecting…',
+        ),
+      MyWatchSyncStatus(syncing: true) => (t.accent, 'My W@tch: syncing…'),
+      MyWatchSyncStatus(problems: [_, ...]) => (
+          const Color(0xffffb74d),
+          'My W@tch: sync issue',
+        ),
+      MyWatchSyncStatus(:final lastSyncMs?) => (
+          const Color(0xff4caf50),
+          'My W@tch: synced ${_relative(lastSyncMs)}',
+        ),
+      _ => (const Color(0xff4caf50), 'My W@tch: linked'),
+    };
+    return InkWell(
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const MyWatchScreen()),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11.5, color: t.boneDim),
+          ),
+        ],
+      ),
     );
   }
 
@@ -618,18 +679,10 @@ class _NetworkStatusBarState extends State<NetworkStatusBar> {
     final (color, text) = switch (h.state) {
       'ready' => (
           const Color(0xff4caf50),
-          'Autonomi network: connected · ${h.peers} '
-              '${h.peers == 1 ? 'peer' : 'peers'}',
+          'Connected · ${h.peers} ${h.peers == 1 ? 'peer' : 'peers'}',
         ),
-      'connecting' => (
-          t.accent,
-          h.message == null
-              ? 'Autonomi network: connecting…'
-                  '${h.attempts > 1 ? ' (attempt ${h.attempts})' : ''}'
-              : 'Autonomi network: connecting (attempt ${h.attempts}) — '
-                  '${h.message}',
-        ),
-      _ => (const Color(0xffe57373), 'Autonomi network: error'),
+      'connecting' => (t.accent, 'Connecting…'),
+      _ => (const Color(0xffe57373), 'Connection error'),
     };
     return Container(
       width: double.infinity,
@@ -650,6 +703,10 @@ class _NetworkStatusBarState extends State<NetworkStatusBar> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 11.5, color: t.boneDim),
             ),
+          ),
+          ValueListenableBuilder<MyWatchSyncStatus>(
+            valueListenable: MyWatchSync.status,
+            builder: (context, s, _) => _myWatchSegment(t, s),
           ),
         ],
       ),
