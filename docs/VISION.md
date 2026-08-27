@@ -46,7 +46,11 @@ library private by construction.
 8. **Play everything.** libmpv-based engine: every container/codec, subtitles,
    multiple audio tracks, chapters.
 9. **Own your data.** Watch history, resume points, lists, and cached metadata stored
-   locally. No telemetry.
+   locally. No telemetry. Your own devices can keep each other in sync —
+   My W@tch links them peer-to-peer (shipped alpha.61/.62): lists,
+   viewing positions, edits, and artwork travel directly between your
+   devices, end-to-end encrypted, with no account and no third party in
+   the middle.
 
 ## Non-goals
 

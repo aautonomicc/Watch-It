@@ -1,10 +1,23 @@
 # Roadmap
 
-**Status (2026-08-25):** latest release is **v0.1.0-alpha.57**
+**Status (2026-08-27):** latest release is **v0.1.0-alpha.62**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
 and every release since alpha.55 ships a signed APK, a Linux AppImage,
-**and a Windows portable zip**. The headline of the recent releases is
-**Publish**: W@tch now uploads files to Autonomi itself (see the
+**and a Windows portable zip**. The headline of the newest releases is
+**My W@tch device sync** (see its section below): alpha.61 links a
+user's own devices by QR code/invite and syncs watch lists and viewing
+positions between them — with data maps travelling too, so synced
+entries arrive playable — and brings My W@tch to Android (verified on
+a real phone against the desktop AppImage); alpha.62 extends sync to
+Edit-details changes and custom artwork at full quality. Around them:
+alpha.58 gave Edit details proper TV scoping (show/season/episode each
+edit their own level); alpha.59 fixed Publish for files over ~12 MiB
+(the finalize step choked on the shrunk child map — the upload itself
+had succeeded, so re-publishing finishes it free) and added a poster
+crop/zoom step after picking a video frame; alpha.60 added the Terms
+of Use & Disclaimer first-launch gate + Settings → About page and the
+Publish "Why multiple versions?" explainer. Before that the headline
+was **Publish**: W@tch uploads files to Autonomi itself (see the
 Publish section below). Alpha.55 shipped the built-in ANT wallet and
 single-file private uploads with live cost estimates (paid upload
 verified end-to-end on mainnet); alpha.56 grew Publish to multi-file
@@ -418,11 +431,61 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       ffmpeg, desktop), or the player's "use this frame" button (all
       platforms); user rows are never overwritten by TMDB and travel
       in bundles
+- [x] Edit details for TV (alpha.58): shows and seasons get their own
+      edit pencil (title/year/description/artwork at show level,
+      description/artwork at season level, overlaid onto every
+      episode), and editing an episode edits that episode's name,
+      synopsis, and artwork instead of the series — with episode
+      artwork never leaking onto season surfaces
+- [x] Large-file finalize fix (alpha.59): uploads over ~12 MiB no
+      longer fail at the post-payment bookkeeping step (the shrunk
+      child map is now expanded to the root, like import does);
+      victims of the old bug re-publish the same file for free. Plus
+      a crop/zoom step after picking a poster frame
+- [x] Terms of Use & Disclaimer (alpha.60): first-launch accept gate +
+      read-only page under Settings → About; the Publish quality
+      section explains *why* multiple versions are encoded
+      (device/bandwidth fit + Autonomi permanence)
+- [x] Version-picker labels: universal Original-tier uploads gain
+      their real resolution tag in the file name (alpha.60), and
+      published entries are stamped with their "1080p H.264"
+      resolution/codec label so the picker shows the full quality
+      line, matching imported entries (post-alpha.62, next release)
 - [ ] Publish on Android/iOS (desktop-only today)
 - [ ] External signer / WalletConnect (the internal hot wallet is the
       only signing path today)
 - [ ] True self-update (the check only notifies; AppImageUpdate/zsync
       and a Windows helper are deferred — see PLAN-alpha55.md §6)
+
+## My W@tch — device sync (shipped 2026-08-26/27, v0.1.0-alpha.61/.62)
+
+A user's own devices link into a private sync group — no account, no
+server, and deliberately not via Autonomi: sync runs device-to-device
+over an embedded x0x agent (post-quantum QUIC) with the devices meeting
+in a CRDT store on a topic derived from the shared invite secret.
+Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
+
+- [x] Device linking (alpha.61): create a link on one device, join on
+      the others via QR code (camera scan on Android/iOS) or pasted
+      `wtch1-…` invite; My W@tch drawer page shows Last sync, Linked
+      since, and per-device presence; Unlink wipes the link
+- [x] Watch-list + viewing-position sync (alpha.61): lists merge by
+      title with last-writer-wins add/remove (deletes propagate),
+      positions merge newest-wins; each entry's shrunk data map
+      travels in the store, so synced entries arrive playable; 30 s
+      background cycle app-wide plus a "Sync now" button
+- [x] My W@tch on Android (alpha.61): the x0x agent builds into the
+      Android core — verified end-to-end on a real phone against the
+      desktop AppImage (2026-08-27)
+- [x] Edit-details + artwork sync (alpha.62): userEdited titles/years/
+      descriptions/episode names travel inline (last-writer-wins by
+      edit time); artwork syncs at **full quality** — the sync doc
+      carries a sha256 manifest and the bytes are pulled directly from
+      any online linked device that has them, hash-verified, never
+      downscaled; a device that synced a poster re-serves it
+- [ ] My W@tch on iOS (stubbed out today)
+- [ ] Sync while apart: devices must currently be online together —
+      no relay/mailbox in the middle (by design, for now)
 
 ## Phase 3 — All desktop platforms
 - [x] Windows build + packaging → CI-built portable zip, shipped with
@@ -449,7 +512,8 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
 - Publish/subscribe community lists on Autonomi (curated "channels") —
   must default private (a datamap list published at a public address
   re-leaks every title; see PLAN-datamap-privacy.md)
-- Watch-state + list sync between devices via Autonomi
+- ~~Watch-state + list sync between devices~~ — **shipped** as My W@tch
+  (alpha.61/.62, via x0x rather than Autonomi — see the section above)
 - tvOS (Apple TV) layout — Android TV is now in Phase 4
 - Trakt scrobbling
 - Music & photos lists

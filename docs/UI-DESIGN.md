@@ -72,7 +72,8 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   import key/phrase, live ANT/ETH balances, remove)
 - Playback (hardware decode, default subtitle language, skip amounts)
 - Appearance (theme, poster size)
-- About / licenses (incl. TMDB attribution notice + logo; update-check
+- About / licenses (incl. TMDB attribution notice + logo; the Terms of
+  Use & Disclaimer page — also gated on first launch; update-check
   toggle + "Update available" row on desktop)
 
 ### 7. Publish (desktop, alpha.55/.56)
@@ -88,6 +89,18 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   copy, add-all-to-library via the list picker, save-all `.datamap`
   files
 
+### 8. My W@tch (alpha.61/.62)
+- Drawer tile between Publish and Settings (desktop + Android)
+- Unlinked: **Link this device** (names the device, shows the invite as
+  a QR code + copyable `wtch1-…` code) or **Join** (paste the code, or
+  scan the QR with the camera on Android/iOS)
+- Linked: Last sync / Linked since, a row per device with online dot,
+  last-heard time, and list/item counts; Show invite, **Sync now**, and
+  Unlink (with confirm)
+- Sync itself is invisible: a background cycle keeps lists, viewing
+  positions, edits, and artwork current whenever linked devices are
+  online together — the page never needs to be open
+
 ## Layout adaptation
 
 | | Mobile (Android/iOS) | Desktop (Linux/Win/Mac) | TV (Android TV, 10-foot) |
@@ -102,7 +115,7 @@ TV notes: larger base type scale (readable at 3 m), no hover-only affordances, t
 entry kept to add/import flows only (paste via network share or a shown-on-TV import
 address is preferred over typing addresses with a remote).
 
-## Built so far (alpha.57)
+## Built so far (alpha.62)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,
@@ -152,6 +165,13 @@ the Settings → Publishing wallet described above, plus the update-check
 toggle and badge in Settings → About. Alpha.57 adds the detail-page
 Edit details editor (pencil in the app bar): title/year/description
 plus artwork from an image file, a 12-frame video-frame picker
-(desktop), or the player's camera button. Still to
-come from this document: filter/sort + fast-scroller on
+(desktop), or the player's camera button; alpha.58 extends the pencil
+to show and season pages with properly scoped editors, and alpha.59
+adds a crop/zoom step after picking a poster frame. Alpha.60 adds the
+first-launch Terms of Use accept gate (and its read-only page in
+Settings → About) plus the Publish quality explainer dialog. Alpha.61
+adds the My W@tch drawer page described above (link/join with QR,
+device presence, Sync now) with camera QR scanning on Android;
+alpha.62 makes edits and full-quality artwork ride the same sync.
+Still to come from this document: filter/sort + fast-scroller on
 the grid, the full desktop keyboard map, mobile gestures, and the TV layout.
