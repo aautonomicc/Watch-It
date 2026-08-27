@@ -300,19 +300,29 @@ ships, and stored in the OS keychain beside the wallet key
   wholesale when a newer signed head arrives (5-min background check +
   manual refresh). Unsubscribe deletes the list + replicated store.
 - **Publishing** (desktop-only, needs the wallet): items enter one
-  explicit pick at a time — pick → required Describe-this-item (title,
-  description, artwork mandatory; saved as a normal Edit-details row;
-  a **Check TMDB** button looks the item up with the typed title/year
-  when a TMDB key is configured — public-domain classics ARE in the
-  database — previews the match, and on accept stores the full row
-  incl. rating/genres/poster through the normal metadata pipeline, so
-  those extras reach keyless subscribers via the manifest)
-  → per-item rights attestation → staged; Publish update builds the
-  manifest, shows a live cost preview (`/upload/estimate` + balance),
-  runs the paid public upload job (`POST /channel/publish`, same job
-  surface as Upload + an `announcing` phase for the head) and bumps the
-  seq. Since self-encryption is deterministic, chunks of an
-  already-uploaded item cost nothing — only the manifest is new.
+  explicit pick at a time, starting from a LOCAL FILE (the Upload
+  flow's shape, screens/channel_publish_screen.dart): choose a file →
+  quality tiers to encode (same ffmpeg tiers/planning as Upload; tiers
+  fold into one channel item via the version picker) → required
+  Describe-this-item (title, description, artwork mandatory — the page
+  runs against the local file, so frame-grab artwork samples it
+  directly; saved as a normal Edit-details row keyed by the parsed file
+  name, which the tier outputs share; a **Check TMDB** button looks the
+  item up with the typed title/year when a TMDB key is configured —
+  public-domain classics ARE in the database — previews the match, and
+  on accept stores the full row incl. rating/genres/poster through the
+  normal metadata pipeline, so those extras reach keyless subscribers
+  via the manifest) → per-item rights attestation → encode + upload
+  (private-visibility uploads; the datamaps only go public inside the
+  manifest) → auto-staged on the item list, with an optional
+  add-to-library leg. "Add an item already in the library" keeps the
+  picker path for existing uploads (describe + attestation unchanged).
+  Publish update builds the manifest, shows a live cost preview
+  (`/upload/estimate` + balance), runs the paid public upload job
+  (`POST /channel/publish`, same job surface as Upload + an
+  `announcing` phase for the head) and bumps the seq. Since
+  self-encryption is deterministic, chunks of an already-uploaded item
+  cost nothing — only the manifest is new.
 - **Safety rails** (plan Part 3): "publish" is reserved for channels
   ("upload" = private); every channel surface is amber with a PUBLIC
   badge (blue = private); separate drawer doors (never a toggle on

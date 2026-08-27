@@ -513,6 +513,11 @@ implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → Channels.
       typed title/year (public-domain classics are in the database),
       preview, and fill title/description/artwork + rating/genres from
       the match — subscribers get the full metadata keylessly
+- [x] Publish an item straight from a file (2026-08-27): the channel
+      flow now mirrors Upload — choose a local file, encode the quality
+      tiers, describe (TMDB check included), attest, upload; finished
+      uploads are auto-staged and can optionally join a library list
+      (already-uploaded library items keep a secondary picker path)
 - [ ] Channel directory (deliberately NOT in v1 — codes only; a curated
       directory would be a separate repo/site with its own vetting)
 - [ ] Mobile channel creation (subscribe works everywhere; publishing

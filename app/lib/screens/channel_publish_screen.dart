@@ -4,34 +4,40 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 
 import '../models/media_list.dart';
-import '../services/embedded_client.dart';
+import '../services/channel_service.dart';
 import '../services/ffmpeg.dart';
 import '../services/library_store.dart';
 import '../services/publish_api.dart';
 import '../services/publish_plan.dart';
 import '../theme/tokens.dart';
-import 'settings_screen.dart' show promptForText;
+import '../widgets/channel_badge.dart';
+import 'channels_screen.dart' show ChannelAttestationDialog;
+import 'describe_item_screen.dart';
+import 'publish_screen.dart'
+    show addEntriesToLists, pickTargetLists;
 import 'wallet_screen.dart';
 
-/// Upload: put media files on the Autonomi network from the app.
+/// Publish an item to the channel, starting from a FILE — the Upload
+/// flow's shape applied to the public space: pick one local file, choose
+/// the qualities to encode (bundled ffmpeg, same tiers as Upload),
+/// describe it for subscribers (required — with the Check TMDB helper
+/// for known films), attest the rights, then encode + upload.
 ///
-/// User-facing name is "Upload" (formerly "Publish" — renamed so the
-/// word "publish" stays reserved for the genuinely-public Channels
-/// feature; docs/PLAN-personal-vs-channels.md). Uploads are PRIVATE:
-/// Visibility::Private keeps the datamap off the network. Internal
-/// identifiers keep the Publish* names.
-///
-/// Multi-file edition — pick one file or a whole series, see per-file
-/// probe verdicts, choose quality tiers (encoded with bundled ffmpeg;
-/// H.264/AAC faststart MP4 that plays everywhere), confirm rights +
-/// permanence, then the batch runs: each file × tier encodes and uploads
-/// in turn, paid from the internal wallet. Results land in the library
-/// like any import; same-title tiers fold into the version picker.
-class PublishScreen extends StatefulWidget {
-  const PublishScreen({super.key, this.apiBase, this.apiToken, this.ffmpeg});
+/// Finished uploads are STAGED on the channel's item list; nothing is
+/// public until "Publish update" ships the signed manifest (the uploads
+/// themselves are private-visibility — their data maps only leave this
+/// computer inside the manifest). One file per pass on purpose: channel
+/// items enter one explicit pick at a time, there is no bulk publish.
+class ChannelPublishScreen extends StatefulWidget {
+  const ChannelPublishScreen({
+    super.key,
+    this.apiBase,
+    this.apiToken,
+    this.ffmpeg,
+    this.postersDirProvider,
+  });
 
   /// Test overrides for the embedded server base URL / auth token.
   final String? apiBase;
@@ -40,8 +46,11 @@ class PublishScreen extends StatefulWidget {
   /// Test override for the ffmpeg integration.
   final FfmpegService? ffmpeg;
 
+  /// Posters directory override, forwarded to the describe page (tests).
+  final Future<Directory> Function()? postersDirProvider;
+
   @override
-  State<PublishScreen> createState() => _PublishScreenState();
+  State<ChannelPublishScreen> createState() => _ChannelPublishScreenState();
 }
 
 enum _Stage { setup, running, done }
@@ -49,16 +58,6 @@ enum _Stage { setup, running, done }
 enum _EntryStatus { pending, encoding, uploading, done, error, skipped }
 
 enum _ErrorAction { retry, skip, stop }
-
-class _PickedFile {
-  _PickedFile(this.file, this.size, this.probe);
-  final XFile file;
-  final int size;
-  final MediaProbe? probe;
-
-  PublishSource get source => PublishSource(
-      path: file.path, name: file.name, size: size, probe: probe);
-}
 
 class _QueueEntry {
   _QueueEntry(this.item);
@@ -71,7 +70,7 @@ class _QueueEntry {
   String? tempPath;
 }
 
-class _PublishScreenState extends State<PublishScreen> {
+class _ChannelPublishScreenState extends State<ChannelPublishScreen> {
   late final PublishApi _api =
       PublishApi(base: widget.apiBase, token: widget.apiToken);
   late final FfmpegService _ffmpeg = widget.ffmpeg ?? FfmpegService();
@@ -80,13 +79,15 @@ class _PublishScreenState extends State<PublishScreen> {
   bool? _ffmpegAvailable;
 
   _Stage _stage = _Stage.setup;
-  final List<_PickedFile> _files = [];
+  XFile? _file;
+  int _fileSize = 0;
+  MediaProbe? _probe;
   bool _picking = false;
   Set<PublishTier> _selection = {};
   UploadEstimate? _refEstimate;
   bool _estimating = false;
   String? _estimateError;
-  bool _rights = false;
+  bool _described = false;
 
   List<_QueueEntry> _queue = [];
   int _current = 0;
@@ -119,67 +120,65 @@ class _PublishScreenState extends State<PublishScreen> {
       final status = await _api.walletStatus();
       if (mounted) setState(() => _wallet = status);
     } catch (_) {
-      // Leave null — the wallet row shows setup guidance either way.
       if (mounted) {
         setState(() => _wallet = const WalletStatus(configured: false));
       }
     }
   }
 
-  Future<void> _pickFiles() async {
-    final files = await openFiles(acceptedTypeGroups: [
+  PublishSource? get _source {
+    final file = _file;
+    if (file == null) return null;
+    return PublishSource(
+        path: file.path, name: file.name, size: _fileSize, probe: _probe);
+  }
+
+  Future<void> _pickFile() async {
+    final file = await openFile(acceptedTypeGroups: [
       const XTypeGroup(label: 'Media files', extensions: [
         'mp4', 'mkv', 'webm', 'avi', 'mov', 'm4v',
         'mp3', 'flac', 'm4a', 'ogg', 'opus', 'wav',
       ]),
       const XTypeGroup(label: 'All files'),
     ]);
-    if (files.isEmpty || !mounted) return;
+    if (file == null || !mounted) return;
     setState(() => _picking = true);
-    final hadFirst = _files.isNotEmpty;
-    for (final file in files) {
-      if (_files.any((f) => f.file.path == file.path)) continue;
-      final size = await file.length();
-      final probe = await _ffmpeg.probe(file.path);
-      if (!mounted) return;
-      _files.add(_PickedFile(file, size, probe));
-    }
+    final size = await file.length();
+    final probe = await _ffmpeg.probe(file.path);
+    if (!mounted) return;
     setState(() {
       _picking = false;
-      _selection = _defaultSelection();
-      _rights = false;
+      _file = file;
+      _fileSize = size;
+      _probe = probe;
+      _selection = defaultTiers(probe).toSet();
+      // A new file needs its own description.
+      _described = false;
     });
-    if (!hadFirst || _refEstimate == null) await _estimateCost();
+    await _estimateCost();
   }
 
-  void _removeFile(_PickedFile file) {
-    final wasFirst = _files.isNotEmpty && identical(_files.first, file);
+  void _removeFile() {
     setState(() {
-      _files.remove(file);
-      _selection = _defaultSelection();
-      _rights = false;
-      if (_files.isEmpty) {
-        _refEstimate = null;
-        _estimateError = null;
-      }
+      _file = null;
+      _fileSize = 0;
+      _probe = null;
+      _selection = {};
+      _described = false;
+      _refEstimate = null;
+      _estimateError = null;
     });
-    // The reference quote came from the removed file — refresh it.
-    if (wasFirst && _files.isNotEmpty) unawaited(_estimateCost());
   }
-
-  /// Default tier ticks: the union of every file's defaults, so a series
-  /// mixing sources starts with each file's recommended tiers covered.
-  Set<PublishTier> _defaultSelection() =>
-      {for (final f in _files) ...defaultTiers(f.probe)};
 
   Future<void> _estimateCost() async {
-    if (_files.isEmpty) return;
+    final file = _file;
+    if (file == null) return;
     setState(() {
       _estimating = true;
       _estimateError = null;
     });
     try {
-      final estimate = await _api.estimate(_files.first.file.path);
+      final estimate = await _api.estimate(file.path);
       if (mounted) setState(() => _refEstimate = estimate);
     } catch (e) {
       if (mounted) setState(() => _estimateError = '$e');
@@ -188,15 +187,25 @@ class _PublishScreenState extends State<PublishScreen> {
     }
   }
 
-  List<PublishItem> _plannedQueue() =>
-      buildQueue([for (final f in _files) f.source], _selection);
+  Future<void> _describe() async {
+    final file = _file;
+    if (file == null) return;
+    final done = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      builder: (_) => DescribeItemScreen(
+        fileName: file.name,
+        localPath: file.path,
+        ffmpeg: widget.ffmpeg,
+        postersDirProvider: widget.postersDirProvider,
+      ),
+    ));
+    if (done == true && mounted) setState(() => _described = true);
+  }
 
-  /// Files none of the selected qualities apply to — they would be
-  /// skipped, so the setup stage calls them out.
-  List<_PickedFile> _uncoveredFiles() => [
-        for (final f in _files)
-          if (!f.source.offered.any(_selection.contains)) f,
-      ];
+  List<PublishItem> _plannedQueue() {
+    final source = _source;
+    if (source == null) return const [];
+    return buildQueue([source], _selection);
+  }
 
   BigInt? _approxTotalCost(List<PublishItem> queue) {
     final ref = _refEstimate;
@@ -214,16 +223,24 @@ class _PublishScreenState extends State<PublishScreen> {
       !_picking &&
       (_wallet?.configured ?? false) &&
       _refEstimate != null &&
-      _rights &&
+      _described &&
       _plannedQueue().isNotEmpty;
 
   Future<void> _publish() async {
+    final file = _file;
     final queue = _plannedQueue();
-    if (queue.isEmpty) return;
+    if (file == null || queue.isEmpty) return;
+    // The per-item rights attestation — the channel wall, stronger than
+    // Upload's checkbox, because this content is headed for the public.
+    final attested = await showDialog<bool>(
+      context: context,
+      builder: (_) => ChannelAttestationDialog(entryName: file.name),
+    );
+    if (attested != true || !mounted) return;
     if (queue.any((i) => i.needsEncode)) {
       // Sync on purpose: async file IO never completes in the widget
       // tests' fake-async zone, and this is a one-off cheap call.
-      _tempDir = Directory.systemTemp.createTempSync('watchit-publish');
+      _tempDir = Directory.systemTemp.createTempSync('watchit-channel');
     }
     setState(() {
       _queue = [for (final item in queue) _QueueEntry(item)];
@@ -319,6 +336,14 @@ class _PublishScreenState extends State<PublishScreen> {
       if (mounted) setState(() => entry.job = job);
       final result = job.result;
       if (job.phase == 'done' && result != null) {
+        // Straight onto the channel's staged item list — that is what
+        // this whole flow is for (dedup by address inside).
+        await ChannelService.instance.addMyItem(MediaEntry(
+          name: item.outputName,
+          address: result.address,
+          sizeBytes: result.size,
+          videoInfo: tierVideoInfo(item.source.probe, item.tier),
+        ));
         if (mounted) {
           setState(() {
             entry.result = result;
@@ -371,11 +396,13 @@ class _PublishScreenState extends State<PublishScreen> {
   void _reset() {
     setState(() {
       _stage = _Stage.setup;
-      _files.clear();
+      _file = null;
+      _fileSize = 0;
+      _probe = null;
       _selection = {};
       _refEstimate = null;
       _estimateError = null;
-      _rights = false;
+      _described = false;
       _queue = [];
       _current = 0;
     });
@@ -384,6 +411,9 @@ class _PublishScreenState extends State<PublishScreen> {
   List<_QueueEntry> get _published =>
       [for (final e in _queue) if (e.result != null) e];
 
+  /// The optional add-to-library leg the user asked for: the staged
+  /// uploads can also join a normal (private, blue) library list of
+  /// choice — same picker as the Upload done page.
   Future<void> _addAllToLibrary() async {
     final published = _published;
     if (published.isEmpty) return;
@@ -402,32 +432,8 @@ class _PublishScreenState extends State<PublishScreen> {
     ];
     await addEntriesToLists(entries, chosen);
     _snack('Added ${entries.length} '
-        '${entries.length == 1 ? 'title' : 'titles'} to '
+        '${entries.length == 1 ? 'version' : 'versions'} to '
         '${chosen.length == 1 ? chosen.first : '${chosen.length} lists'}');
-  }
-
-  Future<void> _saveAllDatamaps() async {
-    final published = _published;
-    if (published.isEmpty) return;
-    final base = widget.apiBase ?? EmbeddedClient.baseUrl();
-    if (base == null) return;
-    final dirPath = await getDirectoryPath();
-    if (dirPath == null) return;
-    var saved = 0;
-    for (final entry in published) {
-      try {
-        final res = await http
-            .get(Uri.parse('$base/datamap/${entry.result!.address}'));
-        if (res.statusCode != 200) continue;
-        File('$dirPath${Platform.pathSeparator}'
-                '${entry.item.outputName}.datamap')
-            .writeAsBytesSync(res.bodyBytes);
-        saved++;
-      } catch (_) {}
-    }
-    _snack(saved == published.length
-        ? 'Saved $saved .datamap ${saved == 1 ? 'file' : 'files'}'
-        : 'Saved $saved of ${published.length} .datamap files');
   }
 
   void _snack(String message) {
@@ -443,7 +449,14 @@ class _PublishScreenState extends State<PublishScreen> {
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
-        title: Text('Upload', style: TextStyle(color: t.bone, fontSize: 18)),
+        title: Row(
+          children: [
+            Text('Publish an item',
+                style: TextStyle(color: t.bone, fontSize: 18)),
+            const SizedBox(width: 10),
+            const ChannelBadge(text: 'PUBLIC'),
+          ],
+        ),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -458,20 +471,36 @@ class _PublishScreenState extends State<PublishScreen> {
 
   // ── setup ────────────────────────────────────────────────────────────
 
+  Widget _header(WiTokens t, String text) => Padding(
+        padding: const EdgeInsets.fromLTRB(0, 20, 0, 6),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: 11,
+            letterSpacing: 1.5,
+            fontWeight: FontWeight.w700,
+            color: t.ash,
+          ),
+        ),
+      );
+
   List<Widget> _setupChildren(WiTokens t) {
     final queue = _plannedQueue();
     return [
       Text(
-        'Upload media files to the Autonomi network — one file or a '
-        'whole series at once. Uploads are private: only you and your '
-        'linked devices can watch. Nothing is published.',
+        'Add an item to your channel straight from a file on this '
+        'computer: it is encoded into the qualities you pick, described '
+        'for subscribers, and uploaded. The uploads stay staged — '
+        'nothing becomes public until you press "Publish update" on the '
+        'channel page.',
         style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
       ),
       const SizedBox(height: 8),
       Text(
-        'Uploaded files are permanent — they cannot be edited or '
-        'deleted — and storage is paid once, in ANT, from your wallet.',
-        style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+        'Once published, channel content is PUBLIC and PERMANENT — it '
+        'can never be deleted from the network.',
+        style: TextStyle(
+            color: WiTokens.channelAmber, fontSize: 12.5, height: 1.4),
       ),
       const SizedBox(height: 16),
       _walletRow(t),
@@ -479,246 +508,156 @@ class _PublishScreenState extends State<PublishScreen> {
         const SizedBox(height: 12),
         Text(
           'ffmpeg was not found beside the app, so quality tiers are '
-          'unavailable — files can only be uploaded as-is.',
+          'unavailable — the file can only be uploaded as-is.',
           style: TextStyle(color: t.rust, fontSize: 12, height: 1.4),
         ),
       ],
       const SizedBox(height: 16),
-      ..._filesSection(t),
-      if (_files.isNotEmpty && !_picking) ...[
-        const SizedBox(height: 16),
+      ..._fileSection(t),
+      if (_file != null && !_picking) ...[
         ..._tierSection(t),
+        _header(t, 'DESCRIBE — WHAT SUBSCRIBERS SEE'),
+        ..._describeSection(t),
         const SizedBox(height: 16),
         _estimateSection(t, queue),
-        const SizedBox(height: 8),
-        ..._uncoveredWarning(t),
-        CheckboxListTile(
-          value: _rights,
-          contentPadding: EdgeInsets.zero,
-          controlAffinity: ListTileControlAffinity.leading,
-          title: Text(
-            'I have the right to upload '
-            '${_files.length == 1 ? 'this file' : 'these files'} — '
-            '${_files.length == 1 ? 'it is' : 'they are'} my own work, '
-            'verifiably public domain, or a personal copy for private use.',
-            style: TextStyle(color: t.bone, fontSize: 13),
-          ),
-          onChanged: (v) => setState(() => _rights = v ?? false),
-        ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 16),
         FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: WiTokens.channelAmber,
+            foregroundColor: Colors.black,
+            disabledBackgroundColor: t.ink2,
+          ),
           onPressed: _canPublish ? _publish : null,
           icon: const Icon(Icons.cloud_upload_outlined),
           label: Text(queue.length <= 1
-              ? 'Upload'
-              : 'Upload ${queue.length} files'),
+              ? 'Encode & upload for the channel'
+              : 'Encode & upload ${queue.length} versions'),
         ),
+        if (!_canPublish && _file != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              [
+                if (!(_wallet?.configured ?? false)) 'a wallet',
+                if (!_described) 'the description',
+                if (queue.isEmpty) 'at least one quality',
+                if (_refEstimate == null && _estimateError == null)
+                  'the cost estimate',
+                if (_estimateError != null) 'a working cost estimate',
+              ].isEmpty
+                  ? ''
+                  : 'Still needed: '
+                      '${[
+                      if (!(_wallet?.configured ?? false)) 'a wallet',
+                      if (!_described) 'the description',
+                      if (queue.isEmpty) 'at least one quality',
+                      if (_refEstimate == null && _estimateError == null)
+                        'the cost estimate',
+                      if (_estimateError != null)
+                        'a working cost estimate',
+                    ].join(', ')}',
+              style: TextStyle(color: t.ash, fontSize: 12),
+            ),
+          ),
       ],
     ];
   }
 
-  List<Widget> _filesSection(WiTokens t) {
-    if (_files.isEmpty && !_picking) {
+  List<Widget> _fileSection(WiTokens t) {
+    final file = _file;
+    if (file == null && !_picking) {
       return [
         OutlinedButton.icon(
-          onPressed: _pickFiles,
+          onPressed: _pickFile,
           icon: const Icon(Icons.insert_drive_file_outlined),
-          label: const Text('Choose files to upload'),
+          label: const Text('Choose a file'),
         ),
         const SizedBox(height: 6),
         Text(
-          'Select several files at once to upload a whole series — '
-          'episodes named like "Show S01E02.mkv" group under one card '
-          'in the library.',
+          'One item per pass — channel items are added one explicit '
+          'pick at a time. Name the file like "Title (Year).mp4" so it '
+          'displays well.',
           style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
         ),
       ];
     }
+    if (_picking) {
+      return [
+        Row(
+          children: [
+            const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(width: 10),
+            Text('Reading file…',
+                style: TextStyle(color: t.ash, fontSize: 13)),
+          ],
+        ),
+      ];
+    }
     return [
-      Row(
-        children: [
-          Text(
-            'FILES (${_files.length})',
-            style: TextStyle(
-                fontSize: 11,
-                letterSpacing: 1.5,
-                fontWeight: FontWeight.w700,
-                color: t.ash),
-          ),
-          const Spacer(),
-          if (!_picking)
-            TextButton.icon(
-              onPressed: _pickFiles,
-              icon: const Icon(Icons.add, size: 16),
-              label: Text('Add more', style: TextStyle(color: t.accent)),
-            ),
-        ],
+      ListTile(
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+        leading: const Icon(Icons.insert_drive_file_outlined,
+            color: WiTokens.channelAmber, size: 20),
+        title: Text(
+          '${file!.name} · ${formatBytes(_fileSize)}',
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: t.bone, fontSize: 14),
+        ),
+        subtitle: Text(
+          probeVerdict(_probe),
+          style: TextStyle(color: t.ash, fontSize: 12),
+        ),
+        trailing: IconButton(
+          tooltip: 'Remove',
+          icon: Icon(Icons.close, color: t.ash, size: 18),
+          onPressed: _removeFile,
+        ),
       ),
-      for (final file in _files)
-        ListTile(
-          dense: true,
-          contentPadding: EdgeInsets.zero,
-          leading: Icon(Icons.insert_drive_file_outlined,
-              color: t.accent, size: 20),
-          title: Text(
-            '${file.file.name} · ${formatBytes(file.size)}',
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: t.bone, fontSize: 14),
-          ),
-          subtitle: Text(
-            probeVerdict(file.probe),
-            style: TextStyle(color: t.ash, fontSize: 12),
-          ),
-          trailing: IconButton(
-            tooltip: 'Remove',
-            icon: Icon(Icons.close, color: t.ash, size: 18),
-            onPressed: () => _removeFile(file),
-          ),
-        ),
-      if (_picking)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            children: [
-              const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2)),
-              const SizedBox(width: 10),
-              Text('Reading files…',
-                  style: TextStyle(color: t.ash, fontSize: 13)),
-            ],
-          ),
-        ),
     ];
   }
 
   List<Widget> _tierSection(WiTokens t) {
-    final offered = <PublishTier>{
-      for (final f in _files) ...f.source.offered,
-    };
+    final source = _source;
+    if (source == null) return const [];
+    final offered = source.offered;
     // Best encode tiers first, Original last — matches the queue order.
     final ordered = [
       ...kEncodeTierOrder.where(offered.contains),
       if (offered.contains(PublishTier.original)) PublishTier.original,
     ];
     if (ordered.length == 1 && ordered.single == PublishTier.original) {
-      // Nothing to choose — every file goes up as-is.
+      // Nothing to choose — the file goes up as-is.
       return const [];
     }
     return [
-      Row(
-        children: [
-          Text(
-            'QUALITY',
-            style: TextStyle(
-                fontSize: 11,
-                letterSpacing: 1.5,
-                fontWeight: FontWeight.w700,
-                color: t.ash),
-          ),
-          const SizedBox(width: 2),
-          IconButton(
-            tooltip: 'Why multiple versions?',
-            visualDensity: VisualDensity.compact,
-            icon: Icon(Icons.info_outline, color: t.ash, size: 16),
-            onPressed: () => _showWhyVersionsDialog(t),
-          ),
-        ],
-      ),
+      _header(t, 'QUALITY'),
       Text(
-        'Devices and connections vary — smaller versions play smoothly '
-        'where the full-quality file can\'t. Each ticked quality is '
-        'encoded and uploaded for every file it applies to; your library '
-        'shows one card with a version picker.',
+        'Subscribers\' devices and connections vary — smaller versions '
+        'play smoothly where the full-quality file can\'t. Each ticked '
+        'quality is encoded and uploaded; they show as one channel item '
+        'with a version picker.',
         style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
       ),
       for (final tier in ordered) _tierTile(t, tier),
     ];
   }
 
-  /// The full "why" story behind the quality tiers, one tap away from
-  /// where the choice is made. The inline helper carries the one-line
-  /// version; this covers the permanence angle that makes the choice
-  /// matter (uploads can't be swapped for a better-encoded copy later).
-  void _showWhyVersionsDialog(WiTokens t) {
-    final style = TextStyle(color: t.boneDim, fontSize: 13, height: 1.5);
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: t.ink2,
-        title: Text('Why multiple versions?',
-            style: TextStyle(color: t.bone, fontSize: 16)),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'One file rarely suits every viewer. A full-quality file '
-                'can stutter or fail entirely on phones, TVs and older '
-                'computers, and it needs a fast connection to stream '
-                'without buffering. Smaller versions play everywhere and '
-                'start quickly even on slow links.',
-                style: style,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Uploads to Autonomi are permanent — a file can\'t be '
-                'replaced with a re-encoded copy later. Any quality you '
-                'want your devices to have needs to be uploaded now.',
-                style: style,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'The extra versions don\'t clutter anyone\'s library: '
-                'uploads of the same title share a single card, and its '
-                'page has a version picker where you choose what plays '
-                'best on each device.',
-                style: style,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text('Close', style: TextStyle(color: t.accent)),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _tierTile(WiTokens t, PublishTier tier) {
-    final applicable = [
-      for (final f in _files)
-        if (f.source.offered.contains(tier)) f,
-    ];
-    var knownBytes = 0;
-    var anyUnknown = false;
-    for (final f in applicable) {
-      final bytes = predictedSizeBytes(f.probe, tier, f.size);
-      if (bytes == null) {
-        anyUnknown = true;
-      } else {
-        knownBytes += bytes;
-      }
-    }
+    final bytes = predictedSizeBytes(_probe, tier, _fileSize);
     final ref = _refEstimate;
-    final cost = ref == null || knownBytes == 0
+    final cost = ref == null || bytes == null
         ? null
-        : approxCostAtto(knownBytes, ref.costAtto, ref.chunkCount);
+        : approxCostAtto(bytes, ref.costAtto, ref.chunkCount);
     final spec = kTierSpecs[tier];
     final title = tier == PublishTier.original
-        ? 'Original files (as-is)'
+        ? 'Original file (as-is)'
         : '${spec!.name} · ${spec.label} H.264';
     final details = [
-      if (_files.length > 1)
-        'applies to ${applicable.length} of ${_files.length} files',
-      if (knownBytes > 0)
-        '≈${formatBytes(knownBytes)}${anyUnknown ? '+' : ''}',
+      if (bytes != null) '≈${formatBytes(bytes)}',
       if (cost != null) '≈${formatUnits(cost)} ANT',
     ].join(' · ');
     return CheckboxListTile(
@@ -726,6 +665,8 @@ class _PublishScreenState extends State<PublishScreen> {
       value: _selection.contains(tier),
       contentPadding: EdgeInsets.zero,
       controlAffinity: ListTileControlAffinity.leading,
+      activeColor: WiTokens.channelAmber,
+      checkColor: Colors.black,
       title: Text(title, style: TextStyle(color: t.bone, fontSize: 14)),
       subtitle: details.isEmpty
           ? null
@@ -736,19 +677,37 @@ class _PublishScreenState extends State<PublishScreen> {
     );
   }
 
-  List<Widget> _uncoveredWarning(WiTokens t) {
-    final uncovered = _uncoveredFiles();
-    if (uncovered.isEmpty) return const [];
-    return [
-      Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(
-          '${uncovered.length} '
-          '${uncovered.length == 1 ? 'file matches' : 'files match'} none '
-          'of the ticked qualities and will be skipped: '
-          '${uncovered.map((f) => f.file.name).join(', ')}',
-          style: TextStyle(color: t.rust, fontSize: 12, height: 1.4),
+  List<Widget> _describeSection(WiTokens t) {
+    if (_described) {
+      return [
+        Row(
+          children: [
+            Icon(Icons.check_circle_outline, color: t.signalOk, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('Described for subscribers ✓',
+                  style: TextStyle(color: t.bone, fontSize: 13.5)),
+            ),
+            TextButton(
+              onPressed: _describe,
+              child: Text('Edit', style: TextStyle(color: t.ash)),
+            ),
+          ],
         ),
+      ];
+    }
+    return [
+      Text(
+        'Title, description and artwork are required — subscribers only '
+        'see what you write. Known films can be filled in from TMDB.',
+        style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+      ),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        onPressed: _describe,
+        icon: const Icon(Icons.edit_note, color: WiTokens.channelAmber),
+        label: const Text('Describe this item',
+            style: TextStyle(color: WiTokens.channelAmber)),
       ),
     ];
   }
@@ -777,7 +736,8 @@ class _PublishScreenState extends State<PublishScreen> {
           ),
           TextButton(
             onPressed: _estimateCost,
-            child: Text('Retry', style: TextStyle(color: t.accent)),
+            child: const Text('Retry',
+                style: TextStyle(color: WiTokens.channelAmber)),
           ),
         ],
       );
@@ -802,9 +762,9 @@ class _PublishScreenState extends State<PublishScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Estimated from live network quotes on the first file; encoded '
-            'sizes are predictions. Each upload is quoted and paid at live '
-            'prices, so the final total can differ.',
+            'Estimated from live network quotes; encoded sizes are '
+            'predictions. Publishing the channel update afterwards is a '
+            'separate, small manifest upload with its own cost preview.',
             style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
           ),
         ],
@@ -858,7 +818,7 @@ class _PublishScreenState extends State<PublishScreen> {
             fontFamily: wiMonoFamily,
             fontFamilyFallback: wiMonoFallback,
             fontSize: 12,
-            color: t.accent,
+            color: WiTokens.channelAmber,
           ),
         ),
       ],
@@ -876,8 +836,8 @@ class _PublishScreenState extends State<PublishScreen> {
         _current < _queue.length ? _queue[_current] : _queue.last;
     return [
       Text(
-        'Uploading · task ${(_current + 1).clamp(1, _queue.length)} of '
-        '${_queue.length}',
+        'Uploading for the channel · task '
+        '${(_current + 1).clamp(1, _queue.length)} of ${_queue.length}',
         style: TextStyle(
             color: t.bone, fontSize: 16, fontWeight: FontWeight.w600),
       ),
@@ -893,11 +853,48 @@ class _PublishScreenState extends State<PublishScreen> {
         ..._entryProgressSection(t, entry),
       const SizedBox(height: 4),
       Text(
-        'Keep W@tch open until uploading finishes.',
+        'Keep W@tch open until uploading finishes. Nothing is public '
+        'yet — that happens at "Publish update".',
         style: TextStyle(color: t.ash, fontSize: 12),
       ),
       const SizedBox(height: 16),
-      ..._queueList(t),
+      for (final e in _queue)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child: Row(
+            children: [
+              Icon(
+                switch (e.status) {
+                  _EntryStatus.pending => Icons.schedule,
+                  _EntryStatus.encoding => Icons.movie_filter_outlined,
+                  _EntryStatus.uploading => Icons.cloud_upload_outlined,
+                  _EntryStatus.done => Icons.check_circle_outline,
+                  _EntryStatus.error => Icons.error_outline,
+                  _EntryStatus.skipped => Icons.remove_circle_outline,
+                },
+                size: 16,
+                color: switch (e.status) {
+                  _EntryStatus.done => t.signalOk,
+                  _EntryStatus.error => t.rust,
+                  _EntryStatus.pending || _EntryStatus.skipped => t.ash,
+                  _ => WiTokens.channelAmber,
+                },
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  e.item.outputName,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: e.status == _EntryStatus.skipped
+                          ? t.ash
+                          : t.boneDim,
+                      fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+        ),
     ];
   }
 
@@ -959,7 +956,7 @@ class _PublishScreenState extends State<PublishScreen> {
           ),
           OutlinedButton(
             onPressed: () => _errorAction?.complete(_ErrorAction.skip),
-            child: const Text('Skip this file'),
+            child: const Text('Skip this version'),
           ),
           TextButton(
             onPressed: () => _errorAction?.complete(_ErrorAction.stop),
@@ -970,58 +967,14 @@ class _PublishScreenState extends State<PublishScreen> {
     ];
   }
 
-  List<Widget> _queueList(WiTokens t) {
-    return [
-      for (final entry in _queue)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 3),
-          child: Row(
-            children: [
-              Icon(
-                switch (entry.status) {
-                  _EntryStatus.pending => Icons.schedule,
-                  _EntryStatus.encoding => Icons.movie_filter_outlined,
-                  _EntryStatus.uploading => Icons.cloud_upload_outlined,
-                  _EntryStatus.done => Icons.check_circle_outline,
-                  _EntryStatus.error => Icons.error_outline,
-                  _EntryStatus.skipped => Icons.remove_circle_outline,
-                },
-                size: 16,
-                color: switch (entry.status) {
-                  _EntryStatus.done => t.signalOk,
-                  _EntryStatus.error => t.rust,
-                  _EntryStatus.pending || _EntryStatus.skipped => t.ash,
-                  _ => t.accent,
-                },
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  entry.item.outputName,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      color: entry.status == _EntryStatus.skipped
-                          ? t.ash
-                          : t.boneDim,
-                      fontSize: 13),
-                ),
-              ),
-            ],
-          ),
-        ),
-    ];
-  }
-
   // ── done ─────────────────────────────────────────────────────────────
 
   List<Widget> _doneChildren(WiTokens t) {
     final published = _published;
-    final failed = _queue
-        .where((e) => e.status == _EntryStatus.error)
-        .length;
-    final skipped = _queue
-        .where((e) => e.status == _EntryStatus.skipped)
-        .length;
+    final failed =
+        _queue.where((e) => e.status == _EntryStatus.error).length;
+    final skipped =
+        _queue.where((e) => e.status == _EntryStatus.skipped).length;
     var paid = BigInt.zero;
     for (final e in published) {
       paid += e.result!.costAtto;
@@ -1040,7 +993,7 @@ class _PublishScreenState extends State<PublishScreen> {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Uploaded',
+              'Staged for the channel',
               style: TextStyle(
                   color: t.bone, fontSize: 18, fontWeight: FontWeight.w600),
             ),
@@ -1059,32 +1012,36 @@ class _PublishScreenState extends State<PublishScreen> {
       for (final entry in published) _publishedTile(t, entry),
       const SizedBox(height: 8),
       Text(
-        'The titles are ready to play from your library once added, and '
-        'My W@tch sync carries them to your linked devices. They stay '
-        'private unless you share the .datamap files (or a list bundle '
-        'from the Media page) yourself.',
-        style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+        'The ${published.length == 1 ? 'upload is' : 'uploads are'} on '
+        'the channel\'s item list now, but still private. Press '
+        '"Publish update" on the channel page to make the new version '
+        'public — permanently.',
+        style: const TextStyle(
+            color: WiTokens.channelAmber, fontSize: 12.5, height: 1.4),
       ),
       const SizedBox(height: 20),
       if (published.isNotEmpty) ...[
-        FilledButton.icon(
+        OutlinedButton.icon(
           onPressed: _addAllToLibrary,
           icon: const Icon(Icons.video_library_outlined),
-          label: const Text('Add to library'),
-        ),
-        const SizedBox(height: 10),
-        OutlinedButton.icon(
-          onPressed: _saveAllDatamaps,
-          icon: const Icon(Icons.save_alt),
-          label: Text(published.length == 1
-              ? 'Save .datamap file'
-              : 'Save ${published.length} .datamap files'),
+          label: const Text('Also add to my library'),
         ),
         const SizedBox(height: 10),
       ],
+      FilledButton.icon(
+        style: FilledButton.styleFrom(
+          backgroundColor: WiTokens.channelAmber,
+          foregroundColor: Colors.black,
+        ),
+        onPressed: () => Navigator.of(context).pop(true),
+        icon: const Icon(Icons.check),
+        label: const Text('Back to the channel'),
+      ),
+      const SizedBox(height: 8),
       TextButton(
         onPressed: _reset,
-        child: Text('Upload more', style: TextStyle(color: t.ash)),
+        child:
+            Text('Publish another item', style: TextStyle(color: t.ash)),
       ),
     ];
   }
@@ -1136,118 +1093,4 @@ class _PublishScreenState extends State<PublishScreen> {
       ),
     );
   }
-}
-
-/// Desktop platforms are the only place Upload exists this edition
-/// (uploads need local files, ffmpeg, and a wallet on disk).
-bool get isDesktopPlatform =>
-    Platform.isLinux || Platform.isMacOS || Platform.isWindows;
-
-/// Checkbox picker over the existing lists plus a create-new option —
-/// the import flow's picker pattern (its original is private to the
-/// Media page). Shared by the Upload and channel-publish done pages.
-Future<List<String>?> pickTargetLists(
-    BuildContext context, List<MediaList> allLists) async {
-  final t = WiTokens.of(context);
-  // Channel lists mirror someone's manifest and are read-only — never
-  // add targets.
-  final lists = [for (final l in allLists) if (!l.isChannel) l];
-  if (lists.isEmpty) {
-    final title = await promptForText(
-      context,
-      title: 'New list',
-      hint: 'e.g. My uploads',
-      note: 'The library has no lists yet — name one for these titles.',
-    );
-    final trimmed = title?.trim() ?? '';
-    return trimmed.isEmpty ? null : [trimmed];
-  }
-  final selected = <String>{};
-  return showDialog<List<String>>(
-    context: context,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setDialogState) => AlertDialog(
-        backgroundColor: t.ink2,
-        title: Text('Add to library',
-            style: TextStyle(color: t.bone, fontSize: 16)),
-        content: SizedBox(
-          width: 360,
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              for (final list in lists)
-                CheckboxListTile(
-                  dense: true,
-                  value: selected.contains(list.title),
-                  title: Text(list.title,
-                      style: TextStyle(color: t.bone, fontSize: 14)),
-                  onChanged: (v) => setDialogState(() => v == true
-                      ? selected.add(list.title)
-                      : selected.remove(list.title)),
-                ),
-              OutlinedButton.icon(
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Create new list'),
-                onPressed: () async {
-                  final title = await promptForText(
-                    context,
-                    title: 'New list',
-                    hint: 'e.g. My uploads',
-                  );
-                  final trimmed = title?.trim() ?? '';
-                  if (trimmed.isNotEmpty) {
-                    setDialogState(() => selected.add(trimmed));
-                    if (context.mounted) {
-                      Navigator.of(context).pop(selected.toList());
-                    }
-                  }
-                },
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text('Cancel', style: TextStyle(color: t.ash)),
-          ),
-          TextButton(
-            onPressed: selected.isEmpty
-                ? null
-                : () => Navigator.of(context).pop(selected.toList()),
-            child: Text('Add', style: TextStyle(color: t.accent)),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-/// Merge [entries] into every list named in [chosen] (created when
-/// missing), deduplicating by address — the Upload done page's
-/// add-to-library semantics, shared with the channel-publish flow.
-Future<void> addEntriesToLists(
-    List<MediaEntry> entries, List<String> chosen) async {
-  final lists = await LibraryStore.load();
-  final updated = List<MediaList>.of(lists);
-  var idBase = DateTime.now().microsecondsSinceEpoch;
-  for (final title in chosen) {
-    final i = updated.indexWhere((l) =>
-        !l.isChannel && l.title.toLowerCase() == title.toLowerCase());
-    if (i < 0) {
-      updated
-          .add(MediaList(id: '${idBase++}', title: title, entries: entries));
-    } else {
-      final existing = updated[i].entries.map((e) => e.address).toSet();
-      final fresh = [
-        for (final entry in entries)
-          if (!existing.contains(entry.address)) entry,
-      ];
-      if (fresh.isNotEmpty) {
-        updated[i] = updated[i]
-            .copyWith(entries: [...updated[i].entries, ...fresh]);
-      }
-    }
-  }
-  await LibraryStore.save(updated);
 }

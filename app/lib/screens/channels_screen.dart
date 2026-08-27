@@ -9,11 +9,13 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../models/media_list.dart';
 import '../services/channel_service.dart';
 import '../services/channels_api.dart';
+import '../services/ffmpeg.dart';
 import '../services/library_store.dart';
 import '../services/metadata_service.dart';
 import '../services/publish_api.dart';
 import '../theme/tokens.dart';
 import '../widgets/channel_badge.dart';
+import 'channel_publish_screen.dart';
 import 'describe_item_screen.dart';
 import 'list_home_screen.dart';
 import 'publish_screen.dart' show isDesktopPlatform;
@@ -28,19 +30,25 @@ import 'qr_scan_screen.dart';
 ///   read-only lists — subscribers just want to watch.
 /// * **My Channel**: create (name → 12-word key ceremony → full-screen
 ///   public-permanence gate) / restore by phrase; then the code + QR,
-///   the item list subscribers see, "+ Publish an item" (pick →
-///   required Describe-this-item → per-item rights attestation), and
+///   the item list subscribers see, "+ Publish an item" (pick a LOCAL
+///   FILE → encode qualities → required Describe-this-item → per-item
+///   rights attestation → upload; see channel_publish_screen.dart —
+///   already-uploaded library items keep a secondary picker path), and
 ///   Publish update with a cost preview. Everything publish-side is
 ///   desktop-only, like Upload.
 ///
 /// Every surface here is amber ("PUBLIC") on purpose; the word
 /// "publish" is reserved for this screen — the private flow is Upload.
 class ChannelsScreen extends StatefulWidget {
-  const ChannelsScreen({super.key, this.apiBase, this.apiToken});
+  const ChannelsScreen(
+      {super.key, this.apiBase, this.apiToken, this.ffmpeg});
 
   /// Test overrides for the embedded server base URL / auth token.
   final String? apiBase;
   final String? apiToken;
+
+  /// Test override for the publish flow's ffmpeg integration.
+  final FfmpegService? ffmpeg;
 
   @override
   State<ChannelsScreen> createState() => _ChannelsScreenState();
@@ -624,7 +632,13 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
           label: const Text('Publish an item',
               style: TextStyle(color: WiTokens.channelAmber)),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 4),
+        TextButton(
+          onPressed: own.keyMissing ? null : () => _addLibraryItem(own),
+          child: Text('Add an item already in the library',
+              style: TextStyle(color: t.ash, fontSize: 13)),
+        ),
+        const SizedBox(height: 6),
         FilledButton.icon(
           style: FilledButton.styleFrom(
             backgroundColor: WiTokens.channelAmber,
@@ -694,10 +708,32 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     await _reload();
   }
 
-  /// The add-to-channel flow: pick from the library → required
-  /// Describe-this-item page → per-item rights attestation. The item is
-  /// then staged; Publish update ships it (cost preview first).
+  /// The add-to-channel flow, Upload-shaped: pick a LOCAL FILE → choose
+  /// the qualities to encode → required Describe-this-item (Check TMDB
+  /// available) → per-item rights attestation → encode + upload. The
+  /// finished uploads land staged on the item list (with an optional
+  /// add-to-library leg); Publish update ships them (cost preview
+  /// first).
   Future<void> _publishItem(OwnChannel own) async {
+    final staged = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => ChannelPublishScreen(
+            apiBase: widget.apiBase,
+            apiToken: widget.apiToken,
+            ffmpeg: widget.ffmpeg),
+      ),
+    );
+    if (staged == true && mounted) {
+      _snack('Staged — press "Publish update" to make it public');
+    }
+    await _reload();
+  }
+
+  /// Secondary path for content that is ALREADY uploaded: pick from the
+  /// library → required Describe-this-item page → per-item rights
+  /// attestation → staged. (The primary "Publish an item" starts from a
+  /// local file instead.)
+  Future<void> _addLibraryItem(OwnChannel own) async {
     final entry = await showDialog<MediaEntry>(
       context: context,
       builder: (_) => _PickItemDialog(
@@ -1534,12 +1570,14 @@ class _ChannelQrDialog extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Publish an item: picker → (describe, attestation live in the caller)
+// Add from library: picker → (describe, attestation live in the caller)
 // ---------------------------------------------------------------------------
 
-/// Pick one library entry to publish. One explicit pick at a time — the
-/// "separate doors" wall means there is deliberately no bulk selection
-/// and no channel toggle anywhere near the Upload flow.
+/// Pick one already-uploaded library entry for the channel (the
+/// secondary path beside the file-first ChannelPublishScreen). One
+/// explicit pick at a time — the "separate doors" wall means there is
+/// deliberately no bulk selection and no channel toggle anywhere near
+/// the Upload flow.
 class _PickItemDialog extends StatelessWidget {
   const _PickItemDialog({required this.lists, required this.alreadyStaged});
 
