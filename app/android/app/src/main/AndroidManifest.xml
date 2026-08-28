@@ -9,7 +9,7 @@
     <!-- AntTP gateways are plain HTTP (LAN/self-hosted), so allow cleartext. -->
     <application
         android:label="W@tch"
-        android:name="${applicationName}"
+        android:name=".WatchItApplication"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:usesCleartextTraffic="true">

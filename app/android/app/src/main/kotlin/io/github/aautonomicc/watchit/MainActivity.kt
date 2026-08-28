@@ -212,6 +212,7 @@ class MainActivity : FlutterActivity() {
         if (Build.VERSION.SDK_INT < 30) return emptyList()
         return try {
             val am = getSystemService(ACTIVITY_SERVICE) as ActivityManager
+            val javaCrashes = JavaCrashRecorder.crashes(this).toMutableList()
             am.getHistoricalProcessExitReasons(packageName, 0, 8).map {
                 mapOf(
                     "timestampMs" to it.timestamp,
@@ -220,12 +221,29 @@ class MainActivity : FlutterActivity() {
                     "status" to it.status,
                     "importance" to it.importance,
                     "description" to (it.description ?: ""),
-                    "trace" to readTrace(it),
+                    "trace" to (readTrace(it).ifEmpty {
+                        javaTraceFor(it, javaCrashes)
+                    }),
                 )
             }
         } catch (_: Exception) {
             emptyList()
         }
+    }
+
+    // The OS attaches no trace to a Java crash (REASON_CRASH), but our
+    // uncaught-exception handler (WatchItApplication) saved the stack
+    // moments before this death was recorded — match by timestamp.
+    private fun javaTraceFor(
+        info: ApplicationExitInfo,
+        saved: MutableList<Pair<Long, String>>,
+    ): String {
+        if (info.reason != ApplicationExitInfo.REASON_CRASH) return ""
+        val match = saved.minByOrNull { Math.abs(it.first - info.timestamp) }
+            ?.takeIf { Math.abs(it.first - info.timestamp) < 60_000 }
+            ?: return ""
+        saved.remove(match)
+        return match.second
     }
 
     private fun reasonName(reason: Int): String = when (reason) {
