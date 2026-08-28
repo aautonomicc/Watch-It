@@ -17,8 +17,7 @@ import 'show_screen.dart';
 /// A list's own page: every entry as a poster grid (shows folded into one
 /// card, like the wall) behind a row of genre chips built from the TMDB
 /// matches. Chips are multi-select — Science Fiction + Comedy narrows to
-/// entries carrying both. Works for user lists and the virtual
-/// Movies / TV Shows lists alike.
+/// entries carrying both.
 class ListHomeScreen extends StatefulWidget {
   const ListHomeScreen({super.key, required this.list});
 
@@ -47,7 +46,7 @@ class _ListHomeScreenState extends State<ListHomeScreen> {
   Future<void> _reload() async {
     final lists = await LibraryStore.load();
     MediaList? updated;
-    for (final l in isAutoListId(_list.id) ? autoLists(lists) : lists) {
+    for (final l in lists) {
       if (l.id == _list.id) updated = l;
     }
     if (mounted && updated != null) setState(() => _list = updated!);
@@ -155,7 +154,10 @@ class _ListHomeScreenState extends State<ListHomeScreen> {
     }
     final chips = [
       ...genres.toList()..sort(),
-      if (hasUncategorised) kUncategorised,
+      // Only worth a chip when it narrows anything: a list where nothing
+      // is categorised would show a lone Uncategorised chip that filters
+      // nothing (common right after publishing without categories).
+      if (hasUncategorised && genres.isNotEmpty) kUncategorised,
     ];
     // Ignore stale selections (a chip can vanish when a better TMDB
     // match lands) without mutating state during build.

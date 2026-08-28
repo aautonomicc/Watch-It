@@ -2,12 +2,16 @@ import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
 import '../services/library_store.dart';
+import '../services/season_grouping.dart';
 import '../theme/tokens.dart';
 import 'settings_screen.dart' show promptForText;
 
-/// Edit one media list: rename, delete, remove entries. Media is added
-/// on the Media page ("Add to library"), which can also create lists —
-/// this screen only curates what an import put in the library.
+/// Edit one media list: rename, delete, and curate entries in a tree —
+/// episodes group under their show, then season (movies and other
+/// singles stay top-level rows). Every item, season, and show offers
+/// Remove and Move-to-another-list (an existing list or a fresh one).
+/// Media is added on the Media page ("Add to library"), which can also
+/// create lists — this screen only curates what an import put there.
 class ListEditScreen extends StatefulWidget {
   const ListEditScreen({super.key, required this.listId});
 
@@ -93,17 +97,268 @@ class _ListEditScreenState extends State<ListEditScreen> {
     if (mounted) Navigator.of(context).pop();
   }
 
-  Future<void> _removeEntry(int index) async {
+  static String _norm(String address) =>
+      address.toLowerCase().replaceFirst('0x', '');
+
+  /// Remove [entries] from this list. A single item goes straight away
+  /// (like the old per-row ✕); a season or show removal asks first.
+  Future<void> _removeEntries(List<MediaEntry> entries, String what) async {
     final list = _list;
     if (list == null) return;
-    final entries = List<MediaEntry>.of(list.entries)..removeAt(index);
-    await _update(list.copyWith(entries: entries));
+    if (entries.length > 1) {
+      final t = WiTokens.of(context);
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: t.ink2,
+          title: Text('Remove $what?',
+              style: TextStyle(color: t.bone, fontSize: 16)),
+          content: Text(
+            '${entries.length} entries leave "${list.title}". Content on '
+            'Autonomi is unaffected.',
+            style: TextStyle(color: t.boneDim, fontSize: 13),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text('Cancel', style: TextStyle(color: t.ash)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text('Remove', style: TextStyle(color: t.rust)),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    final addrs = {for (final e in entries) _norm(e.address)};
+    await _update(list.copyWith(entries: [
+      for (final e in list.entries)
+        if (!addrs.contains(_norm(e.address))) e,
+    ]));
+  }
+
+  /// Move [entries] out of this list into a picked target: any other
+  /// non-channel list, or a freshly created one. Duplicates already in
+  /// the target are dropped, not doubled.
+  Future<void> _moveEntries(List<MediaEntry> entries, String what) async {
+    final list = _list;
+    final lists = _lists;
+    if (list == null || lists == null) return;
+    final title = await _pickMoveTarget(what);
+    final trimmed = title?.trim();
+    if (trimmed == null || trimmed.isEmpty || !mounted) return;
+
+    final updated = List<MediaList>.of(lists);
+    final srcIndex = updated.indexWhere((l) => l.id == list.id);
+    if (srcIndex < 0) return;
+    final addrs = {for (final e in entries) _norm(e.address)};
+    updated[srcIndex] = list.copyWith(entries: [
+      for (final e in list.entries)
+        if (!addrs.contains(_norm(e.address))) e,
+    ]);
+    // A typed name matching an existing list merges into it — same rule
+    // as the import flow's "Create new list" pseudo-rows.
+    final targetIndex = updated.indexWhere((l) =>
+        l.id != list.id &&
+        !l.isChannel &&
+        l.title.toLowerCase() == trimmed.toLowerCase());
+    var duplicates = 0;
+    String targetTitle;
+    if (targetIndex >= 0) {
+      final target = updated[targetIndex];
+      targetTitle = target.title;
+      final have = {for (final e in target.entries) _norm(e.address)};
+      final fresh =
+          [for (final e in entries) if (have.add(_norm(e.address))) e];
+      duplicates = entries.length - fresh.length;
+      updated[targetIndex] =
+          target.copyWith(entries: [...target.entries, ...fresh]);
+    } else {
+      targetTitle = trimmed;
+      updated.add(MediaList(
+        id: '${DateTime.now().microsecondsSinceEpoch}',
+        title: trimmed,
+        entries: entries,
+      ));
+    }
+    await LibraryStore.save(updated);
+    if (!mounted) return;
+    setState(() => _lists = updated);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Moved ${entries.length} '
+          '${entries.length == 1 ? 'entry' : 'entries'} to "$targetTitle"'
+          '${duplicates > 0 ? ' ($duplicates already there)' : ''}'),
+    ));
+  }
+
+  /// Target picker for a move: the other non-channel lists plus "Create
+  /// new list". Returns the chosen list title, or null on cancel.
+  Future<String?> _pickMoveTarget(String what) async {
+    final t = WiTokens.of(context);
+    final others = [
+      for (final l in _lists ?? <MediaList>[])
+        if (l.id != widget.listId && !l.isChannel) l,
+    ];
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text('Move $what to…',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        contentPadding: const EdgeInsets.fromLTRB(8, 16, 8, 0),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final l in others)
+                      ListTile(
+                        dense: true,
+                        title: Text(l.title,
+                            style:
+                                TextStyle(color: t.bone, fontSize: 14)),
+                        subtitle: Text(
+                            '${l.entries.length} '
+                            '${l.entries.length == 1 ? 'entry' : 'entries'}',
+                            style:
+                                TextStyle(color: t.ash, fontSize: 11.5)),
+                        onTap: () => Navigator.of(context).pop(l.title),
+                      ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () async {
+                      final title = await promptForText(
+                        context,
+                        title: 'New media list',
+                        hint: 'List title',
+                      );
+                      final trimmed = title?.trim();
+                      if (trimmed == null || trimmed.isEmpty) return;
+                      if (context.mounted) {
+                        Navigator.of(context).pop(trimmed);
+                      }
+                    },
+                    child: Text('Create new list',
+                        style: TextStyle(color: t.bone)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text('Cancel', style: TextStyle(color: t.ash)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The Remove / Move menu shared by item, season, and show rows.
+  Widget _entryMenu(WiTokens t, List<MediaEntry> entries, String what) {
+    return PopupMenuButton<String>(
+      tooltip: 'Options',
+      icon: Icon(Icons.more_vert, size: 20, color: t.ash),
+      color: t.ink2,
+      onSelected: (v) => switch (v) {
+        'move' => _moveEntries(entries, what),
+        'remove' => _removeEntries(entries, what),
+        _ => null,
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: 'move',
+          child: Text('Move to another list…',
+              style: TextStyle(color: t.bone, fontSize: 14)),
+        ),
+        PopupMenuItem(
+          value: 'remove',
+          child: Text('Remove from list',
+              style: TextStyle(color: t.rust, fontSize: 14)),
+        ),
+      ],
+    );
+  }
+
+  Widget _entryRow(WiTokens t, MediaEntry e, {double indent = 16}) {
+    final info = formatInfoLine(e);
+    return ListTile(
+      contentPadding: EdgeInsets.only(left: indent, right: 4),
+      title: Text(e.name, style: TextStyle(color: t.bone, fontSize: 14)),
+      subtitle: info == null
+          ? null
+          : Text(info, style: TextStyle(color: t.ash, fontSize: 12)),
+      trailing: _entryMenu(t, [e], '"${e.name}"'),
+    );
+  }
+
+  Widget _seasonTile(WiTokens t, HomeSeason season) {
+    final n = season.episodes.length;
+    return ExpansionTile(
+      controlAffinity: ListTileControlAffinity.leading,
+      iconColor: t.ash,
+      collapsedIconColor: t.ash,
+      shape: const Border(),
+      collapsedShape: const Border(),
+      tilePadding: const EdgeInsets.only(left: 24, right: 4),
+      childrenPadding: EdgeInsets.zero,
+      title: Text('Season ${season.season}',
+          style: TextStyle(color: t.bone, fontSize: 14)),
+      subtitle: Text('$n ${n == 1 ? 'episode' : 'episodes'}',
+          style: TextStyle(color: t.ash, fontSize: 12)),
+      trailing: _entryMenu(t, season.episodes,
+          'season ${season.season} of "${season.show}"'),
+      children: [
+        for (final e in season.episodes) _entryRow(t, e, indent: 56),
+      ],
+    );
+  }
+
+  Widget _showTile(WiTokens t, HomeShow group) {
+    final seasons = group.seasons.length;
+    final episodes = group.episodeCount;
+    final all = [for (final s in group.seasons) ...s.episodes];
+    return ExpansionTile(
+      controlAffinity: ListTileControlAffinity.leading,
+      iconColor: t.ash,
+      collapsedIconColor: t.ash,
+      shape: const Border(),
+      collapsedShape: const Border(),
+      tilePadding: const EdgeInsets.only(left: 8, right: 4),
+      childrenPadding: EdgeInsets.zero,
+      title: Text(group.show,
+          style: TextStyle(
+              color: t.bone, fontSize: 14, fontWeight: FontWeight.w600)),
+      subtitle: Text(
+          '$seasons ${seasons == 1 ? 'season' : 'seasons'} · '
+          '$episodes ${episodes == 1 ? 'episode' : 'episodes'}',
+          style: TextStyle(color: t.ash, fontSize: 12)),
+      trailing: _entryMenu(t, all, '"${group.show}"'),
+      children: [for (final s in group.seasons) _seasonTile(t, s)],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
     final list = _list;
+    // Episodes fold by show, then season — the same grouping as the
+    // home wall, so curating mirrors what browsing shows.
+    final items = list == null ? const <HomeItem>[] : groupShows(list.entries);
     return Scaffold(
       appBar: AppBar(
         backgroundColor: t.ink,
@@ -134,30 +389,24 @@ class _ListEditScreenState extends State<ListEditScreen> {
                     style: TextStyle(fontSize: 13, color: t.ash),
                   ),
                 )
-              : ListView.separated(
+              : ListView(
                   padding: const EdgeInsets.only(bottom: 24),
-                  itemCount: list.entries.length,
-                  separatorBuilder: (_, _) =>
-                      Divider(height: 1, color: t.line),
-                  itemBuilder: (context, i) {
-                    final e = list.entries[i];
-                    final info = formatInfoLine(e);
-                    return ListTile(
-                      title: Text(e.name,
-                          style: TextStyle(color: t.bone, fontSize: 14)),
-                      subtitle: info == null
-                          ? null
-                          : Text(info,
-                              style: TextStyle(color: t.ash, fontSize: 12)),
-                      trailing: IconButton(
-                        tooltip: 'Remove entry',
-                        icon: Icon(Icons.close, size: 18, color: t.ash),
-                        onPressed: () => _removeEntry(i),
-                      ),
-                    );
-                  },
+                  children: [
+                    for (final item in items)
+                      switch (item) {
+                        HomeShow() && final group => _showTile(t, group),
+                        HomeEntry() && final single => Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              for (final e in single.allVersions)
+                                _entryRow(t, e),
+                            ],
+                          ),
+                        // groupShows never yields bare seasons.
+                        HomeSeason() => const SizedBox.shrink(),
+                      },
+                  ],
                 ),
     );
   }
 }
-

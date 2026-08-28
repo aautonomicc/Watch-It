@@ -167,8 +167,9 @@ raw datamap members named by original filename, so even a hand-made
 is gone, old bundles convert on import, and existing libraries migrate
 automatically in a one-time background pass on first launch.
 Alpha.42/.43 add library arrangement: an "Auto by type" mode that groups
-the wall into virtual Movies / TV Shows lists, a left library drawer,
-and per-list browse pages with genre filter chips. Alpha.44–.47
+the wall into virtual Movies / TV Shows lists (removed again after
+alpha.66 — it hid custom lists whose entries have no TMDB match), a
+left library drawer, and per-list browse pages with genre filter chips. Alpha.44–.47
 consolidate importing into a single multi-select "Add to library"
 picker that works out what each file is, and fix importing real
 `ant file upload` output (shrunk datamaps for files over ~12 MiB) and

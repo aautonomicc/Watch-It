@@ -176,8 +176,13 @@ cellular), automatic reconnection after network loss on both platforms,
 an Android background-download progress notification, and the bundled
 demo-movie data map for a fast first play. Alpha.42/.43 add the left
 library drawer and the "My lists | Auto by type" arrangement toggle
-(virtual Movies / TV Shows lists) plus per-list browse pages with
-multi-select genre filter chips. Alpha.48 seeds a full public-domain
+(virtual Movies / TV Shows lists; the toggle was removed again after
+alpha.66 — it hid custom lists with no TMDB match, so browsing is
+always the user's own lists) plus per-list browse pages with
+multi-select genre filter chips (since the post-alpha.66 changes the
+Uncategorised chip only appears when the list also has categorised
+items, and the list editor curates entries in a show → season tree
+with per-item/season/show remove and move-to-list). Alpha.48 seeds a full public-domain
 poster wall (three rows with bundled artwork) on first run and adds a
 file-size/format line ("480p H.264 · 570 MB") to cards and detail
 pages; alpha.49 folds same-title uploads into one card with an

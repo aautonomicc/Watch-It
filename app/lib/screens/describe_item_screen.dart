@@ -10,6 +10,7 @@ import '../models/media_list.dart';
 import '../services/download_manager.dart';
 import '../services/embedded_client.dart';
 import '../services/ffmpeg.dart';
+import '../services/library_arrangement.dart' show genreNames;
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/tmdb_client.dart';
@@ -19,6 +20,30 @@ import '../theme/tokens.dart';
 import '../widgets/channel_badge.dart';
 import '../widgets/poster_crop_dialog.dart';
 import 'edit_details_screen.dart' show FramePickerDialog;
+
+/// Categories offered as chips on the Describe page — the TMDB genre
+/// names, so a hand-picked category and a TMDB match feed the exact
+/// same filter chips on list pages.
+const kDescribeCategories = [
+  'Action',
+  'Adventure',
+  'Animation',
+  'Comedy',
+  'Crime',
+  'Documentary',
+  'Drama',
+  'Family',
+  'Fantasy',
+  'History',
+  'Horror',
+  'Music',
+  'Mystery',
+  'Romance',
+  'Science Fiction',
+  'Thriller',
+  'War',
+  'Western',
+];
 
 /// What "Check TMDB" searches for: the typed title/year when the
 /// publisher changed them (their correction beats a mangled file name),
@@ -90,6 +115,7 @@ class _DescribeItemScreenState extends State<DescribeItemScreen> {
   late final ParsedName _parsed;
 
   Uint8List? _newPosterBytes;
+  final _selectedGenres = <String>{};
   bool _frameSourceAvailable = false;
   bool _saving = false;
   bool _checkingTmdb = false;
@@ -107,6 +133,7 @@ class _DescribeItemScreenState extends State<DescribeItemScreen> {
     _title = TextEditingController(text: _meta.title);
     _year = TextEditingController(text: _meta.year?.toString() ?? '');
     _overview = TextEditingController(text: _meta.overview ?? '');
+    _selectedGenres.addAll(genreNames(_meta.category));
     _title.addListener(_changed);
     _overview.addListener(_changed);
     unawaited(_load());
@@ -263,6 +290,12 @@ class _DescribeItemScreenState extends State<DescribeItemScreen> {
         _year.text = match.year?.toString() ?? _year.text;
         // TMDB sometimes has no synopsis — keep whatever was typed.
         if (match.overview != null) _overview.text = match.overview!;
+        // The match's genres replace any hand-picked category.
+        if (adopted.category != null) {
+          _selectedGenres
+            ..clear()
+            ..addAll(genreNames(adopted.category));
+        }
         // The adopted poster file shows through _meta; a previously
         // picked image would hide it.
         _newPosterBytes = null;
@@ -283,12 +316,21 @@ class _DescribeItemScreenState extends State<DescribeItemScreen> {
           _parsed.lookupKey, _newPosterBytes!,
           postersDirProvider: widget.postersDirProvider));
     }
+    // Ordered as listed (extras from a TMDB match keep their spot at
+    // the end) so the stored string is deterministic.
+    final genres = [
+      for (final g in kDescribeCategories)
+        if (_selectedGenres.contains(g)) g,
+      for (final g in _selectedGenres)
+        if (!kDescribeCategories.contains(g)) g,
+    ];
     await saveUserDetails(
       lookupKey: _parsed.lookupKey,
       title: _title.text.trim(),
       year: int.tryParse(_year.text.trim()),
       overview: _overview.text,
       posterFile: posterFile,
+      category: Value(genres.isEmpty ? null : genres.join(' · ')),
       postersDirProvider: widget.postersDirProvider,
     );
     if (mounted) Navigator.of(context).pop(true);
@@ -398,6 +440,56 @@ class _DescribeItemScreenState extends State<DescribeItemScreen> {
               helperStyle: TextStyle(color: t.ash, fontSize: 11),
               border: const OutlineInputBorder(),
             ),
+          ),
+          const SizedBox(height: 16),
+          Text('CATEGORY (optional)',
+              style: TextStyle(
+                fontSize: 11,
+                letterSpacing: 1.5,
+                fontWeight: FontWeight.w700,
+                color: t.ash,
+              )),
+          const SizedBox(height: 4),
+          Text(
+            'Subscribers filter a list by these — without one the item '
+            'shows as uncategorised.',
+            style: TextStyle(color: t.ash, fontSize: 11.5),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              // A TMDB match can carry genres outside the offered set
+              // ("TV Movie", "War & Politics") — keep them selectable
+              // rather than silently dropping them on the next save.
+              for (final g in [
+                ...kDescribeCategories,
+                ..._selectedGenres
+                    .where((g) => !kDescribeCategories.contains(g)),
+              ])
+                FilterChip(
+                  label: Text(g),
+                  selected: _selectedGenres.contains(g),
+                  showCheckmark: false,
+                  backgroundColor: t.ink2,
+                  selectedColor: WiTokens.channelAmber,
+                  side: BorderSide(
+                      color: _selectedGenres.contains(g)
+                          ? WiTokens.channelAmber
+                          : t.line),
+                  labelStyle: TextStyle(
+                    fontSize: 12,
+                    color: _selectedGenres.contains(g) ? t.ink : t.boneDim,
+                    fontWeight: _selectedGenres.contains(g)
+                        ? FontWeight.w600
+                        : FontWeight.w400,
+                  ),
+                  onSelected: (on) => setState(() {
+                    on ? _selectedGenres.add(g) : _selectedGenres.remove(g);
+                  }),
+                ),
+            ],
           ),
           const SizedBox(height: 16),
           Text('ARTWORK (required)',
