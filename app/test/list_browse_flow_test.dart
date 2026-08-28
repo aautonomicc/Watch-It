@@ -131,6 +131,25 @@ void main() {
     expect(tester.getTopLeft(zeta).dy, lessThan(tester.getTopLeft(fav).dy));
   });
 
+  testWidgets(
+      'drawer has no Media or Channels tiles — both live under '
+      'Settings → LIBRARY', (tester) async {
+    await seedLibrary();
+    await tester.pumpWidget(const WatchItApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Browse lists'));
+    await tester.pumpAndSettle();
+    final drawer = find.byType(WiLibraryDrawer);
+    expect(find.descendant(of: drawer, matching: find.text('Media')),
+        findsNothing);
+    expect(find.descendant(of: drawer, matching: find.text('Channels')),
+        findsNothing);
+    // The remaining entry points stand.
+    expect(find.descendant(of: drawer, matching: find.text('Settings')),
+        findsOneWidget);
+  });
+
   testWidgets('genre chips multi-select narrows the grid', (tester) async {
     final gamma = MediaEntry(name: 'Gamma (2022).mkv', address: _addr(4));
     await LibraryStore.save([

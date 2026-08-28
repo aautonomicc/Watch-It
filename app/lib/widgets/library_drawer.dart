@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
-import '../screens/channels_screen.dart';
 import '../screens/list_home_screen.dart';
-import '../screens/media_lists_screen.dart';
 import '../screens/publish_screen.dart';
 import '../screens/settings_screen.dart';
 import '../services/app_settings.dart';
@@ -109,7 +107,7 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                         horizontal: 16, vertical: 8),
                     child: Text(
                       'Nothing to browse yet — add media on the Media '
-                      'page.',
+                      'page (Settings → Media).',
                       style: TextStyle(fontSize: 12, color: t.boneDim),
                     ),
                   )
@@ -139,14 +137,6 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                       onTap: () => _openList(list),
                     ),
                 Divider(color: t.line, height: 24),
-                ListTile(
-                  dense: true,
-                  leading: Icon(Icons.playlist_add_check,
-                      color: t.boneDim, size: 20),
-                  title: Text('Media',
-                      style: TextStyle(color: t.bone, fontSize: 14)),
-                  onTap: () => _openPage(const MediaListsScreen()),
-                ),
                 // Desktop-only this edition: uploads need local files
                 // and the internal wallet (see docs/PLAN-alpha55.md).
                 if (isDesktopPlatform)
@@ -160,21 +150,9 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                         style: TextStyle(color: t.ash, fontSize: 11)),
                     onTap: () => _openPage(const PublishScreen()),
                   ),
-                // Channels — the PUBLIC space, amber; a separate door
-                // from Upload on purpose (never a mode toggle on it).
-                ListTile(
-                  dense: true,
-                  leading: const Icon(Icons.podcasts,
-                      color: WiTokens.channelAmber, size: 20),
-                  title: Text('Channels',
-                      style: TextStyle(color: t.bone, fontSize: 14)),
-                  subtitle: Text('Public · anyone with the code',
-                      style: TextStyle(color: t.ash, fontSize: 11)),
-                  onTap: () => _openPage(const ChannelsScreen()),
-                ),
-                // My W@tch lives under Settings → Network since the
-                // drawer slimmed down to library navigation + entry
-                // points (the home status bar also links to it).
+                // Media and Channels live under Settings → LIBRARY; My
+                // W@tch under Settings → Network — the drawer is slimmed
+                // down to list navigation + Upload + Settings.
                 ListTile(
                   dense: true,
                   leading: Icon(Icons.settings_outlined,

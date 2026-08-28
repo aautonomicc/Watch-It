@@ -16,6 +16,7 @@ import '../services/storage_usage.dart';
 import '../services/update_check.dart';
 import '../theme/tokens.dart';
 import '../widgets/brand_mark.dart';
+import 'channels_screen.dart';
 import 'downloads_screen.dart';
 import 'media_lists_screen.dart';
 import 'my_watch_screen.dart';
@@ -438,6 +439,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   trailing: Icon(Icons.chevron_right, color: t.ash),
                   onTap: _openMediaLists,
+                ),
+                // Channels — the PUBLIC space, amber; moved here from
+                // the home drawer alongside Media (2026-08-28).
+                ListTile(
+                  leading:
+                      const Icon(Icons.podcasts, color: WiTokens.channelAmber),
+                  title: Text('Channels',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    'Public · anyone with the code',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  trailing: Icon(Icons.chevron_right, color: t.ash),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ChannelsScreen()),
+                  ),
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
