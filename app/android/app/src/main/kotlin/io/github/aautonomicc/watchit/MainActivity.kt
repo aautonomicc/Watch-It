@@ -173,7 +173,23 @@ class MainActivity : FlutterActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode != SAVE_DOCUMENT_REQUEST) {
-            super.onActivityResult(requestCode, resultCode, data)
+            try {
+                super.onActivityResult(requestCode, resultCode, data)
+            } catch (e: SecurityException) {
+                // Known Android SAF bug: the Downloads documents provider
+                // returns a picker URI it cannot re-open itself
+                // ("com.android.providers.downloads has no access to
+                // content://media/…"), so a plugin's content-resolver read
+                // inside the result delivery throws and would kill the
+                // process. Deliver a synthetic cancel so the plugin's
+                // pending Dart future completes (otherwise the picker is
+                // wedged until restart), then tell the user what to do.
+                try {
+                    super.onActivityResult(requestCode, RESULT_CANCELED, null)
+                } catch (_: Exception) {
+                }
+                showPickedFileErrorDialog()
+            }
             return
         }
         val result = pendingSave ?: return
@@ -281,6 +297,22 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
             ""
         }
+    }
+
+    private fun showPickedFileErrorDialog() {
+        if (isFinishing || isDestroyed) return
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Couldn't read that file")
+            .setMessage(
+                "Android refused access to the file you picked — a known " +
+                    "Android bug with files in the Downloads area on some " +
+                    "devices.\n\nTry again, but browse to the file through " +
+                    "the picker's ☰ menu → your device's internal " +
+                    "storage instead of the Downloads shortcut, or move " +
+                    "the file into another folder first."
+            )
+            .setPositiveButton("OK", null)
+            .show()
     }
 
     private fun displayNameOf(uri: Uri): String =
