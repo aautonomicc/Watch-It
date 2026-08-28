@@ -789,10 +789,11 @@ void main() {
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
 
-      // Library section: a single tile that opens the Media Lists page
-      // (list management moved there in alpha.25).
+      // Library section: Media (list management, moved there in
+      // alpha.25) and Channels (moved out of the drawer post-alpha.67).
       expect(find.text('LIBRARY'), findsOneWidget);
       expect(find.text('Media'), findsOneWidget);
+      expect(find.text('Channels'), findsOneWidget);
       expect(find.text('New list'), findsNothing);
 
       // Streaming section: buffer size tile showing the current value.
