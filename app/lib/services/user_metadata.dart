@@ -87,6 +87,8 @@ void _deleteUserPosters(Directory dir, String prefix, {String? keep}) {
 /// remove it (the file itself is only deleted when it is a `user_` one —
 /// TMDB artwork files can be shared between rows). [episodeLabel] absent
 /// = keep the current label; the episode editor writes `SxxEyy · Name`.
+/// [category] absent = keep the current genres; the Describe page writes
+/// a `'Horror · Thriller'`-style value (or null to clear).
 Future<void> saveUserDetails({
   required String lookupKey,
   required String title,
@@ -94,6 +96,7 @@ Future<void> saveUserDetails({
   String? overview,
   Value<String?> episodeLabel = const Value.absent(),
   Value<String?> posterFile = const Value.absent(),
+  Value<String?> category = const Value.absent(),
   Future<Directory> Function()? postersDirProvider,
 }) async {
   final db = await LibraryStore.database();
@@ -117,7 +120,7 @@ Future<void> saveUserDetails({
           year: Value(year),
           overview: Value(
               (overview == null || overview.trim().isEmpty) ? null : overview),
-          category: Value(existing?.category),
+          category: category.present ? category : Value(existing?.category),
           episodeLabel: episodeLabel.present
               ? episodeLabel
               : Value(existing?.episodeLabel),

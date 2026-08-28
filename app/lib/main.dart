@@ -21,7 +21,6 @@ import 'services/channel_service.dart';
 import 'services/favourites.dart';
 import 'services/home_rows.dart';
 import 'services/home_sections.dart';
-import 'services/library_arrangement.dart';
 import 'services/library_store.dart';
 import 'services/licenses.dart';
 import 'services/metadata.dart';
@@ -252,10 +251,8 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
 
   Future<void> _reload() async {
     await LibraryStore.ensureDefaults();
-    // The wall reads the arrangement inside its ListenableBuilder; make
-    // sure the persisted choice is in before the first build settles.
-    await ArrangementStore.instance.ensureLoaded();
-    // Same for the hearted addresses behind the Favourites row.
+    // The hearted addresses behind the Favourites row must be in before
+    // the first build settles.
     await FavouritesStore.instance.ensureLoaded();
     final lists = await LibraryStore.load();
     final continueRow = await continueWatching(lists);
@@ -396,7 +393,6 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
       listenable: Listenable.merge([
         MetadataService.instance,
         DownloadManager.instance,
-        ArrangementStore.instance,
         FavouritesStore.instance,
       ]),
       builder: (context, _) => _posterWall(t, lists),
@@ -460,87 +456,36 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     final sections = _sections.isNotEmpty
         ? _sections
         : reconcileHomeSections(const [], lists);
-    // Auto mode: the list-backed rows collapse into the two virtual
-    // Movies / TV Shows rows (fixed order, minus hidden ones) at the
-    // first list slot; the special rows keep their configured order and
-    // visibility. The home-layout reorder/visibility of list rows
-    // applies to user mode.
-    final auto = ArrangementStore.instance.isAuto;
-    final hidden = ArrangementStore.instance.hiddenAutoIds;
-    // Hidden virtual lists also drop their entries from Continue
-    // Watching and Recently Added (a hidden type resurfacing there would
-    // undercut the hide); Downloads and Favourites are exempt —
-    // on-device files always show, and a heart is a deliberate pick. Filtered here, not in _reload, so a checkbox flip on the
-    // Media page applies live (this builder re-runs on every
-    // ArrangementStore notification). Inert in user mode.
-    final continueItems = auto && hidden.isNotEmpty
-        ? [
-            for (final c in _continue)
-              if (!hidden.contains(autoIdForEntry(c.entry))) c,
-          ]
-        : _continue;
-    final recentItems = auto && hidden.isNotEmpty
-        ? [
-            for (final item in _recent)
-              if (!hidden.contains(_autoIdForItem(item))) item,
-          ]
-        : _recent;
-    var autoEmitted = false;
     final children = <Widget>[];
     for (final section in sections) {
       if (section.isSpecial) {
         if (!section.visible) continue;
         children.addAll(switch (section.id) {
-          kSectionContinue => _continueSection(t, continueItems),
+          kSectionContinue => _continueSection(t, _continue),
           kSectionFavourites => favourites.isEmpty
               ? const <Widget>[]
               : [_sectionTitle(t, 'Favourites'), _itemsRow(t, favourites)],
           kSectionDownloads => downloads.isEmpty
               ? const <Widget>[]
               : [_sectionTitle(t, 'Downloads'), _itemsRow(t, downloads)],
-          _ => recentItems.isEmpty
+          _ => _recent.isEmpty
               ? const <Widget>[]
               : [
                   _sectionTitle(t, 'Recently Added'),
-                  _itemsRow(t, recentItems)
+                  _itemsRow(t, _recent)
                 ],
         });
-      } else if (auto) {
-        if (autoEmitted) continue;
-        autoEmitted = true;
-        for (final list in visibleAutoLists(lists, hidden)) {
-          children.addAll(_listSection(t, list));
-        }
       } else if (section.visible) {
         // Sections whose list is hidden or was deleted after the last
         // reconcile render nothing.
         children.addAll(_listSection(t, listsById[section.listId]));
       }
     }
-    // Auto mode can hide everything (both virtual lists unchecked, no
-    // downloads) — show a way back to the checkboxes instead of a blank
-    // scroll view.
-    if (auto && children.isEmpty) {
-      final hasMedia = lists.any((l) => l.entries.isNotEmpty);
-      return _EmptyState(
-        tokens: t,
-        variant: hasMedia ? _EmptyVariant.autoHidden : _EmptyVariant.empty,
-      );
-    }
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: children,
     );
   }
-
-  /// The virtual auto-mode list a wall item belongs to — a show or
-  /// season card follows its first episode.
-  String _autoIdForItem(HomeItem item) => switch (item) {
-        HomeEntry(:final entry) => autoIdForEntry(entry),
-        HomeShow(:final seasons) =>
-          autoIdForEntry(seasons.first.episodes.first),
-        HomeSeason(:final episodes) => autoIdForEntry(episodes.first),
-      };
 
   List<Widget> _continueSection(WiTokens t, List<ContinueItem> items) {
     if (items.isEmpty) return const [];
@@ -839,10 +784,6 @@ enum _EmptyVariant {
 
   /// Lists exist but every one is unchecked in Settings → Media.
   allHidden,
-
-  /// Auto mode, and every virtual list is hidden (or empty) with no
-  /// downloads — the enabled lists do hold media.
-  autoHidden,
 }
 
 class _EmptyState extends StatelessWidget {
@@ -861,10 +802,6 @@ class _EmptyState extends StatelessWidget {
         ),
       _EmptyVariant.allHidden => (
           'All your lists are hidden',
-          'Enable a list in Settings → Media to show it here.',
-        ),
-      _EmptyVariant.autoHidden => (
-          'All media is hidden',
           'Enable a list in Settings → Media to show it here.',
         ),
     };

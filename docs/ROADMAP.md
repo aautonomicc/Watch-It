@@ -85,7 +85,9 @@ statically linked self_encryption crate; new Settings → About →
 Open-source licenses page). Alpha.42 added library arrangement: a "My lists | Auto by type" toggle on
 the Media page that swaps the home wall and the new left library drawer to
 virtual Movies / TV Shows lists (derived from cached TMDB media types,
-never stored), per-list browse pages with multi-select genre filter chips,
+never stored; REMOVED after alpha.66 — the auto split hid custom lists
+whose entries have no TMDB match, so browsing is always the user's own
+lists now), per-list browse pages with multi-select genre filter chips,
 and a checkbox list-picker on `.datamap` import (multi-select into
 existing lists or create-new, silent merge). Alpha.43 refined auto mode:
 the Settings section is now just "Media", the checkbox rows follow the

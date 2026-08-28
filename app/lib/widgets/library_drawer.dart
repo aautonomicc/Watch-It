@@ -11,10 +11,10 @@ import '../services/library_store.dart';
 import '../services/metadata_service.dart';
 import '../theme/tokens.dart';
 
-/// Modal left drawer for hopping between browsable lists: enabled user
-/// lists, or the virtual Movies / TV Shows pair in auto mode. Mounted on
-/// the home screen and on every list page (there, [currentListId] marks
-/// the open list and navigation replaces the page instead of stacking).
+/// Modal left drawer for hopping between browsable lists (the enabled
+/// user lists). Mounted on the home screen and on every list page
+/// (there, [currentListId] marks the open list and navigation replaces
+/// the page instead of stacking).
 class WiLibraryDrawer extends StatefulWidget {
   const WiLibraryDrawer({super.key, this.currentListId});
 
@@ -35,7 +35,6 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
   }
 
   Future<void> _load() async {
-    await ArrangementStore.instance.ensureLoaded();
     final lists = await LibraryStore.load();
     if (mounted) setState(() => _lists = lists);
   }
@@ -60,12 +59,8 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
     navigator.push(MaterialPageRoute<void>(builder: (_) => page));
   }
 
-  IconData _iconFor(MediaList list) => switch (list.id) {
-        kAutoMoviesListId => Icons.movie_outlined,
-        kAutoTvShowsListId => Icons.live_tv_outlined,
-        _ =>
-          list.isChannel ? Icons.podcasts : Icons.video_library_outlined,
-      };
+  IconData _iconFor(MediaList list) =>
+      list.isChannel ? Icons.podcasts : Icons.video_library_outlined;
 
   @override
   Widget build(BuildContext context) {
@@ -73,17 +68,12 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
     return Drawer(
       backgroundColor: t.ink,
       child: SafeArea(
-        // Counts and the auto split refine as TMDB matches land; the
-        // whole drawer flips when the arrangement changes elsewhere.
+        // Titles refine as TMDB matches land elsewhere in the app.
         child: ListenableBuilder(
-          listenable: Listenable.merge(
-              [MetadataService.instance, ArrangementStore.instance]),
+          listenable: MetadataService.instance,
           builder: (context, _) {
             final lists = _lists;
-            final browsable = lists == null
-                ? null
-                : browsableLists(lists, ArrangementStore.instance.value,
-                    hiddenAutoIds: ArrangementStore.instance.hiddenAutoIds);
+            final browsable = lists == null ? null : browsableLists(lists);
             return ListView(
               children: [
                 Padding(

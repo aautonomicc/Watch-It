@@ -10,9 +10,6 @@ import 'package:watchit/db/app_database.dart';
 import 'package:watchit/main.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/screens/list_home_screen.dart';
-import 'package:watchit/screens/media_lists_screen.dart';
-import 'package:watchit/services/app_settings.dart';
-import 'package:watchit/services/library_arrangement.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata.dart';
 import 'package:watchit/services/metadata_service.dart';
@@ -47,7 +44,6 @@ void main() {
       apiKeyProvider: () async => '',
       postersDirProvider: () async => Directory.systemTemp,
     );
-    ArrangementStore.instance = ArrangementStore();
     WatchStateStore.instance = WatchStateStore();
   });
 
@@ -82,51 +78,12 @@ void main() {
         home: home,
       );
 
-  testWidgets('user mode keeps the list rows on the wall', (tester) async {
+  testWidgets('the wall shows the list rows', (tester) async {
     await seedLibrary();
     await tester.pumpWidget(const WatchItApp());
     await tester.pumpAndSettle();
 
     expect(find.text('Favourites'), findsOneWidget);
-    expect(find.text('Movies'), findsNothing);
-    expect(find.text('TV Shows'), findsNothing);
-  });
-
-  testWidgets('auto mode swaps list rows for Movies and TV Shows',
-      (tester) async {
-    SharedPreferences.setMockInitialValues({
-      'defaults_seeded_v4': true,
-      'terms_accepted_version_v1': kTermsVersion,
-      'library_arrangement_v1': 'autoByType',
-    });
-    await seedLibrary();
-    await tester.pumpWidget(const WatchItApp());
-    await tester.pumpAndSettle();
-
-    expect(find.text('Movies'), findsOneWidget);
-    expect(find.text('Favourites'), findsNothing);
-    // The movie card sits under Movies.
-    expect(find.text('Alpha (2020)'), findsWidgets);
-    // The TV Shows row starts below the fold of the test viewport.
-    await tester.drag(find.byType(ListView).last, const Offset(0, -400));
-    await tester.pumpAndSettle();
-    expect(find.text('TV Shows'), findsOneWidget);
-    expect(find.text('Showname'), findsWidgets);
-  });
-
-  testWidgets('segmented control on Media Lists persists the arrangement',
-      (tester) async {
-    await seedLibrary();
-    await tester.pumpWidget(page(const MediaListsScreen()));
-    await tester.pumpAndSettle();
-
-    expect(find.text('My lists'), findsOneWidget);
-    await tester.tap(find.text('Auto by type'));
-    await tester.pumpAndSettle();
-
-    expect(
-        await AppSettings.libraryArrangement(), LibraryArrangement.autoByType);
-    expect(ArrangementStore.instance.isAuto, isTrue);
   });
 
   testWidgets('drawer lists user lists and opens the list page',
@@ -148,150 +105,6 @@ void main() {
     // One movie card + one folded show card in the grid.
     expect(find.byType(PosterCard), findsOneWidget);
     expect(find.byType(ShowCard), findsOneWidget);
-  });
-
-  testWidgets('drawer in auto mode lists the virtual pair', (tester) async {
-    SharedPreferences.setMockInitialValues({
-      'defaults_seeded_v4': true,
-      'terms_accepted_version_v1': kTermsVersion,
-      'library_arrangement_v1': 'autoByType',
-    });
-    await seedLibrary();
-    await tester.pumpWidget(const WatchItApp());
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byTooltip('Browse lists'));
-    await tester.pumpAndSettle();
-    Finder inDrawer(String text) => find.descendant(
-        of: find.byType(WiLibraryDrawer), matching: find.text(text));
-    expect(inDrawer('Movies'), findsOneWidget);
-    expect(inDrawer('TV Shows'), findsOneWidget);
-
-    await tester.tap(inDrawer('TV Shows'));
-    await tester.pumpAndSettle();
-    expect(find.byType(ListHomeScreen), findsOneWidget);
-    expect(find.text('2 entries'), findsOneWidget);
-    expect(find.byType(ShowCard), findsOneWidget);
-    expect(find.byType(PosterCard), findsNothing);
-  });
-
-  testWidgets('auto mode swaps the Media page rows for the virtual lists',
-      (tester) async {
-    SharedPreferences.setMockInitialValues({
-      'defaults_seeded_v4': true,
-      'terms_accepted_version_v1': kTermsVersion,
-      'library_arrangement_v1': 'autoByType',
-    });
-    await seedLibrary();
-    await tester.pumpWidget(page(const MediaListsScreen()));
-    await tester.pumpAndSettle();
-
-    // Virtual rows, not the stored list; no 3-dot menu, no tap-to-edit.
-    expect(find.text('Movies'), findsOneWidget);
-    expect(find.text('TV Shows'), findsOneWidget);
-    expect(find.text('Favourites'), findsNothing);
-    expect(find.byTooltip('List options'), findsNothing);
-
-    // Unchecking TV Shows hides it from home and persists.
-    await tester.tap(find.descendant(
-        of: find.widgetWithText(ListTile, 'TV Shows'),
-        matching: find.byType(Checkbox)));
-    await tester.pumpAndSettle();
-    expect(ArrangementStore.instance.hiddenAutoIds, {kAutoTvShowsListId});
-    expect(await AppSettings.autoHiddenLists(), {kAutoTvShowsListId});
-    expect(find.text('2 entries  ·  hidden from home'), findsOneWidget);
-
-    // Back in My lists, the user rows return with the hide untouched.
-    await tester.tap(find.text('My lists'));
-    await tester.pumpAndSettle();
-    expect(find.text('Favourites'), findsOneWidget);
-    expect(find.byTooltip('List options'), findsOneWidget);
-    final favourites = await LibraryStore.load();
-    expect(favourites.single.enabled, isTrue);
-  });
-
-  testWidgets('hidden virtual list leaves the wall and drawer',
-      (tester) async {
-    SharedPreferences.setMockInitialValues({
-      'defaults_seeded_v4': true,
-      'terms_accepted_version_v1': kTermsVersion,
-      'library_arrangement_v1': 'autoByType',
-      'auto_hidden_lists_v1': [kAutoTvShowsListId],
-    });
-    await seedLibrary();
-    await tester.pumpWidget(const WatchItApp());
-    await tester.pumpAndSettle();
-
-    expect(find.text('Movies'), findsOneWidget);
-    await tester.drag(find.byType(ListView).last, const Offset(0, -400));
-    await tester.pumpAndSettle();
-    expect(find.text('TV Shows'), findsNothing);
-
-    await tester.tap(find.byTooltip('Browse lists'));
-    await tester.pumpAndSettle();
-    Finder inDrawer(String text) => find.descendant(
-        of: find.byType(WiLibraryDrawer), matching: find.text(text));
-    expect(inDrawer('Movies'), findsOneWidget);
-    expect(inDrawer('TV Shows'), findsNothing);
-  });
-
-  testWidgets('hidden virtual list filters Continue Watching and Recently '
-      'Added', (tester) async {
-    SharedPreferences.setMockInitialValues({
-      'defaults_seeded_v4': true,
-      'terms_accepted_version_v1': kTermsVersion,
-      'library_arrangement_v1': 'autoByType',
-      'auto_hidden_lists_v1': [kAutoTvShowsListId],
-    });
-    await seedLibrary();
-    await WatchStateStore.instance.record(_ep1,
-        position: const Duration(minutes: 10),
-        duration: const Duration(minutes: 45));
-    await WatchStateStore.instance.record(_movie,
-        position: const Duration(minutes: 10),
-        duration: const Duration(minutes: 100));
-    await tester.pumpWidget(const WatchItApp());
-    await tester.pumpAndSettle();
-
-    // The movie stays; the hidden show's episode drops out of the row.
-    expect(find.text('Continue Watching'), findsOneWidget);
-    expect(find.text('Alpha (2020)'), findsWidgets);
-    expect(find.text('Showname'), findsNothing);
-  });
-
-  testWidgets('both virtual lists hidden shows the all-media-hidden state',
-      (tester) async {
-    SharedPreferences.setMockInitialValues({
-      'defaults_seeded_v4': true,
-      'terms_accepted_version_v1': kTermsVersion,
-      'library_arrangement_v1': 'autoByType',
-      'auto_hidden_lists_v1': [kAutoMoviesListId, kAutoTvShowsListId],
-    });
-    await seedLibrary();
-    await tester.pumpWidget(const WatchItApp());
-    await tester.pumpAndSettle();
-
-    expect(find.text('All media is hidden'), findsOneWidget);
-    expect(find.text('Enable a list in Settings → Media to show it here.'),
-        findsOneWidget);
-    // Flush the offline metadata resolves the last build scheduled —
-    // they resolve to nothing and never notify, so pumpAndSettle alone
-    // leaves their zero-duration timers pending at teardown.
-    await tester.pump(const Duration(seconds: 1));
-  });
-
-  testWidgets('user mode ignores the auto-mode hide set', (tester) async {
-    SharedPreferences.setMockInitialValues({
-      'defaults_seeded_v4': true,
-      'terms_accepted_version_v1': kTermsVersion,
-      'auto_hidden_lists_v1': [kAutoMoviesListId, kAutoTvShowsListId],
-    });
-    await seedLibrary();
-    await tester.pumpWidget(const WatchItApp());
-    await tester.pumpAndSettle();
-
-    expect(find.text('Favourites'), findsOneWidget);
-    expect(find.text('All media is hidden'), findsNothing);
   });
 
   testWidgets('genre chips multi-select narrows the grid', (tester) async {
@@ -352,6 +165,23 @@ void main() {
     await tester.tap(find.text('All'));
     await tester.pumpAndSettle();
     expect(find.byType(PosterCard), findsNWidgets(3));
+  });
+
+  testWidgets('no chips at all when nothing in the list is categorised',
+      (tester) async {
+    // Every entry unmatched → an Uncategorised chip would be the only
+    // one, filtering nothing — the whole chip row stays hidden.
+    final films = MediaList(id: 'l1', title: 'Films', entries: [
+      _movie,
+      MediaEntry(name: 'Beta (2021).mkv', address: _addr(5)),
+    ]);
+    await LibraryStore.save([films]);
+    await tester.pumpWidget(page(ListHomeScreen(list: films)));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Uncategorised'), findsNothing);
+    expect(find.text('All'), findsNothing);
+    expect(find.byType(PosterCard), findsNWidgets(2));
   });
 
   testWidgets('show cards filter by the show genres', (tester) async {

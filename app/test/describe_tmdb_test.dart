@@ -270,4 +270,94 @@ void main() {
       expect(rows.where((r) => r.found), isEmpty);
     });
   });
+
+  group('DescribeItemScreen category', () {
+    // Pushed onto a base route so tapping Save (which pops) is safe.
+    Future<void> pump(WidgetTester tester,
+        {String name = 'The.Movie.2024.1080p.mkv'}) async {
+      tester.view.physicalSize = const Size(900, 3000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => DescribeItemScreen(
+                    entry: MediaEntry(name: name, address: 'ab12'),
+                    postersDirProvider: () async => postersDir,
+                  ),
+                ),
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    FilterChip chip(WidgetTester tester, String label) =>
+        tester.widget<FilterChip>(find.widgetWithText(FilterChip, label));
+
+    testWidgets('chips offer the TMDB genre names', (tester) async {
+      MetadataService.instance = service();
+      await pump(tester);
+      expect(find.text('CATEGORY (optional)'), findsOneWidget);
+      expect(find.widgetWithText(FilterChip, 'Horror'), findsOneWidget);
+      expect(find.widgetWithText(FilterChip, 'Western'), findsOneWidget);
+      expect(chip(tester, 'Horror').selected, isFalse);
+    });
+
+    testWidgets('a TMDB match selects its genres; extra picks save with '
+        'them', (tester) async {
+      MetadataService.instance = service();
+      await pump(tester);
+      await tester.tap(find.text('Check TMDB'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Use these details'));
+      await tester.pumpAndSettle();
+      expect(chip(tester, 'Drama').selected, isTrue);
+
+      await tester.ensureVisible(find.widgetWithText(FilterChip, 'Horror'));
+      await tester.tap(find.widgetWithText(FilterChip, 'Horror'));
+      await tester.pumpAndSettle();
+      final save = find.widgetWithText(FilledButton, 'Save description');
+      await tester.ensureVisible(save);
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+
+      final db = await LibraryStore.database();
+      final rows = await db.select(db.metadataCache).get();
+      final row = rows.singleWhere((r) => r.userEdited);
+      expect(row.category, 'Drama · Horror');
+    });
+
+    testWidgets('deselecting every chip clears the category',
+        (tester) async {
+      MetadataService.instance = service();
+      await pump(tester);
+      await tester.tap(find.text('Check TMDB'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Use these details'));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.widgetWithText(FilterChip, 'Drama'));
+      await tester.tap(find.widgetWithText(FilterChip, 'Drama'));
+      await tester.pumpAndSettle();
+      final save = find.widgetWithText(FilledButton, 'Save description');
+      await tester.ensureVisible(save);
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+
+      final db = await LibraryStore.database();
+      final rows = await db.select(db.metadataCache).get();
+      final row = rows.singleWhere((r) => r.userEdited);
+      expect(row.category, isNull);
+    });
+  });
 }
