@@ -2,16 +2,19 @@ import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
 import '../services/library_store.dart';
+import '../services/metadata.dart';
 import '../services/season_grouping.dart';
 import '../theme/tokens.dart';
 import 'settings_screen.dart' show promptForText;
 
 /// Edit one media list: rename, delete, and curate entries in a tree —
-/// episodes group under their show, then season (movies and other
-/// singles stay top-level rows). Every item, season, and show offers
-/// Remove and Move-to-another-list (an existing list or a fresh one).
-/// Media is added on the Media page ("Add to library"), which can also
-/// create lists — this screen only curates what an import put there.
+/// episodes group under their show, then season, and multiple uploads of
+/// one title (a 480p and a 1080p copy) under a single version tile
+/// (movies and other singles stay top-level rows). Every item, season,
+/// show, and version group offers Remove, Move-to-another-list, and
+/// Copy-to-another-list (an existing list or a fresh one). Media is
+/// added on the Media page ("Add to library"), which can also create
+/// lists — this screen only curates what an import put there.
 class ListEditScreen extends StatefulWidget {
   const ListEditScreen({super.key, required this.listId});
 
@@ -139,25 +142,29 @@ class _ListEditScreenState extends State<ListEditScreen> {
     ]));
   }
 
-  /// Move [entries] out of this list into a picked target: any other
-  /// non-channel list, or a freshly created one. Duplicates already in
-  /// the target are dropped, not doubled.
-  Future<void> _moveEntries(List<MediaEntry> entries, String what) async {
+  /// Move or copy [entries] into a picked target: any other non-channel
+  /// list, or a freshly created one. A copy leaves this list untouched
+  /// (for building custom playlists); a move removes the entries here.
+  /// Duplicates already in the target are dropped, not doubled.
+  Future<void> _transferEntries(List<MediaEntry> entries, String what,
+      {required bool copy}) async {
     final list = _list;
     final lists = _lists;
     if (list == null || lists == null) return;
-    final title = await _pickMoveTarget(what);
+    final title = await _pickTransferTarget(what, copy: copy);
     final trimmed = title?.trim();
     if (trimmed == null || trimmed.isEmpty || !mounted) return;
 
     final updated = List<MediaList>.of(lists);
     final srcIndex = updated.indexWhere((l) => l.id == list.id);
     if (srcIndex < 0) return;
-    final addrs = {for (final e in entries) _norm(e.address)};
-    updated[srcIndex] = list.copyWith(entries: [
-      for (final e in list.entries)
-        if (!addrs.contains(_norm(e.address))) e,
-    ]);
+    if (!copy) {
+      final addrs = {for (final e in entries) _norm(e.address)};
+      updated[srcIndex] = list.copyWith(entries: [
+        for (final e in list.entries)
+          if (!addrs.contains(_norm(e.address))) e,
+      ]);
+    }
     // A typed name matching an existing list merges into it — same rule
     // as the import flow's "Create new list" pseudo-rows.
     final targetIndex = updated.indexWhere((l) =>
@@ -187,15 +194,16 @@ class _ListEditScreenState extends State<ListEditScreen> {
     if (!mounted) return;
     setState(() => _lists = updated);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Moved ${entries.length} '
+      content: Text('${copy ? 'Copied' : 'Moved'} ${entries.length} '
           '${entries.length == 1 ? 'entry' : 'entries'} to "$targetTitle"'
           '${duplicates > 0 ? ' ($duplicates already there)' : ''}'),
     ));
   }
 
-  /// Target picker for a move: the other non-channel lists plus "Create
-  /// new list". Returns the chosen list title, or null on cancel.
-  Future<String?> _pickMoveTarget(String what) async {
+  /// Target picker for a move or copy: the other non-channel lists plus
+  /// "Create new list". Returns the chosen list title, or null on cancel.
+  Future<String?> _pickTransferTarget(String what,
+      {required bool copy}) async {
     final t = WiTokens.of(context);
     final others = [
       for (final l in _lists ?? <MediaList>[])
@@ -205,7 +213,7 @@ class _ListEditScreenState extends State<ListEditScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: t.ink2,
-        title: Text('Move $what to…',
+        title: Text('${copy ? 'Copy' : 'Move'} $what to…',
             style: TextStyle(color: t.bone, fontSize: 16)),
         contentPadding: const EdgeInsets.fromLTRB(8, 16, 8, 0),
         content: SizedBox(
@@ -268,14 +276,16 @@ class _ListEditScreenState extends State<ListEditScreen> {
     );
   }
 
-  /// The Remove / Move menu shared by item, season, and show rows.
+  /// The Remove / Move / Copy menu shared by item, season, show, and
+  /// version-group rows.
   Widget _entryMenu(WiTokens t, List<MediaEntry> entries, String what) {
     return PopupMenuButton<String>(
       tooltip: 'Options',
       icon: Icon(Icons.more_vert, size: 20, color: t.ash),
       color: t.ink2,
       onSelected: (v) => switch (v) {
-        'move' => _moveEntries(entries, what),
+        'move' => _transferEntries(entries, what, copy: false),
+        'copy' => _transferEntries(entries, what, copy: true),
         'remove' => _removeEntries(entries, what),
         _ => null,
       },
@@ -283,6 +293,11 @@ class _ListEditScreenState extends State<ListEditScreen> {
         PopupMenuItem(
           value: 'move',
           child: Text('Move to another list…',
+              style: TextStyle(color: t.bone, fontSize: 14)),
+        ),
+        PopupMenuItem(
+          value: 'copy',
+          child: Text('Copy to another list…',
               style: TextStyle(color: t.bone, fontSize: 14)),
         ),
         PopupMenuItem(
@@ -303,6 +318,33 @@ class _ListEditScreenState extends State<ListEditScreen> {
           ? null
           : Text(info, style: TextStyle(color: t.ash, fontSize: 12)),
       trailing: _entryMenu(t, [e], '"${e.name}"'),
+    );
+  }
+
+  /// Multiple uploads of one title (same parsed lookup key — e.g. a 480p
+  /// and a 1080p copy) fold under a single expandable tile, mirroring the
+  /// show → season tree: cleaner than N near-identical rows, and the
+  /// group menu curates all versions at once.
+  Widget _versionsTile(WiTokens t, HomeEntry item) {
+    final versions = item.allVersions;
+    final parsed = parseMediaName(item.entry.name);
+    final title = parsed.title.isEmpty ? item.entry.name : parsed.title;
+    return ExpansionTile(
+      controlAffinity: ListTileControlAffinity.leading,
+      iconColor: t.ash,
+      collapsedIconColor: t.ash,
+      shape: const Border(),
+      collapsedShape: const Border(),
+      tilePadding: const EdgeInsets.only(left: 8, right: 4),
+      childrenPadding: EdgeInsets.zero,
+      title: Text(title,
+          style: TextStyle(
+              color: t.bone, fontSize: 14, fontWeight: FontWeight.w600)),
+      subtitle: Text('${versions.length} versions',
+          style: TextStyle(color: t.ash, fontSize: 12)),
+      trailing: _entryMenu(
+          t, versions, 'all ${versions.length} versions of "$title"'),
+      children: [for (final e in versions) _entryRow(t, e, indent: 40)],
     );
   }
 
@@ -395,13 +437,10 @@ class _ListEditScreenState extends State<ListEditScreen> {
                     for (final item in items)
                       switch (item) {
                         HomeShow() && final group => _showTile(t, group),
-                        HomeEntry() && final single => Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              for (final e in single.allVersions)
-                                _entryRow(t, e),
-                            ],
-                          ),
+                        HomeEntry() && final single =>
+                          single.allVersions.length > 1
+                              ? _versionsTile(t, single)
+                              : _entryRow(t, single.entry),
                         // groupShows never yields bare seasons.
                         HomeSeason() => const SizedBox.shrink(),
                       },

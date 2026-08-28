@@ -126,6 +126,13 @@ class WiTokens extends ThemeExtension<WiTokens> {
   }
 }
 
+/// The active colour-scheme choice (Settings → Appearance). Dark is the
+/// default — the look the app has always shipped with; light and system
+/// map onto [WiTokens.light] via MaterialApp's theme/darkTheme pair.
+/// Loaded from [AppSettings.themeMode] in main() and flipped live by the
+/// Settings picker.
+final ValueNotifier<ThemeMode> wiThemeMode = ValueNotifier(ThemeMode.dark);
+
 /// Mono stack for the wordmark and XOR addresses (name-preference only,
 /// nothing shipped — falls back to the platform mono).
 const wiMonoFamily = 'JetBrains Mono';

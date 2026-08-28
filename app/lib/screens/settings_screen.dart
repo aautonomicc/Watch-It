@@ -17,7 +17,6 @@ import '../services/update_check.dart';
 import '../theme/tokens.dart';
 import '../widgets/brand_mark.dart';
 import 'downloads_screen.dart';
-import 'home_layout_screen.dart';
 import 'media_lists_screen.dart';
 import 'my_watch_screen.dart';
 import 'publish_screen.dart' show isDesktopPlatform;
@@ -255,14 +254,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _reload();
   }
 
-  /// Reloads on return — the layout screen can change list visibility,
-  /// which the Media Lists subtitle counts.
-  Future<void> _openHomeLayout() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const HomeLayoutScreen()),
+  /// Colour-scheme picker: dark (the app's original look, still the
+  /// default), light, or follow the OS. Applies instantly app-wide.
+  Future<void> _pickThemeMode() async {
+    final t = WiTokens.of(context);
+    final picked = await showDialog<ThemeMode>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        backgroundColor: t.ink2,
+        title: Text('Colour scheme',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        children: [
+          RadioGroup<ThemeMode>(
+            groupValue: wiThemeMode.value,
+            onChanged: (v) => Navigator.of(context).pop(v),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final mode in const [
+                  ThemeMode.dark,
+                  ThemeMode.light,
+                  ThemeMode.system,
+                ])
+                  RadioListTile<ThemeMode>(
+                    value: mode,
+                    activeColor: t.accent,
+                    title: Text(
+                      _themeModeLabel(mode),
+                      style: TextStyle(color: t.bone, fontSize: 14),
+                    ),
+                    subtitle: mode == ThemeMode.system
+                        ? Text('Follows the device setting',
+                            style: TextStyle(color: t.ash, fontSize: 11.5))
+                        : null,
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
-    await _reload();
+    if (picked == null) return;
+    await AppSettings.setThemeMode(picked);
+    wiThemeMode.value = picked;
+    if (mounted) setState(() {});
   }
+
+  static String _themeModeLabel(ThemeMode mode) => switch (mode) {
+        ThemeMode.dark => 'Dark  ·  default',
+        ThemeMode.light => 'Light',
+        ThemeMode.system => 'System default',
+      };
 
   Future<void> _pickDownloadNetwork() async {
     final t = WiTokens.of(context);
@@ -378,32 +420,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
+                // One door for the whole library: lists AND the home-row
+                // order/visibility (the separate "Home screen" page
+                // merged in here).
                 ListTile(
                   leading: Icon(Icons.video_library_outlined, color: t.accent),
                   title: Text('Media',
                       style: TextStyle(color: t.bone, fontSize: 15)),
                   subtitle: Text(
                     lists.isEmpty
-                        ? 'No lists yet'
+                        ? 'No lists yet — home row order and visibility'
                         : '${lists.length} '
                             '${lists.length == 1 ? 'list' : 'lists'} · '
                             '${lists.where((l) => l.enabled).length} shown '
-                            'on home',
+                            'on home · row order and visibility',
                     style: TextStyle(color: t.ash, fontSize: 12),
                   ),
                   trailing: Icon(Icons.chevron_right, color: t.ash),
                   onTap: _openMediaLists,
                 ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
+                  child: Text(
+                    'APPEARANCE',
+                    style: TextStyle(
+                      fontSize: 11,
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.w700,
+                      color: t.ash,
+                    ),
+                  ),
+                ),
                 ListTile(
-                  leading: Icon(Icons.view_agenda_outlined, color: t.accent),
-                  title: Text('Home screen',
+                  leading: Icon(Icons.dark_mode_outlined, color: t.accent),
+                  title: Text('Colour scheme',
                       style: TextStyle(color: t.bone, fontSize: 15)),
                   subtitle: Text(
-                    'Row order and visibility',
+                    _themeModeLabel(wiThemeMode.value)
+                        .replaceFirst('  ·  default', ' (default)'),
                     style: TextStyle(color: t.ash, fontSize: 12),
                   ),
                   trailing: Icon(Icons.chevron_right, color: t.ash),
-                  onTap: _openHomeLayout,
+                  onTap: _pickThemeMode,
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),

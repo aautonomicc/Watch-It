@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'home_sections.dart';
@@ -169,6 +170,21 @@ class AppSettings {
   static Future<void> setTermsAccepted(int version) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_termsAcceptedKey, version);
+  }
+
+  static const _themeModeKey = 'theme_mode_v1';
+
+  /// Colour scheme (Settings → Appearance). Dark is the default — the
+  /// app's original look; [ThemeMode.system] follows the OS setting.
+  static Future<ThemeMode> themeMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final name = prefs.getString(_themeModeKey);
+    return ThemeMode.values.asNameMap()[name] ?? ThemeMode.dark;
+  }
+
+  static Future<void> setThemeMode(ThemeMode mode) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_themeModeKey, mode.name);
   }
 
   static const _pauseDownloadsOnPlayKey = 'pause_downloads_on_play_v1';
