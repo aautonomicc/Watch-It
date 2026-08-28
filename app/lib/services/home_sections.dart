@@ -73,7 +73,10 @@ List<HomeSection> decodeHomeSections(String raw) {
 /// Reconciles a stored order against the current lists:
 /// - stored ids whose list no longer exists are dropped;
 /// - lists not in the stored order are appended at the end (in their
-///   library position order), as are special rows a stale blob lacks;
+///   library position order), as are special rows a stale blob lacks —
+///   EXCEPT channel lists, which go to the very top so a freshly
+///   subscribed/created channel is immediately visible (it stays there
+///   until the user reorders, which persists the arrangement);
 /// - nothing stored → default order: continue, favourites, downloads,
 ///   recent, then lists — exactly the pre-customization layout;
 /// - list rows always report [MediaList.enabled] as their visibility.
@@ -96,9 +99,16 @@ List<HomeSection> reconcileHomeSections(
   for (final id in kSpecialSectionIds) {
     if (seen.add(id)) out.add(HomeSection(id: id));
   }
+  final newChannels = <HomeSection>[];
   for (final l in lists) {
     final id = listSectionId(l.id);
-    if (seen.add(id)) out.add(HomeSection(id: id, visible: l.enabled));
+    if (!seen.add(id)) continue;
+    final section = HomeSection(id: id, visible: l.enabled);
+    if (l.isChannel) {
+      newChannels.add(section);
+    } else {
+      out.add(section);
+    }
   }
-  return out;
+  return [...newChannels, ...out];
 }

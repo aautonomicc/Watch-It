@@ -6,6 +6,8 @@ import '../screens/list_home_screen.dart';
 import '../screens/media_lists_screen.dart';
 import '../screens/publish_screen.dart';
 import '../screens/settings_screen.dart';
+import '../services/app_settings.dart';
+import '../services/home_sections.dart';
 import '../services/library_arrangement.dart';
 import '../services/library_store.dart';
 import '../services/metadata_service.dart';
@@ -27,6 +29,7 @@ class WiLibraryDrawer extends StatefulWidget {
 
 class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
   List<MediaList>? _lists;
+  List<HomeSection> _storedSections = const [];
 
   @override
   void initState() {
@@ -36,7 +39,12 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
 
   Future<void> _load() async {
     final lists = await LibraryStore.load();
-    if (mounted) setState(() => _lists = lists);
+    final stored = await AppSettings.homeSections();
+    if (!mounted) return;
+    setState(() {
+      _lists = lists;
+      _storedSections = stored;
+    });
   }
 
   void _openList(MediaList list) {
@@ -73,7 +81,9 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
           listenable: MetadataService.instance,
           builder: (context, _) {
             final lists = _lists;
-            final browsable = lists == null ? null : browsableLists(lists);
+            // Same order and visibility as the home screen's rows.
+            final browsable =
+                lists == null ? null : browsableLists(lists, _storedSections);
             return ListView(
               children: [
                 Padding(

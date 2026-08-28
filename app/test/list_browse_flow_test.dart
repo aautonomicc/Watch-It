@@ -10,6 +10,8 @@ import 'package:watchit/db/app_database.dart';
 import 'package:watchit/main.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/screens/list_home_screen.dart';
+import 'package:watchit/services/app_settings.dart';
+import 'package:watchit/services/home_sections.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata.dart';
 import 'package:watchit/services/metadata_service.dart';
@@ -105,6 +107,28 @@ void main() {
     // One movie card + one folded show card in the grid.
     expect(find.byType(PosterCard), findsOneWidget);
     expect(find.byType(ShowCard), findsOneWidget);
+  });
+
+  testWidgets('drawer follows the home-screen row order', (tester) async {
+    await LibraryStore.save([
+      MediaList(id: 'l1', title: 'Favourites', entries: [_movie]),
+      MediaList(id: 'l2', title: 'Zeta', entries: [_ep1]),
+    ]);
+    // Custom home order puts Zeta first; the drawer must match it.
+    await AppSettings.setHomeSections(const [
+      HomeSection(id: 'list:l2'),
+      HomeSection(id: 'list:l1'),
+    ]);
+    await tester.pumpWidget(const WatchItApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Browse lists'));
+    await tester.pumpAndSettle();
+    final drawer = find.byType(WiLibraryDrawer);
+    final fav =
+        find.descendant(of: drawer, matching: find.text('Favourites'));
+    final zeta = find.descendant(of: drawer, matching: find.text('Zeta'));
+    expect(tester.getTopLeft(zeta).dy, lessThan(tester.getTopLeft(fav).dy));
   });
 
   testWidgets('genre chips multi-select narrows the grid', (tester) async {
