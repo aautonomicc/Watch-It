@@ -113,7 +113,10 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   name/description/item count/update state, Add channel (paste
   `wchn1-…` or scan QR on mobile, with the content-comes-from-the-owner
   note); subscribed channels render on the home wall + drawer as
-  read-only amber-badged lists that update automatically
+  read-only amber-badged lists that update automatically — a freshly
+  added channel surfaces at the TOP of both until reordered in
+  Settings → Home screen (the drawer always mirrors the home screen's
+  row order and visibility)
 - **My Channel** segment (desktop): Create channel → name/description →
   12-word key ceremony (show → retype 3) → full-screen
   public/permanent/attributable gate confirmed by typing the channel

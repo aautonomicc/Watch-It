@@ -86,6 +86,55 @@ void main() {
       expect(out.last.visible, isFalse);
     });
 
+    test('a channel list the order does not know goes to the top', () {
+      final out = reconcileHomeSections(
+        const [
+          HomeSection(id: 'continue'),
+          HomeSection(id: 'favourites'),
+          HomeSection(id: 'downloads'),
+          HomeSection(id: 'recent'),
+          HomeSection(id: 'list:a'),
+        ],
+        [
+          _list('a'),
+          _list('fresh'),
+          MediaList(id: 'ch', title: 'ch', channelPubkey: 'aa' * 32),
+        ],
+      );
+      // Fresh channel first; a fresh plain list still appends at the end.
+      expect(_ids(out), [
+        'list:ch',
+        'continue',
+        'favourites',
+        'downloads',
+        'recent',
+        'list:a',
+        'list:fresh',
+      ]);
+    });
+
+    test('a channel already in the stored order stays where it was put', () {
+      final out = reconcileHomeSections(
+        const [
+          HomeSection(id: 'continue'),
+          HomeSection(id: 'list:ch'),
+          HomeSection(id: 'recent'),
+        ],
+        [
+          _list('a'),
+          MediaList(id: 'ch', title: 'ch', channelPubkey: 'aa' * 32),
+        ],
+      );
+      expect(_ids(out), [
+        'continue',
+        'list:ch',
+        'recent',
+        'favourites',
+        'downloads',
+        'list:a',
+      ]);
+    });
+
     test('duplicate stored ids collapse to the first occurrence', () {
       final out = reconcileHomeSections(
         const [
