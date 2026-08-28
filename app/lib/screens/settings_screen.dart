@@ -11,6 +11,7 @@ import '../services/bundle.dart' show kTmdbAttributionNotice;
 import '../services/download_manager.dart';
 import '../services/library_store.dart';
 import '../services/embedded_client.dart';
+import '../services/exit_info.dart';
 import '../services/metadata_service.dart';
 import '../services/storage_usage.dart';
 import '../services/update_check.dart';
@@ -18,6 +19,7 @@ import '../theme/tokens.dart';
 import '../widgets/brand_mark.dart';
 import 'channels_screen.dart';
 import 'downloads_screen.dart';
+import 'exit_info_screen.dart';
 import 'media_lists_screen.dart';
 import 'my_watch_screen.dart';
 import 'publish_screen.dart' show isDesktopPlatform;
@@ -766,6 +768,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(color: t.ash, fontSize: 12),
                   ),
                 ),
+                // Android-only: the OS's record of why the app last
+                // closed — lets a device without adb report a crash.
+                if (ExitInfoService.instance.supported)
+                  ListTile(
+                    leading:
+                        Icon(Icons.report_gmailerrorred_outlined,
+                            color: t.accent),
+                    title: Text('Why did the app close?',
+                        style: TextStyle(color: t.bone, fontSize: 15)),
+                    subtitle: Text(
+                      'Android\'s record of recent app exits — use it '
+                      'to report a crash',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                    trailing: Icon(Icons.chevron_right, color: t.ash),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                          builder: (_) => const ExitInfoScreen()),
+                    ),
+                  ),
                 if (isDesktopPlatform) ...[
                   ListenableBuilder(
                     listenable: UpdateCheck.instance,

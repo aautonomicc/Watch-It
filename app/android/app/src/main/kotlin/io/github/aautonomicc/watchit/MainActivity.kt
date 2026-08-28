@@ -1,6 +1,8 @@
 package io.github.aautonomicc.watchit
 
 import android.Manifest
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -106,6 +108,23 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        // Exit diagnostics: the OS keeps a record of WHY this app's
+        // process last died (native crash, ANR, system kill, …) that
+        // survives the death itself — the only crash evidence available
+        // on a device with no adb access. Dart shows it in Settings.
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger, "watchit/exitinfo"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getExitReasons" -> Thread {
+                    val reasons = collectExitReasons()
+                    Handler(Looper.getMainLooper()).post {
+                        result.success(reasons)
+                    }
+                }.start()
+                else -> result.notImplemented()
+            }
+        }
         // Export saves: file_selector_android has no save dialog, so Dart
         // hands us a temp file and we stream it into the content URI the
         // system's Create-Document (SAF) dialog returns.
@@ -187,6 +206,63 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }.start()
+    }
+
+    private fun collectExitReasons(): List<Map<String, Any?>> {
+        if (Build.VERSION.SDK_INT < 30) return emptyList()
+        return try {
+            val am = getSystemService(ACTIVITY_SERVICE) as ActivityManager
+            am.getHistoricalProcessExitReasons(packageName, 0, 8).map {
+                mapOf(
+                    "timestampMs" to it.timestamp,
+                    "reason" to it.reason,
+                    "reasonName" to reasonName(it.reason),
+                    "status" to it.status,
+                    "importance" to it.importance,
+                    "description" to (it.description ?: ""),
+                    "trace" to readTrace(it),
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun reasonName(reason: Int): String = when (reason) {
+        ApplicationExitInfo.REASON_EXIT_SELF -> "exit-self"
+        ApplicationExitInfo.REASON_SIGNALED -> "signaled"
+        ApplicationExitInfo.REASON_LOW_MEMORY -> "low-memory"
+        ApplicationExitInfo.REASON_CRASH -> "crash (java)"
+        ApplicationExitInfo.REASON_CRASH_NATIVE -> "crash (native)"
+        ApplicationExitInfo.REASON_ANR -> "anr"
+        ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> "init-failure"
+        ApplicationExitInfo.REASON_PERMISSION_CHANGE -> "permission-change"
+        ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE ->
+            "excessive-resource-usage"
+        ApplicationExitInfo.REASON_USER_REQUESTED -> "user-requested"
+        ApplicationExitInfo.REASON_USER_STOPPED -> "user-stopped"
+        ApplicationExitInfo.REASON_DEPENDENCY_DIED -> "dependency-died"
+        ApplicationExitInfo.REASON_FREEZER -> "freezer"
+        ApplicationExitInfo.REASON_OTHER -> "other (system)"
+        else -> "unknown-$reason"
+    }
+
+    // Tombstone-style trace, only recorded for native crashes and ANRs.
+    // Capped: the full tombstone can run to hundreds of KB and the top
+    // is where the signal + faulting library live.
+    private fun readTrace(info: ApplicationExitInfo): String {
+        if (info.reason != ApplicationExitInfo.REASON_CRASH_NATIVE &&
+            info.reason != ApplicationExitInfo.REASON_ANR
+        ) return ""
+        return try {
+            info.traceInputStream?.bufferedReader()?.use { reader ->
+                val buf = CharArray(64 * 1024)
+                val n = reader.read(buf)
+                if (n <= 0) "" else String(buf, 0, n)
+            } ?: ""
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     private fun displayNameOf(uri: Uri): String =
