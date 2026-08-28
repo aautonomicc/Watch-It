@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -159,6 +160,67 @@ class ChannelsApi {
       client.close();
     }
   }
+
+  /// One byte range of a channel manifest — the delta import's building
+  /// block. [range] is a `bytes=`-form Range header value. A 200 answer
+  /// (an embedded core from before range support) carries the whole
+  /// manifest; the caller uses it as-is.
+  Future<ManifestRangeResponse> fetchManifestRange(
+      String address, String range) async {
+    final client = http.Client();
+    try {
+      final res = await client.get(
+        Uri.parse('$_base/channel/manifest/$address'),
+        headers: {..._headers, 'range': range},
+      );
+      if (res.statusCode != 200 && res.statusCode != 206) {
+        throw PublishApiException(res.body.trim().isEmpty
+            ? 'manifest fetch failed (${res.statusCode})'
+            : res.body.trim());
+      }
+      int? start, total;
+      final contentRange = res.headers['content-range'];
+      final m = contentRange == null
+          ? null
+          : RegExp(r'^bytes (\d+)-(\d+)/(\d+)$').firstMatch(contentRange);
+      if (m != null) {
+        start = int.parse(m.group(1)!);
+        total = int.parse(m.group(3)!);
+      }
+      return ManifestRangeResponse(
+        status: res.statusCode,
+        bytes: res.bodyBytes,
+        start: start,
+        total: total,
+      );
+    } on PublishApiException {
+      rethrow;
+    } catch (e) {
+      throw PublishApiException('could not reach the embedded client: $e');
+    } finally {
+      client.close();
+    }
+  }
+}
+
+/// One ranged read of a manifest: 206 partial content (with its
+/// Content-Range position) or a 200 whole-manifest answer.
+class ManifestRangeResponse {
+  const ManifestRangeResponse({
+    required this.status,
+    required this.bytes,
+    this.start,
+    this.total,
+  });
+
+  final int status;
+  final Uint8List bytes;
+
+  /// Absolute offset of [bytes] in the manifest (206 answers only).
+  final int? start;
+
+  /// The manifest's total size (206 answers only).
+  final int? total;
 }
 
 class GeneratedChannel {

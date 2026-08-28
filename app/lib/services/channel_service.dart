@@ -2,12 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/media_list.dart';
 import 'bundle.dart';
+import 'channel_manifest_delta.dart';
 import 'channels_api.dart';
 import 'library_store.dart';
 import 'list_import.dart';
@@ -387,15 +387,49 @@ class ChannelService extends ChangeNotifier {
     return true;
   }
 
+  /// Fetch + parse a manifest, delta-first: posters already in the
+  /// posters directory are skipped from the download entirely (their
+  /// bytes would lose the gap-fill anyway), so a channel update
+  /// re-ships only what changed instead of every poster. Any planning
+  /// or range hiccup falls back to the plain whole-manifest fetch.
+  Future<ParsedChannelManifest> _fetchManifest(String address) async {
+    try {
+      final postersDir =
+          await (postersDirProvider ?? defaultBundlePostersDir)();
+      final delta = await fetchManifestMembersDelta(
+        fetch: (range) => api.fetchManifestRange(address, range),
+        havePoster: (base) =>
+            File('${postersDir.path}/$base').existsSync(),
+      );
+      if (delta != null) {
+        if (delta.postersSkipped > 0) {
+          debugPrint('channel manifest $address: delta import fetched '
+              '${delta.bytesFetched} of ${delta.totalSize} bytes '
+              '(${delta.postersSkipped} posters already on disk)');
+        }
+        return delta.fullBytes != null
+            ? parseChannelManifest(delta.fullBytes!)
+            : parseChannelManifestMembers(delta.members!);
+      }
+    } on ListImportException {
+      // The manifest itself is unusable (over the size cap) — a full
+      // fetch would refuse it too.
+      rethrow;
+    } catch (_) {
+      // Delta unavailable (old core, test fake, transport hiccup) —
+      // the whole-manifest path below is the source of truth.
+    }
+    return parseChannelManifest(
+        Uint8List.fromList(await api.fetchManifest(address)));
+  }
+
   /// Fetch + verify + import one channel manifest as the channel's
   /// read-only library list (full replace — the list mirrors the
   /// manifest, it is not a merge target). Returns the manifest's own
   /// channel.json info for the caller's bookkeeping.
   Future<ChannelManifestInfo> _importManifest(
       String pubkey, ChannelHead head) async {
-    final bytes =
-        Uint8List.fromList(await api.fetchManifest(head.manifest));
-    final manifest = parseChannelManifest(bytes);
+    final manifest = await _fetchManifest(head.manifest);
     if (manifest.channel.pubkey.toLowerCase() != pubkey) {
       throw PublishApiException(
           'the fetched manifest belongs to a different channel — refused');
@@ -538,9 +572,7 @@ class ChannelService extends ChangeNotifier {
   /// network and repopulate the local item list + display meta (used
   /// after "Restore channel" on a fresh machine).
   Future<int> restoreMyItemsFromManifest(ChannelHead head) async {
-    final bytes =
-        Uint8List.fromList(await api.fetchManifest(head.manifest));
-    final manifest = parseChannelManifest(bytes);
+    final manifest = await _fetchManifest(head.manifest);
     final result = await importBundleEntries(
       manifest.bundle,
       base: importBase,
@@ -701,19 +733,24 @@ class ParsedChannelManifest {
 /// means the zip is a plain bundle, not a channel manifest) plus the
 /// normal bundle members.
 ParsedChannelManifest parseChannelManifest(Uint8List bytes) {
-  final Archive archive;
-  try {
-    archive = ZipDecoder().decodeBytes(bytes, verify: true);
-  } catch (_) {
+  if (bytes.length > kMaxBundleBytes) {
     throw const ListImportException(
-        'The fetched manifest could not be read as a channel manifest.');
+        'That bundle is larger than the 200 MB limit.');
   }
+  return parseChannelManifestMembers(zipBundleMembers(
+      bytes, 'The fetched manifest could not be read as a channel manifest.'));
+}
+
+/// [parseChannelManifest] after zip decoding — also fed directly by the
+/// delta import's ranged-read members.
+ParsedChannelManifest parseChannelManifestMembers(
+    List<BundleZipMember> members) {
   ChannelManifestInfo? info;
-  for (final file in archive.files) {
-    if (!file.isFile || file.name != 'channel.json') continue;
+  for (final member in members) {
+    if (member.name != 'channel.json') continue;
     try {
-      final decoded =
-          jsonDecode(utf8.decode(file.readBytes()!)) as Map<String, dynamic>;
+      final decoded = jsonDecode(utf8.decode(member.read(kMaxLibraryJsonBytes)!))
+          as Map<String, dynamic>;
       final pubkey = decoded['pubkey'] as String? ?? '';
       if (pubkey.isEmpty) break;
       info = ChannelManifestInfo(
@@ -732,5 +769,6 @@ ParsedChannelManifest parseChannelManifest(Uint8List bytes) {
     throw const ListImportException(
         'That is not a channel manifest (no channel.json inside).');
   }
-  return ParsedChannelManifest(channel: info, bundle: parseBundle(bytes));
+  return ParsedChannelManifest(
+      channel: info, bundle: parseBundleMembers(members));
 }

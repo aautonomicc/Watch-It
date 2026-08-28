@@ -140,7 +140,9 @@ fn protected_router(engine: &'static Engine) -> Router {
         )
         .route(
             "/channel/manifest/{addr}",
-            get(move |path: Path<String>| channel_manifest(engine, path)),
+            get(move |method: Method, path: Path<String>, headers: HeaderMap| {
+                channel_manifest(engine, method, path, headers)
+            }),
         )
 }
 
@@ -838,55 +840,108 @@ async fn channel_unsubscribe(
 
 /// `GET /channel/manifest/{addr}` — fetch a channel manifest from the
 /// network by its public address: data-map chunk first, then the content
-/// itself, returned as the zip bytes. The only place the app fetches a
+/// itself, streamed as the zip bytes. The only place the app fetches a
 /// *data map* over the network — manifests are public by intent
 /// (entries stay datamap-first, docs/PLAN-datamap-privacy.md).
-async fn channel_manifest(engine: &'static Engine, Path(addr_hex): Path<String>) -> Response {
+///
+/// The route honours `Range` (and `HEAD`) exactly like `/xor`: manifests
+/// are content-addressed and immutable, so the root map is stored in the
+/// mapstore on first fetch and every request after that — including the
+/// delta import's ranged reads of the zip's central directory and
+/// individual members — serves from the stored map through the chunk
+/// cache without another network map lookup.
+async fn channel_manifest(
+    engine: &'static Engine,
+    method: Method,
+    Path(addr_hex): Path<String>,
+    headers: HeaderMap,
+) -> Response {
     /// Matches the app-side bundle cap (kMaxBundleBytes).
     const MAX_MANIFEST_BYTES: u64 = 200 * 1024 * 1024;
     let mut addr = [0u8; 32];
     if hex::decode_to_slice(addr_hex.trim(), &mut addr).is_err() {
         return (StatusCode::BAD_REQUEST, "address must be 64 hex chars").into_response();
     }
-    let client = match engine.client().await {
-        Ok(c) => c,
-        Err(e) => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                format!("not connected to the network yet: {e}"),
-            )
-                .into_response()
+    let root = match engine.stored_root_map(&addr) {
+        Some(r) => r,
+        None => {
+            let client = match engine.client().await {
+                Ok(c) => c,
+                Err(e) => {
+                    return (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        format!("not connected to the network yet: {e}"),
+                    )
+                        .into_response()
+                }
+            };
+            let map = match client.data_map_fetch(&addr).await {
+                Ok(m) => m,
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        format!("manifest lookup failed: {e}"),
+                    )
+                        .into_response()
+                }
+            };
+            // For a child map this is the serialized-root size, not the
+            // content size — the real cap check runs again on the
+            // expanded root below.
+            if map.original_file_size() as u64 > MAX_MANIFEST_BYTES {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "that address points at something too large to be a channel manifest",
+                )
+                    .into_response();
+            }
+            // Mirror the POST /datamap import: a >3-chunk manifest's
+            // fetched map is the shrunk child form; expand it over the
+            // wrapper chunks and verify the root against the address.
+            let (derived, root) = if map.is_child() {
+                let derived = match crate::verify::shrunk_map_address(&map) {
+                    Ok(a) => a,
+                    Err(e) => return (StatusCode::UNPROCESSABLE_ENTITY, e).into_response(),
+                };
+                let root = match engine.expand_child_map(map).await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return (
+                            StatusCode::BAD_GATEWAY,
+                            format!("manifest lookup failed: {e}"),
+                        )
+                            .into_response()
+                    }
+                };
+                if let Err(e) = crate::verify::verify_root_map(&derived, &root) {
+                    return (StatusCode::UNPROCESSABLE_ENTITY, e).into_response();
+                }
+                (derived, root)
+            } else {
+                match crate::verify::derive_address(&map) {
+                    Ok(a) => (a, map),
+                    Err(e) => return (StatusCode::UNPROCESSABLE_ENTITY, e).into_response(),
+                }
+            };
+            if derived != addr {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "the fetched manifest does not match its address",
+                )
+                    .into_response();
+            }
+            if root.original_file_size() as u64 > MAX_MANIFEST_BYTES {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "that address points at something too large to be a channel manifest",
+                )
+                    .into_response();
+            }
+            engine.store_root_map(addr, &root);
+            root
         }
     };
-    let map = match client.data_map_fetch(&addr).await {
-        Ok(m) => m,
-        Err(e) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                format!("manifest lookup failed: {e}"),
-            )
-                .into_response()
-        }
-    };
-    if map.original_file_size() as u64 > MAX_MANIFEST_BYTES {
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "that address points at something too large to be a channel manifest",
-        )
-            .into_response();
-    }
-    match client.data_download(&map).await {
-        Ok(bytes) => (
-            [(header::CONTENT_TYPE, "application/octet-stream")],
-            bytes.to_vec(),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::BAD_GATEWAY,
-            format!("manifest download failed: {e}"),
-        )
-            .into_response(),
-    }
+    serve_stored_map(engine, root, method, &headers)
 }
 
 async fn serve_xor(
@@ -915,6 +970,18 @@ async fn serve_xor(
                 .into_response();
         }
     };
+    serve_stored_map(engine, root, method, &headers)
+}
+
+/// Stream a stored root map's content, honouring `Range` and `HEAD` —
+/// the serving half of `/xor`, shared with `/channel/manifest` (which
+/// resolves its map over the network first).
+fn serve_stored_map(
+    engine: &'static Engine,
+    root: DataMap,
+    method: Method,
+    headers: &HeaderMap,
+) -> Response {
     let size = root.original_file_size() as u64;
 
     let range = headers
@@ -1598,6 +1665,86 @@ mod channel_api_tests {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         let _ = std::fs::remove_file(&file);
+    }
+
+    /// HEAD keeps the body empty, so serving headers are assertable
+    /// offline (a GET body would stream chunks the test engine cannot
+    /// fetch).
+    async fn send_head(
+        app: &Router,
+        uri: &str,
+        range: Option<&str>,
+    ) -> (StatusCode, axum::http::HeaderMap) {
+        let mut req = axum::http::Request::builder().method("HEAD").uri(uri);
+        if let Some(r) = range {
+            req = req.header("range", r);
+        }
+        let res = app
+            .clone()
+            .oneshot(req.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        (res.status(), res.headers().clone())
+    }
+
+    /// Offline upload-equivalent (same as rootmap_tests): encrypt
+    /// deterministic content, derive the public address and root map.
+    fn upload() -> ([u8; 32], DataMap) {
+        let mut v = Vec::with_capacity(10 * 1024);
+        let mut x = 0x51ED270Bu64;
+        while v.len() < 10 * 1024 {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            v.extend_from_slice(&x.to_le_bytes());
+        }
+        let (shrunk, _chunks) = self_encryption::encrypt(v.into()).unwrap();
+        let addr = *blake3::hash(&rmp_serde::to_vec(&shrunk).unwrap()).as_bytes();
+        (addr, shrunk)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn manifest_serves_stored_map_with_ranges() {
+        let engine = test_engine("manifest-range");
+        let (addr, root) = upload();
+        engine.store_root_map(addr, &root);
+        let app = router(engine);
+        let size = root.original_file_size() as u64;
+        let uri = format!("/channel/manifest/{}", hex::encode(addr));
+
+        // Full request: 200 with the manifest size + range capability.
+        let (status, headers) = send_head(&app, &uri, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            headers[header::CONTENT_LENGTH],
+            size.to_string().parse::<axum::http::HeaderValue>().unwrap()
+        );
+        assert_eq!(headers[header::ACCEPT_RANGES], "bytes");
+
+        // Suffix range (the delta import's central-directory read).
+        let (status, headers) = send_head(&app, &uri, Some("bytes=-100")).await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            headers[header::CONTENT_RANGE],
+            format!("bytes {}-{}/{size}", size - 100, size - 1)
+        );
+
+        // Explicit member range.
+        let (status, headers) = send_head(&app, &uri, Some("bytes=10-19")).await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+        assert_eq!(headers[header::CONTENT_LENGTH], "10");
+        assert_eq!(
+            headers[header::CONTENT_RANGE],
+            format!("bytes 10-19/{size}")
+        );
+
+        // Unsatisfiable range.
+        let (status, _) =
+            send_head(&app, &uri, Some(&format!("bytes={size}-"))).await;
+        assert_eq!(status, StatusCode::RANGE_NOT_SATISFIABLE);
+
+        // Bad address is rejected before any lookup.
+        let (status, _) =
+            send_head(&app, "/channel/manifest/nothex", None).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test(flavor = "multi_thread")]

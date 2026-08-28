@@ -170,7 +170,9 @@ class BundleSeedSummary {
 String _normalizeAddr(String address) =>
     address.trim().toLowerCase().replaceFirst('0x', '');
 
-Future<Directory> _defaultPostersDir() async {
+/// Where poster members land (and where the channel delta import checks
+/// for already-held posters): the app support dir's posters/.
+Future<Directory> defaultBundlePostersDir() async {
   final support = await getApplicationSupportDirectory();
   return Directory('${support.path}/posters');
 }
@@ -353,7 +355,7 @@ Future<BundleBuildResult> buildBundle(
       }),
     ));
   }
-  final postersDir = await (postersDirProvider ?? _defaultPostersDir)();
+  final postersDir = await (postersDirProvider ?? defaultBundlePostersDir)();
   for (final name in posterFiles) {
     final file = File('${postersDir.path}/$name');
     if (!file.existsSync()) continue;
@@ -439,6 +441,56 @@ String? _datamapBaseName(String memberName) {
   return base;
 }
 
+/// One zip member as the bundle parser consumes it: the name plus a
+/// size-capped reader. Backed either by a decoded [Archive] file (the
+/// whole-zip paths) or by bytes the channel delta import extracted from
+/// ranged reads — the parser cannot tell the difference.
+class BundleZipMember {
+  BundleZipMember({
+    required this.name,
+    required this.declaredSize,
+    required Uint8List? Function() read,
+  }) : _read = read; // ignore: prefer_initializing_formals
+
+  BundleZipMember.bytes(this.name, Uint8List data)
+      : declaredSize = data.length,
+        _read = (() => data);
+
+  final String name;
+
+  /// The size the zip headers claim — checked against every cap before
+  /// any decompression happens (the bomb guard).
+  final int declaredSize;
+  final Uint8List? Function() _read;
+
+  Uint8List? read(int cap) {
+    if (declaredSize > cap) return null;
+    final data = _read();
+    if (data == null || data.length > cap) return null;
+    return data;
+  }
+}
+
+/// Decode a zip into parser members, wrapping decoder errors in
+/// [error]. Shared by the bundle and channel-manifest whole-zip paths.
+List<BundleZipMember> zipBundleMembers(Uint8List bytes, String error) {
+  final Archive archive;
+  try {
+    archive = ZipDecoder().decodeBytes(bytes, verify: true);
+  } catch (_) {
+    throw ListImportException(error);
+  }
+  return [
+    for (final file in archive.files)
+      if (file.isFile)
+        BundleZipMember(
+          name: file.name,
+          declaredSize: file.size,
+          read: file.readBytes,
+        ),
+  ];
+}
+
 /// Decode and size-check a bundle. Every member is optional — a zip of
 /// nothing but `.datamap` files is a valid bundle — but a bundle with
 /// neither `list.txt` nor datamap members has nothing to import and
@@ -450,15 +502,16 @@ ParsedBundle parseBundle(Uint8List bytes) {
     throw const ListImportException(
         'That bundle is larger than the 200 MB limit.');
   }
-  final Archive archive;
-  try {
-    archive = ZipDecoder().decodeBytes(bytes, verify: true);
-  } catch (_) {
-    throw const ListImportException(
-        'That file looks like a zip archive but could not be read as a '
-        '.watch-list bundle.');
-  }
+  return parseBundleMembers(zipBundleMembers(
+      bytes,
+      'That file looks like a zip archive but could not be read as a '
+      '.watch-list bundle.'));
+}
 
+/// [parseBundle] after zip decoding — the channel delta import calls
+/// this directly with members assembled from ranged reads (already-held
+/// posters simply absent; the poster gap-fill never misses them).
+ParsedBundle parseBundleMembers(List<BundleZipMember> members) {
   String? listText;
   final datamapMembers = <String, Uint8List>{};
   final metadataRows = <String, Map<String, dynamic>>{};
@@ -466,19 +519,11 @@ ParsedBundle parseBundle(Uint8List bytes) {
   final libraryPrefs = <String, ({bool enabled, int position})>{};
   final historyByMember = <String, BundleHistoryRow>{};
 
-  Uint8List? readCapped(ArchiveFile file, int cap) {
-    if (file.size > cap) return null;
-    final data = file.readBytes();
-    if (data == null || data.length > cap) return null;
-    return data;
-  }
-
-  for (final file in archive.files) {
-    if (!file.isFile) continue;
+  for (final file in members) {
     final name = file.name;
     switch (name) {
       case 'list.txt':
-        final data = readCapped(file, kMaxListFileBytes);
+        final data = file.read(kMaxListFileBytes);
         if (data == null) {
           throw const ListImportException(
               'The list inside this bundle is too large to be a media '
@@ -491,7 +536,7 @@ ParsedBundle parseBundle(Uint8List bytes) {
               'The list inside this bundle is not a text file.');
         }
       case 'metadata.json':
-        final data = readCapped(file, kMaxMetadataJsonBytes);
+        final data = file.read(kMaxMetadataJsonBytes);
         if (data == null) continue;
         try {
           final decoded = jsonDecode(utf8.decode(data));
@@ -507,7 +552,7 @@ ParsedBundle parseBundle(Uint8List bytes) {
           // Malformed metadata: the list still imports.
         }
       case 'library.json':
-        final data = readCapped(file, kMaxLibraryJsonBytes);
+        final data = file.read(kMaxLibraryJsonBytes);
         if (data == null) continue;
         try {
           final decoded = jsonDecode(utf8.decode(data));
@@ -524,7 +569,7 @@ ParsedBundle parseBundle(Uint8List bytes) {
           }
         } catch (_) {}
       case 'history.json':
-        final data = readCapped(file, kMaxHistoryJsonBytes);
+        final data = file.read(kMaxHistoryJsonBytes);
         if (data == null) continue;
         try {
           final decoded = jsonDecode(utf8.decode(data));
@@ -552,7 +597,7 @@ ParsedBundle parseBundle(Uint8List bytes) {
         // floor). The directory form wins on a duplicate base name.
         final datamapBase = _datamapBaseName(name);
         if (datamapBase != null) {
-          final data = readCapped(file, kMaxRootMapBytes);
+          final data = file.read(kMaxRootMapBytes);
           if (data != null &&
               (name.startsWith('datamaps/') ||
                   !datamapMembers.containsKey(datamapBase))) {
@@ -570,7 +615,7 @@ ParsedBundle parseBundle(Uint8List bytes) {
               base.contains('..')) {
             continue;
           }
-          final data = readCapped(file, kMaxPosterBytes);
+          final data = file.read(kMaxPosterBytes);
           if (data != null) posters[base] = data;
         }
       // Unknown members are ignored (forward compatibility).
@@ -867,7 +912,7 @@ Future<(int, int)> seedMetadataGapFill(
 
   // Poster files: existing files win.
   if (posters.isNotEmpty) {
-    final dir = await (postersDirProvider ?? _defaultPostersDir)();
+    final dir = await (postersDirProvider ?? defaultBundlePostersDir)();
     await dir.create(recursive: true);
     for (final entry in posters.entries) {
       final file = File('${dir.path}/${entry.key}');

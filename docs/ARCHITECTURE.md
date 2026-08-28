@@ -291,9 +291,12 @@ ships, and stored in the OS keychain beside the wallet key
   history chain). Uploaded PUBLICLY — ant-core's
   `file_upload_public_with_progress` stores the serialized data map as
   a fetchable chunk in the same payment batch, so anyone holding the
-  address fetches it via `data_map_fetch` + `data_download`
+  address fetches it via `data_map_fetch`
   (`GET /channel/manifest/{addr}` — the only network data-map fetch in
-  the app; entries themselves stay datamap-first).
+  the app; entries themselves stay datamap-first). The route stores the
+  fetched root map (manifests are content-addressed and immutable) and
+  streams through the chunk cache honouring `Range`/`HEAD`, exactly
+  like `/xor`.
 - **Head distribution** (the mutability layer): the owner gossips a
   signed head record `{seq, manifest, sig}` into a self-keyed CRDT KV
   store on an x0x topic derived from the channel pubkey. The topic is
@@ -309,7 +312,17 @@ ships, and stored in the OS keychain beside the wallet key
   a read-only amber-badged **channel list** (media_lists.channel_pubkey,
   schema v10) that renders on the normal home wall/drawer and replaces
   wholesale when a newer signed head arrives (5-min background check +
-  manual refresh). Unsubscribe deletes the list + replicated store.
+  manual refresh). Updates import DELTA-AWARE
+  (channel_manifest_delta.dart): the zip's central directory is read
+  from a ranged tail request and poster members whose file already sits
+  in the posters directory are skipped from the download entirely
+  (their bytes would lose the import's existing-file-wins gap-fill
+  anyway) — since buildBundle writes posters last, an updated channel
+  re-fetches only its head members, changed posters, and the directory,
+  not every poster it ever shipped. Any structural surprise or an older
+  core answering 200 falls back to the plain whole-manifest fetch;
+  correctness never depends on the delta path. Unsubscribe deletes the
+  list + replicated store.
   The creator's own machine shows the same amber list for its OWN
   channel — empty the moment the channel is created, mirroring the
   manifest after each published update (imported through the exact
