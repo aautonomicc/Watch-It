@@ -35,14 +35,6 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <!-- Impeller (Vulkan) off: suspected driver crash on Mali-G77
-             (Lenovo Tab P11 Pro 2nd Gen, Android 14) when the home wall
-             first rasterises a full imported library. Skia is the
-             pre-3.29 default renderer; remove once the crash is
-             understood or Flutter's Mali handling is fixed. -->
-        <meta-data
-            android:name="io.flutter.embedding.android.EnableImpeller"
-            android:value="false" />
         <service
             android:name=".DownloadForegroundService"
             android:exported="false"
