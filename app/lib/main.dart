@@ -116,6 +116,9 @@ Future<void> main() async {
   // Channels auto-update: follows subscribed channels' signed heads and
   // imports newer manifests (a silent no-op with no subscriptions).
   ChannelService.instance.start();
+  // Colour scheme (dark default / light / system) before the first frame
+  // so the app never flashes the wrong theme.
+  wiThemeMode.value = await AppSettings.themeMode();
   runApp(const WatchItApp());
 }
 
@@ -145,15 +148,23 @@ class WatchItApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'W@tch',
-      debugShowCheckedModeBanner: false,
-      // App-wide messenger so background work (download auto-resume)
-      // can report its outcome whatever screen is on top.
-      scaffoldMessengerKey: wiMessengerKey,
-      navigatorObservers: [wiRouteObserver],
-      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
-      home: const TermsGate(child: HomeScreen()),
+    // themeMode picks between the pair: dark (default) keeps the app's
+    // original look, light uses the light token set, system follows the
+    // OS. The notifier flips live from Settings → Appearance.
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: wiThemeMode,
+      builder: (context, mode, _) => MaterialApp(
+        title: 'W@tch',
+        debugShowCheckedModeBanner: false,
+        // App-wide messenger so background work (download auto-resume)
+        // can report its outcome whatever screen is on top.
+        scaffoldMessengerKey: wiMessengerKey,
+        navigatorObservers: [wiRouteObserver],
+        theme: wiTheme(WiTokens.light, brightness: Brightness.light),
+        darkTheme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        themeMode: mode,
+        home: const TermsGate(child: HomeScreen()),
+      ),
     );
   }
 }

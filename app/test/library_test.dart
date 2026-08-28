@@ -906,7 +906,12 @@ void main() {
       await tester.tap(find.text('Media'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byType(Checkbox));
+      // The built-in home rows carry checkboxes here too — target the
+      // Movies list row's own.
+      await tester.tap(find.descendant(
+        of: find.widgetWithText(ListTile, 'Movies'),
+        matching: find.byType(Checkbox),
+      ));
       await tester.pumpAndSettle();
       expect(find.textContaining('hidden from home'), findsOneWidget);
       expect((await LibraryStore.load()).single.enabled, isFalse);

@@ -9,10 +9,12 @@ import 'package:share_plus/share_plus.dart' show SharePlus, ShareParams;
 
 import '../models/media_list.dart';
 import '../services/android_saf.dart';
+import '../services/app_settings.dart';
 import '../services/bundle.dart';
 import '../services/connectivity.dart';
 import '../services/datamap_import.dart';
 import '../services/channel_service.dart';
+import '../services/home_sections.dart';
 import '../services/library_store.dart';
 import '../services/list_import.dart';
 import '../services/metadata_service.dart';
@@ -22,9 +24,13 @@ import 'list_edit_screen.dart';
 import 'list_home_screen.dart';
 import 'settings_screen.dart' show promptForText;
 
-/// Manage media lists: show/hide on the home screen, open for editing,
-/// rename, delete. Lists are created inside the import flow ("Add to
-/// library" → "Create new list") — the one place media enters the app.
+/// Manage the whole home library in one place: every home row — the
+/// user's lists plus the built-in rows (Continue Watching, Favourites,
+/// Downloads, Recently Added, shown in a lighter shade because they fill
+/// themselves) — in home-screen order, with drag-to-reorder, show/hide
+/// checkboxes, and per-list open/rename/export/delete. Lists are created
+/// inside the import flow ("Add to library" → "Create new list") — the
+/// one place media enters the app.
 class MediaListsScreen extends StatefulWidget {
   const MediaListsScreen({super.key, this.importBase});
 
@@ -39,6 +45,12 @@ class MediaListsScreen extends StatefulWidget {
 class _MediaListsScreenState extends State<MediaListsScreen> {
   List<MediaList>? _lists;
 
+  /// The raw stored home-row order (`home_sections_v1`). The rendered
+  /// rows come from reconciling this against the current lists at build
+  /// time, so list edits elsewhere in this screen never leave the order
+  /// stale.
+  List<HomeSection> _stored = const [];
+
   @override
   void initState() {
     super.initState();
@@ -47,7 +59,32 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
 
   Future<void> _reload() async {
     final lists = await LibraryStore.load();
-    if (mounted) setState(() => _lists = lists);
+    final stored = await AppSettings.homeSections();
+    if (mounted) {
+      setState(() {
+        _lists = lists;
+        _stored = stored;
+      });
+    }
+  }
+
+  // onReorderItem delivers newIndex already adjusted for the removal.
+  Future<void> _reorder(int oldIndex, int newIndex) async {
+    final sections = reconcileHomeSections(_stored, _lists ?? const []);
+    sections.insert(newIndex, sections.removeAt(oldIndex));
+    setState(() => _stored = sections);
+    await AppSettings.setHomeSections(sections);
+  }
+
+  /// Built-in rows keep their visibility in the stored section order
+  /// itself (list rows use [MediaList.enabled] via [_setEnabled]).
+  Future<void> _setSpecialVisible(HomeSection section, bool visible) async {
+    final sections = reconcileHomeSections(_stored, _lists ?? const []);
+    final i = sections.indexWhere((s) => s.id == section.id);
+    if (i < 0) return;
+    sections[i] = sections[i].copyWith(visible: visible);
+    setState(() => _stored = sections);
+    await AppSettings.setHomeSections(sections);
   }
 
   /// Add media to the library through one multi-select picker — the app
@@ -1157,131 +1194,192 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       ),
       body: lists == null
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
+          : ReorderableListView(
+              buildDefaultDragHandles: false,
+              onReorderItem: _reorder,
               padding: const EdgeInsets.only(bottom: 24),
+              header: _header(t, lists),
               children: [
-                // Plain-English pointer at the point of import — the
-                // picker itself can't explain what it accepts.
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                  child: Text(
-                    'Add to library (the download button above) takes '
-                    'any mix of: .datamap files made by uploading a '
-                    'video with the ant app, .watch-list bundles '
-                    'exported from W@tch, and a bundle\'s own '
-                    '.watch-list.datamap when the bundle is stored on '
-                    'Autonomi. The app works out which is which.',
-                    style: TextStyle(fontSize: 11.5, color: t.ash),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                  child: Text(
-                    'Checked lists appear in your home library. '
-                    'Tap a list to edit its entries.',
-                    style: TextStyle(fontSize: 11.5, color: t.ash),
-                  ),
-                ),
-                ..._userRows(t, lists),
+                for (final (i, section)
+                    in reconcileHomeSections(_stored, lists).indexed)
+                  section.isSpecial
+                      ? _specialRow(t, i, section)
+                      : _listRow(t, i, section, lists),
               ],
             ),
     );
   }
 
-  List<Widget> _userRows(WiTokens t, List<MediaList> lists) {
-    return [
-      if (lists.isEmpty)
+  Widget _header(WiTokens t, List<MediaList> lists) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Plain-English pointer at the point of import — the
+        // picker itself can't explain what it accepts.
         Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           child: Text(
-            'No lists yet. Use "Add to library" above — it creates '
-            'lists as part of the import.',
-            style: TextStyle(fontSize: 13, color: t.boneDim),
+            'Add to library (the download button above) takes '
+            'any mix of: .datamap files made by uploading a '
+            'video with the ant app, .watch-list bundles '
+            'exported from W@tch, and a bundle\'s own '
+            '.watch-list.datamap when the bundle is stored on '
+            'Autonomi. The app works out which is which.',
+            style: TextStyle(fontSize: 11.5, color: t.ash),
           ),
         ),
-      for (final list in lists)
-        ListTile(
-          leading: Checkbox(
-            value: list.enabled,
-            activeColor: t.accent,
-            checkColor: t.ink,
-            side: BorderSide(color: t.ash),
-            onChanged: (v) => _setEnabled(list, v ?? true),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Text(
+            'Rows appear on your home screen in this order — drag the '
+            'handle to reorder, untick to hide. The lighter rows are '
+            'built-in (they fill themselves); tap a list to edit its '
+            'entries.',
+            style: TextStyle(fontSize: 11.5, color: t.ash),
           ),
-          title: Row(
-            children: [
-              Flexible(
-                child: Text(
-                  list.title,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: list.enabled ? t.bone : t.ash,
-                    fontSize: 15,
-                  ),
-                ),
+        ),
+        if (lists.isEmpty)
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              'No lists yet. Use "Add to library" above — it creates '
+              'lists as part of the import.',
+              style: TextStyle(fontSize: 13, color: t.boneDim),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// A built-in home row (Continue Watching, Favourites, Downloads,
+  /// Recently Added): rendered in a lighter shade — it is not an actual
+  /// list, it fills itself — but still hideable and reorderable.
+  Widget _specialRow(WiTokens t, int index, HomeSection section) {
+    return ListTile(
+      key: ValueKey(section.id),
+      tileColor: t.ink2,
+      leading: Checkbox(
+        value: section.visible,
+        activeColor: t.accent,
+        checkColor: t.ink,
+        side: BorderSide(color: t.ash),
+        onChanged: (v) => _setSpecialVisible(section, v ?? true),
+      ),
+      title: Text(
+        section.title,
+        style: TextStyle(
+          color: section.visible ? t.boneDim : t.ash,
+          fontSize: 15,
+        ),
+      ),
+      subtitle: Text(
+        'Built-in row — fills itself'
+        '${section.visible ? '' : '  ·  hidden from home'}',
+        style: TextStyle(color: t.ash, fontSize: 12),
+      ),
+      trailing: ReorderableDragStartListener(
+        index: index,
+        child: Icon(Icons.drag_handle, color: t.ash),
+      ),
+    );
+  }
+
+  Widget _listRow(
+      WiTokens t, int index, HomeSection section, List<MediaList> lists) {
+    // Reconcile only emits sections for lists that exist.
+    final list = lists.firstWhere((l) => l.id == section.listId);
+    return ListTile(
+      key: ValueKey(section.id),
+      leading: Checkbox(
+        value: list.enabled,
+        activeColor: t.accent,
+        checkColor: t.ink,
+        side: BorderSide(color: t.ash),
+        onChanged: (v) => _setEnabled(list, v ?? true),
+      ),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(
+              list.title,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: list.enabled ? t.bone : t.ash,
+                fontSize: 15,
               ),
-              if (list.isChannel) ...[
-                const SizedBox(width: 8),
-                const ChannelBadge(),
-              ],
-            ],
+            ),
           ),
-          subtitle: Text(
-            '${list.entries.length} '
-            '${list.entries.length == 1 ? 'entry' : 'entries'}'
-            '${list.isChannel ? '  ·  read-only, updates automatically' : ''}'
-            '${list.enabled ? '' : '  ·  hidden from home'}',
-            style: TextStyle(color: t.ash, fontSize: 12),
-          ),
+          if (list.isChannel) ...[
+            const SizedBox(width: 8),
+            const ChannelBadge(),
+          ],
+        ],
+      ),
+      subtitle: Text(
+        '${list.entries.length} '
+        '${list.entries.length == 1 ? 'entry' : 'entries'}'
+        '${list.isChannel ? '  ·  read-only, updates automatically' : ''}'
+        '${list.enabled ? '' : '  ·  hidden from home'}',
+        style: TextStyle(color: t.ash, fontSize: 12),
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
           // Channel lists are managed by unsubscribing — never renamed,
           // exported, or deleted like an owned list.
-          trailing: list.isChannel
-              ? PopupMenuButton<String>(
-                  tooltip: 'Channel options',
-                  icon: Icon(Icons.more_vert, color: t.ash),
-                  color: t.ink2,
-                  onSelected: (v) => switch (v) {
-                    'unsubscribe' => _unsubscribeChannel(list),
-                    _ => null,
-                  },
-                  itemBuilder: (context) => [
-                    PopupMenuItem(
-                      value: 'unsubscribe',
-                      child: Text('Unsubscribe',
-                          style: TextStyle(color: t.rust, fontSize: 14)),
-                    ),
-                  ],
-                )
-              : PopupMenuButton<String>(
-                  tooltip: 'List options',
-                  icon: Icon(Icons.more_vert, color: t.ash),
-                  color: t.ink2,
-                  onSelected: (v) => switch (v) {
-                    'rename' => _rename(list),
-                    'export' => _export(list),
-                    'delete' => _delete(list),
-                    _ => null,
-                  },
-                  itemBuilder: (context) => [
-                    PopupMenuItem(
-                      value: 'rename',
-                      child: Text('Rename',
-                          style: TextStyle(color: t.bone, fontSize: 14)),
-                    ),
-                    PopupMenuItem(
-                      value: 'export',
-                      child: Text('Export',
-                          style: TextStyle(color: t.bone, fontSize: 14)),
-                    ),
-                    PopupMenuItem(
-                      value: 'delete',
-                      child: Text('Delete',
-                          style: TextStyle(color: t.rust, fontSize: 14)),
-                    ),
-                  ],
+          if (list.isChannel)
+            PopupMenuButton<String>(
+              tooltip: 'Channel options',
+              icon: Icon(Icons.more_vert, color: t.ash),
+              color: t.ink2,
+              onSelected: (v) => switch (v) {
+                'unsubscribe' => _unsubscribeChannel(list),
+                _ => null,
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'unsubscribe',
+                  child: Text('Unsubscribe',
+                      style: TextStyle(color: t.rust, fontSize: 14)),
                 ),
-          onTap: () => _openList(list),
-        ),
-    ];
+              ],
+            )
+          else
+            PopupMenuButton<String>(
+              tooltip: 'List options',
+              icon: Icon(Icons.more_vert, color: t.ash),
+              color: t.ink2,
+              onSelected: (v) => switch (v) {
+                'rename' => _rename(list),
+                'export' => _export(list),
+                'delete' => _delete(list),
+                _ => null,
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'rename',
+                  child: Text('Rename',
+                      style: TextStyle(color: t.bone, fontSize: 14)),
+                ),
+                PopupMenuItem(
+                  value: 'export',
+                  child: Text('Export',
+                      style: TextStyle(color: t.bone, fontSize: 14)),
+                ),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Text('Delete',
+                      style: TextStyle(color: t.rust, fontSize: 14)),
+                ),
+              ],
+            ),
+          ReorderableDragStartListener(
+            index: index,
+            child: Icon(Icons.drag_handle, color: t.ash),
+          ),
+        ],
+      ),
+      onTap: () => _openList(list),
+    );
   }
 }

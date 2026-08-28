@@ -13,6 +13,7 @@ import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata_service.dart';
 import 'package:watchit/services/watch_state.dart';
 import 'package:watchit/services/terms.dart';
+import 'package:watchit/theme/tokens.dart';
 
 String _addr(int i) => i.toRadixString(16).padLeft(64, '0');
 
@@ -85,7 +86,12 @@ void main() {
     expect(find.text('Alpha'), findsOneWidget);
   });
 
-  testWidgets('layout screen toggles and reorders rows', (tester) async {
+  testWidgets('Media screen toggles and reorders home rows', (tester) async {
+    // Tall surface: the Media page's header paragraphs push the rows
+    // down, and off-screen ListView children are never built.
+    tester.view.physicalSize = const Size(900, 2000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
     await seedLibrary();
     await tester.pumpWidget(const WatchItApp());
     await tester.pumpAndSettle();
@@ -97,12 +103,14 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Home screen'));
+    await tester.tap(find.text('Media'));
     await tester.pumpAndSettle();
 
-    // All five rows are listed, even the currently-empty special ones.
+    // All six home rows are listed, even the currently-empty built-in
+    // ones — the Media page now owns order and visibility.
     for (final title in [
       'Continue Watching',
+      'Favourites',
       'Downloads',
       'Recently Added',
       'Alpha',
@@ -110,6 +118,15 @@ void main() {
     ]) {
       expect(find.widgetWithText(ListTile, title), findsOneWidget);
     }
+
+    // Built-in rows are shaded lighter than list rows to mark that they
+    // are not actual lists.
+    final specialTile = tester.widget<ListTile>(
+        find.widgetWithText(ListTile, 'Recently Added'));
+    expect(specialTile.tileColor, WiTokens.dark.ink2);
+    final listTile =
+        tester.widget<ListTile>(find.widgetWithText(ListTile, 'Alpha'));
+    expect(listTile.tileColor, isNull);
 
     // Hide Recently Added.
     await tester.tap(find.descendant(
@@ -146,6 +163,9 @@ void main() {
 
   testWidgets('unticking a list row writes MediaList.enabled',
       (tester) async {
+    tester.view.physicalSize = const Size(900, 2000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
     await seedLibrary();
     await tester.pumpWidget(const WatchItApp());
     await tester.pumpAndSettle();
@@ -154,7 +174,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Home screen'));
+    await tester.tap(find.text('Media'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.descendant(

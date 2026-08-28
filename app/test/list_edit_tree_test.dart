@@ -167,6 +167,101 @@ void main() {
         findsOneWidget);
   });
 
+  testWidgets('same-title versions nest under one expandable tile',
+      (tester) async {
+    await LibraryStore.save([
+      MediaList(id: 'l1', title: 'Mixed', entries: [
+        MediaEntry(name: 'Alpha (2020).mkv', address: _addr(1)),
+        MediaEntry(name: 'Alpha (2020) [1080p].mkv', address: _addr(9)),
+        _s1e1,
+      ]),
+    ]);
+    await tester.pumpWidget(page());
+    await tester.pumpAndSettle();
+
+    // Collapsed: one group tile with the parsed title, no file rows.
+    expect(find.text('Alpha'), findsOneWidget);
+    expect(find.text('2 versions'), findsOneWidget);
+    expect(find.text('Alpha (2020).mkv'), findsNothing);
+    expect(find.text('Alpha (2020) [1080p].mkv'), findsNothing);
+
+    // Expanded: both version rows appear.
+    await tester.tap(find.text('Alpha'));
+    await tester.pumpAndSettle();
+    expect(find.text('Alpha (2020).mkv'), findsOneWidget);
+    expect(find.text('Alpha (2020) [1080p].mkv'), findsOneWidget);
+
+    // The group menu curates every version at once.
+    await tester.tap(find.descendant(
+        of: find.widgetWithText(ListTile, 'Alpha'),
+        matching: find.byTooltip('Options')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove from list'));
+    await tester.pumpAndSettle();
+    expect(find.text('Remove all 2 versions of "Alpha"?'), findsOneWidget);
+    await tester.tap(find.text('Remove'));
+    await tester.pumpAndSettle();
+
+    final lists = await stored();
+    expect(lists.single.entries.map((e) => e.name), ['Showname.S01E01.mkv']);
+  });
+
+  testWidgets('copying an item to a fresh list keeps the source',
+      (tester) async {
+    await seed();
+    await tester.pumpWidget(page());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.descendant(
+        of: find.widgetWithText(ListTile, 'Alpha (2020).mkv'),
+        matching: find.byTooltip('Options')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Copy to another list…'));
+    await tester.pumpAndSettle();
+    expect(find.text('Copy "Alpha (2020).mkv" to…'), findsOneWidget);
+
+    await tester.tap(find.text('Create new list'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Playlist');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final lists = await stored();
+    expect(lists.map((l) => l.title), ['Mixed', 'Playlist']);
+    // Still in the source list AND in the new one.
+    expect(lists[0].entries.map((e) => e.name), contains('Alpha (2020).mkv'));
+    expect(lists[0].entries, hasLength(4));
+    expect(lists[1].entries.map((e) => e.name), ['Alpha (2020).mkv']);
+    expect(find.text('Copied 1 entry to "Playlist"'), findsOneWidget);
+  });
+
+  testWidgets('copying to an existing list skips duplicates',
+      (tester) async {
+    await seed(extra: [
+      MediaList(id: 'l2', title: 'Films', entries: [
+        MediaEntry(name: 'Alpha copy.mkv', address: '0x${_addr(1)}'),
+      ]),
+    ]);
+    await tester.pumpWidget(page());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.descendant(
+        of: find.widgetWithText(ListTile, 'Alpha (2020).mkv'),
+        matching: find.byTooltip('Options')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Copy to another list…'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Films'));
+    await tester.pumpAndSettle();
+
+    final lists = await stored();
+    // Source untouched; the target already held the same address.
+    expect(lists[0].entries, hasLength(4));
+    expect(lists[1].entries.map((e) => e.name), ['Alpha copy.mkv']);
+    expect(find.text('Copied 1 entry to "Films" (1 already there)'),
+        findsOneWidget);
+  });
+
   testWidgets('channel lists are not offered as move targets',
       (tester) async {
     await seed(extra: [
