@@ -132,6 +132,48 @@ void main() {
       expect(find.text('Unsubscribe'), findsOneWidget);
       expect(find.text('Rename'), findsNothing);
     });
+
+    testWidgets(
+        'fetch problem reads calm — raw error only in the tooltip',
+        (tester) async {
+      final pubkey = 'cd' * 32;
+      SharedPreferences.setMockInitialValues({
+        'channel_subs_v1': jsonEncode({
+          pubkey: {'name': 'Nature Films', 'importedSeq': 2}
+        }),
+      });
+      fake.channelsStatus = {
+        'supported': true,
+        'state': 'ready',
+        'own': null,
+        'subs': [
+          {
+            'pubkey': pubkey,
+            'code': 'wchn1-x',
+            'head': {'seq': 2, 'manifest': 'ee' * 32},
+          },
+        ],
+      };
+      const raw = 'manifest lookup failed: not found: '
+          'DataMap chunk not found at 6fd42655';
+      ChannelService.instance.lastProblem[pubkey] = raw;
+      await openChannels(tester);
+      expect(
+          find.textContaining(
+              'Update found — not fully reachable yet, '
+              'retrying automatically'),
+          findsOneWidget);
+      // The scary raw error is off the card…
+      expect(find.textContaining('Update failed'), findsNothing);
+      expect(find.textContaining('DataMap chunk'), findsNothing);
+      // …but stays available via the tooltip, and the line is amber
+      // (pending), not the error red.
+      final tips = tester.widgetList<Tooltip>(find.byType(Tooltip));
+      expect(tips.map((w) => w.message), contains(raw));
+      final line = tester.widget<Text>(
+          find.textContaining('retrying automatically'));
+      expect(line.style?.color, WiTokens.channelAmber);
+    });
   });
 
   group('My Channel segment', () {
