@@ -86,11 +86,13 @@ class ChannelsApi {
   Future<CreatedChannel> create({
     required String name,
     required String description,
+    String author = '',
     required String mnemonic,
   }) async {
     final json = await _request('POST', '/channel/create', body: {
       'name': name,
       'description': description,
+      'author': author,
       'mnemonic': mnemonic,
     });
     return CreatedChannel(
@@ -110,11 +112,19 @@ class ChannelsApi {
     );
   }
 
-  /// Update the locally displayed channel name/description (the
-  /// canonical copy travels in the published manifest).
-  Future<void> setMeta({required String name, required String description}) =>
-      _request('POST', '/channel/meta',
-          body: {'name': name, 'description': description});
+  /// Update the locally displayed channel name/description/author (the
+  /// canonical copy travels in the published manifest). An empty
+  /// [author] clears it — the field is optional.
+  Future<void> setMeta({
+    required String name,
+    required String description,
+    String author = '',
+  }) =>
+      _request('POST', '/channel/meta', body: {
+        'name': name,
+        'description': description,
+        'author': author,
+      });
 
   /// Delete the channel key + config from this device.
   Future<void> removeOwn() => _request('DELETE', '/channel');
@@ -259,6 +269,7 @@ class OwnChannel {
   const OwnChannel({
     required this.name,
     required this.description,
+    this.author = '',
     required this.pubkey,
     required this.code,
     required this.seq,
@@ -271,6 +282,9 @@ class OwnChannel {
 
   final String name;
   final String description;
+
+  /// Optional "by `<author>`" name/handle; empty = unset.
+  final String author;
   final String pubkey;
   final String code;
 
@@ -324,6 +338,7 @@ class ChannelsStatus {
           : OwnChannel(
               name: ownJson['name'] as String? ?? '',
               description: ownJson['description'] as String? ?? '',
+              author: ownJson['author'] as String? ?? '',
               pubkey: ownJson['pubkey'] as String? ?? '',
               code: ownJson['code'] as String? ?? '',
               seq: ownJson['seq'] as int? ?? 0,

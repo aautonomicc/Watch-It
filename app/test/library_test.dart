@@ -356,6 +356,53 @@ void main() {
       expect(row.userEdited, isFalse);
       expect(row.title, 'Old');
     });
+
+    test('v10 lists gain channelAuthor + channelAvatar on upgrade',
+        () async {
+      final dir = await Directory.systemTemp.createTemp('watchit-migration');
+      addTearDown(() => dir.delete(recursive: true));
+      final file = File('${dir.path}/watchit.sqlite');
+
+      // Hand-build the alpha.65–69 (schema v10) lists table: channel
+      // pubkey column exists, no profile columns yet.
+      final raw = sqlite3.open(file.path);
+      raw.execute('''
+        CREATE TABLE media_lists (
+          id TEXT NOT NULL, title TEXT NOT NULL, position INTEGER NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1, channel_pubkey TEXT,
+          PRIMARY KEY (id));
+        CREATE TABLE media_entries (
+          entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          list_id TEXT NOT NULL REFERENCES media_lists (id) ON DELETE CASCADE,
+          name TEXT NOT NULL, address TEXT NOT NULL,
+          position INTEGER NOT NULL, added_at INTEGER NOT NULL DEFAULT 0,
+          size_bytes INTEGER, video_info TEXT);
+        INSERT INTO media_lists (id, title, position, channel_pubkey)
+          VALUES ('channel-x', 'Their channel', 0, '${'ab' * 32}');
+        PRAGMA user_version = 10;
+      ''');
+      raw.close();
+
+      await LibraryStore.useForTesting(
+          AppDatabase.forTesting(NativeDatabase(file)));
+      final lists = await LibraryStore.load();
+      // Pre-upgrade channel lists have no profile yet…
+      expect(lists.single.channelAuthor, isNull);
+      expect(lists.single.channelAvatar, isNull);
+      // …and the new columns round-trip through a save.
+      await LibraryStore.save([
+        MediaList(
+          id: 'channel-x',
+          title: 'Their channel',
+          channelPubkey: 'ab' * 32,
+          channelAuthor: '@neil',
+          channelAvatar: 'channel_avatar_00112233.img',
+        ),
+      ]);
+      final reloaded = (await LibraryStore.load()).single;
+      expect(reloaded.channelAuthor, '@neil');
+      expect(reloaded.channelAvatar, 'channel_avatar_00112233.img');
+    });
   });
 
   group('Legacy SharedPreferences import', () {

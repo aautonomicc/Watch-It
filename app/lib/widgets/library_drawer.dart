@@ -9,6 +9,7 @@ import '../services/library_arrangement.dart';
 import '../services/library_store.dart';
 import '../services/metadata_service.dart';
 import '../theme/tokens.dart';
+import 'channel_avatar.dart';
 
 /// Modal left drawer for hopping between browsable lists (the enabled
 /// user lists). Mounted on the home screen and on every list page
@@ -64,8 +65,13 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
     navigator.push(MaterialPageRoute<void>(builder: (_) => page));
   }
 
-  IconData _iconFor(MediaList list) =>
-      list.isChannel ? Icons.podcasts : Icons.video_library_outlined;
+  /// Channel rows lead with the channel's mini avatar (podcasts-icon
+  /// fallback keeps the old look); plain lists keep the library icon.
+  Widget _leadingFor(MediaList list, WiTokens t) => list.isChannel
+      ? ChannelAvatar(memberName: list.channelAvatar, size: 20)
+      : Icon(Icons.video_library_outlined,
+          color: list.id == widget.currentListId ? t.accent : t.boneDim,
+          size: 20);
 
   @override
   Widget build(BuildContext context) {
@@ -116,15 +122,7 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                       dense: true,
                       selected: list.id == widget.currentListId,
                       selectedTileColor: t.ink2,
-                      leading: Icon(_iconFor(list),
-                          // Channel lists are amber everywhere — the
-                          // public/private colour wall.
-                          color: list.isChannel
-                              ? WiTokens.channelAmber
-                              : list.id == widget.currentListId
-                                  ? t.accent
-                                  : t.boneDim,
-                          size: 20),
+                      leading: _leadingFor(list, t),
                       title: Text(
                         list.title,
                         style: TextStyle(color: t.bone, fontSize: 14),

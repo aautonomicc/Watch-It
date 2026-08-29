@@ -66,6 +66,8 @@ class MediaList {
     this.entries = const [],
     this.enabled = true,
     this.channelPubkey,
+    this.channelAuthor,
+    this.channelAvatar,
   });
 
   final String id;
@@ -81,6 +83,14 @@ class MediaList {
   /// published manifest and updates when a newer signed head arrives.
   final String? channelPubkey;
 
+  /// Channel lists only — the profile from the last imported manifest:
+  /// the optional "by `<author>`" name/handle…
+  final String? channelAuthor;
+
+  /// …and the avatar's file name in the posters dir
+  /// (`channel_avatar_<sha8>.img`), null when the channel has none.
+  final String? channelAvatar;
+
   bool get isChannel => channelPubkey != null;
 
   MediaList copyWith({
@@ -94,6 +104,8 @@ class MediaList {
         entries: entries ?? this.entries,
         enabled: enabled ?? this.enabled,
         channelPubkey: channelPubkey,
+        channelAuthor: channelAuthor,
+        channelAvatar: channelAvatar,
       );
 
   Map<String, dynamic> toJson() => {
@@ -102,6 +114,8 @@ class MediaList {
         'entries': entries.map((e) => e.toJson()).toList(),
         'enabled': enabled,
         if (channelPubkey != null) 'channelPubkey': channelPubkey,
+        if (channelAuthor != null) 'channelAuthor': channelAuthor,
+        if (channelAvatar != null) 'channelAvatar': channelAvatar,
       };
 
   factory MediaList.fromJson(Map<String, dynamic> json) => MediaList(
@@ -112,6 +126,8 @@ class MediaList {
             .toList(),
         enabled: json['enabled'] as bool? ?? true,
         channelPubkey: json['channelPubkey'] as String?,
+        channelAuthor: json['channelAuthor'] as String?,
+        channelAvatar: json['channelAvatar'] as String?,
       );
 }
 

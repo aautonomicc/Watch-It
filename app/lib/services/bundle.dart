@@ -247,6 +247,7 @@ Future<BundleBuildResult> buildBundle(
   String? base,
   Future<Directory> Function()? postersDirProvider,
   Map<String, String> extraTextMembers = const {},
+  Map<String, Uint8List> extraPosterMembers = const {},
 }) async {
   base ??= EmbeddedClient.baseUrl();
   final archive = Archive();
@@ -369,6 +370,13 @@ Future<BundleBuildResult> buildBundle(
     archive.addFile(
         ArchiveFile.noCompress('posters/$name', file.lengthSync(),
             await file.readAsBytes()));
+  }
+  // Extra image members (the channel avatar) ride with the posters —
+  // content-hash names keep the delta import's already-on-disk skip and
+  // the gap-fill's existing-file-wins correct for them too.
+  for (final extra in extraPosterMembers.entries) {
+    archive.addFile(ArchiveFile.noCompress(
+        'posters/${extra.key}', extra.value.length, extra.value));
   }
 
   if (options.includeLibrary) {

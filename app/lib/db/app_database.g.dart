@@ -64,6 +64,28 @@ class $MediaListsTable extends MediaLists
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _channelAuthorMeta = const VerificationMeta(
+    'channelAuthor',
+  );
+  @override
+  late final GeneratedColumn<String> channelAuthor = GeneratedColumn<String>(
+    'channel_author',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _channelAvatarMeta = const VerificationMeta(
+    'channelAvatar',
+  );
+  @override
+  late final GeneratedColumn<String> channelAvatar = GeneratedColumn<String>(
+    'channel_avatar',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -71,6 +93,8 @@ class $MediaListsTable extends MediaLists
     position,
     enabled,
     channelPubkey,
+    channelAuthor,
+    channelAvatar,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -120,6 +144,24 @@ class $MediaListsTable extends MediaLists
         ),
       );
     }
+    if (data.containsKey('channel_author')) {
+      context.handle(
+        _channelAuthorMeta,
+        channelAuthor.isAcceptableOrUnknown(
+          data['channel_author']!,
+          _channelAuthorMeta,
+        ),
+      );
+    }
+    if (data.containsKey('channel_avatar')) {
+      context.handle(
+        _channelAvatarMeta,
+        channelAvatar.isAcceptableOrUnknown(
+          data['channel_avatar']!,
+          _channelAvatarMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -149,6 +191,14 @@ class $MediaListsTable extends MediaLists
         DriftSqlType.string,
         data['${effectivePrefix}channel_pubkey'],
       ),
+      channelAuthor: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}channel_author'],
+      ),
+      channelAvatar: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}channel_avatar'],
+      ),
     );
   }
 
@@ -171,12 +221,22 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
   /// value is the channel's Ed25519 public key, lowercase hex). Channel
   /// lists are managed by unsubscribing, never by editing.
   final String? channelPubkey;
+
+  /// Channel profile (channel lists only), refreshed from every imported
+  /// manifest: the optional "by <author>" display name/handle…
+  final String? channelAuthor;
+
+  /// …and the avatar's member file name in the posters dir
+  /// (`channel_avatar_<sha8>.img`; resolved to a path at render time).
+  final String? channelAvatar;
   const MediaListRow({
     required this.id,
     required this.title,
     required this.position,
     required this.enabled,
     this.channelPubkey,
+    this.channelAuthor,
+    this.channelAvatar,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -187,6 +247,12 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     map['enabled'] = Variable<bool>(enabled);
     if (!nullToAbsent || channelPubkey != null) {
       map['channel_pubkey'] = Variable<String>(channelPubkey);
+    }
+    if (!nullToAbsent || channelAuthor != null) {
+      map['channel_author'] = Variable<String>(channelAuthor);
+    }
+    if (!nullToAbsent || channelAvatar != null) {
+      map['channel_avatar'] = Variable<String>(channelAvatar);
     }
     return map;
   }
@@ -200,6 +266,12 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       channelPubkey: channelPubkey == null && nullToAbsent
           ? const Value.absent()
           : Value(channelPubkey),
+      channelAuthor: channelAuthor == null && nullToAbsent
+          ? const Value.absent()
+          : Value(channelAuthor),
+      channelAvatar: channelAvatar == null && nullToAbsent
+          ? const Value.absent()
+          : Value(channelAvatar),
     );
   }
 
@@ -214,6 +286,8 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       position: serializer.fromJson<int>(json['position']),
       enabled: serializer.fromJson<bool>(json['enabled']),
       channelPubkey: serializer.fromJson<String?>(json['channelPubkey']),
+      channelAuthor: serializer.fromJson<String?>(json['channelAuthor']),
+      channelAvatar: serializer.fromJson<String?>(json['channelAvatar']),
     );
   }
   @override
@@ -225,6 +299,8 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       'position': serializer.toJson<int>(position),
       'enabled': serializer.toJson<bool>(enabled),
       'channelPubkey': serializer.toJson<String?>(channelPubkey),
+      'channelAuthor': serializer.toJson<String?>(channelAuthor),
+      'channelAvatar': serializer.toJson<String?>(channelAvatar),
     };
   }
 
@@ -234,6 +310,8 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     int? position,
     bool? enabled,
     Value<String?> channelPubkey = const Value.absent(),
+    Value<String?> channelAuthor = const Value.absent(),
+    Value<String?> channelAvatar = const Value.absent(),
   }) => MediaListRow(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -242,6 +320,12 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     channelPubkey: channelPubkey.present
         ? channelPubkey.value
         : this.channelPubkey,
+    channelAuthor: channelAuthor.present
+        ? channelAuthor.value
+        : this.channelAuthor,
+    channelAvatar: channelAvatar.present
+        ? channelAvatar.value
+        : this.channelAvatar,
   );
   MediaListRow copyWithCompanion(MediaListsCompanion data) {
     return MediaListRow(
@@ -252,6 +336,12 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       channelPubkey: data.channelPubkey.present
           ? data.channelPubkey.value
           : this.channelPubkey,
+      channelAuthor: data.channelAuthor.present
+          ? data.channelAuthor.value
+          : this.channelAuthor,
+      channelAvatar: data.channelAvatar.present
+          ? data.channelAvatar.value
+          : this.channelAvatar,
     );
   }
 
@@ -262,13 +352,23 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
           ..write('title: $title, ')
           ..write('position: $position, ')
           ..write('enabled: $enabled, ')
-          ..write('channelPubkey: $channelPubkey')
+          ..write('channelPubkey: $channelPubkey, ')
+          ..write('channelAuthor: $channelAuthor, ')
+          ..write('channelAvatar: $channelAvatar')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, title, position, enabled, channelPubkey);
+  int get hashCode => Object.hash(
+    id,
+    title,
+    position,
+    enabled,
+    channelPubkey,
+    channelAuthor,
+    channelAvatar,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -277,7 +377,9 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
           other.title == this.title &&
           other.position == this.position &&
           other.enabled == this.enabled &&
-          other.channelPubkey == this.channelPubkey);
+          other.channelPubkey == this.channelPubkey &&
+          other.channelAuthor == this.channelAuthor &&
+          other.channelAvatar == this.channelAvatar);
 }
 
 class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
@@ -286,6 +388,8 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
   final Value<int> position;
   final Value<bool> enabled;
   final Value<String?> channelPubkey;
+  final Value<String?> channelAuthor;
+  final Value<String?> channelAvatar;
   final Value<int> rowid;
   const MediaListsCompanion({
     this.id = const Value.absent(),
@@ -293,6 +397,8 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     this.position = const Value.absent(),
     this.enabled = const Value.absent(),
     this.channelPubkey = const Value.absent(),
+    this.channelAuthor = const Value.absent(),
+    this.channelAvatar = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   MediaListsCompanion.insert({
@@ -301,6 +407,8 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     required int position,
     this.enabled = const Value.absent(),
     this.channelPubkey = const Value.absent(),
+    this.channelAuthor = const Value.absent(),
+    this.channelAvatar = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        title = Value(title),
@@ -311,6 +419,8 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     Expression<int>? position,
     Expression<bool>? enabled,
     Expression<String>? channelPubkey,
+    Expression<String>? channelAuthor,
+    Expression<String>? channelAvatar,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -319,6 +429,8 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
       if (position != null) 'position': position,
       if (enabled != null) 'enabled': enabled,
       if (channelPubkey != null) 'channel_pubkey': channelPubkey,
+      if (channelAuthor != null) 'channel_author': channelAuthor,
+      if (channelAvatar != null) 'channel_avatar': channelAvatar,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -329,6 +441,8 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     Value<int>? position,
     Value<bool>? enabled,
     Value<String?>? channelPubkey,
+    Value<String?>? channelAuthor,
+    Value<String?>? channelAvatar,
     Value<int>? rowid,
   }) {
     return MediaListsCompanion(
@@ -337,6 +451,8 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
       position: position ?? this.position,
       enabled: enabled ?? this.enabled,
       channelPubkey: channelPubkey ?? this.channelPubkey,
+      channelAuthor: channelAuthor ?? this.channelAuthor,
+      channelAvatar: channelAvatar ?? this.channelAvatar,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -359,6 +475,12 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     if (channelPubkey.present) {
       map['channel_pubkey'] = Variable<String>(channelPubkey.value);
     }
+    if (channelAuthor.present) {
+      map['channel_author'] = Variable<String>(channelAuthor.value);
+    }
+    if (channelAvatar.present) {
+      map['channel_avatar'] = Variable<String>(channelAvatar.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -373,6 +495,8 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
           ..write('position: $position, ')
           ..write('enabled: $enabled, ')
           ..write('channelPubkey: $channelPubkey, ')
+          ..write('channelAuthor: $channelAuthor, ')
+          ..write('channelAvatar: $channelAvatar, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2990,6 +3114,8 @@ typedef $$MediaListsTableCreateCompanionBuilder =
       required int position,
       Value<bool> enabled,
       Value<String?> channelPubkey,
+      Value<String?> channelAuthor,
+      Value<String?> channelAvatar,
       Value<int> rowid,
     });
 typedef $$MediaListsTableUpdateCompanionBuilder =
@@ -2999,6 +3125,8 @@ typedef $$MediaListsTableUpdateCompanionBuilder =
       Value<int> position,
       Value<bool> enabled,
       Value<String?> channelPubkey,
+      Value<String?> channelAuthor,
+      Value<String?> channelAvatar,
       Value<int> rowid,
     });
 
@@ -3056,6 +3184,16 @@ class $$MediaListsTableFilterComposer
 
   ColumnFilters<String> get channelPubkey => $composableBuilder(
     column: $table.channelPubkey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get channelAuthor => $composableBuilder(
+    column: $table.channelAuthor,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get channelAvatar => $composableBuilder(
+    column: $table.channelAvatar,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -3118,6 +3256,16 @@ class $$MediaListsTableOrderingComposer
     column: $table.channelPubkey,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get channelAuthor => $composableBuilder(
+    column: $table.channelAuthor,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get channelAvatar => $composableBuilder(
+    column: $table.channelAvatar,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$MediaListsTableAnnotationComposer
@@ -3143,6 +3291,16 @@ class $$MediaListsTableAnnotationComposer
 
   GeneratedColumn<String> get channelPubkey => $composableBuilder(
     column: $table.channelPubkey,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get channelAuthor => $composableBuilder(
+    column: $table.channelAuthor,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get channelAvatar => $composableBuilder(
+    column: $table.channelAvatar,
     builder: (column) => column,
   );
 
@@ -3205,6 +3363,8 @@ class $$MediaListsTableTableManager
                 Value<int> position = const Value.absent(),
                 Value<bool> enabled = const Value.absent(),
                 Value<String?> channelPubkey = const Value.absent(),
+                Value<String?> channelAuthor = const Value.absent(),
+                Value<String?> channelAvatar = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MediaListsCompanion(
                 id: id,
@@ -3212,6 +3372,8 @@ class $$MediaListsTableTableManager
                 position: position,
                 enabled: enabled,
                 channelPubkey: channelPubkey,
+                channelAuthor: channelAuthor,
+                channelAvatar: channelAvatar,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -3221,6 +3383,8 @@ class $$MediaListsTableTableManager
                 required int position,
                 Value<bool> enabled = const Value.absent(),
                 Value<String?> channelPubkey = const Value.absent(),
+                Value<String?> channelAuthor = const Value.absent(),
+                Value<String?> channelAvatar = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MediaListsCompanion.insert(
                 id: id,
@@ -3228,6 +3392,8 @@ class $$MediaListsTableTableManager
                 position: position,
                 enabled: enabled,
                 channelPubkey: channelPubkey,
+                channelAuthor: channelAuthor,
+                channelAvatar: channelAvatar,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

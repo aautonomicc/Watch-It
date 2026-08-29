@@ -22,6 +22,9 @@ Uint8List manifestZip({
   required String pubkey,
   String name = 'Nature Films',
   String description = 'My own footage',
+  String? author,
+  String? avatarName,
+  List<int>? avatarBytes,
   Map<String, List<int>> members = const {
     'Waterfall (2026).mp4.datamap': [0x11],
   },
@@ -35,6 +38,8 @@ Uint8List manifestZip({
         'version': 1,
         'name': name,
         'description': description,
+        'author': ?author,
+        'avatar': ?avatarName,
         'pubkey': pubkey,
         'seq': 1,
       }),
@@ -47,6 +52,11 @@ Uint8List manifestZip({
     listText.writeln(e.key);
   }
   archive.addFile(ArchiveFile.string('list.txt', listText.toString()));
+  if (avatarBytes != null) {
+    final member = avatarName ?? channelAvatarMemberName(avatarBytes);
+    archive.addFile(ArchiveFile.bytes(
+        'posters/$member', Uint8List.fromList(avatarBytes)));
+  }
   return Uint8List.fromList(ZipEncoder().encode(archive));
 }
 
@@ -430,6 +440,260 @@ void main() {
     test('syncView is null while channels are unsupported', () async {
       fake.channelsStatus = {'supported': false, 'state': 'off'};
       expect(await ChannelService.instance.syncView(), isNull);
+    });
+  });
+
+  group('channel profile (author + avatar)', () {
+    final pubkey = 'ab' * 32;
+    final manifestAddr = 'ee' * 32;
+    final avatarBytes = List<int>.generate(64, (i) => i);
+    late String avatarName;
+    late Directory postersDir;
+    late Directory profileDir;
+
+    setUp(() async {
+      avatarName = channelAvatarMemberName(avatarBytes);
+      postersDir = await Directory.systemTemp.createTemp('wi-ch-posters');
+      profileDir = await Directory.systemTemp.createTemp('wi-ch-profile');
+      addTearDown(() => postersDir.delete(recursive: true));
+      addTearDown(() {
+        if (profileDir.existsSync()) profileDir.deleteSync(recursive: true);
+      });
+      ChannelService.instance.postersDirProvider = () async => postersDir;
+      ChannelService.instance.profileDirProvider = () async => profileDir;
+    });
+
+    test('member names are content-hashed and validated', () {
+      expect(avatarName, matches(r'^channel_avatar_[0-9a-f]{8}\.img$'));
+      expect(channelAvatarMemberName(avatarBytes), avatarName);
+      expect(channelAvatarMemberName([1, 2, 3]), isNot(avatarName));
+      expect(isChannelAvatarMemberName(avatarName), isTrue);
+      expect(isChannelAvatarMemberName('../evil.img'), isFalse);
+      expect(isChannelAvatarMemberName('channel_avatar_x.img'), isFalse);
+      expect(
+          isChannelAvatarMemberName('posters/channel_avatar_00112233.img'),
+          isFalse);
+    });
+
+    test('parse reads author + avatar; hostile avatar names drop', () {
+      final parsed = parseChannelManifest(manifestZip(
+        pubkey: pubkey,
+        author: '  @neil  ',
+        avatarName: avatarName,
+        avatarBytes: avatarBytes,
+      ));
+      expect(parsed.channel.author, '@neil');
+      expect(parsed.channel.avatar, avatarName);
+      expect(parsed.bundle.posters[avatarName], avatarBytes);
+
+      final evil = parseChannelManifest(
+          manifestZip(pubkey: pubkey, avatarName: '../../etc/passwd'));
+      expect(evil.channel.avatar, isNull);
+
+      final plain = parseChannelManifest(manifestZip(pubkey: pubkey));
+      expect(plain.channel.author, isEmpty);
+      expect(plain.channel.avatar, isNull);
+    });
+
+    test('setMyAvatar stores the crop + a posters copy; clear removes',
+        () async {
+      final service = ChannelService.instance;
+      await service.setMyAvatar(Uint8List.fromList(avatarBytes));
+      final file = await service.myAvatarFile();
+      expect(file, isNotNull);
+      expect(file!.uri.pathSegments.last, avatarName);
+      expect(File('${postersDir.path}/$avatarName').existsSync(), isTrue);
+
+      // A new crop replaces the old one (fresh hash name).
+      final other = List<int>.filled(16, 7);
+      await service.setMyAvatar(Uint8List.fromList(other));
+      final replaced = await service.myAvatarFile();
+      expect(replaced!.uri.pathSegments.last,
+          channelAvatarMemberName(other));
+      expect(File('${profileDir.path}/$avatarName').existsSync(), isFalse);
+
+      await service.clearMyAvatar();
+      expect(await service.myAvatarFile(), isNull);
+    });
+
+    test('an avatar over the 2 MB cap is refused', () async {
+      final big = Uint8List(kMaxChannelAvatarBytes + 1);
+      expect(ChannelService.instance.setMyAvatar(big),
+          throwsA(isA<PublishApiException>()));
+    });
+
+    test('buildMyManifest carries author + the avatar poster member',
+        () async {
+      final addr = FakeEmbeddedHttp.addrForByte(0x42);
+      fake.datamaps[addr] = [0x42];
+      await ChannelService.instance
+          .addMyItem(MediaEntry(name: 'My Film (2026).mp4', address: addr));
+      await ChannelService.instance
+          .setMyAvatar(Uint8List.fromList(avatarBytes));
+      const own = OwnChannel(
+        name: 'Nature Films',
+        description: 'My own footage',
+        author: 'Neil',
+        pubkey: 'ab',
+        code: 'wchn1-x',
+        seq: 0,
+        manifest: '',
+        createdAtMs: 1,
+      );
+      final build =
+          await ChannelService.instance.buildMyManifest(own: own);
+      final parsed =
+          parseChannelManifest(await File(build.path).readAsBytes());
+      expect(parsed.channel.author, 'Neil');
+      expect(parsed.channel.avatar, avatarName);
+      expect(parsed.bundle.posters[avatarName], avatarBytes);
+      File(build.path).parent.deleteSync(recursive: true);
+    });
+
+    test('an authorless, avatarless build omits both keys', () async {
+      final addr = FakeEmbeddedHttp.addrForByte(0x42);
+      fake.datamaps[addr] = [0x42];
+      await ChannelService.instance
+          .addMyItem(MediaEntry(name: 'My Film (2026).mp4', address: addr));
+      const own = OwnChannel(
+        name: 'Nature Films',
+        description: '',
+        pubkey: 'ab',
+        code: 'wchn1-x',
+        seq: 0,
+        manifest: '',
+        createdAtMs: 1,
+      );
+      final build =
+          await ChannelService.instance.buildMyManifest(own: own);
+      final bytes = await File(build.path).readAsBytes();
+      final archive = ZipDecoder().decodeBytes(bytes);
+      final channelJson = jsonDecode(utf8.decode(
+              archive.files.singleWhere((f) => f.name == 'channel.json').readBytes()!))
+          as Map<String, dynamic>;
+      expect(channelJson.containsKey('author'), isFalse);
+      expect(channelJson.containsKey('avatar'), isFalse);
+      expect(archive.files.where((f) => f.name.startsWith('posters/')),
+          isEmpty);
+      File(build.path).parent.deleteSync(recursive: true);
+    });
+
+    test('import refreshes the list + record profile from the manifest',
+        () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('channel_subs_v1',
+          jsonEncode({pubkey: {'importedSeq': 0}}));
+      fake.channelsStatus = {
+        'supported': true,
+        'state': 'ready',
+        'own': null,
+        'subs': [
+          {
+            'pubkey': pubkey,
+            'code': 'wchn1-x',
+            'head': {'seq': 2, 'manifest': manifestAddr},
+          },
+        ],
+      };
+      fake.channelManifests[manifestAddr] = manifestZip(
+        pubkey: pubkey,
+        author: '@neil',
+        avatarName: avatarName,
+        avatarBytes: avatarBytes,
+      );
+      await ChannelService.instance.syncNow();
+      final lists = await LibraryStore.load();
+      final channel = lists.singleWhere((l) => l.channelPubkey == pubkey);
+      expect(channel.channelAuthor, '@neil');
+      expect(channel.channelAvatar, avatarName);
+      // The avatar member landed in the posters dir (gap-fill).
+      expect(File('${postersDir.path}/$avatarName').readAsBytesSync(),
+          avatarBytes);
+      final record = await ChannelService.instance.record(pubkey);
+      expect(record!.author, '@neil');
+      expect(record.avatar, avatarName);
+    });
+
+    test('a manifest without profile keys clears both on the list',
+        () async {
+      await LibraryStore.save([
+        MediaList(
+          id: 'channel-x',
+          title: 'Old name',
+          channelPubkey: pubkey,
+          channelAuthor: 'Old author',
+          channelAvatar: 'channel_avatar_00000000.img',
+        ),
+      ]);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('channel_subs_v1',
+          jsonEncode({pubkey: {'importedSeq': 0}}));
+      fake.channelsStatus = {
+        'supported': true,
+        'state': 'ready',
+        'own': null,
+        'subs': [
+          {
+            'pubkey': pubkey,
+            'code': 'wchn1-x',
+            'head': {'seq': 2, 'manifest': manifestAddr},
+          },
+        ],
+      };
+      fake.channelManifests[manifestAddr] = manifestZip(pubkey: pubkey);
+      await ChannelService.instance.syncNow();
+      final channel = (await LibraryStore.load())
+          .singleWhere((l) => l.channelPubkey == pubkey);
+      expect(channel.channelAuthor, isNull);
+      expect(channel.channelAvatar, isNull);
+    });
+
+    test('the own pre-publish list shows the config author + avatar',
+        () async {
+      await ChannelService.instance
+          .setMyAvatar(Uint8List.fromList(avatarBytes));
+      fake.channelsStatus = {
+        'supported': true,
+        'state': 'ready',
+        'own': {
+          'name': 'Nature Films',
+          'description': '',
+          'author': 'Neil',
+          'pubkey': pubkey,
+          'code': 'wchn1-own',
+          'seq': 0,
+          'manifest': '',
+          'created_at_ms': 5,
+          'head': null,
+        },
+        'subs': const [],
+      };
+      await ChannelService.instance.syncNow();
+      final channel = (await LibraryStore.load())
+          .singleWhere((l) => l.channelPubkey == pubkey);
+      expect(channel.channelAuthor, 'Neil');
+      expect(channel.channelAvatar, avatarName);
+    });
+
+    test('restore recovers author + avatar from the fetched manifest',
+        () async {
+      fake.channelManifests[manifestAddr] = manifestZip(
+        pubkey: pubkey,
+        author: '@neil',
+        avatarName: avatarName,
+        avatarBytes: avatarBytes,
+      );
+      final count = await ChannelService.instance
+          .restoreMyItemsFromManifest(
+              ChannelHead(seq: 1, manifest: manifestAddr));
+      expect(count, 1);
+      // setMeta got the author back…
+      expect(fake.channelMetaPosts.single, contains('"author":"@neil"'));
+      // …and the avatar crop is back in place for the next publish.
+      final file = await ChannelService.instance.myAvatarFile();
+      expect(file, isNotNull);
+      expect(file!.uri.pathSegments.last, avatarName);
+      expect(file.readAsBytesSync(), avatarBytes);
     });
   });
 }

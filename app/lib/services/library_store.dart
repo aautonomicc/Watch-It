@@ -276,6 +276,8 @@ class LibraryStore {
           entries: entriesByList[row.id] ?? const [],
           enabled: row.enabled,
           channelPubkey: row.channelPubkey,
+          channelAuthor: row.channelAuthor,
+          channelAvatar: row.channelAvatar,
         ),
     ];
   }
@@ -300,6 +302,8 @@ class LibraryStore {
               position: listPos,
               enabled: Value(list.enabled),
               channelPubkey: Value(list.channelPubkey),
+              channelAuthor: Value(list.channelAuthor),
+              channelAvatar: Value(list.channelAvatar),
             ));
         for (final (entryPos, entry) in list.entries.indexed) {
           await db.into(db.mediaEntries).insert(MediaEntriesCompanion.insert(

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -14,7 +15,9 @@ import '../services/library_store.dart';
 import '../services/metadata_service.dart';
 import '../services/publish_api.dart';
 import '../theme/tokens.dart';
+import '../widgets/channel_avatar.dart';
 import '../widgets/channel_badge.dart';
+import '../widgets/poster_crop_dialog.dart';
 import 'channel_publish_screen.dart';
 import 'describe_item_screen.dart';
 import 'list_home_screen.dart';
@@ -68,6 +71,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
   List<ChannelRecord> _records = const [];
   List<MediaList> _lists = const [];
   List<MyChannelItem> _myItems = const [];
+  File? _myAvatar;
   Timer? _poll;
 
   @override
@@ -97,11 +101,13 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     final records = await ChannelService.instance.records();
     final lists = await LibraryStore.load();
     final items = await ChannelService.instance.myItems();
+    final avatar = await ChannelService.instance.myAvatarFile();
     if (!mounted) return;
     setState(() {
       _records = records;
       _lists = lists;
       _myItems = items;
+      _myAvatar = avatar;
     });
     await _refreshStatus();
   }
@@ -323,7 +329,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
         side: BorderSide(color: t.line),
       ),
       child: ListTile(
-        leading: const Icon(Icons.podcasts, color: WiTokens.channelAmber),
+        leading: ChannelAvatar(memberName: record.avatar, size: 40),
         title: Row(
           children: [
             Flexible(
@@ -338,6 +344,10 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (record.author.isNotEmpty)
+              Text('by ${record.author}',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: t.boneDim, fontSize: 12)),
             if (record.description.isNotEmpty)
               Text(record.description,
                   maxLines: 2,
@@ -562,16 +572,24 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
       children: [
         Row(
           children: [
-            const Icon(Icons.podcasts,
-                color: WiTokens.channelAmber, size: 28),
+            ChannelAvatar(file: _myAvatar, size: 44),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(
-                own.name.isEmpty ? '(unnamed channel)' : own.name,
-                style: TextStyle(
-                    color: t.bone,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    own.name.isEmpty ? '(unnamed channel)' : own.name,
+                    style: TextStyle(
+                        color: t.bone,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600),
+                  ),
+                  if (own.author.isNotEmpty)
+                    Text('by ${own.author}',
+                        style:
+                            TextStyle(color: t.boneDim, fontSize: 12.5)),
+                ],
               ),
             ),
             const ChannelBadge(text: 'PUBLIC'),
@@ -583,6 +601,15 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
             child: Text(own.description,
                 style: TextStyle(color: t.boneDim, fontSize: 13)),
           ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _editChannel,
+            icon: Icon(Icons.edit_outlined, color: t.ash, size: 16),
+            label: Text('Edit channel details',
+                style: TextStyle(color: t.ash, fontSize: 13)),
+          ),
+        ),
         header('CHANNEL CODE — SHARE THIS'),
         Row(
           children: [
@@ -731,6 +758,18 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     );
   }
 
+  /// Avatar / name / author / description — staged locally, rides the
+  /// next publish.
+  Future<void> _editChannel() async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => EditChannelScreen(api: _api)),
+    );
+    if (changed == true) {
+      _snack('Saved — goes public with the next publish');
+      await _reload();
+    }
+  }
+
   Future<void> _removeChannel(OwnChannel own) async {
     final t = WiTokens.of(context);
     final confirmed = await showDialog<bool>(
@@ -867,6 +906,339 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
 }
 
 // ---------------------------------------------------------------------------
+// Channel avatar picking (create form + edit screen)
+// ---------------------------------------------------------------------------
+
+/// Pick an image file and crop it square for the channel avatar.
+/// Returns the crop bytes (≤512px, far under the 2 MB member cap) or
+/// null on cancel/refusal. The crop is forced 1:1 — the stored bytes
+/// are always square, so the circular render never surprises. A picked
+/// GIF flattens to its first frame here, by design (avatars are still
+/// images).
+Future<Uint8List?> pickChannelAvatar(BuildContext context) async {
+  final file = await openFile(acceptedTypeGroups: const [
+    XTypeGroup(
+        label: 'Images',
+        extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp']),
+    XTypeGroup(label: 'All files'),
+  ]);
+  if (file == null) return null;
+  final bytes = await file.readAsBytes();
+  if (!context.mounted) return null;
+  if (bytes.length > 10 * 1024 * 1024) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content:
+            Text('That image is larger than 10 MB — pick a smaller one.')));
+    return null;
+  }
+  final cropped = await showDialog<Uint8List>(
+    context: context,
+    builder: (_) => PosterCropDialog(
+      bytes: bytes,
+      aspect: 1,
+      title: 'Crop your avatar',
+      hint: 'The square becomes the circular avatar: drag to position, '
+          'zoom to fill it. Square images of at least 256px work best.',
+      allowWholeFrame: false,
+      maxOutputDimension: 512,
+    ),
+  );
+  if (cropped == null || !context.mounted) return null;
+  if (cropped.length > kMaxChannelAvatarBytes) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('The cropped avatar is larger than the 2 MB limit — '
+            'try a smaller image.')));
+    return null;
+  }
+  return cropped;
+}
+
+/// The 96px circular avatar picker — amber 1px ring, camera overlay
+/// badge; empty state is the podcasts icon in a dim circle. Shows
+/// [bytes] when a fresh crop is staged, else [file] (the stored crop).
+class ChannelAvatarPicker extends StatelessWidget {
+  const ChannelAvatarPicker({
+    super.key,
+    this.bytes,
+    this.file,
+    required this.onPick,
+    this.onClear,
+  });
+
+  final Uint8List? bytes;
+  final File? file;
+  final VoidCallback onPick;
+
+  /// Offered (as a small "Remove" action) only while an avatar exists.
+  final VoidCallback? onClear;
+
+  bool get _hasAvatar =>
+      bytes != null || (file != null && file!.existsSync());
+
+  @override
+  Widget build(BuildContext context) {
+    final t = WiTokens.of(context);
+    final image = bytes != null
+        ? ClipOval(
+            child: Image.memory(bytes!,
+                width: 94, height: 94, fit: BoxFit.cover))
+        : ChannelAvatar(file: file, size: 94);
+    return Column(
+      children: [
+        Center(
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onPick,
+            child: Stack(
+              children: [
+                Container(
+                  width: 96,
+                  height: 96,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border:
+                        Border.all(color: WiTokens.channelAmber, width: 1),
+                  ),
+                  child: Center(child: image),
+                ),
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: t.ink2,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: t.line),
+                    ),
+                    child: Icon(Icons.photo_camera_outlined,
+                        color: t.boneDim, size: 15),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_hasAvatar && onClear != null)
+          TextButton(
+            onPressed: onClear,
+            child: Text('Remove avatar',
+                style: TextStyle(color: t.ash, fontSize: 12)),
+          ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Edit channel details (avatar / name / author / description)
+// ---------------------------------------------------------------------------
+
+/// Profile editing for the owner's channel. Everything here is staged
+/// locally — the config + avatar file — and goes public with the NEXT
+/// publish (the manifest is rebuilt on every head, so the profile rides
+/// it; no separate mechanism). Pops true when something was saved.
+class EditChannelScreen extends StatefulWidget {
+  const EditChannelScreen({super.key, this.api});
+
+  /// Test override; defaults to the service's live API.
+  final ChannelsApi? api;
+
+  @override
+  State<EditChannelScreen> createState() => _EditChannelScreenState();
+}
+
+class _EditChannelScreenState extends State<EditChannelScreen> {
+  ChannelsApi get _api => widget.api ?? ChannelService.instance.api;
+
+  final _name = TextEditingController();
+  final _author = TextEditingController();
+  final _description = TextEditingController();
+  File? _avatarFile;
+  Uint8List? _pickedAvatar;
+  bool _avatarRemoved = false;
+  bool _loaded = false;
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _author.dispose();
+    _description.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final status = await _api.status();
+      final own = status.own;
+      final avatar = await ChannelService.instance.myAvatarFile();
+      if (!mounted) return;
+      setState(() {
+        _name.text = own?.name ?? '';
+        _author.text = own?.author ?? '';
+        _description.text = own?.description ?? '';
+        _avatarFile = avatar;
+        _loaded = true;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = '$e';
+          _loaded = true;
+        });
+      }
+    }
+  }
+
+  Future<void> _pick() async {
+    final bytes = await pickChannelAvatar(context);
+    if (bytes != null && mounted) {
+      setState(() {
+        _pickedAvatar = bytes;
+        _avatarRemoved = false;
+      });
+    }
+  }
+
+  Future<void> _save() async {
+    if (_busy) return;
+    final name = _name.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = 'The channel name cannot be empty.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _api.setMeta(
+        name: name,
+        description: _description.text.trim(),
+        author: _author.text.trim(),
+      );
+      if (_pickedAvatar != null) {
+        await ChannelService.instance.setMyAvatar(_pickedAvatar!);
+      } else if (_avatarRemoved) {
+        await ChannelService.instance.clearMyAvatar();
+      }
+      // The own amber list follows the staged profile right away.
+      unawaited(ChannelService.instance.syncNow());
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = '$e';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = WiTokens.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: t.ink,
+        elevation: 0,
+        title: Text('Edit channel details',
+            style: TextStyle(color: t.bone, fontSize: 18)),
+      ),
+      body: !_loaded
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                ChannelAvatarPicker(
+                  bytes: _pickedAvatar,
+                  file: _avatarRemoved ? null : _avatarFile,
+                  onPick: _pick,
+                  onClear: () => setState(() {
+                    _pickedAvatar = null;
+                    _avatarRemoved = true;
+                  }),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _name,
+                  maxLength: 80,
+                  style: TextStyle(color: t.bone),
+                  decoration: InputDecoration(
+                    labelText: 'Channel name',
+                    labelStyle: TextStyle(color: t.ash),
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _author,
+                  maxLength: 80,
+                  style: TextStyle(color: t.bone),
+                  decoration: InputDecoration(
+                    labelText: 'Author name or handle',
+                    labelStyle: TextStyle(color: t.ash),
+                    helperText: 'Optional. Shown as "by <author>" on your '
+                        'channel. Public and permanent.',
+                    helperMaxLines: 2,
+                    helperStyle: TextStyle(color: t.ash, fontSize: 11),
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _description,
+                  maxLines: 3,
+                  maxLength: 500,
+                  style: TextStyle(color: t.bone),
+                  decoration: InputDecoration(
+                    labelText: 'Description (optional)',
+                    labelStyle: TextStyle(color: t.ash),
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Changes are staged on this computer and go public with '
+                  'the next publish. Old manifests — including an old '
+                  'avatar — stay on the network; they just stop being '
+                  'shown.',
+                  style: TextStyle(
+                      color: WiTokens.channelAmber,
+                      fontSize: 12.5,
+                      height: 1.4),
+                ),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Text(_error!,
+                        style: TextStyle(color: t.rust, fontSize: 13)),
+                  ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: WiTokens.channelAmber,
+                    foregroundColor: Colors.black,
+                  ),
+                  onPressed: _busy ? null : _save,
+                  child: Text(_busy ? 'Saving…' : 'Save'),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Add channel
 // ---------------------------------------------------------------------------
 
@@ -995,15 +1367,23 @@ class CreateChannelScreen extends StatefulWidget {
 
 class _CreateChannelScreenState extends State<CreateChannelScreen> {
   final _name = TextEditingController();
+  final _author = TextEditingController();
   final _description = TextEditingController();
+  Uint8List? _avatar;
   bool _busy = false;
   String? _error;
 
   @override
   void dispose() {
     _name.dispose();
+    _author.dispose();
     _description.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickAvatar() async {
+    final bytes = await pickChannelAvatar(context);
+    if (bytes != null && mounted) setState(() => _avatar = bytes);
   }
 
   Future<void> _next() async {
@@ -1029,6 +1409,8 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
         generated: generated,
         channelName: name,
         description: _description.text.trim(),
+        author: _author.text.trim(),
+        avatar: _avatar,
         api: widget.api,
         confirmIndices: widget.confirmIndices,
       ),
@@ -1054,6 +1436,14 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // The channel's face — optional but encouraged; forced 1:1
+          // crop so the circle render never surprises.
+          ChannelAvatarPicker(
+            bytes: _avatar,
+            onPick: _pickAvatar,
+            onClear: () => setState(() => _avatar = null),
+          ),
+          const SizedBox(height: 16),
           TextField(
             controller: _name,
             autofocus: true,
@@ -1063,6 +1453,21 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
               labelText: 'Channel name',
               labelStyle: TextStyle(color: t.ash),
               helperText: 'Shown to every subscriber',
+              helperStyle: TextStyle(color: t.ash, fontSize: 11),
+              border: const OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _author,
+            maxLength: 80,
+            style: TextStyle(color: t.bone),
+            decoration: InputDecoration(
+              labelText: 'Author name or handle',
+              labelStyle: TextStyle(color: t.ash),
+              helperText: 'Optional. Shown as "by <author>" on your '
+                  'channel. Public and permanent.',
+              helperMaxLines: 2,
               helperStyle: TextStyle(color: t.ash, fontSize: 11),
               border: const OutlineInputBorder(),
             ),
@@ -1117,6 +1522,8 @@ class ChannelSeedBackupScreen extends StatefulWidget {
     required this.generated,
     required this.channelName,
     required this.description,
+    this.author = '',
+    this.avatar,
     required this.api,
     this.confirmIndices,
   });
@@ -1124,6 +1531,11 @@ class ChannelSeedBackupScreen extends StatefulWidget {
   final GeneratedChannel generated;
   final String channelName;
   final String description;
+
+  /// Optional profile extras from the create form, carried through to
+  /// the gate (where the channel is actually created).
+  final String author;
+  final Uint8List? avatar;
   final ChannelsApi api;
   final List<int>? confirmIndices;
 
@@ -1172,6 +1584,8 @@ class _ChannelSeedBackupScreenState extends State<ChannelSeedBackupScreen> {
         builder: (_) => FirstPublishGateScreen(
           channelName: widget.channelName,
           description: widget.description,
+          author: widget.author,
+          avatar: widget.avatar,
           mnemonic: widget.generated.mnemonic,
           api: widget.api,
         ),
@@ -1328,12 +1742,19 @@ class FirstPublishGateScreen extends StatefulWidget {
     super.key,
     required this.channelName,
     required this.description,
+    this.author = '',
+    this.avatar,
     required this.mnemonic,
     required this.api,
   });
 
   final String channelName;
   final String description;
+
+  /// Optional profile extras — the author name/handle and the avatar
+  /// crop staged by the create form.
+  final String author;
+  final Uint8List? avatar;
   final String mnemonic;
   final ChannelsApi api;
 
@@ -1373,8 +1794,17 @@ class _FirstPublishGateScreenState extends State<FirstPublishGateScreen> {
       await widget.api.create(
         name: widget.channelName,
         description: widget.description,
+        author: widget.author,
         mnemonic: widget.mnemonic,
       );
+      // The avatar crop is staged best-effort — the channel exists
+      // either way, and Edit channel details can retry it.
+      final avatar = widget.avatar;
+      if (avatar != null) {
+        try {
+          await ChannelService.instance.setMyAvatar(avatar);
+        } catch (_) {}
+      }
       // The new channel appears on the home wall (as its amber list)
       // right away, not on the next 5-minute tick.
       unawaited(ChannelService.instance.syncNow());
@@ -1426,6 +1856,9 @@ class _FirstPublishGateScreenState extends State<FirstPublishGateScreen> {
                 'key;',
             'makes YOU the publisher, legally responsible for having '
                 'the rights to distribute it.',
+            'includes your channel name — and the author name and avatar '
+                'if you set them — published publicly and permanently '
+                'alongside everything in the channel.',
           ])
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
