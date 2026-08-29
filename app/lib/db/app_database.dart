@@ -21,6 +21,14 @@ class MediaLists extends Table {
   /// lists are managed by unsubscribing, never by editing.
   TextColumn get channelPubkey => text().nullable()();
 
+  /// Channel profile (channel lists only), refreshed from every imported
+  /// manifest: the optional "by `<author>`" display name/handle…
+  TextColumn get channelAuthor => text().nullable()();
+
+  /// …and the avatar's member file name in the posters dir
+  /// (`channel_avatar_<sha8>.img`; resolved to a path at render time).
+  TextColumn get channelAvatar => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -167,7 +175,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -210,6 +218,12 @@ class AppDatabase extends _$AppDatabase {
             // Channels: subscribed channels land as read-only lists
             // marked with the channel public key.
             await m.addColumn(mediaLists, mediaLists.channelPubkey);
+          }
+          if (from < 11) {
+            // Channel profile: author + avatar member name on channel
+            // lists (refreshed from each imported manifest).
+            await m.addColumn(mediaLists, mediaLists.channelAuthor);
+            await m.addColumn(mediaLists, mediaLists.channelAvatar);
           }
           if (from >= 4 && from < 9) {
             // alpha.57: Edit details — user-authored metadata rows are

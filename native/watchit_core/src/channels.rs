@@ -54,6 +54,9 @@ mod imp {
     struct OwnConfig {
         name: String,
         description: String,
+        /// Display name or handle of whoever runs the channel. Optional —
+        /// empty string means unset (description's convention).
+        author: String,
         pubkey_hex: String,
         /// Highest sequence number this device has published.
         seq: u64,
@@ -131,6 +134,7 @@ mod imp {
             Some(OwnConfig {
                 name: v["name"].as_str().unwrap_or("").to_string(),
                 description: v["description"].as_str().unwrap_or("").to_string(),
+                author: v["author"].as_str().unwrap_or("").to_string(),
                 pubkey_hex,
                 seq: v["seq"].as_u64().unwrap_or(0),
                 manifest_hex: v["manifest"].as_str().unwrap_or("").to_string(),
@@ -146,6 +150,7 @@ mod imp {
             let body = json!({
                 "name": cfg.name,
                 "description": cfg.description,
+                "author": cfg.author,
                 "pubkey": cfg.pubkey_hex,
                 "seq": cfg.seq,
                 "manifest": cfg.manifest_hex,
@@ -308,6 +313,7 @@ mod imp {
             &'static self,
             name: &str,
             description: &str,
+            author: &str,
             phrase: &str,
         ) -> Result<Value, String> {
             if self.load_own().is_some() {
@@ -329,6 +335,7 @@ mod imp {
             self.save_own(&OwnConfig {
                 name: name.chars().take(80).collect(),
                 description: description.trim().chars().take(500).collect(),
+                author: author.trim().chars().take(80).collect(),
                 pubkey_hex: pubkey_hex.clone(),
                 seq: 0,
                 manifest_hex: String::new(),
@@ -343,8 +350,8 @@ mod imp {
         }
 
         /// Restore a channel from its recovery phrase on a new machine:
-        /// same key, same code, publishing resumes. The name/description
-        /// are recovered from the fetched manifest by the app
+        /// same key, same code, publishing resumes. The name/description/
+        /// author are recovered from the fetched manifest by the app
         /// (`set_meta`) once the head arrives.
         pub async fn restore(&'static self, phrase: &str) -> Result<Value, String> {
             if self.load_own().is_some() {
@@ -362,6 +369,7 @@ mod imp {
             self.save_own(&OwnConfig {
                 name: String::new(),
                 description: String::new(),
+                author: String::new(),
                 pubkey_hex: pubkey_hex.clone(),
                 seq: 0,
                 manifest_hex: String::new(),
@@ -375,15 +383,21 @@ mod imp {
             }))
         }
 
-        /// Update the locally displayed name/description (the canonical
-        /// copy lives in the published manifest).
-        pub async fn set_meta(&self, name: &str, description: &str) -> Result<Value, String> {
+        /// Update the locally displayed name/description/author (the
+        /// canonical copy lives in the published manifest).
+        pub async fn set_meta(
+            &self,
+            name: &str,
+            description: &str,
+            author: &str,
+        ) -> Result<Value, String> {
             let mut own = self.load_own().ok_or("this device has no channel")?;
             let name = name.trim();
             if !name.is_empty() {
                 own.name = name.chars().take(80).collect();
             }
             own.description = description.trim().chars().take(500).collect();
+            own.author = author.trim().chars().take(80).collect();
             self.save_own(&own)?;
             Ok(json!({ "updated": true }))
         }
@@ -597,6 +611,7 @@ mod imp {
                     json!({
                         "name": cfg.name,
                         "description": cfg.description,
+                        "author": cfg.author,
                         "pubkey": cfg.pubkey_hex,
                         "code": channel::code_from_pubkey_hex(&cfg.pubkey_hex)
                             .unwrap_or_default(),
@@ -699,6 +714,7 @@ mod imp {
                 .save_own(&OwnConfig {
                     name: "My Films".into(),
                     description: "d".into(),
+                    author: "@neil".into(),
                     pubkey_hex: "ab".repeat(32),
                     seq: 4,
                     manifest_hex: "cd".repeat(32),
@@ -707,13 +723,34 @@ mod imp {
                 .unwrap();
             let own = store.load_own().unwrap();
             assert_eq!(own.name, "My Films");
+            assert_eq!(own.author, "@neil");
             assert_eq!(own.seq, 4);
             assert_eq!(own.manifest_hex, "cd".repeat(32));
-            // set_meta trims + keeps name when blank.
-            store.set_meta("", "new description").await.unwrap();
+            // set_meta trims + keeps name when blank; author follows the
+            // given value (empty clears — it is optional).
+            store.set_meta("", "new description", " Neil ").await.unwrap();
             let own = store.load_own().unwrap();
             assert_eq!(own.name, "My Films");
             assert_eq!(own.description, "new description");
+            assert_eq!(own.author, "Neil");
+            store.set_meta("", "new description", "").await.unwrap();
+            assert_eq!(store.load_own().unwrap().author, "");
+        }
+
+        #[tokio::test]
+        async fn author_caps_at_80_and_old_config_reads_unset() {
+            let store = test_store("author");
+            // A pre-author my.json (no "author" key) loads as unset.
+            let path = store.my_path().unwrap();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(
+                &path,
+                json!({ "name": "Old", "pubkey": "ab".repeat(32) }).to_string(),
+            )
+            .unwrap();
+            assert_eq!(store.load_own().unwrap().author, "");
+            store.set_meta("Old", "", &"x".repeat(200)).await.unwrap();
+            assert_eq!(store.load_own().unwrap().author.chars().count(), 80);
         }
 
         #[tokio::test]
@@ -769,6 +806,7 @@ mod imp {
             &'static self,
             _n: &str,
             _d: &str,
+            _a: &str,
             _p: &str,
         ) -> Result<Value, String> {
             Err(UNSUPPORTED.into())
@@ -776,7 +814,12 @@ mod imp {
         pub async fn restore(&'static self, _p: &str) -> Result<Value, String> {
             Err(UNSUPPORTED.into())
         }
-        pub async fn set_meta(&self, _n: &str, _d: &str) -> Result<Value, String> {
+        pub async fn set_meta(
+            &self,
+            _n: &str,
+            _d: &str,
+            _a: &str,
+        ) -> Result<Value, String> {
             Err(UNSUPPORTED.into())
         }
         pub async fn remove_own(&self) -> Result<Value, String> {

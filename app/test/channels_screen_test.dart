@@ -16,6 +16,7 @@ import 'package:watchit/services/ffmpeg.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/terms.dart';
 import 'package:watchit/theme/tokens.dart';
+import 'package:watchit/widgets/channel_avatar.dart';
 
 import 'fake_embedded_http.dart';
 
@@ -37,6 +38,18 @@ void main() {
     HttpOverrides.global = fake;
     ChannelService.resetForTesting();
     ChannelService.instance.importBase = FakeEmbeddedHttp.base;
+    // Real path_provider IO would hang the fake-async zone — the avatar
+    // lookups need overridden dirs (created sync for the same reason).
+    final postersDir =
+        Directory.systemTemp.createTempSync('wi-chs-posters');
+    final profileDir =
+        Directory.systemTemp.createTempSync('wi-chs-profile');
+    addTearDown(() => postersDir.deleteSync(recursive: true));
+    addTearDown(() {
+      if (profileDir.existsSync()) profileDir.deleteSync(recursive: true);
+    });
+    ChannelService.instance.postersDirProvider = () async => postersDir;
+    ChannelService.instance.profileDirProvider = () async => profileDir;
   });
 
   tearDown(() {
@@ -266,6 +279,8 @@ void main() {
           ),
           channelName: 'Nature Films',
           description: 'My own footage',
+          author: '@neil',
+          avatar: Uint8List.fromList(List<int>.generate(64, (i) => i)),
           api: ChannelsApi(base: FakeEmbeddedHttp.base),
           confirmIndices: const [0, 1, 2],
         ),
@@ -298,6 +313,11 @@ void main() {
       expect(find.text('Before your channel exists'), findsOneWidget);
       expect(find.text('PUBLIC · PERMANENT'), findsOneWidget);
       expect(find.textContaining('ATTRIBUTABLE'), findsOneWidget);
+      // The profile warning: name always, author/avatar when set.
+      expect(
+          find.textContaining(
+              'author name and avatar if you set them'),
+          findsOneWidget);
       // Button disabled until the channel name is typed.
       final createButton = find.widgetWithText(
           FilledButton, 'I understand — create the channel');
@@ -313,7 +333,14 @@ void main() {
       final created =
           jsonDecode(fake.channelCreates.single) as Map<String, dynamic>;
       expect(created['name'], 'Nature Films');
+      expect(created['author'], '@neil');
       expect(created['mnemonic'], fake.channelMnemonic);
+      // The staged avatar crop was stored under its content-hash name.
+      final avatarFile = await ChannelService.instance.myAvatarFile();
+      expect(avatarFile, isNotNull);
+      expect(
+          isChannelAvatarMemberName(avatarFile!.uri.pathSegments.last),
+          isTrue);
     });
 
     testWidgets('own channel view: code, backup row, item staging gates',
@@ -471,6 +498,122 @@ void main() {
       expect(channelSection.body, contains('solely responsible'));
       expect(
           kTermsSections.any((s) => s.title.contains('Wallet')), isTrue);
+    });
+  });
+
+  group('channel profile UI', () {
+    testWidgets('create form: avatar picker + optional author field',
+        (tester) async {
+      tester.view.physicalSize = const Size(900, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home:
+            CreateChannelScreen(api: ChannelsApi(base: FakeEmbeddedHttp.base)),
+      ));
+      await tester.pumpAndSettle();
+      // The 96px circular picker with its camera badge and the empty
+      // podcasts fallback.
+      expect(find.byType(ChannelAvatarPicker), findsOneWidget);
+      expect(find.byIcon(Icons.photo_camera_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.podcasts), findsOneWidget);
+      // Author is optional, with the public-and-permanent helper.
+      expect(find.text('Author name or handle'), findsOneWidget);
+      expect(find.textContaining('Optional. Shown as "by <author>"'),
+          findsOneWidget);
+    });
+
+    testWidgets('edit screen prefills the profile and saves author',
+        (tester) async {
+      tester.view.physicalSize = const Size(900, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      fake.channelsStatus = {
+        'supported': true,
+        'state': 'ready',
+        'own': {
+          'name': 'Nature Films',
+          'description': 'My own footage',
+          'author': 'Neil',
+          'pubkey': fake.channelPubkey,
+          'code': fake.channelCode,
+          'seq': 0,
+          'manifest': '',
+          'created_at_ms': 1,
+          'head': null,
+        },
+        'subs': const [],
+      };
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: EditChannelScreen(api: ChannelsApi(base: FakeEmbeddedHttp.base)),
+      ));
+      await tester.pumpAndSettle();
+      // Prefilled from the channel config.
+      expect(find.widgetWithText(TextField, 'Nature Films'), findsOneWidget);
+      expect(find.widgetWithText(TextField, 'Neil'), findsOneWidget);
+      expect(find.widgetWithText(TextField, 'My own footage'),
+          findsOneWidget);
+      expect(find.byType(ChannelAvatarPicker), findsOneWidget);
+      expect(find.textContaining('go public with the next publish'),
+          findsOneWidget);
+      // Change the author, save → the meta post carries all three.
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Neil'), '@neil');
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(fake.channelMetaPosts, hasLength(1));
+      final posted =
+          jsonDecode(fake.channelMetaPosts.single) as Map<String, dynamic>;
+      expect(posted['name'], 'Nature Films');
+      expect(posted['author'], '@neil');
+      expect(posted['description'], 'My own footage');
+    });
+
+    testWidgets('own channel header shows avatar, author, and Edit',
+        (tester) async {
+      fake.channelsStatus = {
+        'supported': true,
+        'state': 'ready',
+        'own': {
+          'name': 'Nature Films',
+          'description': 'My own footage',
+          'author': 'Neil',
+          'pubkey': fake.channelPubkey,
+          'code': fake.channelCode,
+          'seq': 0,
+          'manifest': '',
+          'created_at_ms': 1,
+          'key_storage': 'keychain',
+          'key_missing': false,
+          'head': null,
+        },
+        'subs': const [],
+      };
+      await openChannels(tester);
+      await tester.tap(find.text('My Channel'));
+      await tester.pumpAndSettle();
+      expect(find.text('by Neil'), findsOneWidget);
+      expect(find.text('Edit channel details'), findsOneWidget);
+      // The header's avatar renders (podcasts fallback — none set).
+      expect(find.byType(ChannelAvatar), findsWidgets);
+    });
+
+    testWidgets('subscribed card shows the author line', (tester) async {
+      final pubkey = 'cd' * 32;
+      SharedPreferences.setMockInitialValues({
+        'channel_subs_v1': jsonEncode({
+          pubkey: {
+            'name': 'Nature Films',
+            'description': 'My own footage',
+            'author': '@neil',
+            'importedSeq': 1,
+          }
+        }),
+      });
+      await openChannels(tester);
+      expect(find.text('by @neil'), findsOneWidget);
     });
   });
 }

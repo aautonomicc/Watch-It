@@ -120,6 +120,30 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - Channels carry NO category tags (2026-08-29): the Describe page has
   no genre chips, manifests publish `category: null`, and channel list
   pages never show the genre chip row
+- **Channel profile** (2026-08-29): a channel has a face — a circular
+  avatar (still image, forced 1:1 crop, ≤2 MB — the FIRST and ONLY
+  circular artwork in the app: circles mean channel identity,
+  rectangles mean media), an optional author name-or-handle rendered
+  as "by <author>" wherever set (unset → the line simply doesn't
+  render), plus the existing name/description. Create form = profile
+  form (96px circular picker with amber ring + camera badge, author
+  field marked optional/public/permanent); My Channel gains **Edit
+  channel details** — edits are staged locally and go public with the
+  next publish (the manifest is rebuilt on every head, so the profile
+  rides it; a changed avatar is a new content-hash member, an
+  unchanged one is skipped by the delta fetch). A channel's list page
+  opens with the full-width **channel info card** above the poster
+  grid: 72px avatar, name, "by author · N entries", description (2
+  lines, tap to expand), and the copyable `wchn1-` code in amber mono
+  — deliberate anti-impersonation UI: there is no handle registry and
+  no uniqueness, anyone can type any author name, so the code stays
+  the only real identity and is always in sight (the app bar drops its
+  entry-count subtitle there; the card owns it). Mini avatars
+  (podcasts-icon fallback) on the channels-screen cards, the drawer's
+  channel rows, the My Media rows, and the home wall's channel row
+  titles (18px beside the CHANNEL badge). The FirstPublishGate warning
+  list includes the profile: channel name — and author/avatar if set —
+  are published publicly and permanently.
 - **Subscribed** segment (default, all platforms): channel cards with
   name/description/item count/update state, Add channel (paste
   `wchn1-…` or scan QR on mobile, with the content-comes-from-the-owner

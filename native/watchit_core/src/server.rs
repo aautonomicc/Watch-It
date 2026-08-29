@@ -740,8 +740,9 @@ async fn channel_generate() -> Response {
     }
 }
 
-/// `POST /channel/create` — `{"name", "description", "mnemonic"}`:
-/// derive + store the channel key, persist the config, join the topic.
+/// `POST /channel/create` — `{"name", "description", "author",
+/// "mnemonic"}`: derive + store the channel key, persist the config,
+/// join the topic. `author` is optional (empty = unset).
 async fn channel_create(engine: &'static Engine, body: Bytes) -> Response {
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
         return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
@@ -752,6 +753,7 @@ async fn channel_create(engine: &'static Engine, body: Bytes) -> Response {
             .create(
                 v["name"].as_str().unwrap_or(""),
                 v["description"].as_str().unwrap_or(""),
+                v["author"].as_str().unwrap_or(""),
                 v["mnemonic"].as_str().unwrap_or(""),
             )
             .await,
@@ -772,8 +774,9 @@ async fn channel_restore(engine: &'static Engine, body: Bytes) -> Response {
     )
 }
 
-/// `POST /channel/meta` — `{"name", "description"}`: update the locally
-/// displayed copy (the canonical copy is in the published manifest).
+/// `POST /channel/meta` — `{"name", "description", "author"}`: update
+/// the locally displayed copy (the canonical copy is in the published
+/// manifest). `author` is optional (empty = unset).
 async fn channel_meta(engine: &'static Engine, body: Bytes) -> Response {
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
         return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
@@ -784,6 +787,7 @@ async fn channel_meta(engine: &'static Engine, body: Bytes) -> Response {
             .set_meta(
                 v["name"].as_str().unwrap_or(""),
                 v["description"].as_str().unwrap_or(""),
+                v["author"].as_str().unwrap_or(""),
             )
             .await,
     )

@@ -1,8 +1,25 @@
 # Plan — Channel profile: avatar, name, author
 
-Status: **PLANNED 2026-08-29 — not implemented.** Follows the "Later: channel avatars"
+Status: **IMPLEMENTED 2026-08-29.** Follows the "Later: channel avatars"
 item in PLAN-personal-vs-channels.md. Read that plan first; nothing here weakens its
 safety rails — it extends them to two new public facts (avatar, author).
+
+Implementation deviations (2026-08-29):
+
+- **Add-channel confirm preview (§3b) not built**: the manifest address only
+  arrives via gossip *after* joining the channel's topic, so a
+  pre-subscribe avatar/name/author preview would need a join-peek-leave
+  dance the core doesn't expose. The subscribed card shows the full
+  profile (avatar, name, "by author") the moment the first import lands —
+  the same information a few seconds later — and the add dialog keeps its
+  subscriber note. Revisit only if drive-by subscribes become a problem.
+- Avatar crop output is PNG bytes in the `.img` member (Flutter decodes
+  by content, the plan's "jpg" was illustrative), downscaled to ≤512px so
+  it always sits far under the 2 MB cap.
+- The owner's avatar crop lives in `<support>/channel/` under its
+  content-hash member name (no prefs path needed), with a copy under the
+  same name in the posters dir so the owner's own list renders it
+  pre-publish and the post-publish import maps to the identical file.
 
 Rev 2 (2026-08-29): animated GIF support **dropped** (user: would look cheap and
 tacky) — avatars are still images only; added the explicit "Keeping the profile up

@@ -9,6 +9,7 @@ import '../services/library_store.dart';
 import '../services/metadata_service.dart';
 import '../services/season_grouping.dart';
 import '../theme/tokens.dart';
+import '../widgets/channel_info_card.dart';
 import '../widgets/library_drawer.dart';
 import '../widgets/poster_cards.dart';
 import 'detail_screen.dart';
@@ -100,18 +101,23 @@ class _ListHomeScreenState extends State<ListHomeScreen> {
         // drop the back affordance entirely — keep back on the left, the
         // drawer opens from the menu action on the right.
         leading: BackButton(color: t.boneDim),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(_list.title,
-                style: TextStyle(color: t.bone, fontSize: 18)),
-            Text(
-              '$count ${count == 1 ? 'entry' : 'entries'}',
-              style: TextStyle(color: t.ash, fontSize: 11),
-            ),
-          ],
-        ),
+        // Channel pages carry the full-width info card below, which owns
+        // the entry count — the app bar stays plain there.
+        title: _list.isChannel
+            ? Text(_list.title,
+                style: TextStyle(color: t.bone, fontSize: 18))
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_list.title,
+                      style: TextStyle(color: t.bone, fontSize: 18)),
+                  Text(
+                    '$count ${count == 1 ? 'entry' : 'entries'}',
+                    style: TextStyle(color: t.ash, fontSize: 11),
+                  ),
+                ],
+              ),
         actions: [
           // The pushed route puts a back arrow in `leading`, so the
           // drawer needs its own handle here.
@@ -133,13 +139,21 @@ class _ListHomeScreenState extends State<ListHomeScreen> {
   }
 
   Widget _body(WiTokens t) {
+    // The channel's face — profile card above the grid (a grid cell is
+    // poster-shaped; a profile crammed into one would fight the grid).
+    final infoCard = _list.isChannel
+        ? ChannelInfoCard(list: _list, onEdited: _reload)
+        : null;
     if (_list.entries.isEmpty) {
-      return Center(
+      final empty = Center(
         child: Text(
           'This list is empty.',
           style: TextStyle(fontSize: 13, color: t.boneDim),
         ),
       );
+      return infoCard == null
+          ? empty
+          : Column(children: [infoCard, Expanded(child: empty)]);
     }
     final items = groupShows(_list.entries);
     // Channel lists carry no category tags by design — manifests are
@@ -177,6 +191,7 @@ class _ListHomeScreenState extends State<ListHomeScreen> {
     ];
     return Column(
       children: [
+        ?infoCard,
         if (chips.isNotEmpty) _chipRow(t, chips, active),
         Expanded(
           child: filtered.isEmpty

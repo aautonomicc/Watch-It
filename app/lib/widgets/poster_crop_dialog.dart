@@ -55,9 +55,34 @@ Rect cropSourceRect({
 /// natural resolution, never upscaled), the untouched original via
 /// "Use whole frame", or null on cancel.
 class PosterCropDialog extends StatefulWidget {
-  const PosterCropDialog({super.key, required this.bytes});
+  const PosterCropDialog({
+    super.key,
+    required this.bytes,
+    this.aspect = kPosterAspect,
+    this.title = 'Crop for poster',
+    this.hint = 'The box is the poster: drag the image to position it, '
+        'zoom to fill the box with the part you want.',
+    this.allowWholeFrame = true,
+    this.maxOutputDimension,
+  });
 
   final Uint8List bytes;
+
+  /// Selector-box aspect (width : height). Posters use the default 2:3;
+  /// channel avatars pass 1 — forced square, so the circular render
+  /// never surprises.
+  final double aspect;
+  final String title;
+  final String hint;
+
+  /// Whether the escape hatch that returns the uncropped original is
+  /// offered. Avatars turn it off — every avatar goes through the crop.
+  final bool allowWholeFrame;
+
+  /// When set, the crop output is scaled down so neither side exceeds
+  /// this (never upscaled) — avatars cap at 512px to stay far under
+  /// their 2 MB byte limit.
+  final int? maxOutputDimension;
 
   @override
   State<PosterCropDialog> createState() => _PosterCropDialogState();
@@ -78,11 +103,11 @@ class _PosterCropDialogState extends State<PosterCropDialog> {
   Offset _startOffset = Offset.zero;
   Offset _startFocal = Offset.zero;
 
-  /// Largest poster-aspect box that fits the viewport with a margin.
+  /// Largest [widget.aspect] box that fits the viewport with a margin.
   Size get _box {
     final h = math.min(
-        _viewport.height - 16, (_viewport.width - 16) / kPosterAspect);
-    return Size(h * kPosterAspect, h);
+        _viewport.height - 16, (_viewport.width - 16) / widget.aspect);
+    return Size(h * widget.aspect, h);
   }
 
   Size get _imageSize =>
@@ -120,8 +145,14 @@ class _PosterCropDialogState extends State<PosterCropDialog> {
         image: _imageSize, box: _box, zoom: _zoom, offset: _offset);
     // Natural resolution of the selected region — zooming in narrows the
     // source rect, it never upscales pixels.
-    final outW = src.width.round().clamp(1, img.width);
-    final outH = src.height.round().clamp(1, img.height);
+    var outW = src.width.round().clamp(1, img.width);
+    var outH = src.height.round().clamp(1, img.height);
+    final maxDim = widget.maxOutputDimension;
+    if (maxDim != null && (outW > maxDim || outH > maxDim)) {
+      final scale = maxDim / math.max(outW, outH);
+      outW = math.max(1, (outW * scale).round());
+      outH = math.max(1, (outH * scale).round());
+    }
     final recorder = ui.PictureRecorder();
     Canvas(recorder).drawImageRect(
       img,
@@ -200,7 +231,7 @@ class _PosterCropDialogState extends State<PosterCropDialog> {
     final t = WiTokens.of(context);
     return AlertDialog(
       backgroundColor: t.ink2,
-      title: Text('Crop for poster',
+      title: Text(widget.title,
           style: TextStyle(color: t.bone, fontSize: 16)),
       content: SizedBox(
         width: _viewport.width,
@@ -209,8 +240,7 @@ class _PosterCropDialogState extends State<PosterCropDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'The box is the poster: drag the image to position it, '
-              'zoom to fill the box with the part you want.',
+              widget.hint,
               style: TextStyle(color: t.boneDim, fontSize: 12.5),
             ),
             const SizedBox(height: 10),
@@ -241,13 +271,14 @@ class _PosterCropDialogState extends State<PosterCropDialog> {
               _busy ? null : () => Navigator.of(context).pop(),
           child: Text('Cancel', style: TextStyle(color: t.ash)),
         ),
-        TextButton(
-          onPressed: _busy
-              ? null
-              : () => Navigator.of(context).pop(widget.bytes),
-          child: Text('Use whole frame',
-              style: TextStyle(color: t.boneDim)),
-        ),
+        if (widget.allowWholeFrame)
+          TextButton(
+            onPressed: _busy
+                ? null
+                : () => Navigator.of(context).pop(widget.bytes),
+            child: Text('Use whole frame',
+                style: TextStyle(color: t.boneDim)),
+          ),
         TextButton(
           onPressed: _image == null || _busy ? null : _useSelection,
           child: Text('Use selection',

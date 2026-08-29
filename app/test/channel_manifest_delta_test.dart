@@ -204,6 +204,53 @@ void main() {
       expect(parsed.bundle.posters['movie_3.jpg'], posters['movie_3.jpg']);
     });
 
+    test('an unchanged channel avatar is skipped like any held poster',
+        () async {
+      // A manifest whose channel.json names an avatar member; the
+      // subscriber already holds the avatar file (unchanged since the
+      // last import) but not the new poster.
+      final avatarBytes = noise(50 * 1024, 77);
+      final avatarName = channelAvatarMemberName(avatarBytes);
+      final archive = Archive();
+      archive.addFile(ArchiveFile.string(
+          'channel.json',
+          jsonEncode({
+            'version': 1,
+            'name': 'Nature',
+            'description': '',
+            'author': 'Neil',
+            'avatar': avatarName,
+            'pubkey': 'ab' * 32,
+            'seq': 3,
+          })));
+      archive.addFile(ArchiveFile.bytes(
+          'datamaps/Clip (2026).mp4.datamap', noise(300, 1)));
+      archive.addFile(
+          ArchiveFile.string('list.txt', 'ListName="Nature"\nClip (2026).mp4.datamap\n'));
+      final newPoster = noise(40 * 1024, 78);
+      archive.addFile(ArchiveFile.noCompress(
+          'posters/movie_9.jpg', newPoster.length, newPoster));
+      archive.addFile(ArchiveFile.noCompress(
+          'posters/$avatarName', avatarBytes.length, avatarBytes));
+      final avatarZip = Uint8List.fromList(ZipEncoder().encode(archive));
+
+      final log = <(int, int)>[];
+      final delta = await fetchManifestMembersDelta(
+        fetch: rangeServer(avatarZip, log),
+        havePoster: (base) => base == avatarName,
+        tailBytes: 4096,
+      );
+      expect(delta, isNotNull);
+      expect(delta!.postersSkipped, 1);
+      expect(delta.bytesFetched, lessThan(avatarZip.length - 40 * 1024),
+          reason: 'the held avatar must not be downloaded');
+      final parsed = parseChannelManifestMembers(delta.members!);
+      expect(parsed.channel.avatar, avatarName);
+      expect(parsed.channel.author, 'Neil');
+      // The new poster still travelled; the avatar bytes did not.
+      expect(parsed.bundle.posters.keys.toSet(), {'movie_9.jpg'});
+    });
+
     test('nothing held falls back to the plain fetch (null)', () async {
       final log = <(int, int)>[];
       final delta = await fetchManifestMembersDelta(

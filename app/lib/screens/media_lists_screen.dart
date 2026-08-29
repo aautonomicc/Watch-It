@@ -19,6 +19,7 @@ import '../services/library_store.dart';
 import '../services/list_import.dart';
 import '../services/metadata_service.dart';
 import '../theme/tokens.dart';
+import '../widgets/channel_avatar.dart';
 import '../widgets/channel_badge.dart';
 import 'list_edit_screen.dart';
 import 'list_home_screen.dart';
@@ -1299,6 +1300,10 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       ),
       title: Row(
         children: [
+          if (list.isChannel) ...[
+            ChannelAvatar(memberName: list.channelAvatar, size: 20),
+            const SizedBox(width: 8),
+          ],
           Flexible(
             child: Text(
               list.title,

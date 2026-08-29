@@ -288,7 +288,16 @@ ships, and stored in the OS keychain beside the wallet key
   posters — the required Describe-this-item edits travel as `userEdited`
   rows, so keyless subscribers render fully offline) plus
   `channel.json` (name/description/pubkey + advisory seq/previous
-  history chain). Uploaded PUBLICLY — ant-core's
+  history chain, and since 2026-08-29 the optional profile keys:
+  `author` — free-text name/handle rendered as "by <author>" — and
+  `avatar`, the member name of a circular avatar image that travels as
+  one more content-hash-named `posters/channel_avatar_<sha8>.img`
+  member, so the delta fetch skips an unchanged avatar and re-fetches a
+  changed one with zero extra machinery; both keys absent = unset, old
+  clients ignore them, old manifests render with the icon fallback and
+  no author line; media_lists.channel_author/channel_avatar, schema
+  v11, refresh from every imported manifest). Uploaded PUBLICLY —
+  ant-core's
   `file_upload_public_with_progress` stores the serialized data map as
   a fetchable chunk in the same payment batch, so anyone holding the
   address fetches it via `data_map_fetch`

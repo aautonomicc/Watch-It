@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/media_list.dart';
@@ -58,6 +60,10 @@ class ChannelService extends ChangeNotifier {
   /// Posters directory override (null = the app support dir). Tests
   /// point it at a temp dir.
   Future<Directory> Function()? postersDirProvider;
+
+  /// Own-channel profile directory override (holds the current avatar
+  /// crop); null = `<support>/channel`. Tests point it at a temp dir.
+  Future<Directory> Function()? profileDirProvider;
 
   Timer? _timer;
   bool _syncing = false;
@@ -275,6 +281,8 @@ class ChannelService extends ChangeNotifier {
           raw['importedSeq'] = head.seq;
           raw['name'] = info.name;
           raw['description'] = info.description;
+          raw['author'] = info.author;
+          raw['avatar'] = info.avatar;
           lastProblem.remove(key);
           changed = true;
         } catch (e) {
@@ -338,6 +346,9 @@ class ChannelService extends ChangeNotifier {
     final title = own.name.trim().isEmpty
         ? 'Channel ${pubkey.substring(0, 8)}'
         : own.name.trim();
+    final author = own.author.trim().isEmpty ? null : own.author.trim();
+    final avatarFile = await myAvatarFile();
+    final avatar = avatarFile?.uri.pathSegments.last;
     final i = lists.indexWhere((l) => l.channelPubkey == pubkey);
     if (i < 0) {
       lists.add(MediaList(
@@ -345,18 +356,25 @@ class ChannelService extends ChangeNotifier {
         title: title,
         entries: const [],
         channelPubkey: pubkey,
+        channelAuthor: author,
+        channelAvatar: avatar,
       ));
       await LibraryStore.save(lists);
       changed = true;
-    } else if (importedSeq == 0 && lists[i].title != title) {
-      // Renamed before the first publish — follow the config name (after
-      // a publish the imported manifest is the naming authority).
+    } else if (importedSeq == 0 &&
+        (lists[i].title != title ||
+            lists[i].channelAuthor != author ||
+            lists[i].channelAvatar != avatar)) {
+      // Profile edited before the first publish — follow the config
+      // (after a publish the imported manifest is the authority).
       lists[i] = MediaList(
         id: lists[i].id,
         title: title,
         entries: lists[i].entries,
         enabled: lists[i].enabled,
         channelPubkey: pubkey,
+        channelAuthor: author,
+        channelAvatar: avatar,
       );
       await LibraryStore.save(lists);
       changed = true;
@@ -455,6 +473,8 @@ class ChannelService extends ChangeNotifier {
     final title = manifest.channel.name.isEmpty
         ? 'Channel ${pubkey.substring(0, 8)}'
         : manifest.channel.name;
+    final author =
+        manifest.channel.author.isEmpty ? null : manifest.channel.author;
     final i = lists.indexWhere((l) => l.channelPubkey == pubkey);
     if (i >= 0) {
       lists[i] = MediaList(
@@ -463,6 +483,8 @@ class ChannelService extends ChangeNotifier {
         entries: entries,
         enabled: lists[i].enabled,
         channelPubkey: pubkey,
+        channelAuthor: author,
+        channelAvatar: manifest.channel.avatar,
       );
     } else {
       lists.add(MediaList(
@@ -470,6 +492,8 @@ class ChannelService extends ChangeNotifier {
         title: title,
         entries: entries,
         channelPubkey: pubkey,
+        channelAuthor: author,
+        channelAvatar: manifest.channel.avatar,
       ));
     }
     await LibraryStore.save(lists);
@@ -519,11 +543,102 @@ class ChannelService extends ChangeNotifier {
     await _saveMyItems(items);
   }
 
+  // ---- own channel: avatar ------------------------------------------------
+
+  Future<Directory> _profileDir() async {
+    if (profileDirProvider != null) return profileDirProvider!();
+    final support = await getApplicationSupportDirectory();
+    return Directory('${support.path}/channel');
+  }
+
+  /// The owner's current avatar crop, named by content hash exactly like
+  /// its manifest member (`channel_avatar_<sha8>.img`); null when the
+  /// channel has no avatar.
+  Future<File?> myAvatarFile() async {
+    final Directory dir;
+    try {
+      dir = await _profileDir();
+    } catch (_) {
+      // No support dir on this platform (headless tests) — no avatar.
+      return null;
+    }
+    if (!dir.existsSync()) return null;
+    for (final f in dir.listSync()) {
+      if (f is File && isChannelAvatarMemberName(f.uri.pathSegments.last)) {
+        return f;
+      }
+    }
+    return null;
+  }
+
+  /// Set the owner's avatar (the 1:1 crop output, ≤2 MB). The file also
+  /// lands in the posters dir under the same content-hash name, so the
+  /// owner's own channel list renders it immediately — and after a
+  /// publish the imported manifest maps to the identical file (the delta
+  /// fetch then skips it as already held).
+  Future<void> setMyAvatar(Uint8List bytes) async {
+    if (bytes.length > kMaxChannelAvatarBytes) {
+      throw PublishApiException(
+          'the avatar image is larger than the 2 MB limit');
+    }
+    final name = channelAvatarMemberName(bytes);
+    final dir = await _profileDir();
+    // Sync IO throughout — async dart:io hangs widget tests' fake-async
+    // zone (the standing user_metadata.dart rule).
+    dir.createSync(recursive: true);
+    // One avatar at a time: older crops (different hash names) go.
+    for (final f in dir.listSync()) {
+      if (f is File &&
+          isChannelAvatarMemberName(f.uri.pathSegments.last) &&
+          f.uri.pathSegments.last != name) {
+        try {
+          f.deleteSync();
+        } catch (_) {}
+      }
+    }
+    File('${dir.path}/$name').writeAsBytesSync(bytes, flush: true);
+    final postersDir = await (postersDirProvider ?? defaultBundlePostersDir)();
+    postersDir.createSync(recursive: true);
+    final posterCopy = File('${postersDir.path}/$name');
+    if (!posterCopy.existsSync()) {
+      posterCopy.writeAsBytesSync(bytes, flush: true);
+    }
+    notifyListeners();
+  }
+
+  /// Resolve a channel avatar member name to its posters-dir file (may
+  /// not exist yet — the icon fallback renders then). Null for unset or
+  /// invalid names, or when no posters dir is available.
+  Future<File?> avatarFileFor(String? memberName) async {
+    if (memberName == null || !isChannelAvatarMemberName(memberName)) {
+      return null;
+    }
+    try {
+      final dir = await (postersDirProvider ?? defaultBundlePostersDir)();
+      return File('${dir.path}/$memberName');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Remove the owner's avatar (the next publish ships none).
+  Future<void> clearMyAvatar() async {
+    final file = await myAvatarFile();
+    if (file != null) {
+      try {
+        file.deleteSync();
+      } catch (_) {}
+    }
+    notifyListeners();
+  }
+
   /// Build the channel manifest zip for the staged items and write it to
   /// a temp file (for estimate + publish). Reuses the bundle exporter,
   /// so the manifest carries the items' `.datamap` members, their
   /// metadata rows (the required Describe-this-item edits travel as
-  /// `userEdited` rows) and poster files, plus `channel.json`.
+  /// `userEdited` rows) and poster files, plus `channel.json` — and the
+  /// channel profile: the optional author key and the avatar as one
+  /// more content-hash-named poster member.
   Future<ChannelManifestBuild> buildMyManifest({
     required OwnChannel own,
   }) async {
@@ -538,10 +653,21 @@ class ChannelService extends ChangeNotifier {
         for (final i in items) MediaEntry(name: i.name, address: i.address),
       ],
     );
+    final avatarFile = await myAvatarFile();
+    final avatarBytes = avatarFile == null
+        ? null
+        : Uint8List.fromList(await avatarFile.readAsBytes());
+    final avatarMember =
+        avatarBytes == null ? null : channelAvatarMemberName(avatarBytes);
+    final author = own.author.trim();
     final channelJson = jsonEncode({
       'version': 1,
       'name': own.name,
       'description': own.description,
+      // Optional profile keys — absent when unset, so old manifests and
+      // authorless channels render identically.
+      if (author.isNotEmpty) 'author': author,
+      'avatar': ?avatarMember,
       'pubkey': own.pubkey,
       // Advisory history chain — the authoritative seq is the signed
       // head's; `previous` lets anyone walk back through old manifests
@@ -550,6 +676,10 @@ class ChannelService extends ChangeNotifier {
       'previous': own.manifest.isEmpty ? null : own.manifest,
       'updated_at_ms': DateTime.now().millisecondsSinceEpoch,
     });
+    final extraPosters = <String, Uint8List>{};
+    if (avatarMember != null && avatarBytes != null) {
+      extraPosters[avatarMember] = avatarBytes;
+    }
     final built = await buildBundle(
       [list],
       // omitCategories: channels publish no category tags.
@@ -557,6 +687,7 @@ class ChannelService extends ChangeNotifier {
       base: importBase,
       postersDirProvider: postersDirProvider,
       extraTextMembers: {'channel.json': channelJson},
+      extraPosterMembers: extraPosters,
     );
     final dir = await Directory.systemTemp.createTemp('wi-channel-');
     final file = File('${dir.path}/manifest.watch-list');
@@ -601,15 +732,38 @@ class ChannelService extends ChangeNotifier {
       await api.setMeta(
         name: manifest.channel.name,
         description: manifest.channel.description,
+        author: manifest.channel.author,
       );
+    }
+    // Bring the avatar back into place so the restored channel
+    // republishes with its face intact: from the fetched manifest, or —
+    // when the delta fetch skipped it — from the posters dir copy.
+    final avatarName = manifest.channel.avatar;
+    if (avatarName != null) {
+      var bytes = manifest.bundle.posters[avatarName];
+      if (bytes == null) {
+        final postersDir =
+            await (postersDirProvider ?? defaultBundlePostersDir)();
+        final onDisk = File('${postersDir.path}/$avatarName');
+        if (onDisk.existsSync()) {
+          bytes = Uint8List.fromList(await onDisk.readAsBytes());
+        }
+      }
+      if (bytes != null && bytes.length <= kMaxChannelAvatarBytes) {
+        await setMyAvatar(bytes);
+      }
     }
     return items.length;
   }
 
-  /// Wipe the own-channel item staging (after Remove channel).
+  /// Wipe the own-channel item staging + avatar (after Remove channel).
   Future<void> clearMyItems() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_itemsKey);
+    try {
+      final dir = await _profileDir();
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    } catch (_) {}
     notifyListeners();
   }
 }
@@ -673,6 +827,8 @@ class ChannelRecord {
     required this.pubkey,
     required this.name,
     required this.description,
+    this.author = '',
+    this.avatar,
     required this.addedMs,
     required this.importedSeq,
   });
@@ -680,6 +836,12 @@ class ChannelRecord {
   final String pubkey;
   final String name;
   final String description;
+
+  /// "by `<author>`" line from the last imported manifest; empty = unset.
+  final String author;
+
+  /// Avatar file name in the posters dir; null = none.
+  final String? avatar;
   final int addedMs;
   final int importedSeq;
 
@@ -688,6 +850,8 @@ class ChannelRecord {
         pubkey: pubkey,
         name: json['name'] as String? ?? '',
         description: json['description'] as String? ?? '',
+        author: json['author'] as String? ?? '',
+        avatar: json['avatar'] as String?,
         addedMs: json['addedMs'] as int? ?? 0,
         importedSeq: json['importedSeq'] as int? ?? 0,
       );
@@ -707,12 +871,55 @@ class ChannelManifestBuild {
   final int entriesMissingMap;
 }
 
+/// Hard cap on the avatar crop output — it travels in every
+/// subscriber's manifest fetch and the owner pays to upload it.
+const int kMaxChannelAvatarBytes = 2 * 1024 * 1024;
+
+String _capLength(String s, int max) =>
+    s.length <= max ? s : s.substring(0, max);
+
+/// The avatar's manifest member / posters-dir file name: content-hash
+/// named so a changed avatar is a new member (fetched) and an unchanged
+/// one keeps its name (skipped by the delta import for free).
+String channelAvatarMemberName(List<int> bytes) =>
+    'channel_avatar_${sha256.convert(bytes).toString().substring(0, 8)}.img';
+
+/// Does [name] look like an avatar member base name? Also the safety
+/// gate for the manifest's `avatar` key — the pattern has no room for
+/// path separators or `..`, so a hostile name cannot escape anywhere.
+bool isChannelAvatarMemberName(String name) =>
+    RegExp(r'^channel_avatar_[0-9a-f]{8}\.img$').hasMatch(name);
+
+/// `wchn1-<base32(pubkey)>` — the Dart twin of channel.rs's
+/// `code_from_pubkey_hex` (lowercase unpadded RFC 4648 base32, 52
+/// chars), for surfaces that only hold the pubkey — the channel info
+/// card's anti-impersonation code line. Empty string on a bad key.
+String channelCodeFromPubkeyHex(String pubkeyHex) {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
+  final hex = pubkeyHex.trim().toLowerCase();
+  if (hex.length != 64 || !RegExp(r'^[0-9a-f]+$').hasMatch(hex)) return '';
+  var bits = 0, value = 0;
+  final out = StringBuffer('wchn1-');
+  for (var i = 0; i < hex.length; i += 2) {
+    value = (value << 8) | int.parse(hex.substring(i, i + 2), radix: 16);
+    bits += 8;
+    while (bits >= 5) {
+      out.write(alphabet[(value >> (bits - 5)) & 31]);
+      bits -= 5;
+    }
+  }
+  if (bits > 0) out.write(alphabet[(value << (5 - bits)) & 31]);
+  return out.toString();
+}
+
 /// `channel.json` inside a manifest.
 class ChannelManifestInfo {
   const ChannelManifestInfo({
     required this.name,
     required this.description,
     required this.pubkey,
+    this.author = '',
+    this.avatar,
     this.seq,
     this.previous,
   });
@@ -720,6 +927,14 @@ class ChannelManifestInfo {
   final String name;
   final String description;
   final String pubkey;
+
+  /// Optional "by `<author>`" name/handle; empty = unset (older manifests
+  /// simply lack the key).
+  final String author;
+
+  /// Avatar member base name (`channel_avatar_<sha8>.img`), null when
+  /// the channel has none.
+  final String? avatar;
   final int? seq;
   final String? previous;
 }
@@ -754,9 +969,14 @@ ParsedChannelManifest parseChannelManifestMembers(
           as Map<String, dynamic>;
       final pubkey = decoded['pubkey'] as String? ?? '';
       if (pubkey.isEmpty) break;
+      final avatar = decoded['avatar'] as String? ?? '';
       info = ChannelManifestInfo(
         name: (decoded['name'] as String? ?? '').trim(),
         description: (decoded['description'] as String? ?? '').trim(),
+        author: _capLength((decoded['author'] as String? ?? '').trim(), 80),
+        // Only the exact content-hash pattern is accepted — anything
+        // else (incl. path-y names) is treated as no avatar.
+        avatar: isChannelAvatarMemberName(avatar) ? avatar : null,
         pubkey: pubkey.toLowerCase(),
         seq: decoded['seq'] as int?,
         previous: decoded['previous'] as String?,

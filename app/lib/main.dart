@@ -36,6 +36,7 @@ import 'services/watch_state.dart';
 import 'theme/tokens.dart';
 import 'widgets/brand_mark.dart';
 import 'widgets/download_badge.dart';
+import 'widgets/channel_avatar.dart';
 import 'widgets/channel_badge.dart';
 import 'widgets/downloads_indicator.dart';
 import 'widgets/library_drawer.dart';
@@ -529,6 +530,10 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Row(
             children: [
+              // The channel's mini avatar — identity beside the badge
+              // (podcasts-icon fallback when the channel has none).
+              ChannelAvatar(memberName: list.channelAvatar, size: 18),
+              const SizedBox(width: 8),
               Flexible(
                 child: Text(
                   list.title,
