@@ -254,8 +254,12 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     final title = record.name.isNotEmpty
         ? record.name
         : list?.title ?? 'Channel ${record.pubkey.substring(0, 8)}';
+    // A fetch problem is almost always transient (a fresh publish still
+    // propagating, or a network hiccup) and the 5-minute loop retries
+    // until it succeeds — so read calm, not alarmed. The raw error stays
+    // one hover/long-press away for reports.
     final updateLine = problem != null
-        ? 'Update failed: $problem'
+        ? 'Update found — not fully reachable yet, retrying automatically'
         : head == null
             ? 'Waiting for the channel\'s current head to arrive…'
             : head.seq > record.importedSeq
@@ -289,11 +293,18 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: t.boneDim, fontSize: 12)),
-            Text(
-              '${list?.entries.length ?? 0} items · $updateLine',
-              style: TextStyle(
-                  color: problem != null ? t.rust : t.ash, fontSize: 12),
-            ),
+            Builder(builder: (context) {
+              final line = Text(
+                '${list?.entries.length ?? 0} items · $updateLine',
+                style: TextStyle(
+                    color:
+                        problem != null ? WiTokens.channelAmber : t.ash,
+                    fontSize: 12),
+              );
+              return problem == null
+                  ? line
+                  : Tooltip(message: problem, child: line);
+            }),
           ],
         ),
         trailing: PopupMenuButton<String>(
