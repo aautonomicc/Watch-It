@@ -22,7 +22,7 @@ import 'downloads_screen.dart';
 import 'exit_info_screen.dart';
 import 'media_lists_screen.dart';
 import 'my_watch_screen.dart';
-import 'publish_screen.dart' show isDesktopPlatform;
+import 'publish_screen.dart' show PublishScreen, isDesktopPlatform;
 import 'terms_screen.dart';
 import 'wallet_screen.dart';
 
@@ -423,27 +423,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
-                // One door for the whole library: lists AND the home-row
-                // order/visibility (the separate "Home screen" page
-                // merged in here).
-                ListTile(
-                  leading: Icon(Icons.video_library_outlined, color: t.accent),
-                  title: Text('Media',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
-                  subtitle: Text(
-                    lists.isEmpty
-                        ? 'No lists yet — home row order and visibility'
-                        : '${lists.length} '
-                            '${lists.length == 1 ? 'list' : 'lists'} · '
-                            '${lists.where((l) => l.enabled).length} shown '
-                            'on home · row order and visibility',
-                    style: TextStyle(color: t.ash, fontSize: 12),
-                  ),
-                  trailing: Icon(Icons.chevron_right, color: t.ash),
-                  onTap: _openMediaLists,
-                ),
-                // Channels — the PUBLIC space, amber; moved here from
-                // the home drawer alongside Media (2026-08-28).
+                // Channels — the PUBLIC space, amber; leads the section
+                // (2026-08-29), above the private tiles.
                 ListTile(
                   leading:
                       const Icon(Icons.podcasts, color: WiTokens.channelAmber),
@@ -458,6 +439,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     MaterialPageRoute(builder: (_) => const ChannelsScreen()),
                   ),
                 ),
+                // One door for the whole library: lists AND the home-row
+                // order/visibility (the separate "Home screen" page
+                // merged in here).
+                ListTile(
+                  leading: Icon(Icons.video_library_outlined, color: t.accent),
+                  title: Text('My Media',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    lists.isEmpty
+                        ? 'No lists yet — home row order and visibility'
+                        : '${lists.length} '
+                            '${lists.length == 1 ? 'list' : 'lists'} · '
+                            '${lists.where((l) => l.enabled).length} shown '
+                            'on home · row order and visibility',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  trailing: Icon(Icons.chevron_right, color: t.ash),
+                  onTap: _openMediaLists,
+                ),
+                // Upload — moved out of the home drawer (2026-08-29);
+                // desktop-only like the Publish flow it opens.
+                if (isDesktopPlatform)
+                  ListTile(
+                    leading:
+                        Icon(Icons.cloud_upload_outlined, color: t.accent),
+                    title: Text('Upload',
+                        style: TextStyle(color: t.bone, fontSize: 15)),
+                    subtitle: Text(
+                      'Private · only your devices',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                    trailing: Icon(Icons.chevron_right, color: t.ash),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const PublishScreen()),
+                    ),
+                  ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
                   child: Text(

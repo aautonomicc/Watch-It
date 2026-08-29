@@ -302,6 +302,34 @@ void main() {
       expect(utf8.decode(historyBytes), isNot(contains(_addrB)));
     });
 
+    test('omitCategories nulls the category in metadata.json — channel '
+        'manifests publish no category tags', () async {
+      final fake = await _FakeEmbedded.start();
+      addTearDown(() => fake.server.close(force: true));
+      fake.datamaps[_addrA] = [9, 9, 9];
+      await _seedMetadataRow('Night of the Living Dead (1968).mp4');
+
+      final result = await buildBundle(
+        [_list],
+        const BundleExportOptions(
+            includeHistory: false, omitCategories: true),
+        base: fake.base,
+        postersDirProvider: postersDirProvider,
+      );
+      final archive = ZipDecoder().decodeBytes(result.bytes);
+      final meta = jsonDecode(utf8.decode(archive.files
+          .firstWhere((f) => f.name == 'metadata.json')
+          .readBytes()!)) as Map<String, dynamic>;
+      final row = (meta['entries'] as List).single as Map;
+      // The row itself still travels (title etc.) — only the category
+      // is stripped; the local cache row is untouched.
+      expect(row['title'], 'Night of the Living Dead');
+      expect(row['category'], isNull);
+      final db = await LibraryStore.database();
+      final local = await db.select(db.metadataCache).getSingle();
+      expect(local.category, 'Horror');
+    });
+
     test('no member exported means no history.json at all — an address '
         'never leaks for a missing-map entry', () async {
       await WatchStateStore.instance.mergeAll([

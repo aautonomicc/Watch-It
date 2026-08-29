@@ -1178,7 +1178,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
-        title: Text('Media', style: TextStyle(color: t.bone, fontSize: 18)),
+        title: Text('My Media', style: TextStyle(color: t.bone, fontSize: 18)),
         actions: [
           IconButton(
             tooltip: 'Add to library',

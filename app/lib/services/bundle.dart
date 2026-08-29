@@ -186,6 +186,7 @@ class BundleExportOptions {
   const BundleExportOptions({
     required this.includeHistory,
     this.includeLibrary = false,
+    this.omitCategories = false,
   });
 
   /// Default OFF — shared lists shouldn't leak viewing habits; a
@@ -194,6 +195,11 @@ class BundleExportOptions {
 
   /// Library export only: add library.json (per-list order/visibility).
   final bool includeLibrary;
+
+  /// Channel manifests set this: channels carry no category tags —
+  /// metadata rows travel with `category` nulled so subscribers never
+  /// see genre chips on a channel list (2026-08-29 user decision).
+  final bool omitCategories;
 }
 
 class BundleBuildResult {
@@ -322,7 +328,7 @@ Future<BundleBuildResult> buildBundle(
       'title': row.title,
       'year': row.year,
       'overview': row.overview,
-      'category': row.category,
+      'category': options.omitCategories ? null : row.category,
       'episodeLabel': row.episodeLabel,
       'posterFile': row.posterFile,
       'mediaType': row.mediaType,

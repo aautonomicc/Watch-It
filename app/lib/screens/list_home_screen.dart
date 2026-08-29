@@ -142,23 +142,29 @@ class _ListHomeScreenState extends State<ListHomeScreen> {
       );
     }
     final items = groupShows(_list.entries);
-    final genres = <String>{};
-    var hasUncategorised = false;
-    for (final item in items) {
-      final g = _genresOf(item);
-      if (g.isEmpty) {
-        hasUncategorised = true;
-      } else {
-        genres.addAll(g);
+    // Channel lists carry no category tags by design — manifests are
+    // published without them, and a subscriber's own TMDB matches must
+    // not sneak genre chips back onto the channel's page.
+    final chips = <String>[];
+    if (!_list.isChannel) {
+      final genres = <String>{};
+      var hasUncategorised = false;
+      for (final item in items) {
+        final g = _genresOf(item);
+        if (g.isEmpty) {
+          hasUncategorised = true;
+        } else {
+          genres.addAll(g);
+        }
       }
+      chips.addAll([
+        ...genres.toList()..sort(),
+        // Only worth a chip when it narrows anything: a list where
+        // nothing is categorised would show a lone Uncategorised chip
+        // that filters nothing.
+        if (hasUncategorised && genres.isNotEmpty) kUncategorised,
+      ]);
     }
-    final chips = [
-      ...genres.toList()..sort(),
-      // Only worth a chip when it narrows anything: a list where nothing
-      // is categorised would show a lone Uncategorised chip that filters
-      // nothing (common right after publishing without categories).
-      if (hasUncategorised && genres.isNotEmpty) kUncategorised,
-    ];
     // Ignore stale selections (a chip can vanish when a better TMDB
     // match lands) without mutating state during build.
     final active = {

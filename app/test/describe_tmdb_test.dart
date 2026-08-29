@@ -301,43 +301,19 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    FilterChip chip(WidgetTester tester, String label) =>
-        tester.widget<FilterChip>(find.widgetWithText(FilterChip, label));
-
-    testWidgets('chips offer the TMDB genre names', (tester) async {
+    // Channels carry no category tags (2026-08-29): the Describe page
+    // offers no genre chips, and a save leaves whatever category a TMDB
+    // match stored locally untouched (the manifest build nulls it out
+    // before anything is published).
+    testWidgets('the describe page offers no category chips',
+        (tester) async {
       MetadataService.instance = service();
       await pump(tester);
-      expect(find.text('CATEGORY (optional)'), findsOneWidget);
-      expect(find.widgetWithText(FilterChip, 'Horror'), findsOneWidget);
-      expect(find.widgetWithText(FilterChip, 'Western'), findsOneWidget);
-      expect(chip(tester, 'Horror').selected, isFalse);
+      expect(find.text('CATEGORY (optional)'), findsNothing);
+      expect(find.byType(FilterChip), findsNothing);
     });
 
-    testWidgets('a TMDB match selects its genres; extra picks save with '
-        'them', (tester) async {
-      MetadataService.instance = service();
-      await pump(tester);
-      await tester.tap(find.text('Check TMDB'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Use these details'));
-      await tester.pumpAndSettle();
-      expect(chip(tester, 'Drama').selected, isTrue);
-
-      await tester.ensureVisible(find.widgetWithText(FilterChip, 'Horror'));
-      await tester.tap(find.widgetWithText(FilterChip, 'Horror'));
-      await tester.pumpAndSettle();
-      final save = find.widgetWithText(FilledButton, 'Save description');
-      await tester.ensureVisible(save);
-      await tester.tap(save);
-      await tester.pumpAndSettle();
-
-      final db = await LibraryStore.database();
-      final rows = await db.select(db.metadataCache).get();
-      final row = rows.singleWhere((r) => r.userEdited);
-      expect(row.category, 'Drama · Horror');
-    });
-
-    testWidgets('deselecting every chip clears the category',
+    testWidgets('saving preserves the TMDB match\'s local category',
         (tester) async {
       MetadataService.instance = service();
       await pump(tester);
@@ -346,18 +322,17 @@ void main() {
       await tester.tap(find.text('Use these details'));
       await tester.pumpAndSettle();
 
-      await tester.ensureVisible(find.widgetWithText(FilterChip, 'Drama'));
-      await tester.tap(find.widgetWithText(FilterChip, 'Drama'));
-      await tester.pumpAndSettle();
       final save = find.widgetWithText(FilledButton, 'Save description');
       await tester.ensureVisible(save);
       await tester.tap(save);
       await tester.pumpAndSettle();
 
+      // The local row keeps the match's genres (they still feed the
+      // user's own library pages) — the save omits category on purpose.
       final db = await LibraryStore.database();
       final rows = await db.select(db.metadataCache).get();
       final row = rows.singleWhere((r) => r.userEdited);
-      expect(row.category, isNull);
+      expect(row.category, 'Drama');
     });
   });
 }

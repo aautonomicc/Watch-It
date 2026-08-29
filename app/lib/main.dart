@@ -319,7 +319,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
-    // Lists unchecked in Settings → Media stay out of the wall.
+    // Lists unchecked in Settings → My Media stay out of the wall.
     final visible = [
       for (final l in _lists)
         if (l.enabled) l,
@@ -552,7 +552,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(
             'Empty list — fill it with "Add to library" in '
-            'Settings → Media.',
+            'Settings → My Media.',
             style: TextStyle(fontSize: 12, color: t.ash),
           ),
         )
@@ -793,7 +793,7 @@ enum _EmptyVariant {
   /// No media anywhere.
   empty,
 
-  /// Lists exist but every one is unchecked in Settings → Media.
+  /// Lists exist but every one is unchecked in Settings → My Media.
   allHidden,
 }
 
@@ -809,11 +809,11 @@ class _EmptyState extends StatelessWidget {
     final (title, hint) = switch (variant) {
       _EmptyVariant.empty => (
           'Your library is empty',
-          'Use "Add to library" in Settings → Media to get started.',
+          'Use "Add to library" in Settings → My Media to get started.',
         ),
       _EmptyVariant.allHidden => (
           'All your lists are hidden',
-          'Enable a list in Settings → Media to show it here.',
+          'Enable a list in Settings → My Media to show it here.',
         ),
     };
     return Center(
