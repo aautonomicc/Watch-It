@@ -80,6 +80,9 @@ mod imp {
 
     pub struct ChannelStore {
         dir: Option<PathBuf>,
+        /// Marker file whose presence means "switched off in Settings".
+        /// Beside the channels dir, out of any per-channel cleanup's way.
+        off_path: Option<PathBuf>,
         /// Channel signing key, keychain-first with file fallback —
         /// exactly the wallet key's storage rules.
         keys: crate::wallet::WalletStore,
@@ -90,9 +93,9 @@ mod imp {
 
     impl ChannelStore {
         pub fn new(data_dir: Option<&str>) -> Self {
-            let dir = data_dir
-                .filter(|d| !d.trim().is_empty())
-                .map(|d| Path::new(d).join("channels"));
+            let data_dir = data_dir.filter(|d| !d.trim().is_empty());
+            let dir = data_dir.map(|d| Path::new(d).join("channels"));
+            let off_path = data_dir.map(|d| Path::new(d).join("channels.off"));
             Self {
                 keys: crate::wallet::WalletStore::named(
                     dir.as_deref().and_then(Path::to_str),
@@ -101,6 +104,7 @@ mod imp {
                     crate::wallet::CHANNEL_KEY_FILE,
                 ),
                 dir,
+                off_path,
                 phase: Mutex::new(Phase::Off),
                 message: std::sync::Mutex::new(None),
             }
@@ -191,6 +195,24 @@ mod imp {
             *self.message.lock().unwrap() = msg;
         }
 
+        /// The Settings switch: on unless the marker file exists.
+        pub fn enabled(&self) -> bool {
+            self.off_path.as_ref().is_none_or(|p| !p.exists())
+        }
+
+        fn set_enabled_flag(&self, on: bool) -> Result<(), String> {
+            let Some(path) = &self.off_path else {
+                return Err("no data dir available for Channels".into());
+            };
+            if on {
+                let _ = std::fs::remove_file(path);
+                Ok(())
+            } else {
+                std::fs::write(path, b"")
+                    .map_err(|e| format!("could not save the switch: {e}"))
+            }
+        }
+
         /// Every channel this device should be joined to (own + subs).
         fn wanted_pubkeys(&self) -> Vec<String> {
             let mut keys: Vec<String> = self.load_subs();
@@ -207,15 +229,44 @@ mod imp {
         /// Resume on process start; a device with no channel state
         /// returns immediately.
         pub async fn autostart(&'static self) {
-            if !self.wanted_pubkeys().is_empty() {
+            if self.enabled() && !self.wanted_pubkeys().is_empty() {
                 self.ensure_running().await;
             }
+        }
+
+        /// The Settings switch. Off stops the x0x agent (topic gossip and
+        /// relay traffic with it) but keeps the channel key, config and
+        /// subscriptions; on brings everything straight back.
+        pub async fn set_enabled(&'static self, on: bool) -> Result<Value, String> {
+            self.set_enabled_flag(on)?;
+            if on {
+                tokio::spawn(self.autostart());
+            } else {
+                let mut phase = self.phase.lock().await;
+                // Only Ready holds an agent to stop; a Starting loop
+                // notices the flag on its next pass and bows out itself.
+                if matches!(*phase, Phase::Ready(_)) {
+                    if let Phase::Ready(running) =
+                        std::mem::replace(&mut *phase, Phase::Off)
+                    {
+                        for (_, store) in running.stores {
+                            store.cancel_sync();
+                        }
+                        running.agent.shutdown().await;
+                    }
+                }
+                self.set_message(None);
+            }
+            Ok(json!({ "enabled": on }))
         }
 
         /// Bring the agent up (retrying with backoff) and join every
         /// configured channel topic. Idempotent; concurrent callers
         /// coalesce on the Starting phase.
         async fn ensure_running(&'static self) {
+            if !self.enabled() {
+                return;
+            }
             {
                 let mut phase = self.phase.lock().await;
                 match &*phase {
@@ -226,7 +277,7 @@ mod imp {
             tokio::spawn(async move {
                 let mut backoff = std::time::Duration::from_secs(2);
                 loop {
-                    if self.wanted_pubkeys().is_empty() {
+                    if self.wanted_pubkeys().is_empty() || !self.enabled() {
                         let mut phase = self.phase.lock().await;
                         if matches!(*phase, Phase::Starting) {
                             *phase = Phase::Off;
@@ -235,6 +286,18 @@ mod imp {
                     }
                     match self.bring_up().await {
                         Ok(running) => {
+                            if !self.enabled() {
+                                // Switched off while the agent came up.
+                                for (_, store) in running.stores {
+                                    store.cancel_sync();
+                                }
+                                running.agent.shutdown().await;
+                                let mut phase = self.phase.lock().await;
+                                if matches!(*phase, Phase::Starting) {
+                                    *phase = Phase::Off;
+                                }
+                                return;
+                            }
                             self.set_message(None);
                             *self.phase.lock().await = Phase::Ready(running);
                             tracing::info!("channels agent up");
@@ -341,6 +404,9 @@ mod imp {
                 manifest_hex: String::new(),
                 created_at_ms: now_ms(),
             })?;
+            // An explicit create/restore is unambiguous intent — flip
+            // the Settings switch back on if it was off.
+            let _ = self.set_enabled_flag(true);
             self.join_wanted(&pubkey_hex).await;
             Ok(json!({
                 "code": code,
@@ -375,6 +441,9 @@ mod imp {
                 manifest_hex: String::new(),
                 created_at_ms: now_ms(),
             })?;
+            // An explicit create/restore is unambiguous intent — flip
+            // the Settings switch back on if it was off.
+            let _ = self.set_enabled_flag(true);
             self.join_wanted(&pubkey_hex).await;
             Ok(json!({
                 "code": code,
@@ -506,6 +575,9 @@ mod imp {
             }
             subs.push(pubkey_hex.clone());
             self.save_subs(&subs)?;
+            // Subscribing is unambiguous intent — flip the Settings
+            // switch back on if it was off.
+            let _ = self.set_enabled_flag(true);
             self.join_wanted(&pubkey_hex).await;
             Ok(json!({ "pubkey": pubkey_hex }))
         }
@@ -566,10 +638,13 @@ mod imp {
         pub async fn status(&self) -> Value {
             let own = self.load_own();
             let subs = self.load_subs();
+            let enabled = self.enabled();
             let phase = self.phase.lock().await;
             let (state, running) = match &*phase {
+                // Off with channels configured normally means "about to
+                // start" — unless the Settings switch is off.
                 Phase::Off => (
-                    if own.is_some() || !subs.is_empty() {
+                    if enabled && (own.is_some() || !subs.is_empty()) {
                         "starting"
                     } else {
                         "off"
@@ -627,6 +702,7 @@ mod imp {
             };
             json!({
                 "supported": true,
+                "enabled": enabled,
                 "state": state,
                 "message": *self.message.lock().unwrap(),
                 "own": own_json,
@@ -774,6 +850,31 @@ mod imp {
             assert!(v["own"].is_null());
             assert_eq!(v["subs"].as_array().unwrap().len(), 0);
         }
+
+        #[tokio::test]
+        async fn enabled_flag_persists_and_gates_status() {
+            let dir = std::env::temp_dir()
+                .join(format!("wi-channels-switch-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let store = ChannelStore::new(dir.to_str());
+            store.disable_keychain();
+            assert!(store.enabled());
+            store.set_enabled_flag(false).unwrap();
+            // Survives a process restart (a fresh store on the same dir).
+            let again = ChannelStore::new(dir.to_str());
+            again.disable_keychain();
+            assert!(!again.enabled());
+            // Subscribed-but-disabled reads "off", not "starting".
+            again.save_subs(&["ab".repeat(32)]).unwrap();
+            let v = again.status().await;
+            assert_eq!(v["enabled"], serde_json::json!(false));
+            assert_eq!(v["state"], serde_json::json!("off"));
+            again.set_enabled_flag(true).unwrap();
+            let v = again.status().await;
+            assert_eq!(v["enabled"], serde_json::json!(true));
+            assert_eq!(v["state"], serde_json::json!("starting"));
+        }
     }
 }
 
@@ -800,7 +901,16 @@ mod imp {
         pub fn disable_keychain(&self) {}
         pub async fn autostart(&'static self) {}
         pub async fn status(&self) -> Value {
-            json!({ "supported": false, "state": "off", "own": null, "subs": [] })
+            json!({
+                "supported": false,
+                "enabled": true,
+                "state": "off",
+                "own": null,
+                "subs": [],
+            })
+        }
+        pub async fn set_enabled(&'static self, _on: bool) -> Result<Value, String> {
+            Err(UNSUPPORTED.into())
         }
         pub async fn create(
             &'static self,

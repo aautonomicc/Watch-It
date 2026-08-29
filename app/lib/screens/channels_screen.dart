@@ -201,6 +201,11 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
           WiTokens.channelAmber,
           'Connecting to the channel network…',
         ),
+      'off' when _status?.enabled == false => (
+          t.ash,
+          'Switched off — turn Channels on in Settings → '
+              'Built-in x0x client',
+        ),
       'off' => (
           t.ash,
           'Not connected — connects when you create or add a channel',

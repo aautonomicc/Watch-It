@@ -99,6 +99,11 @@ class MyWatchApi {
   /// the link).
   Future<void> unlink() => _request('DELETE', '/mywatch');
 
+  /// The Settings switch: off stops the My W@tch x0x agent (and all its
+  /// network traffic) without touching the link; on starts it again.
+  Future<void> setEnabled(bool enabled) =>
+      _request('POST', '/mywatch/enabled', body: {'enabled': enabled});
+
   /// Publish this device's library sync document. The embedded client
   /// attaches the shrunk data maps for the entries it holds locally
   /// before putting both into the link store.
@@ -170,6 +175,7 @@ class MyWatchStatus {
     required this.linked,
     required this.state,
     required this.devices,
+    this.enabled = true,
     this.raw = '',
     this.message,
     this.deviceName,
@@ -181,6 +187,7 @@ class MyWatchStatus {
   factory MyWatchStatus.fromJson(Map<String, dynamic> json) => MyWatchStatus(
         raw: jsonEncode(json),
         supported: json['supported'] as bool? ?? false,
+        enabled: json['enabled'] as bool? ?? true,
         linked: json['linked'] as bool? ?? false,
         state: json['state'] as String? ?? 'off',
         message: json['message'] as String?,
@@ -203,6 +210,10 @@ class MyWatchStatus {
   final String raw;
 
   final bool supported;
+
+  /// The Settings switch (Built-in x0x client): false means the user
+  /// turned My W@tch off — the agent stays down until switched back on.
+  final bool enabled;
   final bool linked;
 
   /// `off`, `starting` (agent still coming up / retrying) or `ready`.

@@ -403,8 +403,30 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
   List<Widget> _linkedBody(WiTokens t, MyWatchStatus status) {
     final starting = status.state != 'ready';
     return [
+      // Switched off in Settings: nothing is coming up — say so instead
+      // of showing the connecting spinner forever.
+      if (!status.enabled)
+        Card(
+          color: t.ink2,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Icon(Icons.power_settings_new, size: 18, color: t.ash),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'My W@tch is switched off — nothing syncs until you '
+                    'turn it back on in Settings → Built-in x0x client.',
+                    style: TextStyle(fontSize: 13, color: t.boneDim),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        )
       // State banner while the agent is still coming up (or retrying).
-      if (starting)
+      else if (starting)
         Card(
           color: t.ink2,
           child: Padding(

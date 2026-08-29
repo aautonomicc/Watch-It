@@ -90,6 +90,10 @@ fn protected_router(engine: &'static Engine) -> Router {
         )
         .route("/mywatch/invite", get(move || mywatch_invite(engine)))
         .route(
+            "/mywatch/enabled",
+            post(move |body: Bytes| mywatch_set_enabled(engine, body)),
+        )
+        .route(
             "/mywatch/announce",
             post(move |body: Bytes| mywatch_announce(engine, body)),
         )
@@ -110,6 +114,10 @@ fn protected_router(engine: &'static Engine) -> Router {
         // handles the channel signing key; even subscribe mutates
         // persistent state only the app should touch.
         .route("/channels", get(move || channels_status(engine)))
+        .route(
+            "/channel/enabled",
+            post(move |body: Bytes| channel_set_enabled(engine, body)),
+        )
         .route("/channel", axum::routing::delete(move || channel_remove(engine)))
         .route("/channel/generate", post(channel_generate))
         .route(
@@ -634,6 +642,20 @@ async fn mywatch_unlink(engine: &'static Engine) -> Response {
     mywatch_result(engine.mywatch.unlink().await)
 }
 
+/// `POST /mywatch/enabled` — `{"enabled": bool}`: the Settings switch.
+/// Off stops the My W@tch x0x agent (and its traffic) without touching
+/// the link; on starts it again.
+async fn mywatch_set_enabled(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    let Some(on) = v["enabled"].as_bool() else {
+        return (StatusCode::BAD_REQUEST, "\"enabled\" must be a boolean")
+            .into_response();
+    };
+    mywatch_result(engine.mywatch.set_enabled(on).await)
+}
+
 /// `POST /mywatch/sync` — `{"doc": …}`: publish this device's library
 /// sync document. The route walks the doc's entry addresses, attaches
 /// the shrunk data map for every one held in the local map store (small
@@ -725,6 +747,20 @@ async fn mywatch_art_fetch(engine: &'static Engine, body: Bytes) -> Response {
 /// the public topics never surfaces here.
 async fn channels_status(engine: &'static Engine) -> Response {
     json_ok(engine.channels.status().await)
+}
+
+/// `POST /channel/enabled` — `{"enabled": bool}`: the Settings switch.
+/// Off stops the channels x0x agent (topic gossip and relay traffic)
+/// without touching the key, config or subscriptions; on restarts it.
+async fn channel_set_enabled(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    let Some(on) = v["enabled"].as_bool() else {
+        return (StatusCode::BAD_REQUEST, "\"enabled\" must be a boolean")
+            .into_response();
+    };
+    mywatch_result(engine.channels.set_enabled(on).await)
 }
 
 /// `POST /channel/generate` — a fresh 12-word channel phrase + the code
@@ -1759,6 +1795,8 @@ mod channel_api_tests {
             ("GET", "/channels"),
             ("POST", "/channel/generate"),
             ("POST", "/channel/subscribe"),
+            ("POST", "/channel/enabled"),
+            ("POST", "/mywatch/enabled"),
             ("GET", &format!("/channel/manifest/{}", "11".repeat(32))[..]),
         ] {
             let (status, _) = send(&app, method, uri, vec![], None).await;

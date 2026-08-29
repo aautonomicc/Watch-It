@@ -8,11 +8,13 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
 import '../services/bundle.dart' show kTmdbAttributionNotice;
+import '../services/channels_api.dart';
 import '../services/download_manager.dart';
 import '../services/library_store.dart';
 import '../services/embedded_client.dart';
 import '../services/exit_info.dart';
 import '../services/metadata_service.dart';
+import '../services/my_watch_api.dart';
 import '../services/storage_usage.dart';
 import '../services/update_check.dart';
 import '../theme/tokens.dart';
@@ -25,6 +27,7 @@ import 'my_watch_screen.dart';
 import 'publish_screen.dart' show PublishScreen, isDesktopPlatform;
 import 'terms_screen.dart';
 import 'wallet_screen.dart';
+import 'x0x_client_screen.dart';
 
 /// Settings: library, streaming, metadata, and about sections.
 class SettingsScreen extends StatefulWidget {
@@ -46,6 +49,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int? _dataSizeBytes;
   bool _dataSizeKnown = false;
   bool _updateCheckEnabled = true;
+
+  /// The two x0x switches, for the Built-in x0x client tile's subtitle
+  /// (null until the statuses have answered).
+  bool? _myWatchOn;
+  bool? _channelsOn;
 
   @override
   void initState() {
@@ -85,6 +93,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final tmdbKeySource = await AppSettings.tmdbKeySource();
     final downloadNetwork = await AppSettings.downloadNetworkPolicy();
     final streamingNetwork = await AppSettings.streamingNetworkPolicy();
+    // The x0x switches, for the tile subtitle. Best-effort: an
+    // unreachable embedded client just leaves the subtitle generic.
+    bool? myWatchOn;
+    bool? channelsOn;
+    try {
+      myWatchOn = (await MyWatchApi().status()).enabled;
+    } catch (_) {}
+    try {
+      channelsOn = (await ChannelsApi().status()).enabled;
+    } catch (_) {}
     if (mounted) {
       setState(() {
         _lists = lists;
@@ -93,8 +111,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _tmdbKeySource = tmdbKeySource;
         _downloadNetwork = downloadNetwork;
         _streamingNetwork = streamingNetwork;
+        _myWatchOn = myWatchOn;
+        _channelsOn = channelsOn;
       });
     }
+  }
+
+  /// "My W@tch on · Channels off" once the switches are known; a
+  /// generic description before that (or when the client is down).
+  String get _x0xSubtitle {
+    final mw = _myWatchOn;
+    final ch = _channelsOn;
+    if (mw == null || ch == null) {
+      return 'The peer-to-peer network behind My W@tch and Channels';
+    }
+    return 'My W@tch ${mw ? 'on' : 'off'} · '
+        'Channels ${ch ? 'on' : 'off'}';
+  }
+
+  Future<void> _openX0xClient() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const X0xClientScreen()),
+    );
+    await _reload();
   }
 
   Future<void> _loadVersion() async {
@@ -439,6 +478,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     MaterialPageRoute(builder: (_) => const ChannelsScreen()),
                   ),
                 ),
+                // My W@tch directly under Channels (2026-08-29): the two
+                // sharing surfaces sit together — public above, private
+                // below.
+                ListTile(
+                  leading: Icon(Icons.devices_outlined, color: t.accent),
+                  title: Text('My W@tch',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    'Link your devices — watch lists, viewing positions, '
+                    'and detail edits sync automatically',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  trailing: Icon(Icons.chevron_right, color: t.ash),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const MyWatchScreen()),
+                  ),
+                ),
                 // One door for the whole library: lists AND the home-row
                 // order/visibility (the separate "Home screen" page
                 // merged in here).
@@ -548,6 +604,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
+                // The two embedded network clients lead the section
+                // (2026-08-29): Autonomi streams/downloads media, x0x
+                // carries My W@tch and Channels gossip.
+                ListTile(
+                  leading: Icon(Icons.cloud_outlined, color: t.accent),
+                  title: Text('Built-in Autonomi client',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    _health?.label ?? 'Checking…',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  trailing: Icon(Icons.refresh, color: t.ash, size: 18),
+                  onTap: _refreshHealth,
+                ),
+                ListTile(
+                  leading: Icon(Icons.hub_outlined, color: t.accent),
+                  title: Text('Built-in x0x client',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    _x0xSubtitle,
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  trailing: Icon(Icons.chevron_right, color: t.ash),
+                  onTap: _openX0xClient,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                  child: Text(
+                    'Playback streams through the Autonomi client — '
+                    'nothing to set up; tap it to refresh the connection '
+                    'status. The x0x client is the peer-to-peer network '
+                    'behind My W@tch and Channels — open it to switch '
+                    'either off.',
+                    style: TextStyle(fontSize: 11.5, color: t.ash),
+                  ),
+                ),
                 ListTile(
                   leading: Icon(Icons.wifi_outlined, color: t.accent),
                   title: Text('Downloads',
@@ -587,20 +679,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
                 ),
-                ListTile(
-                  leading: Icon(Icons.devices_outlined, color: t.accent),
-                  title: Text('My W@tch',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
-                  subtitle: Text(
-                    'Link your devices — watch lists, viewing positions, '
-                    'and detail edits sync automatically',
-                    style: TextStyle(color: t.ash, fontSize: 12),
-                  ),
-                  trailing: Icon(Icons.chevron_right, color: t.ash),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const MyWatchScreen()),
-                  ),
-                ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
                   child: Text(
@@ -611,26 +689,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       fontWeight: FontWeight.w700,
                       color: t.ash,
                     ),
-                  ),
-                ),
-                ListTile(
-                  leading: Icon(Icons.cloud_outlined, color: t.accent),
-                  title: Text('Built-in Autonomi client',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
-                  subtitle: Text(
-                    _health?.label ?? 'Checking…',
-                    style: TextStyle(color: t.ash, fontSize: 12),
-                  ),
-                  trailing: Icon(Icons.refresh, color: t.ash, size: 18),
-                  onTap: _refreshHealth,
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                  child: Text(
-                    'Playback streams through the Autonomi client embedded '
-                    'in the app — nothing to set up. Tap to refresh the '
-                    'connection status.',
-                    style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
                 ),
                 ListTile(

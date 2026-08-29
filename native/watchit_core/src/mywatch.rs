@@ -152,6 +152,10 @@ mod imp {
 
     pub struct MyWatchStore {
         dir: Option<PathBuf>,
+        /// Marker file whose presence means "switched off in Settings".
+        /// Lives BESIDE the mywatch dir (not inside it) so an unlink's
+        /// directory wipe cannot flip the switch back on.
+        off_path: Option<PathBuf>,
         phase: Mutex<Phase>,
         /// Last startup/sync problem, for the status UI.
         message: std::sync::Mutex<Option<String>>,
@@ -163,9 +167,9 @@ mod imp {
 
     impl MyWatchStore {
         pub fn new(data_dir: Option<&str>) -> Self {
-            let dir = data_dir
-                .filter(|d| !d.trim().is_empty())
-                .map(|d| Path::new(d).join("mywatch"));
+            let data_dir = data_dir.filter(|d| !d.trim().is_empty());
+            let dir = data_dir.map(|d| Path::new(d).join("mywatch"));
+            let off_path = data_dir.map(|d| Path::new(d).join("mywatch.off"));
             let store = Self {
                 shared: Arc::new(Shared {
                     last_sync_ms: AtomicU64::new(0),
@@ -175,6 +179,7 @@ mod imp {
                     art_index: std::sync::Mutex::new(Default::default()),
                 }),
                 dir,
+                off_path,
                 phase: Mutex::new(Phase::Off),
                 message: std::sync::Mutex::new(None),
                 art_fetch: Mutex::new(()),
@@ -236,6 +241,24 @@ mod imp {
             Ok(())
         }
 
+        /// The Settings switch: on unless the marker file exists.
+        pub fn enabled(&self) -> bool {
+            self.off_path.as_ref().is_none_or(|p| !p.exists())
+        }
+
+        fn set_enabled_flag(&self, on: bool) -> Result<(), String> {
+            let Some(path) = &self.off_path else {
+                return Err("no data dir available for My W@tch".into());
+            };
+            if on {
+                let _ = std::fs::remove_file(path);
+                Ok(())
+            } else {
+                std::fs::write(path, b"")
+                    .map_err(|e| format!("could not save the switch: {e}"))
+            }
+        }
+
         fn load_state(&self) -> PersistedState {
             let Some(path) = &self.shared.state_path else {
                 return PersistedState::default();
@@ -260,9 +283,35 @@ mod imp {
         /// Resume an existing link after process start. Spawned once from
         /// `start()`; a device that was never linked returns immediately.
         pub async fn autostart(&'static self) {
+            if !self.enabled() {
+                return;
+            }
             if let Some(cfg) = self.load_config() {
                 self.start_with_config(cfg).await;
             }
+        }
+
+        /// The Settings switch. Off stops the x0x agent (all its network
+        /// traffic with it) but keeps every link artefact, so on brings
+        /// the same link straight back.
+        pub async fn set_enabled(&'static self, on: bool) -> Result<Value, String> {
+            self.set_enabled_flag(on)?;
+            if on {
+                tokio::spawn(self.autostart());
+            } else {
+                let mut phase = self.phase.lock().await;
+                if let Phase::Ready(running) = &*phase {
+                    running.cancel.cancel();
+                    running.store.cancel_sync();
+                    running.agent.shutdown().await;
+                }
+                // A Starting loop notices the flag on its next pass.
+                if matches!(*phase, Phase::Ready(_)) {
+                    *phase = Phase::Off;
+                }
+                self.set_message(None);
+            }
+            Ok(json!({ "enabled": on }))
         }
 
         /// Create a brand-new link on this device and return the invite
@@ -278,6 +327,9 @@ mod imp {
                 created_at_ms: now_ms(),
             };
             self.save_config(&cfg)?;
+            // Creating a link is unambiguous intent — flip the Settings
+            // switch back on if it was off.
+            let _ = self.set_enabled_flag(true);
             let invite = format!("{INVITE_PREFIX}{}", cfg.secret_hex);
             tokio::spawn(self.start_with_config(cfg));
             Ok(json!({ "invite": invite }))
@@ -297,6 +349,7 @@ mod imp {
                 created_at_ms: now_ms(),
             };
             self.save_config(&cfg)?;
+            let _ = self.set_enabled_flag(true);
             tokio::spawn(self.start_with_config(cfg));
             Ok(json!({ "joined": true }))
         }
@@ -653,8 +706,8 @@ mod imp {
             }
             let mut backoff = Duration::from_secs(2);
             loop {
-                if self.load_config().is_none() {
-                    // Unlinked while we were still starting.
+                if self.load_config().is_none() || !self.enabled() {
+                    // Unlinked (or switched off) while we were starting.
                     let mut phase = self.phase.lock().await;
                     if matches!(*phase, Phase::Starting) {
                         *phase = Phase::Off;
@@ -663,6 +716,14 @@ mod imp {
                 }
                 match self.bring_up(&cfg).await {
                     Ok(running) => {
+                        if !self.enabled() {
+                            // Switched off while the agent was coming up.
+                            running.cancel.cancel();
+                            running.store.cancel_sync();
+                            running.agent.shutdown().await;
+                            *self.phase.lock().await = Phase::Off;
+                            return;
+                        }
                         self.spawn_tasks(&running);
                         let lists = self.shared.lists.load(Ordering::SeqCst);
                         let entries = self.shared.entries.load(Ordering::SeqCst);
@@ -829,9 +890,15 @@ mod imp {
 
         pub async fn status(&self) -> Value {
             let cfg = self.load_config();
+            let enabled = self.enabled();
             let phase = self.phase.lock().await;
             let (state, running) = match &*phase {
-                Phase::Off => (if cfg.is_some() { "starting" } else { "off" }, None),
+                // A linked-but-Off device is normally about to start —
+                // unless the Settings switch is off, when Off is final.
+                Phase::Off => (
+                    if cfg.is_some() && enabled { "starting" } else { "off" },
+                    None,
+                ),
                 Phase::Starting => ("starting", None),
                 Phase::Ready(r) => ("ready", Some(r)),
             };
@@ -873,6 +940,7 @@ mod imp {
             }
             json!({
                 "supported": true,
+                "enabled": enabled,
                 "linked": cfg.is_some(),
                 "state": state,
                 "message": *self.message.lock().unwrap(),
@@ -1012,6 +1080,47 @@ mod imp {
                 "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
             );
         }
+
+        fn test_store(name: &str) -> (MyWatchStore, PathBuf) {
+            let dir = std::env::temp_dir()
+                .join(format!("wi-mywatch-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            (MyWatchStore::new(dir.to_str()), dir)
+        }
+
+        #[tokio::test]
+        async fn enabled_flag_persists_and_gates_status() {
+            let (store, dir) = test_store("switch");
+            assert!(store.enabled());
+            store.set_enabled_flag(false).unwrap();
+            assert!(!store.enabled());
+            // Survives a process restart (a fresh store on the same dir).
+            let again = MyWatchStore::new(dir.to_str());
+            assert!(!again.enabled());
+            // A linked-but-disabled device reads "off", not "starting" —
+            // nothing is coming; the switch is off.
+            again
+                .save_config(&LinkConfig {
+                    device_name: "test".into(),
+                    secret_hex: "ab".repeat(32),
+                    created_at_ms: 1,
+                })
+                .unwrap();
+            let v = again.status().await;
+            assert_eq!(v["enabled"], serde_json::json!(false));
+            assert_eq!(v["state"], serde_json::json!("off"));
+            assert_eq!(v["linked"], serde_json::json!(true));
+            again.set_enabled_flag(true).unwrap();
+            let v = again.status().await;
+            assert_eq!(v["enabled"], serde_json::json!(true));
+            assert_eq!(v["state"], serde_json::json!("starting"));
+            // The unlink wipe must not flip the switch back on: the
+            // marker lives beside the mywatch dir, not inside it.
+            again.set_enabled_flag(false).unwrap();
+            again.unlink().await.unwrap();
+            assert!(!again.enabled());
+        }
     }
 
     fn record_json(device_name: &str, lists: u64, entries: u64) -> String {
@@ -1061,7 +1170,16 @@ mod imp {
         }
         pub async fn autostart(&'static self) {}
         pub async fn status(&self) -> Value {
-            json!({ "supported": false, "linked": false, "state": "off", "devices": [] })
+            json!({
+                "supported": false,
+                "enabled": true,
+                "linked": false,
+                "state": "off",
+                "devices": [],
+            })
+        }
+        pub async fn set_enabled(&'static self, _on: bool) -> Result<Value, String> {
+            Err(UNSUPPORTED.into())
         }
         pub async fn create_link(&'static self, _name: &str) -> Result<Value, String> {
             Err(UNSUPPORTED.into())

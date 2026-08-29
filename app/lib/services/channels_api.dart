@@ -129,6 +129,12 @@ class ChannelsApi {
   /// Delete the channel key + config from this device.
   Future<void> removeOwn() => _request('DELETE', '/channel');
 
+  /// The Settings switch: off stops the channels x0x agent (topic gossip
+  /// and relay traffic) without touching the key, config or
+  /// subscriptions; on starts it again.
+  Future<void> setEnabled(bool enabled) =>
+      _request('POST', '/channel/enabled', body: {'enabled': enabled});
+
   /// Publish the manifest zip at [path] publicly and announce the signed
   /// head. Returns the job id to poll with [PublishApi.jobStatus].
   Future<int> publishManifest(String path, {String? name}) async {
@@ -314,12 +320,17 @@ class ChannelsStatus {
   const ChannelsStatus({
     required this.supported,
     required this.state,
+    this.enabled = true,
     this.message,
     this.own,
     this.subs = const [],
   });
 
   final bool supported;
+
+  /// The Settings switch (Built-in x0x client): false means the user
+  /// turned Channels off — the agent stays down until switched back on.
+  final bool enabled;
 
   /// `off` | `starting` | `ready` (the channels gossip agent).
   final String state;
@@ -331,6 +342,7 @@ class ChannelsStatus {
     final ownJson = json['own'] as Map<String, dynamic>?;
     return ChannelsStatus(
       supported: json['supported'] as bool? ?? false,
+      enabled: json['enabled'] as bool? ?? true,
       state: json['state'] as String? ?? 'off',
       message: json['message'] as String?,
       own: ownJson == null

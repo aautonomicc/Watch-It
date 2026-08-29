@@ -197,6 +197,7 @@ class MyWatchSync {
     final s = status.value;
     status.value = MyWatchSyncStatus(
       supported: s.supported,
+      enabled: s.enabled,
       linked: s.linked,
       agentState: s.agentState,
       lastSyncMs: s.lastSyncMs,
@@ -216,6 +217,7 @@ class MyWatchSync {
       if (!link.supported || !link.linked || link.state != 'ready') {
         status.value = MyWatchSyncStatus(
           supported: link.supported,
+          enabled: link.enabled,
           linked: link.linked,
           agentState: link.state,
           lastSyncMs: link.lastSyncMs,
@@ -228,6 +230,7 @@ class MyWatchSync {
       _problems = [];
       status.value = MyWatchSyncStatus(
         supported: true,
+        enabled: link.enabled,
         linked: true,
         agentState: link.state,
         lastSyncMs: link.lastSyncMs,
@@ -244,6 +247,7 @@ class MyWatchSync {
       } finally {
         status.value = MyWatchSyncStatus(
           supported: true,
+          enabled: link.enabled,
           linked: true,
           agentState: link.state,
           lastSyncMs: link.lastSyncMs,
@@ -258,6 +262,7 @@ class MyWatchSync {
       final s = status.value;
       status.value = MyWatchSyncStatus(
         supported: s.supported,
+        enabled: s.enabled,
         linked: s.linked,
         agentState: s.agentState,
         lastSyncMs: s.lastSyncMs,
@@ -1775,6 +1780,7 @@ class RemoteArtFile {
 class MyWatchSyncStatus {
   const MyWatchSyncStatus({
     this.supported = false,
+    this.enabled = true,
     this.linked = false,
     this.agentState = 'off',
     this.lastSyncMs,
@@ -1788,6 +1794,10 @@ class MyWatchSyncStatus {
   /// My W@tch exists in this build (false on iOS, and until the first
   /// cycle has asked the embedded client).
   final bool supported;
+
+  /// The Settings switch (Built-in x0x client): false means the user
+  /// turned My W@tch off — nothing syncs until switched back on.
+  final bool enabled;
   final bool linked;
 
   /// The x0x agent: `off`, `starting`, or `ready`.
