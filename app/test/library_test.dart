@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/main.dart';
+import 'package:watchit/screens/x0x_client_screen.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/services/app_settings.dart';
 import 'package:watchit/services/library_store.dart';
@@ -836,19 +837,36 @@ void main() {
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
 
-      // Library section, in order: Channels (public, on top), My Media
-      // (renamed from Media 2026-08-29), Upload (moved out of the home
-      // drawer; desktop-only — tests run on the desktop host).
+      // Library section, in order: Channels (public, on top), My W@tch
+      // (directly below Channels, 2026-08-29), My Media (renamed from
+      // Media 2026-08-29), Upload (moved out of the home drawer;
+      // desktop-only — tests run on the desktop host).
       expect(find.text('LIBRARY'), findsOneWidget);
       expect(find.text('My Media'), findsOneWidget);
       expect(find.text('Channels'), findsOneWidget);
+      expect(find.text('My W@tch'), findsOneWidget);
       expect(find.text('Upload'), findsOneWidget);
       expect(find.text('New list'), findsNothing);
       final channelsY = tester.getTopLeft(find.text('Channels')).dy;
+      final myWatchY = tester.getTopLeft(find.text('My W@tch')).dy;
       final myMediaY = tester.getTopLeft(find.text('My Media')).dy;
       final uploadY = tester.getTopLeft(find.text('Upload')).dy;
-      expect(channelsY, lessThan(myMediaY));
+      expect(channelsY, lessThan(myWatchY));
+      expect(myWatchY, lessThan(myMediaY));
       expect(myMediaY, lessThan(uploadY));
+
+      // Network section leads with the two embedded clients: Autonomi
+      // above the new x0x tile, both above the Downloads policy tile
+      // (2026-08-29).
+      await tester.scrollUntilVisible(find.text('Wi-Fi only'), 100);
+      expect(find.text('Built-in Autonomi client'), findsOneWidget);
+      expect(find.text('Built-in x0x client'), findsOneWidget);
+      final autonomiY =
+          tester.getTopLeft(find.text('Built-in Autonomi client')).dy;
+      final x0xY = tester.getTopLeft(find.text('Built-in x0x client')).dy;
+      final downloadsPolicyY = tester.getTopLeft(find.text('Wi-Fi only')).dy;
+      expect(autonomiY, lessThan(x0xY));
+      expect(x0xY, lessThan(downloadsPolicyY));
 
       // Streaming section: buffer size tile showing the current value.
       await tester.scrollUntilVisible(find.text('Buffer size'), 100);
@@ -858,6 +876,29 @@ void main() {
       await tester.scrollUntilVisible(find.text('Version'), 100);
       expect(find.text('ABOUT'), findsOneWidget);
       expect(find.text('Version'), findsOneWidget);
+    });
+
+    testWidgets('Built-in x0x client tile opens the switches page',
+        (tester) async {
+      await tester.pumpWidget(const WatchItApp());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Browse lists'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Settings'));
+      await tester.pumpAndSettle();
+
+      await tester.scrollUntilVisible(find.text('Built-in x0x client'), 100);
+      await tester.ensureVisible(find.text('Built-in x0x client'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Built-in x0x client'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(X0xClientScreen), findsOneWidget);
+      expect(find.text('My W@tch'), findsOneWidget);
+      expect(find.text('Channels'), findsOneWidget);
+      // Dispose the screen so its status poll timer is cancelled.
+      await tester.pumpWidget(const SizedBox());
     });
 
     testWidgets('buffer size can be changed and persists', (tester) async {

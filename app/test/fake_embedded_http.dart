@@ -48,6 +48,12 @@ class FakeEmbeddedHttp extends HttpOverrides {
   /// Raw bodies of every `POST /mywatch/announce`.
   final List<String> myWatchAnnounces = [];
 
+  /// Raw bodies of every `POST /mywatch/enabled` (the Settings switch).
+  final List<String> myWatchEnabledPosts = [];
+
+  /// Raw bodies of every `POST /channel/enabled` (the Settings switch).
+  final List<String> channelEnabledPosts = [];
+
   /// Raw bodies of every `POST /mywatch/sync` (published sync docs).
   final List<String> myWatchSyncPublishes = [];
 
@@ -248,6 +254,19 @@ class FakeEmbeddedHttp extends HttpOverrides {
     if (method == 'GET' && path == '/channels') {
       return (200, utf8.encode(jsonEncode(channelsStatus)));
     }
+    if (method == 'POST' && path == '/channel/enabled') {
+      channelEnabledPosts.add(utf8.decode(body));
+      final on = (jsonDecode(utf8.decode(body))
+          as Map<String, dynamic>)['enabled'] == true;
+      final hasChannels = channelsStatus['own'] != null ||
+          (channelsStatus['subs'] as List? ?? const []).isNotEmpty;
+      channelsStatus = {
+        ...channelsStatus,
+        'enabled': on,
+        'state': on && hasChannels ? 'ready' : 'off',
+      };
+      return (200, utf8.encode(jsonEncode({'enabled': on})));
+    }
     if (method == 'POST' && path == '/channel/generate') {
       return (
         200,
@@ -387,6 +406,21 @@ class FakeEmbeddedHttp extends HttpOverrides {
   (int, List<int>) _handleMyWatch(String method, String path, List<int> body) {
     if (method == 'GET' && path == '/mywatch') {
       return (200, utf8.encode(jsonEncode(myWatchStatus)));
+    }
+    if (method == 'POST' && path == '/mywatch/enabled') {
+      myWatchEnabledPosts.add(utf8.decode(body));
+      final on = (jsonDecode(utf8.decode(body))
+          as Map<String, dynamic>)['enabled'] == true;
+      myWatchStatus = {
+        ...myWatchStatus,
+        'enabled': on,
+        'state': !on
+            ? 'off'
+            : myWatchStatus['linked'] == true
+                ? 'ready'
+                : 'off',
+      };
+      return (200, utf8.encode(jsonEncode({'enabled': on})));
     }
     if (method == 'POST' && path == '/mywatch/link') {
       final json = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;

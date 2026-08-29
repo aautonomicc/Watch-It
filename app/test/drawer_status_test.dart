@@ -22,6 +22,7 @@ Widget _status({
   int peers = 5,
   String channelsState = 'off',
   bool channelsSupported = true,
+  bool channelsEnabled = true,
 }) =>
     MaterialApp(
       theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
@@ -29,7 +30,9 @@ Widget _status({
         body: WiDrawerStatus(
           healthProvider: () async => ClientHealth(state: state, peers: peers),
           channelsStatusProvider: () async => ChannelsStatus(
-              supported: channelsSupported, state: channelsState),
+              supported: channelsSupported,
+              enabled: channelsEnabled,
+              state: channelsState),
         ),
       ),
     );
@@ -105,6 +108,13 @@ void main() {
       );
       await tester.pump();
       expect(find.text('My W@tch: sync issue'), findsOneWidget);
+
+      // The Settings switch beats the agent state: a linked device that
+      // was switched off says so instead of "connecting…" forever.
+      MyWatchSync.status.value = const MyWatchSyncStatus(
+          supported: true, linked: true, enabled: false, agentState: 'off');
+      await tester.pump();
+      expect(find.text('My W@tch: switched off'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -135,6 +145,13 @@ void main() {
       await tester.pumpWidget(_status(channelsState: 'ready'));
       await tester.pump();
       expect(find.text('Channels: connected'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+
+      // The Settings switch wins over every state.
+      await tester.pumpWidget(
+          _status(channelsState: 'off', channelsEnabled: false));
+      await tester.pump();
+      expect(find.text('Channels: switched off'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -205,9 +222,10 @@ void main() {
     });
   });
 
-  group('Settings → Network', () {
-    testWidgets('My W@tch tile sits in the Network section and navigates',
-        (tester) async {
+  group('Settings → Library', () {
+    testWidgets(
+        'My W@tch tile sits below Channels in the Library section and '
+        'navigates', (tester) async {
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Browse lists'));

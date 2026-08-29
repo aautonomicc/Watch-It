@@ -152,6 +152,7 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
     if (!s.supported) return const SizedBox.shrink();
     final (color, text) = switch (s) {
       MyWatchSyncStatus(linked: false) => (t.ash, 'My W@tch: not linked'),
+      MyWatchSyncStatus(enabled: false) => (t.ash, 'My W@tch: switched off'),
       MyWatchSyncStatus(agentState: != 'ready') => (
           t.accent,
           'My W@tch: connecting…',
@@ -176,9 +177,16 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
   Widget _channelsRow(WiTokens t) {
     final c = _channels;
     if (c == null || !c.supported) return const SizedBox.shrink();
-    final (color, text) = switch (c.state) {
-      'ready' => (const Color(0xff4caf50), 'Channels: connected'),
-      'starting' => (WiTokens.channelAmber, 'Channels: connecting…'),
+    final (color, text) = switch (c) {
+      ChannelsStatus(enabled: false) => (t.ash, 'Channels: switched off'),
+      ChannelsStatus(state: 'ready') => (
+          const Color(0xff4caf50),
+          'Channels: connected',
+        ),
+      ChannelsStatus(state: 'starting') => (
+          WiTokens.channelAmber,
+          'Channels: connecting…',
+        ),
       _ => (t.ash, 'Channels: not connected'),
     };
     return _row(t,

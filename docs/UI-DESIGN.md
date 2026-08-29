@@ -66,16 +66,25 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 
 ### 6. Settings
 - LIBRARY section order (2026-08-29): Channels (public, amber, on
-  top) · My Media (renamed from Media) · Upload (desktop-only, moved
-  out of the home drawer — the drawer is list navigation + Settings +
-  connection status rows: since 2026-08-29 the drawer carries, below
-  the Settings tile, the dot-style status rows previously on the home
-  screen's bar — Autonomi peers ("Connected · N peers"), My W@tch
-  (sync state, tap opens the page, "not linked" when unlinked), and a
-  new Channels row (gossip network state, tap opens Channels); the
-  home screen has no status bar anymore)
+  top) · My W@tch (moved up from Network 2026-08-29 — the two sharing
+  surfaces sit together, public above private) · My Media (renamed
+  from Media) · Upload (desktop-only, moved out of the home drawer —
+  the drawer is list navigation + Settings + connection status rows:
+  since 2026-08-29 the drawer carries, below the Settings tile, the
+  dot-style status rows previously on the home screen's bar — Autonomi
+  peers ("Connected · N peers"), My W@tch (sync state, tap opens the
+  page, "not linked" when unlinked, "switched off" when disabled in
+  the x0x client page), and a Channels row (gossip network state, tap
+  opens Channels, "switched off" when disabled); the home screen has
+  no status bar anymore)
 - Lists (manage, import/export)
-- Network (embedded client status, bandwidth limit for downloads)
+- Network (2026-08-29 order: **Built-in Autonomi client** status tile
+  on top — moved up from Streaming — then **Built-in x0x client**
+  (opens a page with two independent switches that stop the My W@tch
+  or Channels x0x agent and all its background traffic; links, keys
+  and subscriptions are kept, and joining/creating/subscribing flips
+  the matching switch back on automatically), then the
+  downloads/streaming network policies)
 - Downloads (storage location, storage used, clear)
 - Wallet (renamed from Publishing 2026-08-27: create with 12-word
   ceremony + retype confirm, import key/phrase, live ANT/ETH balances,
@@ -103,7 +112,11 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   files
 
 ### 8. My W@tch (alpha.61/.62)
-- Lives under Settings → Network since alpha.63 (desktop + Android)
+- Lives under Settings → LIBRARY, directly below Channels, since
+  2026-08-29 (was Settings → Network since alpha.63; desktop +
+  Android). When switched off in Settings → Network → Built-in x0x
+  client, the linked view shows a "switched off" card instead of the
+  connecting spinner.
 - Unlinked: **Link this device** (names the device, shows the invite as
   a QR code + copyable `wtch1-…` code) or **Join** (paste the code, or
   scan the QR with the camera on Android/iOS)
