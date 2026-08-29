@@ -8,18 +8,32 @@ import '../services/home_sections.dart';
 import '../services/library_arrangement.dart';
 import '../services/library_store.dart';
 import '../services/metadata_service.dart';
+import '../services/channels_api.dart';
+import '../services/embedded_client.dart';
 import '../theme/tokens.dart';
 import 'channel_avatar.dart';
+import 'drawer_status.dart';
 
 /// Modal left drawer for hopping between browsable lists (the enabled
 /// user lists). Mounted on the home screen and on every list page
 /// (there, [currentListId] marks the open list and navigation replaces
 /// the page instead of stacking).
 class WiLibraryDrawer extends StatefulWidget {
-  const WiLibraryDrawer({super.key, this.currentListId});
+  const WiLibraryDrawer({
+    super.key,
+    this.currentListId,
+    this.healthProvider,
+    this.channelsStatusProvider,
+  });
 
   /// Id of the list page the drawer is mounted on; null on home.
   final String? currentListId;
+
+  /// Test override for [EmbeddedClient.health] (status rows).
+  final Future<ClientHealth> Function()? healthProvider;
+
+  /// Test override for [ChannelsApi.status] (status rows).
+  final Future<ChannelsStatus> Function()? channelsStatusProvider;
 
   @override
   State<WiLibraryDrawer> createState() => _WiLibraryDrawerState();
@@ -144,6 +158,13 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                   title: Text('Settings',
                       style: TextStyle(color: t.bone, fontSize: 14)),
                   onTap: () => _openPage(const SettingsScreen()),
+                ),
+                Divider(color: t.line, height: 24),
+                // Connection status lives here since 2026-08-29 (moved
+                // off the home screen): peers, My W@tch, Channels.
+                WiDrawerStatus(
+                  healthProvider: widget.healthProvider,
+                  channelsStatusProvider: widget.channelsStatusProvider,
                 ),
               ],
             );

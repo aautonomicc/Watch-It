@@ -67,7 +67,13 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 ### 6. Settings
 - LIBRARY section order (2026-08-29): Channels (public, amber, on
   top) · My Media (renamed from Media) · Upload (desktop-only, moved
-  out of the home drawer — the drawer is list navigation + Settings)
+  out of the home drawer — the drawer is list navigation + Settings +
+  connection status rows: since 2026-08-29 the drawer carries, below
+  the Settings tile, the dot-style status rows previously on the home
+  screen's bar — Autonomi peers ("Connected · N peers"), My W@tch
+  (sync state, tap opens the page, "not linked" when unlinked), and a
+  new Channels row (gossip network state, tap opens Channels); the
+  home screen has no status bar anymore)
 - Lists (manage, import/export)
 - Network (embedded client status, bandwidth limit for downloads)
 - Downloads (storage location, storage used, clear)
