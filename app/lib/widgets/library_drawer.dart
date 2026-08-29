@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
 import '../screens/list_home_screen.dart';
-import '../screens/publish_screen.dart';
 import '../screens/settings_screen.dart';
 import '../services/app_settings.dart';
 import '../services/home_sections.dart';
@@ -106,8 +105,8 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 8),
                     child: Text(
-                      'Nothing to browse yet — add media on the Media '
-                      'page (Settings → Media).',
+                      'Nothing to browse yet — add media on the My Media '
+                      'page (Settings → My Media).',
                       style: TextStyle(fontSize: 12, color: t.boneDim),
                     ),
                   )
@@ -137,22 +136,9 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                       onTap: () => _openList(list),
                     ),
                 Divider(color: t.line, height: 24),
-                // Desktop-only this edition: uploads need local files
-                // and the internal wallet (see docs/PLAN-alpha55.md).
-                if (isDesktopPlatform)
-                  ListTile(
-                    dense: true,
-                    leading: Icon(Icons.cloud_upload_outlined,
-                        color: t.boneDim, size: 20),
-                    title: Text('Upload',
-                        style: TextStyle(color: t.bone, fontSize: 14)),
-                    subtitle: Text('Private · only your devices',
-                        style: TextStyle(color: t.ash, fontSize: 11)),
-                    onTap: () => _openPage(const PublishScreen()),
-                  ),
-                // Media and Channels live under Settings → LIBRARY; My
-                // W@tch under Settings → Network — the drawer is slimmed
-                // down to list navigation + Upload + Settings.
+                // My Media, Channels, and Upload live under Settings →
+                // LIBRARY; My W@tch under Settings → Network — the
+                // drawer is slimmed down to list navigation + Settings.
                 ListTile(
                   dense: true,
                   leading: Icon(Icons.settings_outlined,

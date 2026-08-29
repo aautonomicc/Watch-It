@@ -103,7 +103,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Media'));
+    await tester.tap(find.text('My Media'));
     await tester.pumpAndSettle();
 
     // All six home rows are listed, even the currently-empty built-in
@@ -174,7 +174,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Media'));
+    await tester.tap(find.text('My Media'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.descendant(

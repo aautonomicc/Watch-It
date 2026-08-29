@@ -176,6 +176,55 @@ void main() {
     });
   });
 
+  group('connection bar', () {
+    testWidgets('off state explains the network is idle', (tester) async {
+      // Fake default: state off (no own channel, no subs).
+      await openChannels(tester);
+      expect(
+          find.text(
+              'Not connected — connects when you create or add a channel'),
+          findsOneWidget);
+    });
+
+    testWidgets('ready shows Connected on both segments', (tester) async {
+      fake.channelsStatus = {
+        'supported': true,
+        'state': 'ready',
+        'own': null,
+        'subs': const [],
+      };
+      await openChannels(tester);
+      expect(find.text('Connected to the channel network'), findsOneWidget);
+      await tester.tap(find.text('My Channel'));
+      await tester.pumpAndSettle();
+      expect(find.text('Connected to the channel network'), findsOneWidget);
+    });
+
+    testWidgets('starting shows Connecting with a spinner', (tester) async {
+      fake.channelsStatus = {
+        'supported': true,
+        'state': 'starting',
+        'own': null,
+        'subs': const [],
+      };
+      tester.view.physicalSize = const Size(900, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: ChannelsScreen(
+            apiBase: FakeEmbeddedHttp.base, ffmpeg: _NoFfmpeg()),
+      ));
+      // An indeterminate spinner never settles — pump a few frames.
+      for (var i = 0; i < 8; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(find.text('Connecting to the channel network…'),
+          findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsWidgets);
+    });
+  });
+
   group('My Channel segment', () {
     Future<void> openMine(WidgetTester tester) async {
       await openChannels(tester);

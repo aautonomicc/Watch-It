@@ -65,6 +65,9 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - "Up next" card in the last 30 seconds of an episode
 
 ### 6. Settings
+- LIBRARY section order (2026-08-29): Channels (public, amber, on
+  top) · My Media (renamed from Media) · Upload (desktop-only, moved
+  out of the home drawer — the drawer is list navigation + Settings)
 - Lists (manage, import/export)
 - Network (embedded client status, bandwidth limit for downloads)
 - Downloads (storage location, storage used, clear)
@@ -79,9 +82,9 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   toggle + "Update available" row on desktop)
 
 ### 7. Upload (desktop, alpha.55/.56; renamed from Publish 2026-08-27)
-- Drawer tile between Media and Settings (desktop-only), subtitle
-  "Private · only your devices" — the word "publish" is reserved for
-  the planned public Channels (PLAN-personal-vs-channels.md)
+- Settings → LIBRARY tile below My Media (desktop-only; lived in the
+  home drawer until 2026-08-29), subtitle "Private · only your
+  devices" — the word "publish" is reserved for the public Channels
 - Multi-select file pick with "Add more" / per-file remove; per-file
   probe verdict line ("1080p H.264 10-bit — many devices can't play
   this" / "480p H.264 — plays everywhere")
@@ -106,9 +109,17 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   online together — the page never needs to be open
 
 ### 9. Channels (2026-08-27, unreleased)
-- Drawer tile **Channels** (amber icon, "Public · anyone with the
-  code") — a separate door from the blue Upload tile on purpose; every
-  channel surface carries an amber PUBLIC/CHANNEL badge
+- Settings → LIBRARY tile **Channels** at the top of the section
+  (amber icon, "Public · anyone with the code") — a separate door from
+  the blue Upload tile on purpose; every channel surface carries an
+  amber PUBLIC/CHANNEL badge
+- Always-visible connection bar under the segment switch (2026-08-29):
+  green dot "Connected to the channel network" / amber spinner
+  "Connecting…" / grey "Not connected — connects when you create or
+  add a channel"
+- Channels carry NO category tags (2026-08-29): the Describe page has
+  no genre chips, manifests publish `category: null`, and channel list
+  pages never show the genre chip row
 - **Subscribed** segment (default, all platforms): channel cards with
   name/description/item count/update state, Add channel (paste
   `wchn1-…` or scan QR on mobile, with the content-comes-from-the-owner

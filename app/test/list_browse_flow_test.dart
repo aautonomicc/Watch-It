@@ -132,7 +132,7 @@ void main() {
   });
 
   testWidgets(
-      'drawer has no Media or Channels tiles — both live under '
+      'drawer has no Media, Channels, or Upload tiles — all live under '
       'Settings → LIBRARY', (tester) async {
     await seedLibrary();
     await tester.pumpWidget(const WatchItApp());
@@ -143,9 +143,13 @@ void main() {
     final drawer = find.byType(WiLibraryDrawer);
     expect(find.descendant(of: drawer, matching: find.text('Media')),
         findsNothing);
+    expect(find.descendant(of: drawer, matching: find.text('My Media')),
+        findsNothing);
     expect(find.descendant(of: drawer, matching: find.text('Channels')),
         findsNothing);
-    // The remaining entry points stand.
+    expect(find.descendant(of: drawer, matching: find.text('Upload')),
+        findsNothing);
+    // The remaining entry point stands.
     expect(find.descendant(of: drawer, matching: find.text('Settings')),
         findsOneWidget);
   });
@@ -224,6 +228,34 @@ void main() {
 
     expect(find.text('Uncategorised'), findsNothing);
     expect(find.text('All'), findsNothing);
+    expect(find.byType(PosterCard), findsNWidgets(2));
+  });
+
+  testWidgets('channel lists never show genre chips, even with matched '
+      'categories', (tester) async {
+    // Channels carry no category tags (2026-08-29) — a subscriber's own
+    // TMDB matches must not sneak chips onto a channel's page either.
+    final channel = MediaList(
+      id: 'c1',
+      title: 'Nature Films',
+      channelPubkey: 'ab' * 32,
+      entries: [
+        _movie,
+        MediaEntry(name: 'Beta (2021).mkv', address: _addr(5)),
+      ],
+    );
+    await LibraryStore.save([channel]);
+    await seedCategory('Alpha (2020).mkv',
+        category: 'Science Fiction', mediaType: 'movie');
+    await seedCategory('Beta (2021).mkv',
+        category: 'Comedy', mediaType: 'movie');
+
+    await tester.pumpWidget(page(ListHomeScreen(list: channel)));
+    await tester.pumpAndSettle();
+
+    expect(find.text('All'), findsNothing);
+    expect(find.text('Science Fiction'), findsNothing);
+    expect(find.text('Comedy'), findsNothing);
     expect(find.byType(PosterCard), findsNWidgets(2));
   });
 

@@ -789,12 +789,19 @@ void main() {
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
 
-      // Library section: Media (list management, moved there in
-      // alpha.25) and Channels (moved out of the drawer post-alpha.67).
+      // Library section, in order: Channels (public, on top), My Media
+      // (renamed from Media 2026-08-29), Upload (moved out of the home
+      // drawer; desktop-only — tests run on the desktop host).
       expect(find.text('LIBRARY'), findsOneWidget);
-      expect(find.text('Media'), findsOneWidget);
+      expect(find.text('My Media'), findsOneWidget);
       expect(find.text('Channels'), findsOneWidget);
+      expect(find.text('Upload'), findsOneWidget);
       expect(find.text('New list'), findsNothing);
+      final channelsY = tester.getTopLeft(find.text('Channels')).dy;
+      final myMediaY = tester.getTopLeft(find.text('My Media')).dy;
+      final uploadY = tester.getTopLeft(find.text('Upload')).dy;
+      expect(channelsY, lessThan(myMediaY));
+      expect(myMediaY, lessThan(uploadY));
 
       // Streaming section: buffer size tile showing the current value.
       await tester.scrollUntilVisible(find.text('Buffer size'), 100);
@@ -844,7 +851,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Media'));
+      await tester.tap(find.text('My Media'));
       await tester.pumpAndSettle();
 
       // Creating lists moved into the import flow ("Add to library" →
@@ -904,7 +911,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Media'));
+      await tester.tap(find.text('My Media'));
       await tester.pumpAndSettle();
 
       // The built-in home rows carry checkboxes here too — target the
@@ -958,7 +965,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Media'));
+      await tester.tap(find.text('My Media'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byTooltip('List options'));
@@ -986,7 +993,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Media'));
+      await tester.tap(find.text('My Media'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byTooltip('List options'));

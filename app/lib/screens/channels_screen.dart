@@ -168,12 +168,70 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                   setState(() => _segment = s.first),
             ),
           ),
+          _connectionBar(t),
           Expanded(
             child: _error != null && _status == null
                 ? _errorRetry(t)
                 : _segment == _Segment.subscribed
                     ? _subscribedBody(t)
                     : _myChannelBody(t),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Always-visible connection state of the channel gossip network, on
+  /// both segments — a dot + plain words, same language as the home
+  /// screen's network bar, so "why is nothing updating?" answers itself.
+  Widget _connectionBar(WiTokens t) {
+    final state = _status?.state;
+    final (color, text) = switch (state) {
+      'ready' => (
+          const Color(0xff4caf50),
+          'Connected to the channel network',
+        ),
+      'starting' => (
+          WiTokens.channelAmber,
+          'Connecting to the channel network…',
+        ),
+      'off' => (
+          t.ash,
+          'Not connected — connects when you create or add a channel',
+        ),
+      // Status not fetched yet (or the fetch failed — _errorRetry has
+      // the details in that case).
+      _ => (t.ash, 'Checking connection…'),
+    };
+    return Container(
+      width: double.infinity,
+      color: t.ink2,
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Row(
+        children: [
+          if (state == 'starting')
+            SizedBox(
+              width: 10,
+              height: 10,
+              child: CircularProgressIndicator(
+                  strokeWidth: 1.5, color: color),
+            )
+          else
+            Container(
+              width: 8,
+              height: 8,
+              decoration:
+                  BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11.5, color: t.boneDim),
+            ),
           ),
         ],
       ),
@@ -232,14 +290,6 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
           icon: const Icon(Icons.add),
           label: const Text('Add channel'),
         ),
-        if (status != null && status.state == 'starting')
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Text(
-              'Connecting to the channel network…',
-              style: TextStyle(color: t.ash, fontSize: 12),
-            ),
-          ),
       ],
     );
   }

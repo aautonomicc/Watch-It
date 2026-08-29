@@ -41,7 +41,7 @@ dates and descriptions, plus a one-tap Download season.*
 ## How it works
 
 1. **Upload from the app — or with the CLI.** On desktop, the
-   drawer's **Upload** page (named *Publish* before 2026-08-27 — renamed
+   **Upload** page (Settings → Upload; named *Publish* before 2026-08-27 — renamed
    because uploads are private; nothing is published) puts media on the
    network straight from W@tch: pick one
    file or a whole series, choose quality tiers (High 1080p / Medium 720p /

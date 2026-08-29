@@ -552,7 +552,8 @@ class ChannelService extends ChangeNotifier {
     });
     final built = await buildBundle(
       [list],
-      const BundleExportOptions(includeHistory: false),
+      // omitCategories: channels publish no category tags.
+      const BundleExportOptions(includeHistory: false, omitCategories: true),
       base: importBase,
       postersDirProvider: postersDirProvider,
       extraTextMembers: {'channel.json': channelJson},
