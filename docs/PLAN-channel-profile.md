@@ -8,6 +8,11 @@ Rev 2 (2026-08-29): animated GIF support **dropped** (user: would look cheap and
 tacky) — avatars are still images only; added the explicit "Keeping the profile up
 to date" section (§2a).
 
+Rev 3 (2026-08-29): both remaining open questions answered by the user — **author is
+optional** (create form + wording adjusted; "by <author>" lines only render when set)
+and the **home-wall mini avatar is in**. No open questions left; plan is ready to
+implement on the word.
+
 ## Goal
 
 A channel gets a face. When creating (or later editing) a channel the owner sets:
@@ -16,7 +21,9 @@ A channel gets a face. When creating (or later editing) a channel the owner sets
   cheap next to the poster wall). Rendered **circular** everywhere.
 - **Channel name** — already exists (≤80 chars).
 - **Author** — a display name *or* handle for whoever runs the channel (one free-text
-  field, ≤80 chars, e.g. `Neil` or `@neil`). Shown as "by <author>".
+  field, ≤80 chars, e.g. `Neil` or `@neil`). **Optional** (user call, rev 3). Shown
+  as "by <author>" wherever set; when unset, every "by …" line is simply omitted —
+  same rendering path as manifests from older clients that lack the field.
 - **Description** — already exists (≤500 chars).
 
 Subscribers see all of it, kept current by the normal head/manifest update flow.
@@ -60,7 +67,8 @@ in the picker copy. Every avatar goes through the existing crop dialog forced to
 
 ### Rust — OwnConfig (channels.rs)
 
-- `OwnConfig` gains `author: String` (≤80, same cap style as name). Avatar bytes are
+- `OwnConfig` gains `author: String` (≤80, same cap style as name; empty string =
+  unset — description already works this way). Avatar bytes are
   Dart-side only (Dart builds the manifest); the owner's current avatar file lives in
   app-support next to other channel state, path persisted in Dart prefs — Rust never
   sees the image.
@@ -91,15 +99,16 @@ The create form becomes the channel profile form:
 - Circular avatar picker at the top — 96px circle, amber 1px ring, camera overlay
   icon; empty state is the podcasts icon in a dim circle. Optional but encouraged.
 - Channel name (required, as today).
-- **Author name or handle** (required — public attribution is the point; helper text:
-  *"Shown as 'by <author>' on your channel. Public and permanent."*).
+- **Author name or handle** (**optional** — rev 3 user call; helper text:
+  *"Optional. Shown as 'by <author>' on your channel. Public and permanent."*).
+  Left blank → no "by …" line anywhere, and channel.json simply omits the key.
 - Description (optional, as today).
 
 Safety-wall additions (per the personal-vs-channels philosophy):
 
-- The `FirstPublishGateScreen` warning list gains a line: *"Your channel name, author
-  name and avatar are published publicly and permanently alongside everything in the
-  channel."*
+- The `FirstPublishGateScreen` warning list gains a line: *"Your channel name — and
+  the author name and avatar if you set them — are published publicly and permanently
+  alongside everything in the channel."*
 - **No handle registry, no uniqueness, no verification.** The author field is free
   text; anyone can type `@neil`. The `wchn1-…` code remains the only real identity —
   which is why the info card (below) always shows the code. State this plainly in
@@ -152,7 +161,8 @@ poster-shaped and a profile crammed into one would fight the grid. Full-width he
 - Avatar: `ClipOval` + `Image.file`, `BoxFit.cover` (first circular artwork in the
   app — note it in UI-DESIGN.md as *the* channel-avatar idiom: circles mean channel
   identity, rectangles mean media). Fallback: podcasts icon on amber-tinted circle.
-- Name in `bone` 18px; "by author · N entries" in `ash`; amber `ChannelBadge` top-right.
+- Name in `bone` 18px; "by author · N entries" in `ash` (no author → just
+  "N entries"); amber `ChannelBadge` top-right.
 - The code line is deliberate anti-impersonation UI: mono font, amber, tap-to-copy —
   matching how the code is shown in the QR dialog today.
 - The AppBar entry-count subtitle can drop for channels (the card owns it).
@@ -161,14 +171,15 @@ poster-shaped and a profile crammed into one would fight the grid. Full-width he
 ### 3b. Everywhere else — consistent mini-avatar, icon fallback
 
 - **Channels screen cards** (Subscribed + My Channel): leading `Icons.podcasts` →
-  40px circular avatar (podcasts-icon fallback); subtitle gains "by <author>".
+  40px circular avatar (podcasts-icon fallback); subtitle gains "by <author>" when
+  set.
 - **Add-channel confirm**: after the manifest fetch, the confirm dialog shows avatar +
   name + "by author" + code, so you see who you're subscribing to *before* the list
   lands.
 - **Drawer**: channel rows swap the amber podcasts icon for a 20px mini avatar
   (fallback keeps the icon). Same on the Media page row list.
 - **Home wall**: channel row titles get an 18px avatar beside the existing
-  `ChannelBadge`. Smallest surface — cut this one first if it looks busy.
+  `ChannelBadge`. **Confirmed in** (rev 3 user call — was "cut first if busy").
 
 ## 4. Compatibility & cost
 
@@ -194,10 +205,13 @@ poster-shaped and a profile crammed into one would fight the grid. Full-width he
    skips the unchanged posters** (this leg proves §2a end to end). Then docs
    (UI-DESIGN §9, BUNDLE-FORMAT, ARCHITECTURE, this file → IMPLEMENTED).
 
-## Open questions (defaults chosen, say if you want different)
+## Open questions
 
-1. Author **required** at create (default) or optional?
-2. Home-wall mini avatar: in (default) or out?
+None — all resolved:
 
-Resolved: animated GIFs — dropped (rev 2, user call: cheap and tacky). Profile
-updates on republish — confirmed in, see §2a.
+- Animated GIFs — **dropped** (rev 2, user call: cheap and tacky).
+- Profile updates on republish — **confirmed in**, see §2a.
+- Author at create — **optional** (rev 3, user call).
+- Home-wall mini avatar — **in** (rev 3, user call).
+
+Plan is ready to implement on the user's word.
