@@ -837,11 +837,12 @@ void main() {
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
 
-      // Library section, in order: Channels (public, on top), My W@tch
-      // (directly below Channels, 2026-08-29), My Media (renamed from
-      // Media 2026-08-29), Upload (moved out of the home drawer;
-      // desktop-only — tests run on the desktop host).
-      expect(find.text('LIBRARY'), findsOneWidget);
+      // Content section (renamed from LIBRARY 2026-08-30), in order:
+      // Channels (public, on top), My W@tch, My Media, Upload
+      // (desktop-only — tests run on the desktop host), Downloads
+      // (moved in from its own section 2026-08-30).
+      expect(find.text('CONTENT'), findsOneWidget);
+      expect(find.text('LIBRARY'), findsNothing);
       expect(find.text('My Media'), findsOneWidget);
       expect(find.text('Channels'), findsOneWidget);
       expect(find.text('My W@tch'), findsOneWidget);
@@ -851,26 +852,41 @@ void main() {
       final myWatchY = tester.getTopLeft(find.text('My W@tch')).dy;
       final myMediaY = tester.getTopLeft(find.text('My Media')).dy;
       final uploadY = tester.getTopLeft(find.text('Upload')).dy;
+      // The Downloads *tile* (queue/storage) — its title collides with
+      // the network Downloads policy tile, so pin via the subtitle.
+      final downloadsY = tester
+          .getTopLeft(find.text('Queue, storage, and playback behaviour'))
+          .dy;
       expect(channelsY, lessThan(myWatchY));
       expect(myWatchY, lessThan(myMediaY));
       expect(myMediaY, lessThan(uploadY));
+      expect(uploadY, lessThan(downloadsY));
 
-      // Network section leads with the two embedded clients: Autonomi
-      // above the new x0x tile, both above the Downloads policy tile
-      // (2026-08-29).
+      // Network section leads with Buffer size (2026-08-30, the
+      // STREAMING section is gone), then the two embedded clients:
+      // Autonomi above the x0x tile, both above the Downloads policy
+      // tile.
       await tester.scrollUntilVisible(find.text('Wi-Fi only'), 100);
+      expect(find.text('STREAMING'), findsNothing);
+      expect(find.text('Buffer size'), findsOneWidget);
+      expect(find.text('32 MB'), findsOneWidget);
       expect(find.text('Built-in Autonomi client'), findsOneWidget);
       expect(find.text('Built-in x0x client'), findsOneWidget);
+      final bufferY = tester.getTopLeft(find.text('Buffer size')).dy;
       final autonomiY =
           tester.getTopLeft(find.text('Built-in Autonomi client')).dy;
       final x0xY = tester.getTopLeft(find.text('Built-in x0x client')).dy;
       final downloadsPolicyY = tester.getTopLeft(find.text('Wi-Fi only')).dy;
+      expect(bufferY, lessThan(autonomiY));
       expect(autonomiY, lessThan(x0xY));
       expect(x0xY, lessThan(downloadsPolicyY));
 
-      // Streaming section: buffer size tile showing the current value.
-      await tester.scrollUntilVisible(find.text('Buffer size'), 100);
-      expect(find.text('32 MB'), findsOneWidget);
+      // Appearance sits below Metadata (2026-08-30).
+      await tester.scrollUntilVisible(find.text('Colour scheme'), 100);
+      expect(find.text('APPEARANCE'), findsOneWidget);
+      final metadataY = tester.getTopLeft(find.text('TMDB API key')).dy;
+      final colourY = tester.getTopLeft(find.text('Colour scheme')).dy;
+      expect(metadataY, lessThan(colourY));
 
       // About section: app blurb and installed version.
       await tester.scrollUntilVisible(find.text('Version'), 100);

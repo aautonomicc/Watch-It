@@ -103,8 +103,16 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                 lists == null ? null : browsableLists(lists, _storedSections);
             return ListView(
               children: [
+                // Connection status leads the drawer (2026-08-30, moved
+                // up from below Settings): peers, My W@tch, Channels.
+                const SizedBox(height: 12),
+                WiDrawerStatus(
+                  healthProvider: widget.healthProvider,
+                  channelsStatusProvider: widget.channelsStatusProvider,
+                ),
+                Divider(color: t.line, height: 24),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                   child: Text(
                     'Library',
                     style: TextStyle(
@@ -148,9 +156,9 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                       onTap: () => _openList(list),
                     ),
                 Divider(color: t.line, height: 24),
-                // My Media, Channels, and Upload live under Settings →
-                // LIBRARY; My W@tch under Settings → Network — the
-                // drawer is slimmed down to list navigation + Settings.
+                // My Media, Channels, My W@tch, Upload, and Downloads
+                // live under Settings → CONTENT — the drawer is slimmed
+                // down to status rows + list navigation + Settings.
                 ListTile(
                   dense: true,
                   leading: Icon(Icons.settings_outlined,
@@ -158,13 +166,6 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                   title: Text('Settings',
                       style: TextStyle(color: t.bone, fontSize: 14)),
                   onTap: () => _openPage(const SettingsScreen()),
-                ),
-                Divider(color: t.line, height: 24),
-                // Connection status lives here since 2026-08-29 (moved
-                // off the home screen): peers, My W@tch, Channels.
-                WiDrawerStatus(
-                  healthProvider: widget.healthProvider,
-                  channelsStatusProvider: widget.channelsStatusProvider,
                 ),
               ],
             );

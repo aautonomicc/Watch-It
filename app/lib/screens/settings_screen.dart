@@ -29,7 +29,7 @@ import 'terms_screen.dart';
 import 'wallet_screen.dart';
 import 'x0x_client_screen.dart';
 
-/// Settings: library, streaming, metadata, and about sections.
+/// Settings: content, network, metadata, appearance, and about sections.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -450,10 +450,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               children: [
+                // Renamed from LIBRARY (2026-08-30): the section covers
+                // everything your content does — channels, device sync,
+                // your media, uploads, and downloads.
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
                   child: Text(
-                    'LIBRARY',
+                    'CONTENT',
                     style: TextStyle(
                       fontSize: 11,
                       letterSpacing: 1.5,
@@ -531,42 +534,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       MaterialPageRoute(builder: (_) => const PublishScreen()),
                     ),
                   ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
-                  child: Text(
-                    'APPEARANCE',
-                    style: TextStyle(
-                      fontSize: 11,
-                      letterSpacing: 1.5,
-                      fontWeight: FontWeight.w700,
-                      color: t.ash,
-                    ),
-                  ),
-                ),
-                ListTile(
-                  leading: Icon(Icons.dark_mode_outlined, color: t.accent),
-                  title: Text('Colour scheme',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
-                  subtitle: Text(
-                    _themeModeLabel(wiThemeMode.value)
-                        .replaceFirst('  ·  default', ' (default)'),
-                    style: TextStyle(color: t.ash, fontSize: 12),
-                  ),
-                  trailing: Icon(Icons.chevron_right, color: t.ash),
-                  onTap: _pickThemeMode,
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
-                  child: Text(
-                    'DOWNLOADS',
-                    style: TextStyle(
-                      fontSize: 11,
-                      letterSpacing: 1.5,
-                      fontWeight: FontWeight.w700,
-                      color: t.ash,
-                    ),
-                  ),
-                ),
+                // Downloads closes the section (2026-08-30, moved out of
+                // its own DOWNLOADS section): below My Media, and below
+                // Upload where that tile shows (desktop).
                 ListenableBuilder(
                   listenable: DownloadManager.instance,
                   builder: (context, _) {
@@ -604,9 +574,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
-                // The two embedded network clients lead the section
-                // (2026-08-29): Autonomi streams/downloads media, x0x
-                // carries My W@tch and Channels gossip.
+                // Buffer size leads the section (2026-08-30, moved in
+                // from the former STREAMING section), then the two
+                // embedded network clients: Autonomi streams/downloads
+                // media, x0x carries My W@tch and Channels gossip.
+                ListTile(
+                  leading: Icon(Icons.memory_outlined, color: t.accent),
+                  title: Text('Buffer size',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    '$_bufferSizeMb MB',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  trailing: Icon(Icons.chevron_right, color: t.ash),
+                  onTap: _pickBufferSize,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                  child: Text(
+                    'How much video the player keeps in memory while '
+                    'streaming. Larger buffers ride out slow patches of the '
+                    'network but use more RAM (the same amount again is kept '
+                    'behind the play position for instant rewind). Takes '
+                    'effect the next time you press Play.',
+                    style: TextStyle(fontSize: 11.5, color: t.ash),
+                  ),
+                ),
                 ListTile(
                   leading: Icon(Icons.cloud_outlined, color: t.accent),
                   title: Text('Built-in Autonomi client',
@@ -682,40 +675,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
                   child: Text(
-                    'STREAMING',
-                    style: TextStyle(
-                      fontSize: 11,
-                      letterSpacing: 1.5,
-                      fontWeight: FontWeight.w700,
-                      color: t.ash,
-                    ),
-                  ),
-                ),
-                ListTile(
-                  leading: Icon(Icons.memory_outlined, color: t.accent),
-                  title: Text('Buffer size',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
-                  subtitle: Text(
-                    '$_bufferSizeMb MB',
-                    style: TextStyle(color: t.ash, fontSize: 12),
-                  ),
-                  trailing: Icon(Icons.chevron_right, color: t.ash),
-                  onTap: _pickBufferSize,
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                  child: Text(
-                    'How much video the player keeps in memory while '
-                    'streaming. Larger buffers ride out slow patches of the '
-                    'network but use more RAM (the same amount again is kept '
-                    'behind the play position for instant rewind). Takes '
-                    'effect the next time you press Play.',
-                    style: TextStyle(fontSize: 11.5, color: t.ash),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
-                  child: Text(
                     'METADATA',
                     style: TextStyle(
                       fontSize: 11,
@@ -753,6 +712,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     'cover.',
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
+                ),
+                // Appearance sits below Metadata (2026-08-30, moved down
+                // from second place).
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
+                  child: Text(
+                    'APPEARANCE',
+                    style: TextStyle(
+                      fontSize: 11,
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.w700,
+                      color: t.ash,
+                    ),
+                  ),
+                ),
+                ListTile(
+                  leading: Icon(Icons.dark_mode_outlined, color: t.accent),
+                  title: Text('Colour scheme',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    _themeModeLabel(wiThemeMode.value)
+                        .replaceFirst('  ·  default', ' (default)'),
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  trailing: Icon(Icons.chevron_right, color: t.ash),
+                  onTap: _pickThemeMode,
                 ),
                 // Desktop-only this edition (Upload is): see
                 // docs/PLAN-alpha55.md. Section named WALLET (not

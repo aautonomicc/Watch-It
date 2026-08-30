@@ -65,39 +65,42 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - "Up next" card in the last 30 seconds of an episode
 
 ### 6. Settings
-- LIBRARY section order (2026-08-29): Channels (public, amber, on
-  top) · My W@tch (moved up from Network 2026-08-29 — the two sharing
-  surfaces sit together, public above private) · My Media (renamed
-  from Media) · Upload (desktop-only, moved out of the home drawer —
-  the drawer is list navigation + Settings + connection status rows:
-  since 2026-08-29 the drawer carries, below the Settings tile, the
-  dot-style status rows previously on the home screen's bar — Autonomi
-  peers ("Connected · N peers"), My W@tch (sync state, tap opens the
-  page, "not linked" when unlinked, "switched off" when disabled in
-  the x0x client page), and a Channels row (gossip network state, tap
-  opens Channels, "switched off" when disabled); the home screen has
-  no status bar anymore)
+- CONTENT section (renamed from LIBRARY 2026-08-30) order: Channels
+  (public, amber, on top) · My W@tch (the two sharing surfaces sit
+  together, public above private) · My Media (renamed from Media) ·
+  Upload (desktop-only, moved out of the home drawer) · Downloads
+  (queue/storage/behaviour tile, moved in from its own DOWNLOADS
+  section 2026-08-30 — sits below My Media, and below Upload where
+  that shows). The drawer is connection status + list navigation +
+  Settings: since 2026-08-30 the dot-style status rows lead the drawer
+  ABOVE the Library list section (they sat below Settings 2026-08-29,
+  and on the home screen's bar before that) — Autonomi peers
+  ("Connected · N peers"), My W@tch (sync state, tap opens the page,
+  "not linked" when unlinked, "switched off" when disabled in the x0x
+  client page), and a Channels row (gossip network state, tap opens
+  Channels, "switched off" when disabled); the home screen has no
+  status bar anymore
 - Lists (manage, import/export)
-- Network (2026-08-29 order: **Built-in Autonomi client** status tile
-  on top — moved up from Streaming — then **Built-in x0x client**
-  (opens a page with two independent switches that stop the My W@tch
-  or Channels x0x agent and all its background traffic; links, keys
-  and subscriptions are kept, and joining/creating/subscribing flips
-  the matching switch back on automatically), then the
-  downloads/streaming network policies)
-- Downloads (storage location, storage used, clear)
+- Network (2026-08-30 order: **Buffer size** on top — moved in from
+  the former STREAMING section, which is gone — then **Built-in
+  Autonomi client** status tile, then **Built-in x0x client** (opens a
+  page with two independent switches that stop the My W@tch or
+  Channels x0x agent and all its background traffic; links, keys and
+  subscriptions are kept, and joining/creating/subscribing flips the
+  matching switch back on automatically), then the downloads/streaming
+  network policies)
 - Wallet (renamed from Publishing 2026-08-27: create with 12-word
   ceremony + retype confirm, import key/phrase, live ANT/ETH balances,
   remove; one wallet will fund both private uploads and the planned
   public Channels)
 - Playback (hardware decode, default subtitle language, skip amounts)
-- Appearance (theme, poster size)
+- Appearance (Colour scheme; sits below Metadata since 2026-08-30)
 - About / licenses (incl. TMDB attribution notice + logo; the Terms of
   Use & Disclaimer page — also gated on first launch; update-check
   toggle + "Update available" row on desktop)
 
 ### 7. Upload (desktop, alpha.55/.56; renamed from Publish 2026-08-27)
-- Settings → LIBRARY tile below My Media (desktop-only; lived in the
+- Settings → CONTENT tile below My Media (desktop-only; lived in the
   home drawer until 2026-08-29), subtitle "Private · only your
   devices" — the word "publish" is reserved for the public Channels
 - Multi-select file pick with "Add more" / per-file remove; per-file
@@ -112,7 +115,7 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   files
 
 ### 8. My W@tch (alpha.61/.62)
-- Lives under Settings → LIBRARY, directly below Channels, since
+- Lives under Settings → CONTENT, directly below Channels, since
   2026-08-29 (was Settings → Network since alpha.63; desktop +
   Android). When switched off in Settings → Network → Built-in x0x
   client, the linked view shows a "switched off" card instead of the
@@ -128,7 +131,7 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   online together — the page never needs to be open
 
 ### 9. Channels (2026-08-27, unreleased)
-- Settings → LIBRARY tile **Channels** at the top of the section
+- Settings → CONTENT tile **Channels** at the top of the section
   (amber icon, "Public · anyone with the code") — a separate door from
   the blue Upload tile on purpose; every channel surface carries an
   amber PUBLIC/CHANNEL badge

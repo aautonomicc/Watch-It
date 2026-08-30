@@ -71,6 +71,10 @@ void main() {
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
 
+    // Appearance sits below Metadata (2026-08-30) — bring it in.
+    await tester.scrollUntilVisible(find.text('Colour scheme'), 100);
+    await tester.ensureVisible(find.text('Colour scheme'));
+    await tester.pumpAndSettle();
     expect(find.text('Colour scheme'), findsOneWidget);
     await tester.tap(find.text('Colour scheme'));
     await tester.pumpAndSettle();
@@ -97,6 +101,9 @@ void main() {
     await tester.tap(find.byTooltip('Browse lists'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Colour scheme'), 100);
+    await tester.ensureVisible(find.text('Colour scheme'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Colour scheme'));
     await tester.pumpAndSettle();

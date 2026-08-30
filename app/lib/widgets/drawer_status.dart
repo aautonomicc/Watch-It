@@ -9,8 +9,8 @@ import '../services/embedded_client.dart';
 import '../services/my_watch_sync.dart';
 import '../theme/tokens.dart';
 
-/// Connection/status rows at the bottom of the library drawer, below
-/// the Settings tile — one per network surface, top to bottom: the
+/// Connection/status rows at the top of the library drawer, above the
+/// list section — one per network surface, top to bottom: the
 /// Autonomi client (peer count), My W@tch (device sync), and Channels
 /// (public gossip network). Same dot-plus-plain-words style as the
 /// home-screen status bar this replaces; the My W@tch and Channels
