@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../services/channels_api.dart';
 import '../services/my_watch_api.dart';
 import '../services/my_watch_sync.dart';
+import '../services/x0x_cellular.dart';
 import '../theme/tokens.dart';
 import '../widgets/messenger.dart';
 
@@ -14,11 +15,13 @@ import '../widgets/messenger.dart';
 /// without touching the link, channel key or subscriptions, so
 /// switching one back on picks up exactly where it left off.
 class X0xClientScreen extends StatefulWidget {
-  const X0xClientScreen({super.key, this.myWatchApi, this.channelsApi});
+  const X0xClientScreen(
+      {super.key, this.myWatchApi, this.channelsApi, this.gate});
 
   /// Test overrides.
   final MyWatchApi? myWatchApi;
   final ChannelsApi? channelsApi;
+  final X0xCellularGate? gate;
 
   @override
   State<X0xClientScreen> createState() => _X0xClientScreenState();
@@ -33,17 +36,28 @@ class _X0xClientScreenState extends State<X0xClientScreen> {
 
   MyWatchApi get _myWatchApi => widget.myWatchApi ?? MyWatchApi();
   ChannelsApi get _channelsApi => widget.channelsApi ?? ChannelsApi();
+  X0xCellularGate get _gate => widget.gate ?? X0xCellularGate.instance;
 
   @override
   void initState() {
     super.initState();
+    // Paused-on-mobile-data flags can flip while the page is open.
+    _gate.ensureLoaded().then((_) {
+      if (mounted) setState(() {});
+    });
+    _gate.addListener(_onGateChanged);
     _reload();
   }
 
   @override
   void dispose() {
+    _gate.removeListener(_onGateChanged);
     _pollTimer?.cancel();
     super.dispose();
+  }
+
+  void _onGateChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _reload() async {
@@ -72,6 +86,9 @@ class _X0xClientScreenState extends State<X0xClientScreen> {
   Future<void> _setMyWatchEnabled(bool on) async {
     setState(() => _busyMyWatch = true);
     try {
+      // An explicit flip wins over the mobile-data gate: forget any
+      // pause it holds so Wi-Fi's return won't override this choice.
+      await _gate.noteManualChange(X0xAgent.myWatch);
       await _myWatchApi.setEnabled(on);
     } catch (e) {
       wiMessengerKey.currentState?.showSnackBar(
@@ -89,6 +106,7 @@ class _X0xClientScreenState extends State<X0xClientScreen> {
   Future<void> _setChannelsEnabled(bool on) async {
     setState(() => _busyChannels = true);
     try {
+      await _gate.noteManualChange(X0xAgent.channels);
       await _channelsApi.setEnabled(on);
     } catch (e) {
       wiMessengerKey.currentState?.showSnackBar(
@@ -101,10 +119,16 @@ class _X0xClientScreenState extends State<X0xClientScreen> {
 
   /// One line of plain words under each switch: what the feature is
   /// doing right now.
-  static String _myWatchStateLine(MyWatchStatus? s) {
+  String _myWatchStateLine(MyWatchStatus? s) {
     if (s == null) return 'Checking…';
     if (!s.supported) return 'Not available on this platform';
-    if (!s.enabled) return 'Switched off — nothing syncs between devices';
+    if (!s.enabled) {
+      // Off because Settings → Network → Mobile data said Wi-Fi only,
+      // not because the user flipped this switch.
+      return _gate.isPaused(X0xAgent.myWatch)
+          ? 'Paused on mobile data — resumes on Wi-Fi'
+          : 'Switched off — nothing syncs between devices';
+    }
     if (!s.linked) return 'On — no devices linked yet';
     return switch (s.state) {
       'ready' => 'On — connected to your devices',
@@ -113,12 +137,14 @@ class _X0xClientScreenState extends State<X0xClientScreen> {
     };
   }
 
-  static String _channelsStateLine(ChannelsStatus? s) {
+  String _channelsStateLine(ChannelsStatus? s) {
     if (s == null) return 'Checking…';
     if (!s.supported) return 'Not available on this platform';
     if (!s.enabled) {
-      return 'Switched off — channels get no updates; your own '
-          'publishes wait here until it is back on';
+      return _gate.isPaused(X0xAgent.channels)
+          ? 'Paused on mobile data — resumes on Wi-Fi'
+          : 'Switched off — channels get no updates; your own '
+              'publishes wait here until it is back on';
     }
     final count = s.subs.length + (s.own != null ? 1 : 0);
     if (count == 0) return 'On — no channels yet';

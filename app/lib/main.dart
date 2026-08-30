@@ -32,6 +32,7 @@ import 'services/season_grouping.dart';
 import 'services/terms.dart';
 import 'services/update_check.dart';
 import 'services/watch_state.dart';
+import 'services/x0x_cellular.dart';
 import 'theme/tokens.dart';
 import 'widgets/brand_mark.dart';
 import 'widgets/download_badge.dart';
@@ -116,6 +117,11 @@ Future<void> main() async {
   // Channels auto-update: follows subscribed channels' signed heads and
   // imports newer manifests (a silent no-op with no subscriptions).
   ChannelService.instance.start();
+  // Mobile-data gates for the x0x agents (Settings → Network → Mobile
+  // data): pause My W@tch / Channels on cellular when set to Wi-Fi
+  // only, resume when Wi-Fi returns. A no-op with the default
+  // everything-allowed settings.
+  X0xCellularGate.instance.start();
   // Colour scheme (dark default / light / system) before the first frame
   // so the app never flashes the wrong theme.
   wiThemeMode.value = await AppSettings.themeMode();

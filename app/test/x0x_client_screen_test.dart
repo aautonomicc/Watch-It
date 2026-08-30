@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watchit/screens/x0x_client_screen.dart';
 import 'package:watchit/services/channels_api.dart';
 import 'package:watchit/services/my_watch_api.dart';
+import 'package:watchit/services/x0x_cellular.dart';
 import 'package:watchit/theme/tokens.dart';
 
 import 'fake_embedded_http.dart';
@@ -126,6 +127,54 @@ void main() {
     expect(
         find.textContaining('Switched off — channels get no updates'),
         findsOneWidget);
+    await close(tester);
+  });
+
+  testWidgets('agents the mobile-data gate paused say paused, and a '
+      'manual flip clears the pause', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'x0x_cellular_paused_v1': ['myWatch', 'channels'],
+    });
+    final gate = X0xCellularGate();
+    await gate.ensureLoaded();
+    fake.myWatchStatus = {
+      'supported': true,
+      'enabled': false,
+      'linked': true,
+      'state': 'off',
+      'devices': const [],
+    };
+    fake.channelsStatus = {
+      'supported': true,
+      'enabled': false,
+      'state': 'off',
+      'message': null,
+      'own': null,
+      'subs': const [],
+    };
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: X0xClientScreen(
+        myWatchApi: MyWatchApi(base: FakeEmbeddedHttp.base),
+        channelsApi: ChannelsApi(base: FakeEmbeddedHttp.base),
+        gate: gate,
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('Paused on mobile data — resumes on Wi-Fi'),
+        findsNWidgets(2));
+    expect(find.textContaining('Switched off'), findsNothing);
+
+    // Flipping My W@tch on by hand takes the pause with it — Wi-Fi's
+    // return must not override the user's explicit choice.
+    await tester.tap(find.text('My W@tch'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(jsonDecode(fake.myWatchEnabledPosts.single), {'enabled': true});
+    expect(gate.isPaused(X0xAgent.myWatch), isFalse);
+    expect(gate.isPaused(X0xAgent.channels), isTrue);
     await close(tester);
   });
 

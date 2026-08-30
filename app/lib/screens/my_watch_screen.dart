@@ -8,6 +8,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../services/library_store.dart';
 import '../services/my_watch_api.dart';
 import '../services/my_watch_sync.dart';
+import '../services/x0x_cellular.dart';
 import '../theme/tokens.dart';
 import 'qr_scan_screen.dart';
 
@@ -416,8 +417,13 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'My W@tch is switched off — nothing syncs until you '
-                    'turn it back on in Settings → Built-in x0x client.',
+                    X0xCellularGate.instance.isPaused(X0xAgent.myWatch)
+                        ? 'My W@tch is paused while on mobile data — '
+                            'sync resumes on Wi-Fi (change this under '
+                            'Settings → Network → Mobile data).'
+                        : 'My W@tch is switched off — nothing syncs '
+                            'until you turn it back on in Settings → '
+                            'Built-in x0x client.',
                     style: TextStyle(fontSize: 13, color: t.boneDim),
                   ),
                 ),
