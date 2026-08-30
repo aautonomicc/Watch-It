@@ -15,6 +15,7 @@ pub mod server;
 pub mod upload;
 pub mod verify;
 pub mod wallet;
+pub(crate) mod x0x_tune;
 
 use std::ffi::CStr;
 use std::os::raw::c_char;
@@ -165,6 +166,7 @@ pub fn start(peers_override: Option<&str>, data_dir: Option<&str>) -> Result<i32
     if existing > 0 {
         return Ok(existing);
     }
+    init_tracing(); // no-op when the FFI entry already ran it
     init_panic_hook();
     ensure_dirs_env(None); // no-op when the FFI entry already set $HOME
 

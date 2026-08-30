@@ -372,6 +372,7 @@ mod imp {
                 .join_network()
                 .await
                 .map_err(|e| format!("network join failed: {e}"))?;
+            crate::x0x_tune::quiet_agent(&agent, "channels").await;
             let agent = Arc::new(agent);
             let mut stores = HashMap::new();
             for pubkey in self.wanted_pubkeys() {
@@ -857,6 +858,9 @@ mod imp {
                 "message": *self.message.lock().unwrap(),
                 "own": own_json,
                 "subs": sub_entries,
+                // "leaf" on every healthy client (x0x 0.40.4 default);
+                // "full" would mean this agent relays overlay traffic.
+                "gossip_mode": running.and_then(|r| crate::x0x_tune::gossip_mode(&r.agent)),
             })
         }
     }

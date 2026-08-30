@@ -764,6 +764,7 @@ mod imp {
                 .join_network()
                 .await
                 .map_err(|e| format!("network join failed: {e}"))?;
+            crate::x0x_tune::quiet_agent(&agent, "mywatch").await;
             let restored_from_snapshot = std::fs::read_dir(&dir)
                 .map(|entries| {
                     entries.flatten().any(|e| {
@@ -925,6 +926,17 @@ mod imp {
                         let v: Value =
                             serde_json::from_slice(&entry.value).unwrap_or(Value::Null);
                         let is_self = entry.key == own_id;
+                        let updated_at_ms = v["updated_at_ms"].as_u64().unwrap_or(0);
+                        // A fresh store heartbeat (60s cadence) marks a
+                        // device online — presence beacons alone would
+                        // miss every peer since quiet_agent stopped our
+                        // broadcasts (and they under-reported before).
+                        let now_ms = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .map(|d| d.as_millis() as u64)
+                            .unwrap_or(0);
+                        let heartbeat_fresh =
+                            now_ms.saturating_sub(updated_at_ms) < 3 * 60 * 1000;
                         devices.push(json!({
                             "agent_id": entry.key,
                             "self": is_self,
@@ -932,8 +944,10 @@ mod imp {
                             "platform": v["platform"].as_str().unwrap_or("?"),
                             "lists": v["lists"].as_u64().unwrap_or(0),
                             "entries": v["entries"].as_u64().unwrap_or(0),
-                            "updated_at_ms": v["updated_at_ms"].as_u64().unwrap_or(0),
-                            "online": is_self || online.contains(&entry.key),
+                            "updated_at_ms": updated_at_ms,
+                            "online": is_self
+                                || heartbeat_fresh
+                                || online.contains(&entry.key),
                         }));
                     }
                 }
@@ -949,6 +963,9 @@ mod imp {
                 "agent_id": own_id,
                 "last_sync_ms": self.shared.last_sync_ms.load(Ordering::SeqCst),
                 "devices": devices,
+                // "leaf" on every healthy client (x0x 0.40.4 default);
+                // "full" would mean this agent relays overlay traffic.
+                "gossip_mode": running.and_then(|r| crate::x0x_tune::gossip_mode(&r.agent)),
             })
         }
     }

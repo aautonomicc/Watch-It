@@ -72,7 +72,10 @@ tracing-android = "0.2"
 # ant-quic, post-quantum, mDNS LAN discovery) syncs lists/viewpoints
 # through a self-keyed CRDT KV store on a secret invite topic. Android
 # included since the NDK cross-build of the x0x tree was proven.
-x0x = "0.39"
+# 0.40.4 for the issue-#380 idle-bandwidth campaign (leaf mode enforced,
+# V3 slim announces, replay-storm validators via saorsa-gossip 0.5.75);
+# pin a release, never git main (mixed-fleet regressions live there).
+x0x = "0.40.4"
 # CancellationToken for the mywatch heartbeat/watch task (already in the
 # x0x tree, so free on desktop).
 tokio-util = "0.7"
