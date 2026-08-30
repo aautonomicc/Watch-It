@@ -66,7 +66,10 @@ class ChannelService extends ChangeNotifier {
   Future<Directory> Function()? profileDirProvider;
 
   Timer? _timer;
-  bool _syncing = false;
+
+  /// The in-flight sync cycle, null while idle. Callers of [syncNow]
+  /// during a run join it instead of silently doing nothing.
+  Future<void>? _run;
 
   /// Last auto-update outcome per channel pubkey (problems surface on
   /// the Channels screen).
@@ -254,58 +257,75 @@ class ChannelService extends ChangeNotifier {
 
   /// Check every subscription's verified head and import any manifest
   /// newer than what the library holds. Safe to call at will; runs are
-  /// serialized.
-  Future<void> syncNow() async {
-    if (_syncing) return;
-    _syncing = true;
+  /// serialized — a call during an in-flight cycle joins that cycle.
+  Future<void> syncNow() {
+    final running = _run;
+    if (running != null) return running;
+    final run = _syncOnce();
+    _run = run.whenComplete(() => _run = null);
+    return _run!;
+  }
+
+  /// A manual "check now": guarantees one full pass that STARTS no
+  /// earlier than the call. A background cycle may be mid-flight when
+  /// the user presses Sync now (say, right after their connection came
+  /// back) — joining it would report "checked" for work done before
+  /// the press, so wait it out and run fresh. Failed imports carry no
+  /// backoff (every cycle retries them), so the fresh pass genuinely
+  /// re-attempts everything still pending.
+  Future<void> checkNow() async {
+    final running = _run;
+    if (running != null) await running;
+    // A tick can slip in between; joining it is fine — that run also
+    // started after the press.
+    await syncNow();
+  }
+
+  Future<void> _syncOnce() async {
+    final ChannelsStatus status;
     try {
-      final ChannelsStatus status;
-      try {
-        status = await api.status();
-      } on PublishApiException {
-        return; // core not up yet; the next tick retries
-      }
-      if (!status.supported) return;
-      final subs = await _loadSubs();
-      var changed = false;
-      for (final sub in status.subs) {
-        final key = sub.pubkey.toLowerCase();
-        final raw = subs[key];
-        if (raw is! Map<String, dynamic>) continue;
-        final head = sub.head;
-        if (head == null) continue;
-        final imported = raw['importedSeq'] as int? ?? 0;
-        if (head.seq <= imported) continue;
-        try {
-          final info = await _importManifest(key, head);
-          raw['importedSeq'] = head.seq;
-          raw['name'] = info.name;
-          raw['description'] = info.description;
-          raw['author'] = info.author;
-          raw['avatar'] = info.avatar;
-          lastProblem.remove(key);
-          changed = true;
-        } catch (e) {
-          lastProblem[key] = '$e';
-        }
-      }
-      if (changed) {
-        await _saveSubs(subs);
-      }
-      var ownChanged = false;
-      try {
-        ownChanged = await _syncOwnChannel(status.own);
-      } catch (e) {
-        final key = status.own?.pubkey.toLowerCase();
-        if (key != null && key.isNotEmpty) lastProblem[key] = '$e';
-      }
-      if (changed || ownChanged) {
-        revision.value++;
-      }
-      notifyListeners();
-    } finally {
-      _syncing = false;
+      status = await api.status();
+    } on PublishApiException {
+      return; // core not up yet; the next tick retries
     }
+    if (!status.supported) return;
+    final subs = await _loadSubs();
+    var changed = false;
+    for (final sub in status.subs) {
+      final key = sub.pubkey.toLowerCase();
+      final raw = subs[key];
+      if (raw is! Map<String, dynamic>) continue;
+      final head = sub.head;
+      if (head == null) continue;
+      final imported = raw['importedSeq'] as int? ?? 0;
+      if (head.seq <= imported) continue;
+      try {
+        final info = await _importManifest(key, head);
+        raw['importedSeq'] = head.seq;
+        raw['name'] = info.name;
+        raw['description'] = info.description;
+        raw['author'] = info.author;
+        raw['avatar'] = info.avatar;
+        lastProblem.remove(key);
+        changed = true;
+      } catch (e) {
+        lastProblem[key] = '$e';
+      }
+    }
+    if (changed) {
+      await _saveSubs(subs);
+    }
+    var ownChanged = false;
+    try {
+      ownChanged = await _syncOwnChannel(status.own);
+    } catch (e) {
+      final key = status.own?.pubkey.toLowerCase();
+      if (key != null && key.isNotEmpty) lastProblem[key] = '$e';
+    }
+    if (changed || ownChanged) {
+      revision.value++;
+    }
+    notifyListeners();
   }
 
   /// Keep the library's view of this device's OWN channel current: the

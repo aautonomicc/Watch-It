@@ -73,6 +73,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
   List<MyChannelItem> _myItems = const [];
   File? _myAvatar;
   Timer? _poll;
+  bool _checking = false;
 
   @override
   void initState() {
@@ -126,6 +127,19 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     }
   }
 
+  /// Manual sync, same shape as My W@tch's Sync now. checkNow waits
+  /// out any in-flight background cycle and runs a fresh full pass, so
+  /// the snackbar's claim holds even when a cycle was already running.
+  Future<void> _checkNow() async {
+    setState(() => _checking = true);
+    try {
+      await ChannelService.instance.checkNow();
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+    if (mounted) _snack('Checked all subscribed channels');
+  }
+
   void _snack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -147,16 +161,6 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
             const ChannelBadge(text: 'PUBLIC'),
           ],
         ),
-        actions: [
-          IconButton(
-            tooltip: 'Check for updates now',
-            icon: Icon(Icons.refresh, color: t.ash, size: 20),
-            onPressed: () async {
-              await ChannelService.instance.syncNow();
-              _snack('Checked all subscribed channels');
-            },
-          ),
-        ],
       ),
       body: Column(
         children: [
@@ -292,6 +296,14 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
           for (final record in _records)
             _channelCard(t, record, subsByKey[record.pubkey]),
         const SizedBox(height: 16),
+        if (_records.isNotEmpty) ...[
+          OutlinedButton.icon(
+            icon: const Icon(Icons.sync),
+            label: const Text('Sync now'),
+            onPressed: _checking ? null : _checkNow,
+          ),
+          const SizedBox(height: 12),
+        ],
         FilledButton.icon(
           style: FilledButton.styleFrom(
             backgroundColor: WiTokens.channelAmber,

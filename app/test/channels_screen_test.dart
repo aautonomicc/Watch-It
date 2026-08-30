@@ -80,6 +80,8 @@ void main() {
       expect(find.textContaining('No subscribed channels yet'),
           findsOneWidget);
       expect(find.text('Add channel'), findsOneWidget);
+      // Nothing to sync yet — the Sync now button waits for a channel.
+      expect(find.text('Sync now'), findsNothing);
     });
 
     testWidgets(
@@ -144,6 +146,44 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Unsubscribe'), findsOneWidget);
       expect(find.text('Rename'), findsNothing);
+    });
+
+    testWidgets(
+        'Sync now sits in the body like My W@tch\'s — no app-bar '
+        'refresh icon — and a press checks and reports', (tester) async {
+      final pubkey = 'ab' * 32;
+      SharedPreferences.setMockInitialValues({
+        'channel_subs_v1': jsonEncode({
+          pubkey: {'name': 'Nature Films', 'importedSeq': 2}
+        }),
+      });
+      fake.channelsStatus = {
+        'supported': true,
+        'state': 'ready',
+        'own': null,
+        'subs': [
+          {
+            'pubkey': pubkey,
+            'code': 'wchn1-x',
+            'head': {'seq': 2, 'manifest': 'ee' * 32},
+          },
+        ],
+      };
+      await openChannels(tester);
+      expect(find.byIcon(Icons.refresh), findsNothing);
+      final button = find.widgetWithText(OutlinedButton, 'Sync now');
+      expect(button, findsOneWidget);
+      expect(
+          find.descendant(of: button, matching: find.byIcon(Icons.sync)),
+          findsOneWidget);
+      final before = fake.requests.length;
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      expect(find.text('Checked all subscribed channels'), findsOneWidget);
+      // The press ran a real pass against the core.
+      expect(
+          fake.requests.skip(before).where((r) => r.contains('/channels')),
+          isNotEmpty);
     });
 
     testWidgets(
