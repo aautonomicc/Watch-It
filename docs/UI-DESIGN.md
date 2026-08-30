@@ -90,8 +90,16 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   keys and subscriptions are kept, and joining/creating/subscribing
   flips the matching switch back on automatically; publishing a channel
   update while Channels is off still works — the signed head waits and
-  is announced when the switch is back on), then the
-  downloads/streaming network policies)
+  is announced when the switch is back on), then the consolidated
+  **Mobile data** page (2026-08-30, replacing the separate Downloads
+  and Streaming-on-mobile-data policy tiles): one place for everything
+  that may use mobile data — Streaming (Ask first / Allowed / Wi-Fi
+  only), Downloads (Wi-Fi only / Wi-Fi + mobile data), and per-feature
+  Channels / My W@tch switches (default ON so existing installs keep
+  behaving the same); set to Wi-Fi only, an x0x agent is paused on
+  cellular by the X0xCellularGate and resumed the moment Wi-Fi
+  returns — status lines then read "paused on mobile data" rather than
+  "switched off", and a user's own x0x switch is never overridden)
 - Wallet (renamed from Publishing 2026-08-27: create with 12-word
   ceremony + retype confirm, import key/phrase, live ANT/ETH balances,
   remove; one wallet will fund both private uploads and the planned

@@ -13,6 +13,7 @@ import 'package:watchit/services/embedded_client.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/my_watch_sync.dart';
 import 'package:watchit/services/terms.dart';
+import 'package:watchit/services/x0x_cellular.dart';
 import 'package:watchit/theme/tokens.dart';
 import 'package:watchit/widgets/drawer_status.dart';
 import 'package:watchit/widgets/library_drawer.dart';
@@ -152,6 +153,29 @@ void main() {
           _status(channelsState: 'off', channelsEnabled: false));
       await tester.pump();
       expect(find.text('Channels: switched off'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a mobile-data pause reads paused, not switched off',
+        (tester) async {
+      // Both agents disabled by the cellular gate, not the user.
+      SharedPreferences.setMockInitialValues({
+        'terms_accepted_version_v1': kTermsVersion,
+        'x0x_cellular_paused_v1': ['myWatch', 'channels'],
+      });
+      X0xCellularGate.instance = X0xCellularGate();
+      await X0xCellularGate.instance.ensureLoaded();
+      addTearDown(() => X0xCellularGate.instance = X0xCellularGate());
+
+      MyWatchSync.status.value = const MyWatchSyncStatus(
+          supported: true, linked: true, enabled: false, agentState: 'off');
+      await tester.pumpWidget(
+          _status(channelsState: 'off', channelsEnabled: false));
+      await tester.pump();
+      expect(
+          find.text('My W@tch: paused on mobile data'), findsOneWidget);
+      expect(find.text('Channels: paused on mobile data'), findsOneWidget);
+      expect(find.textContaining('switched off'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
 

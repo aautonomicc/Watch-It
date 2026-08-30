@@ -23,6 +23,7 @@ import 'channels_screen.dart';
 import 'downloads_screen.dart';
 import 'exit_info_screen.dart';
 import 'media_lists_screen.dart';
+import 'mobile_data_screen.dart';
 import 'my_watch_screen.dart';
 import 'publish_screen.dart' show PublishScreen, isDesktopPlatform;
 import 'terms_screen.dart';
@@ -44,8 +45,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Timer? _healthTimer;
   int _bufferSizeMb = AppSettings.defaultBufferSizeMb;
   TmdbKeySource _tmdbKeySource = TmdbKeySource.none;
-  DownloadNetworkPolicy _downloadNetwork = DownloadNetworkPolicy.wifiOnly;
-  StreamingNetworkPolicy _streamingNetwork = StreamingNetworkPolicy.ask;
   int? _dataSizeBytes;
   bool _dataSizeKnown = false;
   bool _updateCheckEnabled = true;
@@ -91,8 +90,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final health = await EmbeddedClient.health();
     final bufferSizeMb = await AppSettings.bufferSizeMb();
     final tmdbKeySource = await AppSettings.tmdbKeySource();
-    final downloadNetwork = await AppSettings.downloadNetworkPolicy();
-    final streamingNetwork = await AppSettings.streamingNetworkPolicy();
     // The x0x switches, for the tile subtitle. Best-effort: an
     // unreachable embedded client just leaves the subtitle generic.
     bool? myWatchOn;
@@ -109,8 +106,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _health = health;
         _bufferSizeMb = bufferSizeMb;
         _tmdbKeySource = tmdbKeySource;
-        _downloadNetwork = downloadNetwork;
-        _streamingNetwork = streamingNetwork;
         _myWatchOn = myWatchOn;
         _channelsOn = channelsOn;
       });
@@ -349,94 +344,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ThemeMode.system => 'System default',
       };
 
-  Future<void> _pickDownloadNetwork() async {
-    final t = WiTokens.of(context);
-    final picked = await showDialog<DownloadNetworkPolicy>(
-      context: context,
-      builder: (context) => SimpleDialog(
-        backgroundColor: t.ink2,
-        title: Text('Download over',
-            style: TextStyle(color: t.bone, fontSize: 16)),
-        children: [
-          RadioGroup<DownloadNetworkPolicy>(
-            groupValue: _downloadNetwork,
-            onChanged: (v) => Navigator.of(context).pop(v),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (final option in DownloadNetworkPolicy.values)
-                  RadioListTile<DownloadNetworkPolicy>(
-                    value: option,
-                    activeColor: t.accent,
-                    title: Text(
-                      switch (option) {
-                        DownloadNetworkPolicy.wifiOnly => 'Wi-Fi only',
-                        DownloadNetworkPolicy.any => 'Wi-Fi + mobile data',
-                      },
-                      style: TextStyle(color: t.bone, fontSize: 14),
-                    ),
-                    subtitle: option == DownloadNetworkPolicy.wifiOnly
-                        ? Text('On mobile data the queue waits for Wi-Fi',
-                            style: TextStyle(color: t.ash, fontSize: 11.5))
-                        : null,
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-    if (picked == null) return;
-    await AppSettings.setDownloadNetworkPolicy(picked);
-    // Apply immediately: a queue waiting for Wi-Fi starts right away
-    // when mobile data is allowed now (and vice versa).
-    DownloadManager.instance.onNetworkPolicyChanged();
-    if (mounted) setState(() => _downloadNetwork = picked);
-  }
-
-  Future<void> _pickStreamingNetwork() async {
-    final t = WiTokens.of(context);
-    final picked = await showDialog<StreamingNetworkPolicy>(
-      context: context,
-      builder: (context) => SimpleDialog(
-        backgroundColor: t.ink2,
-        title: Text('Streaming on mobile data',
-            style: TextStyle(color: t.bone, fontSize: 16)),
-        children: [
-          RadioGroup<StreamingNetworkPolicy>(
-            groupValue: _streamingNetwork,
-            onChanged: (v) => Navigator.of(context).pop(v),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (final option in StreamingNetworkPolicy.values)
-                  RadioListTile<StreamingNetworkPolicy>(
-                    value: option,
-                    activeColor: t.accent,
-                    title: Text(
-                      switch (option) {
-                        StreamingNetworkPolicy.ask => 'Ask first',
-                        StreamingNetworkPolicy.allow => 'Allowed',
-                        StreamingNetworkPolicy.wifiOnly => 'Wi-Fi only',
-                      },
-                      style: TextStyle(color: t.bone, fontSize: 14),
-                    ),
-                    subtitle: option == StreamingNetworkPolicy.ask
-                        ? Text('Asks once per app session',
-                            style: TextStyle(color: t.ash, fontSize: 11.5))
-                        : null,
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-    if (picked == null) return;
-    await AppSettings.setStreamingNetworkPolicy(picked);
-    if (mounted) setState(() => _streamingNetwork = picked);
-  }
-
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
@@ -634,43 +541,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
                 ),
-                ListTile(
-                  leading: Icon(Icons.wifi_outlined, color: t.accent),
-                  title: Text('Downloads',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
-                  subtitle: Text(
-                    switch (_downloadNetwork) {
-                      DownloadNetworkPolicy.wifiOnly => 'Wi-Fi only',
-                      DownloadNetworkPolicy.any => 'Wi-Fi + mobile data',
-                    },
-                    style: TextStyle(color: t.ash, fontSize: 12),
-                  ),
-                  trailing: Icon(Icons.chevron_right, color: t.ash),
-                  onTap: _pickDownloadNetwork,
-                ),
+                // One door for everything mobile data (2026-08-30):
+                // streaming, downloads, and the two x0x features — the
+                // separate Downloads / Streaming policy tiles merged
+                // into the MobileDataScreen.
                 ListTile(
                   leading:
                       Icon(Icons.network_cell_outlined, color: t.accent),
-                  title: Text('Streaming on mobile data',
+                  title: Text('Mobile data',
                       style: TextStyle(color: t.bone, fontSize: 15)),
                   subtitle: Text(
-                    switch (_streamingNetwork) {
-                      StreamingNetworkPolicy.ask => 'Ask first',
-                      StreamingNetworkPolicy.allow => 'Allowed',
-                      StreamingNetworkPolicy.wifiOnly => 'Wi-Fi only',
-                    },
+                    'What may use it — streaming, downloads, Channels, '
+                    'My W@tch',
                     style: TextStyle(color: t.ash, fontSize: 12),
                   ),
                   trailing: Icon(Icons.chevron_right, color: t.ash),
-                  onTap: _pickStreamingNetwork,
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                  child: Text(
-                    'These control the heavy traffic (streams and '
-                    'downloads). The built-in client keeps a few idle '
-                    'peer connections on any network.',
-                    style: TextStyle(fontSize: 11.5, color: t.ash),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                        builder: (_) => const MobileDataScreen()),
                   ),
                 ),
                 Padding(

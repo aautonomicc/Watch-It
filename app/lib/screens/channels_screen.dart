@@ -14,6 +14,7 @@ import '../services/ffmpeg.dart';
 import '../services/library_store.dart';
 import '../services/metadata_service.dart';
 import '../services/publish_api.dart';
+import '../services/x0x_cellular.dart';
 import '../theme/tokens.dart';
 import '../widgets/channel_avatar.dart';
 import '../widgets/channel_badge.dart';
@@ -207,8 +208,10 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
         ),
       'off' when _status?.enabled == false => (
           t.ash,
-          'Switched off — turn Channels on in Settings → '
-              'Built-in x0x client',
+          X0xCellularGate.instance.isPaused(X0xAgent.channels)
+              ? 'Paused on mobile data — updates resume on Wi-Fi'
+              : 'Switched off — turn Channels on in Settings → '
+                  'Built-in x0x client',
         ),
       'off' => (
           t.ash,

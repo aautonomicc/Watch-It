@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/main.dart';
+import 'package:watchit/screens/mobile_data_screen.dart';
 import 'package:watchit/screens/x0x_client_screen.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/services/app_settings.dart';
@@ -864,22 +865,25 @@ void main() {
 
       // Network section leads with Buffer size (2026-08-30, the
       // STREAMING section is gone), then the two embedded clients:
-      // Autonomi above the x0x tile, both above the Downloads policy
-      // tile.
-      await tester.scrollUntilVisible(find.text('Wi-Fi only'), 100);
+      // Autonomi above the x0x tile, both above the consolidated
+      // Mobile data tile (2026-08-30 — it replaced the separate
+      // Downloads and Streaming-on-mobile-data policy tiles).
+      await tester.scrollUntilVisible(find.text('Mobile data'), 100);
       expect(find.text('STREAMING'), findsNothing);
       expect(find.text('Buffer size'), findsOneWidget);
       expect(find.text('32 MB'), findsOneWidget);
       expect(find.text('Built-in Autonomi client'), findsOneWidget);
       expect(find.text('Built-in x0x client'), findsOneWidget);
+      expect(find.text('Streaming on mobile data'), findsNothing);
+      expect(find.text('Wi-Fi only'), findsNothing);
       final bufferY = tester.getTopLeft(find.text('Buffer size')).dy;
       final autonomiY =
           tester.getTopLeft(find.text('Built-in Autonomi client')).dy;
       final x0xY = tester.getTopLeft(find.text('Built-in x0x client')).dy;
-      final downloadsPolicyY = tester.getTopLeft(find.text('Wi-Fi only')).dy;
+      final mobileDataY = tester.getTopLeft(find.text('Mobile data')).dy;
       expect(bufferY, lessThan(autonomiY));
       expect(autonomiY, lessThan(x0xY));
-      expect(x0xY, lessThan(downloadsPolicyY));
+      expect(x0xY, lessThan(mobileDataY));
 
       // Appearance sits below Metadata (2026-08-30).
       await tester.scrollUntilVisible(find.text('Colour scheme'), 100);
@@ -915,6 +919,32 @@ void main() {
       expect(find.text('Channels'), findsOneWidget);
       // Dispose the screen so its status poll timer is cancelled.
       await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('Mobile data tile opens the consolidated screen',
+        (tester) async {
+      await tester.pumpWidget(const WatchItApp());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Browse lists'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Settings'));
+      await tester.pumpAndSettle();
+
+      await tester.scrollUntilVisible(find.text('Mobile data'), 100);
+      await tester.ensureVisible(find.text('Mobile data'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Mobile data'));
+      await tester.pumpAndSettle();
+
+      // All four consumers in one place, defaults shown.
+      expect(find.byType(MobileDataScreen), findsOneWidget);
+      expect(find.text('Streaming'), findsOneWidget);
+      expect(find.text('Downloads'), findsOneWidget);
+      expect(find.text('Channels'), findsOneWidget);
+      expect(find.text('My W@tch'), findsOneWidget);
+      expect(find.text('Ask first'), findsOneWidget);
+      expect(find.text('Wi-Fi only'), findsOneWidget);
     });
 
     testWidgets('buffer size can be changed and persists', (tester) async {
