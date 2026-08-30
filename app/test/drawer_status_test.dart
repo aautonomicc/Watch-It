@@ -174,8 +174,8 @@ void main() {
   });
 
   group('drawer placement', () {
-    testWidgets('status rows sit in the drawer below Settings',
-        (tester) async {
+    testWidgets('status rows sit at the top of the drawer, above the '
+        'Library section', (tester) async {
       MyWatchSync.status.value = const MyWatchSyncStatus(
           supported: true, linked: true, agentState: 'ready');
       await tester.pumpWidget(MaterialApp(
@@ -199,14 +199,16 @@ void main() {
       expect(find.text('My W@tch: linked'), findsOneWidget);
       expect(find.text('Channels: connected'), findsOneWidget);
 
+      final libraryY = tester.getTopLeft(find.text('Library')).dy;
       final settingsY = tester.getTopLeft(find.text('Settings')).dy;
       final peersY = tester.getTopLeft(find.text('Connected · 3 peers')).dy;
       final watchY = tester.getTopLeft(find.text('My W@tch: linked')).dy;
       final channelsY =
           tester.getTopLeft(find.text('Channels: connected')).dy;
-      expect(peersY, greaterThan(settingsY));
       expect(watchY, greaterThan(peersY));
       expect(channelsY, greaterThan(watchY));
+      expect(libraryY, greaterThan(channelsY));
+      expect(settingsY, greaterThan(libraryY));
       await tester.pumpWidget(const SizedBox());
     });
 
