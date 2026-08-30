@@ -70,12 +70,27 @@ import 'watch_state.dart';
 ///
 /// The service is quiet unless the device is linked; every cycle checks.
 class MyWatchSync {
-  MyWatchSync({MyWatchApi? api}) : _api = api ?? MyWatchApi();
+  MyWatchSync({
+    MyWatchApi? api,
+    Future<ClientHealth> Function()? health,
+    this._clientBase,
+  })  : _api = api ?? MyWatchApi(),
+        _health = health ?? EmbeddedClient.health;
 
   /// Replaceable for tests.
   static MyWatchSync instance = MyWatchSync();
 
   final MyWatchApi _api;
+
+  /// Autonomi client health probe — map imports need that network, so a
+  /// cycle checks it to reset the retry backoff when connectivity
+  /// returns. Injectable for tests.
+  final Future<ClientHealth> Function() _health;
+
+  /// Test override for the embedded server base used by the map-store
+  /// checks and imports (production reads [EmbeddedClient.baseUrl]).
+  final String? _clientBase;
+
   Timer? _timer;
   bool _cycling = false;
 
@@ -125,6 +140,18 @@ class MyWatchSync {
 
   final Map<String, int> _mapRetryAt = {};
 
+  /// Whether the Autonomi client was connected (ready with peers) when
+  /// the last cycle checked. A false→true transition clears
+  /// [_mapRetryAt]: imports that failed offline retry immediately
+  /// instead of waiting out a backoff set while the network was down.
+  bool? _netWasOk;
+
+  /// Data maps the library needs that are still not in the local map
+  /// store after the last cycle (import failed or waiting on retry) —
+  /// their titles cannot play on this device yet. Surfaced on
+  /// [MyWatchSyncStatus.pendingMaps].
+  int _pendingMaps = 0;
+
   /// Failed artwork fetches retry with a PROGRESSIVE backoff — see
   /// [artRetryDelayMs]. Keyed by manifest sha256; the counter clears on
   /// success.
@@ -167,10 +194,20 @@ class MyWatchSync {
 
   /// One immediate cycle (the screen's Sync now action). Returns a
   /// user-readable summary, or throws [MyWatchApiException].
+  ///
+  /// A manual sync is an explicit "try again now": the map-import
+  /// backoff is dropped first so a map that failed minutes ago is
+  /// retried this cycle instead of silently skipped (which read as
+  /// "Everything is in sync." while a map was still missing).
   Future<String> syncNow() async {
+    _mapRetryAt.clear();
     final result = await _cycle(rethrowErrors: true);
     return result == null ? 'Nothing to sync.' : summarize(result);
   }
+
+  /// One plain background cycle, without the manual-sync backoff reset.
+  @visibleForTesting
+  Future<SyncCycleResult?> cycleForTesting() => _cycle();
 
   /// One-line, user-readable outcome of a finished cycle.
   static String summarize(SyncCycleResult result) {
@@ -205,6 +242,7 @@ class MyWatchSync {
       activity: what,
       lastCycleAtMs: s.lastCycleAtMs,
       lastSummary: s.lastSummary,
+      pendingMaps: s.pendingMaps,
       problems: s.problems,
     );
   }
@@ -223,6 +261,7 @@ class MyWatchSync {
           lastSyncMs: link.lastSyncMs,
           lastCycleAtMs: status.value.lastCycleAtMs,
           lastSummary: status.value.lastSummary,
+          pendingMaps: status.value.pendingMaps,
           problems: status.value.problems,
         );
         return null;
@@ -238,6 +277,7 @@ class MyWatchSync {
         activity: 'Checking your other devices…',
         lastCycleAtMs: status.value.lastCycleAtMs,
         lastSummary: status.value.lastSummary,
+        pendingMaps: status.value.pendingMaps,
         problems: status.value.problems,
       );
       SyncCycleResult? result;
@@ -253,6 +293,7 @@ class MyWatchSync {
           lastSyncMs: link.lastSyncMs,
           lastCycleAtMs: DateTime.now().millisecondsSinceEpoch,
           lastSummary: result == null ? null : summarize(result),
+          pendingMaps: _pendingMaps,
           problems: List.unmodifiable(_problems),
         );
       }
@@ -268,6 +309,7 @@ class MyWatchSync {
         lastSyncMs: s.lastSyncMs,
         lastCycleAtMs: DateTime.now().millisecondsSinceEpoch,
         lastSummary: s.lastSummary,
+        pendingMaps: s.pendingMaps,
         problems: List.unmodifiable(
             [...s.problems.where((p) => !p.startsWith('Sync failed:')),
                 'Sync failed: $e']),
@@ -530,21 +572,48 @@ class MyWatchSync {
         maps.putIfAbsent(e.key.toLowerCase(), () => e.value);
       }
     }
+    // Child-map imports need the Autonomi network: when connectivity
+    // just came back, drop the backoff so maps that failed offline are
+    // retried right now instead of waiting out up to [mapRetryMs].
+    final netOk = await _networkOk();
+    if (netOk && _netWasOk == false && _mapRetryAt.isNotEmpty) {
+      _mapRetryAt.clear();
+      debugPrint('mywatch sync: connectivity returned — retrying map imports');
+    }
+    _netWasOk = netOk;
     var imported = 0;
+    var pending = 0;
     for (final entry in maps.entries) {
       final addr = entry.key;
       if (!held.contains(addr)) continue;
-      if ((_mapRetryAt[addr] ?? 0) > nowMs) continue;
       if (await _mapStored(addr)) continue;
+      if ((_mapRetryAt[addr] ?? 0) > nowMs) {
+        pending++;
+        continue;
+      }
       try {
-        await importDatamapBytes(base64.decode(entry.value));
+        await importDatamapBytes(base64.decode(entry.value),
+            base: _clientBase);
         imported++;
       } catch (e) {
+        pending++;
         _mapRetryAt[addr] = nowMs + mapRetryMs;
         debugPrint('mywatch sync: map import for $addr failed: $e');
       }
     }
+    _pendingMaps = pending;
     return imported;
+  }
+
+  /// True when the Autonomi client is connected with peers — the state
+  /// a child-map expansion needs to succeed.
+  Future<bool> _networkOk() async {
+    try {
+      final h = await _health();
+      return h.state == 'ready' && h.peers > 0;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Apply the merged channel-subscription actions through
@@ -579,7 +648,7 @@ class MyWatchSync {
   }
 
   Future<bool> _mapStored(String addr) async {
-    final base = EmbeddedClient.baseUrl();
+    final base = _clientBase ?? EmbeddedClient.baseUrl();
     if (base == null) return true; // cannot check — do not spam imports
     try {
       final res = await HttpClient()
@@ -1788,6 +1857,7 @@ class MyWatchSyncStatus {
     this.activity,
     this.lastCycleAtMs,
     this.lastSummary,
+    this.pendingMaps = 0,
     this.problems = const [],
   });
 
@@ -1816,6 +1886,11 @@ class MyWatchSyncStatus {
   /// When the last cycle finished, and its one-line outcome.
   final int? lastCycleAtMs;
   final String? lastSummary;
+
+  /// Data maps the library still needs but the local map store lacks
+  /// after the last cycle (import failed or waiting on retry) — those
+  /// titles cannot play on this device yet.
+  final int pendingMaps;
 
   /// What went wrong (or could not fit) in the last cycle.
   final List<String> problems;
