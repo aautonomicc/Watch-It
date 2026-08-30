@@ -130,6 +130,14 @@ class FakeEmbeddedHttp extends HttpOverrides {
   /// exercise size limits.
   int datamapSize = 100;
 
+  /// True → every `POST /datamap` fails 503 like a shrunk-map expansion
+  /// attempted while the Autonomi network is unreachable. A successful
+  /// import adds its address to [resolvedAddrs] like the real map store.
+  bool datamapUnavailable = false;
+
+  /// Addresses `GET /resolve/<addr>` answers 200 for (map held locally).
+  final Set<String> resolvedAddrs = {};
+
   /// Any base URL works — routing only looks at the path.
   static const String base = 'http://127.0.0.1:9';
 
@@ -147,21 +155,29 @@ class FakeEmbeddedHttp extends HttpOverrides {
       if (body.length >= 2 && body[0] == 0xBA && body[1] == 0xD1) {
         return (400, utf8.encode('not a data map'));
       }
-      if (body.length >= 2 && body[0] == 0xBA && body[1] == 0xD5) {
+      if (datamapUnavailable ||
+          (body.length >= 2 && body[0] == 0xBA && body[1] == 0xD5)) {
         return (
           503,
           utf8.encode('not connected to the network — this shrunk data '
               'map needs the network to expand')
         );
       }
+      final addr = addrForByte(body.isEmpty ? 0 : body.first);
+      resolvedAddrs.add(addr);
       return (
         200,
         utf8.encode(jsonEncode({
-          'address': addrForByte(body.isEmpty ? 0 : body.first),
+          'address': addr,
           'size': datamapSize,
           'chunks': 1,
         }))
       );
+    }
+    if (method == 'GET' && path.startsWith('/resolve/')) {
+      return resolvedAddrs.contains(path.substring('/resolve/'.length))
+          ? (200, utf8.encode(jsonEncode({'size': datamapSize, 'chunks': 1})))
+          : (404, const <int>[]);
     }
     if (path == '/wallet' || path.startsWith('/wallet/')) {
       return _handleWallet(method, path, body);

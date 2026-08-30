@@ -560,11 +560,15 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2))
                 else
                   Icon(
-                    s.problems.isEmpty
+                    s.problems.isEmpty && s.pendingMaps == 0
                         ? Icons.check_circle_outline
                         : Icons.warning_amber_outlined,
                     size: 16,
-                    color: s.problems.isEmpty ? t.signalOk : t.rust,
+                    color: s.problems.isNotEmpty
+                        ? t.rust
+                        : s.pendingMaps > 0
+                            ? WiTokens.channelAmber
+                            : t.signalOk,
                   ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -579,6 +583,20 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                 child: Text(
                   'Checked ${relativeTime(s.lastCycleAtMs)}',
                   style: TextStyle(fontSize: 11.5, color: t.ash),
+                ),
+              ),
+            // Maps the library needs but this device could not fetch yet
+            // (usually a connection hiccup) — without this line the card
+            // says "Everything is in sync." while a title cannot play.
+            if (s.pendingMaps > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 6, left: 24),
+                child: Text(
+                  '${s.pendingMaps} data map(s) pending — those titles '
+                  "can't play on this device yet. Retrying automatically; "
+                  'Sync now retries immediately.',
+                  style: const TextStyle(
+                      fontSize: 11.5, color: WiTokens.channelAmber),
                 ),
               ),
             for (final p in s.problems)

@@ -201,6 +201,32 @@ void main() {
       await close(tester);
     });
 
+    testWidgets('sync activity card reports pending data maps', (tester) async {
+      MyWatchSync.status.value = const MyWatchSyncStatus(
+        supported: true,
+        linked: true,
+        agentState: 'ready',
+        lastSummary: 'Everything is in sync.',
+        pendingMaps: 2,
+      );
+      await open(tester);
+      expect(find.textContaining('2 data map(s) pending'), findsOneWidget);
+      expect(find.textContaining("can't play on this device yet"),
+          findsOneWidget);
+      // The pending line clears with the count.
+      MyWatchSync.status.value = const MyWatchSyncStatus(
+        supported: true,
+        linked: true,
+        agentState: 'ready',
+        lastSummary: 'Everything is in sync.',
+      );
+      await tester.pump();
+      expect(find.textContaining('data map(s) pending'), findsNothing);
+      MyWatchSync.status.value = const MyWatchSyncStatus();
+      await tester.pump();
+      await close(tester);
+    });
+
     testWidgets('unlink confirms, deletes, and returns to unlinked view',
         (tester) async {
       await open(tester);

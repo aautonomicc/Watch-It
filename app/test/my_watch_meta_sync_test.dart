@@ -11,6 +11,7 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:watchit/db/app_database.dart';
+import 'package:watchit/services/embedded_client.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata_service.dart';
 import 'package:watchit/services/my_watch_api.dart';
@@ -533,6 +534,108 @@ void main() {
       final row = await metadataRowFor('movie:custom:2020');
       expect(row!.title, 'Mine, newer');
       expect(row.fetchedAt, 9999);
+    });
+
+    // A remote doc whose entry's shrunk map cannot import (the Autonomi
+    // network is unreachable) — the map goes on retry backoff and is
+    // reported pending.
+    List<Map<String, dynamic>> mapDoc(String addr) => [
+          {
+            'agent_id': 'bb' * 32,
+            'doc': {
+              'v': 1,
+              'lists': [
+                {
+                  'title': 'Movies',
+                  'entries': [
+                    {'name': 'M.mp4', 'address': addr, 'added_ms': 1000},
+                  ],
+                },
+              ],
+            },
+            'maps': {addr: base64Encode(const [7])},
+          },
+        ];
+
+    int datamapPosts() =>
+        fake.requests.where((r) => r == 'POST /datamap').length;
+
+    test('map backoff resets when connectivity returns, pending surfaces',
+        () async {
+      var health = const ClientHealth(state: 'connecting');
+      final sync2 = MyWatchSync(
+        api: MyWatchApi(base: FakeEmbeddedHttp.base, token: 't'),
+        health: () async => health,
+        clientBase: FakeEmbeddedHttp.base,
+      );
+      final addr = FakeEmbeddedHttp.addrForByte(7);
+      fake.datamapUnavailable = true;
+      fake.myWatchSyncDevices = mapDoc(addr);
+
+      await sync2.cycleForTesting();
+      expect(datamapPosts(), 1);
+      expect(MyWatchSync.status.value.pendingMaps, 1);
+
+      // Still offline: the backoff skips the import, the cycle reports
+      // "in sync" while the map stays pending — the user's exact report.
+      await sync2.cycleForTesting();
+      expect(datamapPosts(), 1);
+      expect(MyWatchSync.status.value.pendingMaps, 1);
+      expect(MyWatchSync.status.value.lastSummary, 'Everything is in sync.');
+
+      // Connectivity returns: the backoff is dropped, the very next
+      // cycle retries and the map lands.
+      health = const ClientHealth(state: 'ready', peers: 5);
+      fake.datamapUnavailable = false;
+      await sync2.cycleForTesting();
+      expect(datamapPosts(), 2);
+      expect(MyWatchSync.status.value.pendingMaps, 0);
+      expect(
+          MyWatchSync.status.value.lastSummary, contains('1 map(s) fetched'));
+    });
+
+    test('Sync now retries a backed-off map immediately', () async {
+      final sync2 = MyWatchSync(
+        api: MyWatchApi(base: FakeEmbeddedHttp.base, token: 't'),
+        // Health never reports connected: the retry below must come from
+        // the manual reset, not the connectivity transition.
+        health: () async => const ClientHealth(state: 'connecting'),
+        clientBase: FakeEmbeddedHttp.base,
+      );
+      final addr = FakeEmbeddedHttp.addrForByte(7);
+      fake.datamapUnavailable = true;
+      fake.myWatchSyncDevices = mapDoc(addr);
+
+      await sync2.syncNow();
+      expect(datamapPosts(), 1);
+      expect(MyWatchSync.status.value.pendingMaps, 1);
+
+      fake.datamapUnavailable = false;
+      final summary = await sync2.syncNow();
+      expect(datamapPosts(), 2);
+      expect(summary, contains('1 map(s) fetched'));
+      expect(MyWatchSync.status.value.pendingMaps, 0);
+    });
+
+    test('a stored map never counts as pending, even under backoff',
+        () async {
+      final sync2 = MyWatchSync(
+        api: MyWatchApi(base: FakeEmbeddedHttp.base, token: 't'),
+        health: () async => const ClientHealth(state: 'connecting'),
+        clientBase: FakeEmbeddedHttp.base,
+      );
+      final addr = FakeEmbeddedHttp.addrForByte(7);
+      fake.datamapUnavailable = true;
+      fake.myWatchSyncDevices = mapDoc(addr);
+      await sync2.cycleForTesting();
+      expect(MyWatchSync.status.value.pendingMaps, 1);
+
+      // The map arrives some other way (manual bundle re-import): the
+      // backoff entry must not keep reporting it pending.
+      fake.resolvedAddrs.add(addr);
+      await sync2.cycleForTesting();
+      expect(datamapPosts(), 1);
+      expect(MyWatchSync.status.value.pendingMaps, 0);
     });
   });
 }
