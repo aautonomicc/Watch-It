@@ -38,7 +38,16 @@ source "$HOME/Android/env.sh"
 echo "=== APK build start $(date) ==="
 "$REPO/native/build-android.sh"
 cd "$REPO/app"
+# Release builds always start clean: a corrupt incremental cache once made
+# Gradle package the PREVIOUS release's Dart snapshot into a fresh-versioned
+# APK ("Invalid depfile: ... kernel_snapshot_program.d" in the log, alpha.70/.71).
+flutter clean
+flutter pub get
 flutter build apk --release
+if grep -q "Invalid depfile" "$LOG"; then
+  echo "FATAL: Invalid depfile during APK build — stale-snapshot risk, aborting" >&2
+  exit 1
+fi
 echo "=== APK done $(date) ==="
 
 echo "=== AppImage build start $(date) ==="
