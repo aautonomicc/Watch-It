@@ -283,6 +283,7 @@ class OwnChannel {
     required this.createdAtMs,
     this.keyStorage,
     this.keyMissing = false,
+    this.pendingAnnounce = false,
     this.head,
   });
 
@@ -303,6 +304,11 @@ class OwnChannel {
   /// Config exists but the signing key is gone (wiped keychain) — the
   /// channel cannot publish until restored from its phrase.
   final bool keyMissing;
+
+  /// A publish finished while the channels agent was down (switch off) —
+  /// its signed head waits locally and is gossiped automatically when
+  /// the agent runs again.
+  final bool pendingAnnounce;
 
   /// Newest signature-verified head visible in the gossip store (what a
   /// restored device learns its own history from).
@@ -358,6 +364,8 @@ class ChannelsStatus {
               createdAtMs: ownJson['created_at_ms'] as int? ?? 0,
               keyStorage: ownJson['key_storage'] as String?,
               keyMissing: ownJson['key_missing'] as bool? ?? false,
+              pendingAnnounce:
+                  ownJson['pending_announce'] as bool? ?? false,
               head: ChannelHead.fromJson(
                   ownJson['head'] as Map<String, dynamic>?),
             ),

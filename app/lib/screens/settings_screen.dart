@@ -117,16 +117,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  /// "My W@tch on · Channels off" once the switches are known; a
-  /// generic description before that (or when the client is down).
+  /// "Channels on · My W@tch off" once the switches are known (Channels
+  /// first — the CONTENT section's order); a generic description before
+  /// that (or when the client is down).
   String get _x0xSubtitle {
     final mw = _myWatchOn;
     final ch = _channelsOn;
     if (mw == null || ch == null) {
-      return 'The peer-to-peer network behind My W@tch and Channels';
+      return 'The peer-to-peer network behind Channels and My W@tch';
     }
-    return 'My W@tch ${mw ? 'on' : 'off'} · '
-        'Channels ${ch ? 'on' : 'off'}';
+    return 'Channels ${ch ? 'on' : 'off'} · '
+        'My W@tch ${mw ? 'on' : 'off'}';
   }
 
   Future<void> _openX0xClient() async {
@@ -628,7 +629,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     'Playback streams through the Autonomi client — '
                     'nothing to set up; tap it to refresh the connection '
                     'status. The x0x client is the peer-to-peer network '
-                    'behind My W@tch and Channels — open it to switch '
+                    'behind Channels and My W@tch — open it to switch '
                     'either off.',
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),

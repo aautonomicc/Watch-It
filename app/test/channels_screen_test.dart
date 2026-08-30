@@ -434,6 +434,99 @@ void main() {
       // (The describe page needs poster IO; the picker and attestation
       // are covered here, the describe page in its own test below.)
     });
+
+    /// Stage one item (with its datamap in the fake) so Publish update
+    /// is enabled, and drive the flow through the cost preview into the
+    /// progress dialog. The manifest build does real file IO, which the
+    /// fake-async test zone never completes on its own — alternating
+    /// runAsync (real event loop turns) with pumps (fake-zone microtask
+    /// drains) carries it through.
+    Future<void> startPublishUpdate(WidgetTester tester) async {
+      await tester.tap(find.textContaining('Publish update'));
+      for (var i = 0; i < 10; i++) {
+        await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      // Cost preview → confirm.
+      await tester.tap(find.text('Publish · public & permanent'));
+      await tester.pump();
+      await tester.pump();
+    }
+
+    testWidgets('failed publish offers Try again; the retry succeeds',
+        (tester) async {
+      fake.wallet = {'address': '0x1', 'storage': 'keychain'};
+      fake.channelsStatus = ownStatus(fake);
+      fake.datamaps['cd' * 32] = [1, 2, 3];
+      await ChannelService.instance.addMyItem(
+          MediaEntry(name: 'My Film (2026).mp4', address: 'cd' * 32));
+      fake.uploadStates.add({
+        'phase': 'error',
+        'error': 'head publish failed: gossip timed out',
+      });
+      await openMine(tester);
+      await startPublishUpdate(tester);
+      expect(fake.channelPublishes, hasLength(1));
+
+      // First poll tick fails the job — the dialog now offers a retry.
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(find.text('Publish failed'), findsOneWidget);
+      expect(find.textContaining('gossip timed out'), findsOneWidget);
+      expect(find.text('Try again'), findsOneWidget);
+
+      // Try again restarts the job with the SAME built manifest.
+      fake.uploadStates.clear();
+      fake.uploadResult = {...fake.uploadResult, 'seq': 2};
+      await tester.tap(find.text('Try again'));
+      await tester.pump();
+      await tester.pump();
+      expect(fake.channelPublishes, hasLength(2));
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(find.textContaining('Published v2 — subscribers update'),
+          findsOneWidget);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+        'publish with Channels switched off reports the deferred announce',
+        (tester) async {
+      fake.wallet = {'address': '0x1', 'storage': 'keychain'};
+      fake.channelsStatus = ownStatus(fake);
+      fake.datamaps['cd' * 32] = [1, 2, 3];
+      await ChannelService.instance.addMyItem(
+          MediaEntry(name: 'My Film (2026).mp4', address: 'cd' * 32));
+      fake.uploadResult = {
+        ...fake.uploadResult,
+        'seq': 2,
+        'announced': false,
+      };
+      await openMine(tester);
+      await startPublishUpdate(tester);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(
+          find.textContaining(
+              'subscribers are told when Channels is switched back on'),
+          findsOneWidget);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('a waiting announce is called out on My Channel',
+        (tester) async {
+      final status = ownStatus(fake);
+      (status['own'] as Map<String, dynamic>)['pending_announce'] = true;
+      fake.channelsStatus = status;
+      await openMine(tester);
+      expect(
+          find.textContaining('not announced yet'), findsOneWidget);
+      expect(
+          find.textContaining(
+              'told automatically when Channels is switched back on'),
+          findsOneWidget);
+    });
   });
 
   group('safety rails', () {

@@ -357,9 +357,17 @@ ships, and stored in the OS keychain beside the wallet key
   Publish update builds the manifest, shows a live cost preview
   (`/upload/estimate` + balance), runs the paid public upload job
   (`POST /channel/publish`, same job surface as Upload + an
-  `announcing` phase for the head) and bumps the seq. Since
-  self-encryption is deterministic, chunks of an already-uploaded item
-  cost nothing — only the manifest is new.
+  `announcing` phase for the head) and bumps the seq; a failed job
+  offers Try again, which re-publishes the same built manifest
+  (already-stored chunks are free). Since self-encryption is
+  deterministic, chunks of an already-uploaded item cost nothing —
+  only the manifest is new. When the channels agent is down (the x0x
+  switch is off, or it is still starting) the publish still finishes:
+  the signed head is saved as pending (`pending_head.json` beside the
+  channels dir, surfaced as `pending_announce` in the status and
+  `announced: false` on the job result) and gossiped automatically on
+  the next Ready transition — re-signed above any newer head another
+  device published meanwhile.
 - **Safety rails** (plan Part 3): "publish" is reserved for channels
   ("upload" = private); every channel surface is amber with a PUBLIC
   badge (blue = private); separate drawer doors (never a toggle on

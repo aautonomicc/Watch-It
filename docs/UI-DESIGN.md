@@ -84,11 +84,14 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - Network (2026-08-30 order: **Buffer size** on top — moved in from
   the former STREAMING section, which is gone — then **Built-in
   Autonomi client** status tile, then **Built-in x0x client** (opens a
-  page with two independent switches that stop the My W@tch or
-  Channels x0x agent and all its background traffic; links, keys and
-  subscriptions are kept, and joining/creating/subscribing flips the
-  matching switch back on automatically), then the downloads/streaming
-  network policies)
+  page with two independent switches — Channels above My W@tch since
+  2026-08-30, matching the CONTENT section's order — that stop the
+  Channels or My W@tch x0x agent and all its background traffic; links,
+  keys and subscriptions are kept, and joining/creating/subscribing
+  flips the matching switch back on automatically; publishing a channel
+  update while Channels is off still works — the signed head waits and
+  is announced when the switch is back on), then the
+  downloads/streaming network policies)
 - Wallet (renamed from Publishing 2026-08-27: create with 12-word
   ceremony + retype confirm, import key/phrase, live ANT/ETH balances,
   remove; one wallet will fund both private uploads and the planned
@@ -113,6 +116,10 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   progress and per-item retry/skip → done page: per-title address +
   copy, add-all-to-library via the list picker, save-all `.datamap`
   files
+- The running batch lives in an app-wide session (2026-08-30):
+  leaving the page mid-upload loses nothing — returning shows the
+  batch where it stands (progress, a pending error's
+  retry/skip/stop, or the done page with its library actions)
 
 ### 8. My W@tch (alpha.61/.62)
 - Lives under Settings → CONTENT, directly below Channels, since
