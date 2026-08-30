@@ -125,6 +125,41 @@ mod imp {
             self.dir.as_ref().map(|d| d.join("subs.json"))
         }
 
+        /// A signed head that could not be gossiped when it was published
+        /// (channels switch off / agent not up) waits here and is
+        /// announced automatically once the agent runs again.
+        fn pending_head_path(&self) -> Option<PathBuf> {
+            self.dir.as_ref().map(|d| d.join("pending_head.json"))
+        }
+
+        fn load_pending_head(&self) -> Option<Value> {
+            let text = std::fs::read_to_string(self.pending_head_path()?).ok()?;
+            serde_json::from_str(&text).ok()
+        }
+
+        fn save_pending_head(&self, record: &Value) -> Result<(), String> {
+            let path = self
+                .pending_head_path()
+                .ok_or("no data dir available for Channels")?;
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            std::fs::write(&path, record.to_string())
+                .map_err(|e| format!("pending head save failed: {e}"))
+        }
+
+        fn clear_pending_head(&self) {
+            if let Some(path) = self.pending_head_path() {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+
+        /// Is a deferred announce waiting for [`pubkey_hex`]'s channel?
+        fn has_pending_head(&self, pubkey_hex: &str) -> bool {
+            self.load_pending_head()
+                .is_some_and(|p| p["pubkey"].as_str() == Some(pubkey_hex))
+        }
+
         fn store_dir(&self, pubkey_hex: &str) -> Option<PathBuf> {
             // First 16 hex chars are plenty unique for a directory name.
             let short = pubkey_hex.get(..16).unwrap_or(pubkey_hex);
@@ -301,6 +336,9 @@ mod imp {
                             self.set_message(None);
                             *self.phase.lock().await = Phase::Ready(running);
                             tracing::info!("channels agent up");
+                            // A head published while the agent was down
+                            // goes out now.
+                            self.flush_pending_head().await;
                             return;
                         }
                         Err(e) => {
@@ -483,6 +521,8 @@ mod imp {
             if let Some(path) = self.my_path() {
                 let _ = std::fs::remove_file(path);
             }
+            // A deferred announce dies with the channel.
+            self.clear_pending_head();
             // Drop the store handle unless a subscription still uses it.
             if !self.load_subs().contains(&own.pubkey_hex) {
                 let mut phase = self.phase.lock().await;
@@ -508,26 +548,55 @@ mod imp {
             self.load_own().is_some() && self.keys.load().is_some()
         }
 
-        /// Sign and gossip a new head for [`manifest_hex`]; returns the
-        /// sequence number it published. The next seq tops both what this
-        /// device published before AND the newest head visible in the
-        /// store, so a restored channel continues its history instead of
-        /// re-issuing old numbers.
+        /// Sign a new head for [`manifest_hex`] and gossip it; returns the
+        /// sequence number it published plus `announced`. The next seq
+        /// tops both what this device published before AND the newest
+        /// head visible in the store, so a restored channel continues its
+        /// history instead of re-issuing old numbers.
+        ///
+        /// When the agent is not running (channels switch off, or still
+        /// coming up) the publish still SUCCEEDS: the signed head is
+        /// saved as pending (`announced: false`) and gossiped
+        /// automatically the next time the agent is up — the paid
+        /// manifest upload must never read as failed just because the
+        /// gossip leg is paused.
         pub async fn publish_head(&self, manifest_hex: &str) -> Result<Value, String> {
             let mut own = self.load_own().ok_or("this device has no channel")?;
             let (secret, _) = self.keys.load().ok_or("channel key is missing")?;
             let phase = self.phase.lock().await;
-            let Phase::Ready(running) = &*phase else {
-                return Err(match &*phase {
-                    Phase::Off => "the channel link is not running".into(),
-                    _ => "the channel link is still starting — try again shortly"
-                        .to_string(),
-                });
+            let running = match &*phase {
+                Phase::Ready(r) if r.stores.contains_key(&own.pubkey_hex) => Some(r),
+                _ => None,
+            };
+            let Some(running) = running else {
+                // Deferred announce. Seq can only top this device's own
+                // history (no store to consult); the flush re-signs above
+                // any newer head it finds once the store is back.
+                let seq = own.seq + 1;
+                let sig = channel::sign_head(&secret, seq, manifest_hex)?;
+                self.save_pending_head(&json!({
+                    "pubkey": own.pubkey_hex,
+                    "seq": seq,
+                    "manifest": manifest_hex,
+                    "sig": sig,
+                }))?;
+                own.seq = seq;
+                own.manifest_hex = manifest_hex.to_string();
+                self.save_own(&own)?;
+                tracing::info!(
+                    "channel head v{seq} saved — announced when the channel \
+                     link next runs"
+                );
+                return Ok(json!({
+                    "seq": seq,
+                    "manifest": manifest_hex,
+                    "announced": false,
+                }));
             };
             let store = running
                 .stores
                 .get(&own.pubkey_hex)
-                .ok_or("the channel topic is not joined yet — try again shortly")?;
+                .expect("checked above");
             let visible = best_head(store, &own.pubkey_hex)
                 .await
                 .map(|h| h.0)
@@ -548,10 +617,84 @@ mod imp {
                 .put(key, record.to_string().into_bytes(), "application/json".into())
                 .await
                 .map_err(|e| format!("head publish failed: {e}"))?;
+            // A live publish supersedes any older deferred head.
+            self.clear_pending_head();
             own.seq = seq;
             own.manifest_hex = manifest_hex.to_string();
             self.save_own(&own)?;
-            Ok(json!({ "seq": seq, "manifest": manifest_hex }))
+            Ok(json!({ "seq": seq, "manifest": manifest_hex, "announced": true }))
+        }
+
+        /// Gossip a deferred head, if one is waiting and the agent is up.
+        /// Called after every Ready transition / own-topic join. If the
+        /// store meanwhile shows an equal-or-newer head (another device
+        /// republished), the pending manifest is re-signed above it. On
+        /// any failure the head simply stays pending for the next pass.
+        async fn flush_pending_head(&self) {
+            let Some(pending) = self.load_pending_head() else { return };
+            let Some(mut own) = self.load_own() else {
+                self.clear_pending_head();
+                return;
+            };
+            if pending["pubkey"].as_str() != Some(own.pubkey_hex.as_str()) {
+                // Stale leftover from a removed/replaced channel.
+                self.clear_pending_head();
+                return;
+            }
+            let (Some(mut seq), Some(manifest), Some(mut sig)) = (
+                pending["seq"].as_u64(),
+                pending["manifest"].as_str().map(str::to_string),
+                pending["sig"].as_str().map(str::to_string),
+            ) else {
+                self.clear_pending_head();
+                return;
+            };
+            let phase = self.phase.lock().await;
+            let Phase::Ready(running) = &*phase else { return };
+            let Some(store) = running.stores.get(&own.pubkey_hex) else {
+                return;
+            };
+            let visible = best_head(store, &own.pubkey_hex)
+                .await
+                .map(|h| h.0)
+                .unwrap_or(0);
+            if visible >= seq {
+                let Some((secret, _)) = self.keys.load() else { return };
+                seq = visible + 1;
+                sig = match channel::sign_head(&secret, seq, &manifest) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!("pending head re-sign failed: {e}");
+                        return;
+                    }
+                };
+            }
+            let record = json!({
+                "wchn": "head",
+                "v": 1,
+                "pubkey": own.pubkey_hex,
+                "seq": seq,
+                "manifest": manifest,
+                "sig": sig,
+                "updated_at_ms": now_ms(),
+            });
+            let key = hex::encode(running.agent.agent_id().as_bytes());
+            match store
+                .put(key, record.to_string().into_bytes(), "application/json".into())
+                .await
+            {
+                Ok(_) => {
+                    self.clear_pending_head();
+                    if own.seq < seq {
+                        own.seq = seq;
+                        let _ = self.save_own(&own);
+                    }
+                    tracing::info!("deferred channel head v{seq} announced");
+                }
+                Err(e) => {
+                    tracing::warn!("deferred head announce failed (kept pending): {e}");
+                }
+            }
         }
 
         // ---- subscriptions ----------------------------------------------
@@ -627,6 +770,10 @@ mod imp {
                             }
                         }
                     }
+                    drop(phase);
+                    // The own topic may just have become joinable — a
+                    // deferred head goes out now (no-op without one).
+                    self.flush_pending_head().await;
                     return;
                 }
             }
@@ -695,6 +842,9 @@ mod imp {
                         "created_at_ms": cfg.created_at_ms,
                         "key_storage": key_storage,
                         "key_missing": key_storage.is_none(),
+                        // A publish finished while the agent was down —
+                        // its head goes out when the switch is back on.
+                        "pending_announce": self.has_pending_head(&cfg.pubkey_hex),
                         "head": head_json(head),
                     })
                 }
@@ -849,6 +999,68 @@ mod imp {
             assert_eq!(v["state"], serde_json::json!("off"));
             assert!(v["own"].is_null());
             assert_eq!(v["subs"].as_array().unwrap().len(), 0);
+        }
+
+        /// A configured own channel with its key in the (file-backed)
+        /// store, for publish tests.
+        fn store_with_own(name: &str) -> (ChannelStore, String, String) {
+            let store = test_store(name);
+            let (_, secret, _) = channel::generate().unwrap();
+            let pubkey = channel::pubkey_of(&secret).unwrap();
+            store.keys.store(&secret).unwrap();
+            store
+                .save_own(&OwnConfig {
+                    name: "Films".into(),
+                    pubkey_hex: pubkey.clone(),
+                    ..Default::default()
+                })
+                .unwrap();
+            (store, secret, pubkey)
+        }
+
+        #[tokio::test]
+        async fn publish_while_off_defers_the_announce() {
+            let (store, _, pubkey) = store_with_own("defer");
+            let manifest = "ab".repeat(32);
+            // Agent down (Phase::Off) — the publish still succeeds.
+            let v = store.publish_head(&manifest).await.unwrap();
+            assert_eq!(v["seq"], json!(1));
+            assert_eq!(v["announced"], json!(false));
+            // Own config advanced, and the pending head is a validly
+            // signed record for exactly this manifest.
+            let own = store.load_own().unwrap();
+            assert_eq!(own.seq, 1);
+            assert_eq!(own.manifest_hex, manifest);
+            let pending = store.load_pending_head().unwrap();
+            assert_eq!(pending["pubkey"].as_str().unwrap(), pubkey);
+            assert!(channel::verify_head(
+                &pubkey,
+                1,
+                &manifest,
+                pending["sig"].as_str().unwrap(),
+            ));
+            // Status surfaces the wait.
+            let s = store.status().await;
+            assert_eq!(s["own"]["pending_announce"], json!(true));
+
+            // A second deferred publish supersedes the first.
+            let manifest2 = "cd".repeat(32);
+            let v = store.publish_head(&manifest2).await.unwrap();
+            assert_eq!(v["seq"], json!(2));
+            let pending = store.load_pending_head().unwrap();
+            assert_eq!(pending["seq"], json!(2));
+            assert_eq!(pending["manifest"].as_str().unwrap(), manifest2);
+        }
+
+        #[tokio::test]
+        async fn remove_own_drops_a_pending_head() {
+            let (store, _, _) = store_with_own("defer-remove");
+            store.publish_head(&"ab".repeat(32)).await.unwrap();
+            assert!(store.load_pending_head().is_some());
+            store.remove_own().await.unwrap();
+            assert!(store.load_pending_head().is_none());
+            let s = store.status().await;
+            assert!(s["own"].is_null());
         }
 
         #[tokio::test]

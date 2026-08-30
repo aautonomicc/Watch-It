@@ -13,6 +13,7 @@ import 'package:watchit/screens/publish_screen.dart';
 import 'package:watchit/services/ffmpeg.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/publish_plan.dart';
+import 'package:watchit/services/publish_session.dart';
 import 'package:watchit/theme/tokens.dart';
 
 import 'fake_embedded_http.dart';
@@ -101,6 +102,7 @@ void main() {
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    PublishSession.resetForTesting();
     await LibraryStore.useForTesting(
         AppDatabase.forTesting(NativeDatabase.memory()));
     fake = FakeEmbeddedHttp();
@@ -420,6 +422,55 @@ void main() {
     // Nothing published → no add-to-library offer.
     expect(find.text('Add to library'), findsNothing);
     expect(find.text('Upload more'), findsOneWidget);
+  });
+
+  testWidgets(
+      'leaving mid-upload and returning shows the running batch, then done',
+      (tester) async {
+    fake.wallet = {'address': '0x1', 'storage': 'keychain'};
+    fake.uploadStates.addAll([
+      {'phase': 'storing', 'done': 1, 'total': 3},
+      {'phase': 'storing', 'done': 2, 'total': 3},
+      {
+        'phase': 'done',
+        'done': 3,
+        'total': 3,
+        'result': fake.uploadResult,
+      },
+    ]);
+    FileSelectorPlatform.instance =
+        _FakeFileSelector([mediaFile('My Film (2021).mp4')]);
+    final ffmpeg = _FakeFfmpeg({'My Film (2021).mp4': universalProbe});
+    await openPublish(tester, ffmpeg);
+    await pickAndEstimate(tester);
+    await tester.tap(find.byType(CheckboxListTile));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Upload'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    expect(find.textContaining('Storing chunks'), findsOneWidget);
+
+    // Leave the Upload page mid-upload (the old behaviour dropped the
+    // batch and a fresh screen showed the setup page)...
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+
+    // ...and come back: the same batch is still running and on show.
+    await openPublish(tester, ffmpeg);
+    expect(find.text('Choose files to upload'), findsNothing);
+    expect(find.textContaining('Uploading · task 1 of 1'), findsOneWidget);
+
+    // It finishes while the page is open; the done page offers the
+    // library actions that were unreachable before.
+    await pumpUploads(tester, 1);
+    expect(find.text('Uploaded'), findsOneWidget);
+    expect(find.text('Add to library'), findsOneWidget);
+
+    // Upload more resets to a fresh setup page.
+    await tester.tap(find.text('Upload more'));
+    await tester.pump();
+    expect(find.text('Choose files to upload'), findsOneWidget);
   });
 
   testWidgets('ffmpeg missing: as-is only banner, publish still works',

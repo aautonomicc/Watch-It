@@ -117,8 +117,8 @@ class _X0xClientScreenState extends State<X0xClientScreen> {
     if (s == null) return 'Checking…';
     if (!s.supported) return 'Not available on this platform';
     if (!s.enabled) {
-      return 'Switched off — channels get no updates and your own '
-          'channel cannot publish';
+      return 'Switched off — channels get no updates; your own '
+          'publishes wait here until it is back on';
     }
     final count = s.subs.length + (s.own != null ? 1 : 0);
     if (count == 0) return 'On — no channels yet';
@@ -146,7 +146,7 @@ class _X0xClientScreenState extends State<X0xClientScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
             child: Text(
-              'My W@tch and Channels talk to each other over x0x, a '
+              'Channels and My W@tch talk to each other over x0x, a '
               'peer-to-peer gossip network embedded in the app '
               '(separate from the Autonomi client that streams and '
               'downloads media). Keeping a feature on uses some '
@@ -158,20 +158,8 @@ class _X0xClientScreenState extends State<X0xClientScreen> {
               style: TextStyle(fontSize: 12.5, color: t.boneDim),
             ),
           ),
-          SwitchListTile(
-            secondary: Icon(Icons.devices_outlined, color: t.accent),
-            title: Text('My W@tch',
-                style: TextStyle(color: t.bone, fontSize: 15)),
-            subtitle: Text(
-              _myWatchStateLine(myWatch),
-              style: TextStyle(color: t.ash, fontSize: 12),
-            ),
-            value: myWatch?.enabled ?? true,
-            onChanged:
-                _busyMyWatch || myWatch == null || !myWatch.supported
-                    ? null
-                    : _setMyWatchEnabled,
-          ),
+          // Channels above My W@tch — same order as Settings' CONTENT
+          // section, so the two lists read alike.
           SwitchListTile(
             secondary:
                 const Icon(Icons.podcasts, color: WiTokens.channelAmber),
@@ -186,6 +174,20 @@ class _X0xClientScreenState extends State<X0xClientScreen> {
                 _busyChannels || channels == null || !channels.supported
                     ? null
                     : _setChannelsEnabled,
+          ),
+          SwitchListTile(
+            secondary: Icon(Icons.devices_outlined, color: t.accent),
+            title: Text('My W@tch',
+                style: TextStyle(color: t.bone, fontSize: 15)),
+            subtitle: Text(
+              _myWatchStateLine(myWatch),
+              style: TextStyle(color: t.ash, fontSize: 12),
+            ),
+            value: myWatch?.enabled ?? true,
+            onChanged:
+                _busyMyWatch || myWatch == null || !myWatch.supported
+                    ? null
+                    : _setMyWatchEnabled,
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),

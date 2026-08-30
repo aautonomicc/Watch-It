@@ -46,6 +46,10 @@ pub struct Outcome {
     /// Channel-publish jobs only: the head sequence number announced for
     /// this manifest. `None` for normal (private) uploads.
     pub seq: Option<u64>,
+    /// Channel-publish jobs only: false when the signed head could not be
+    /// gossiped yet (channels switch off) and waits for the agent to run
+    /// again. Always true for normal uploads.
+    pub announced: bool,
 }
 
 impl JobState {
@@ -64,6 +68,7 @@ impl JobState {
                 "cost_atto": r.cost_atto,
                 "gas_wei": r.gas_wei.to_string(),
                 "seq": r.seq,
+                "announced": r.announced,
             })),
         })
     }
@@ -229,6 +234,7 @@ async fn drive_channel_publish(
         cost_atto: result.storage_cost_atto.clone(),
         gas_wei: result.gas_cost_wei,
         seq: head["seq"].as_u64(),
+        announced: head["announced"].as_bool().unwrap_or(true),
     })
 }
 
@@ -349,6 +355,7 @@ async fn drive_upload(
         cost_atto: result.storage_cost_atto.clone(),
         gas_wei: result.gas_cost_wei,
         seq: None,
+        announced: true,
     })
 }
 

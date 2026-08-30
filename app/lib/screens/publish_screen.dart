@@ -12,6 +12,7 @@ import '../services/ffmpeg.dart';
 import '../services/library_store.dart';
 import '../services/publish_api.dart';
 import '../services/publish_plan.dart';
+import '../services/publish_session.dart';
 import '../theme/tokens.dart';
 import 'settings_screen.dart' show promptForText;
 import 'wallet_screen.dart';
@@ -44,12 +45,6 @@ class PublishScreen extends StatefulWidget {
   State<PublishScreen> createState() => _PublishScreenState();
 }
 
-enum _Stage { setup, running, done }
-
-enum _EntryStatus { pending, encoding, uploading, done, error, skipped }
-
-enum _ErrorAction { retry, skip, stop }
-
 class _PickedFile {
   _PickedFile(this.file, this.size, this.probe);
   final XFile file;
@@ -60,26 +55,19 @@ class _PickedFile {
       path: file.path, name: file.name, size: size, probe: probe);
 }
 
-class _QueueEntry {
-  _QueueEntry(this.item);
-  final PublishItem item;
-  _EntryStatus status = _EntryStatus.pending;
-  double? encodeFraction;
-  UploadJob? job;
-  UploadResult? result;
-  String? error;
-  String? tempPath;
-}
-
 class _PublishScreenState extends State<PublishScreen> {
   late final PublishApi _api =
       PublishApi(base: widget.apiBase, token: widget.apiToken);
   late final FfmpegService _ffmpeg = widget.ffmpeg ?? FfmpegService();
 
+  /// The batch itself lives in this app-wide session, not the widget —
+  /// leaving the page mid-upload loses nothing, and reopening it shows
+  /// the batch where it stands.
+  final PublishSession _session = PublishSession.instance;
+
   WalletStatus? _wallet;
   bool? _ffmpegAvailable;
 
-  _Stage _stage = _Stage.setup;
   final List<_PickedFile> _files = [];
   bool _picking = false;
   Set<PublishTier> _selection = {};
@@ -88,15 +76,10 @@ class _PublishScreenState extends State<PublishScreen> {
   String? _estimateError;
   bool _rights = false;
 
-  List<_QueueEntry> _queue = [];
-  int _current = 0;
-  Completer<_ErrorAction>? _errorAction;
-  Directory? _tempDir;
-  bool _disposed = false;
-
   @override
   void initState() {
     super.initState();
+    _session.addListener(_onSession);
     _loadWallet();
     _ffmpeg.available.then((ok) {
       if (mounted) setState(() => _ffmpegAvailable = ok);
@@ -105,13 +88,15 @@ class _PublishScreenState extends State<PublishScreen> {
 
   @override
   void dispose() {
-    _disposed = true;
-    _ffmpeg.cancel();
-    if (!(_errorAction?.isCompleted ?? true)) {
-      _errorAction!.complete(_ErrorAction.stop);
-    }
-    _cleanupTempDir();
+    _session.removeListener(_onSession);
+    // A running batch encodes with this ffmpeg instance — leave it be;
+    // only kill setup-stage probes.
+    if (!identical(_session.ffmpegInUse, _ffmpeg)) _ffmpeg.cancel();
     super.dispose();
+  }
+
+  void _onSession() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadWallet() async {
@@ -210,179 +195,31 @@ class _PublishScreenState extends State<PublishScreen> {
   }
 
   bool get _canPublish =>
-      _stage == _Stage.setup &&
+      _session.idle &&
       !_picking &&
       (_wallet?.configured ?? false) &&
       _refEstimate != null &&
       _rights &&
       _plannedQueue().isNotEmpty;
 
-  Future<void> _publish() async {
+  void _publish() {
     final queue = _plannedQueue();
-    if (queue.isEmpty) return;
-    if (queue.any((i) => i.needsEncode)) {
-      // Sync on purpose: async file IO never completes in the widget
-      // tests' fake-async zone, and this is a one-off cheap call.
-      _tempDir = Directory.systemTemp.createTempSync('watchit-publish');
-    }
-    setState(() {
-      _queue = [for (final item in queue) _QueueEntry(item)];
-      _current = 0;
-      _stage = _Stage.running;
-    });
-    unawaited(_run());
-  }
-
-  Future<void> _run() async {
-    for (var i = 0; i < _queue.length; i++) {
-      if (_disposed) return;
-      final entry = _queue[i];
-      if (mounted) setState(() => _current = i);
-      var done = false;
-      while (!done) {
-        try {
-          await _runEntry(entry);
-          done = true;
-        } catch (e) {
-          if (_disposed || !mounted) return;
-          setState(() {
-            entry.status = _EntryStatus.error;
-            entry.error = '$e';
-          });
-          _errorAction = Completer<_ErrorAction>();
-          final action = await _errorAction!.future;
-          _errorAction = null;
-          if (_disposed || !mounted) return;
-          switch (action) {
-            case _ErrorAction.retry:
-              setState(() => entry.error = null);
-            case _ErrorAction.skip:
-              setState(() => entry.status = _EntryStatus.skipped);
-              done = true;
-            case _ErrorAction.stop:
-              _finishRun(markRemainingSkipped: true);
-              return;
-          }
-        }
-      }
-    }
-    _finishRun();
-  }
-
-  Future<void> _runEntry(_QueueEntry entry) async {
-    final item = entry.item;
-    var uploadPath = item.source.path;
-    if (item.needsEncode) {
-      // A retry after an upload failure reuses the finished encode.
-      final existing = entry.tempPath;
-      if (existing != null && File(existing).existsSync()) {
-        uploadPath = existing;
-      } else {
-        if (mounted) {
-          setState(() {
-            entry.status = _EntryStatus.encoding;
-            entry.encodeFraction = null;
-          });
-        }
-        final output =
-            '${_tempDir!.path}${Platform.pathSeparator}${item.outputName}';
-        await _ffmpeg.encode(
-          input: item.source.path,
-          output: output,
-          tier: item.tier,
-          probe: item.source.probe,
-          onProgress: (fraction) {
-            if (mounted) setState(() => entry.encodeFraction = fraction);
-          },
-        );
-        if (_disposed) throw FfmpegException('cancelled');
-        entry.tempPath = output;
-        uploadPath = output;
-      }
-    }
-    if (mounted) {
-      setState(() {
-        entry.status = _EntryStatus.uploading;
-        entry.job = null;
-      });
-    }
-    final id = await _api.startUpload(uploadPath, name: item.outputName);
-    while (true) {
-      await Future<void>.delayed(const Duration(seconds: 1));
-      if (_disposed) return;
-      UploadJob job;
-      try {
-        job = await _api.jobStatus(id);
-      } catch (_) {
-        continue; // Transient poll failure — next tick retries.
-      }
-      if (mounted) setState(() => entry.job = job);
-      final result = job.result;
-      if (job.phase == 'done' && result != null) {
-        if (mounted) {
-          setState(() {
-            entry.result = result;
-            entry.status = _EntryStatus.done;
-          });
-        }
-        _deleteTemp(entry);
-        return;
-      }
-      if (job.phase == 'error') {
-        throw PublishApiException(job.error ?? 'upload failed');
-      }
-    }
-  }
-
-  void _finishRun({bool markRemainingSkipped = false}) {
-    if (!mounted) return;
-    setState(() {
-      if (markRemainingSkipped) {
-        for (final entry in _queue) {
-          if (entry.status == _EntryStatus.pending ||
-              entry.status == _EntryStatus.error) {
-            entry.status = _EntryStatus.skipped;
-          }
-        }
-      }
-      _stage = _Stage.done;
-    });
-    _cleanupTempDir();
-  }
-
-  void _deleteTemp(_QueueEntry entry) {
-    final path = entry.tempPath;
-    if (path == null) return;
-    entry.tempPath = null;
-    try {
-      File(path).deleteSync();
-    } catch (_) {}
-  }
-
-  void _cleanupTempDir() {
-    final dir = _tempDir;
-    _tempDir = null;
-    if (dir == null) return;
-    try {
-      dir.deleteSync(recursive: true);
-    } catch (_) {}
+    if (queue.isEmpty || !_session.idle) return;
+    _session.start(api: _api, ffmpeg: _ffmpeg, items: queue);
   }
 
   void _reset() {
+    _session.clear();
     setState(() {
-      _stage = _Stage.setup;
       _files.clear();
       _selection = {};
       _refEstimate = null;
       _estimateError = null;
       _rights = false;
-      _queue = [];
-      _current = 0;
     });
   }
 
-  List<_QueueEntry> get _published =>
-      [for (final e in _queue) if (e.result != null) e];
+  List<PublishQueueEntry> get _published => _session.published;
 
   Future<void> _addAllToLibrary() async {
     final published = _published;
@@ -447,10 +284,10 @@ class _PublishScreenState extends State<PublishScreen> {
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
-        children: switch (_stage) {
-          _Stage.setup => _setupChildren(t),
-          _Stage.running => _runningChildren(t),
-          _Stage.done => _doneChildren(t),
+        children: switch (_session.stage) {
+          PublishStage.idle => _setupChildren(t),
+          PublishStage.running => _runningChildren(t),
+          PublishStage.done => _doneChildren(t),
         },
       ),
     );
@@ -868,32 +705,35 @@ class _PublishScreenState extends State<PublishScreen> {
   // ── running ──────────────────────────────────────────────────────────
 
   List<Widget> _runningChildren(WiTokens t) {
-    final finished = _queue
+    final queue = _session.queue;
+    final finished = queue
         .where((e) =>
-            e.status == _EntryStatus.done || e.status == _EntryStatus.skipped)
+            e.status == PublishEntryStatus.done ||
+            e.status == PublishEntryStatus.skipped)
         .length;
-    final entry =
-        _current < _queue.length ? _queue[_current] : _queue.last;
+    final entry = _session.currentEntry;
     return [
       Text(
-        'Uploading · task ${(_current + 1).clamp(1, _queue.length)} of '
-        '${_queue.length}',
+        'Uploading · task ${(_session.current + 1).clamp(1, queue.length)} '
+        'of ${queue.length}',
         style: TextStyle(
             color: t.bone, fontSize: 16, fontWeight: FontWeight.w600),
       ),
       const SizedBox(height: 8),
       LinearProgressIndicator(
-        value: _queue.isEmpty ? null : finished / _queue.length,
+        value: queue.isEmpty ? null : finished / queue.length,
         backgroundColor: t.ink2,
       ),
       const SizedBox(height: 16),
-      if (entry.status == _EntryStatus.error)
+      if (entry.status == PublishEntryStatus.error)
         ..._entryErrorSection(t, entry)
       else
         ..._entryProgressSection(t, entry),
       const SizedBox(height: 4),
       Text(
-        'Keep W@tch open until uploading finishes.',
+        'You can leave this page — uploading continues and picks up here '
+        'when you come back. Just keep W@tch itself open until it '
+        'finishes.',
         style: TextStyle(color: t.ash, fontSize: 12),
       ),
       const SizedBox(height: 16),
@@ -901,10 +741,10 @@ class _PublishScreenState extends State<PublishScreen> {
     ];
   }
 
-  List<Widget> _entryProgressSection(WiTokens t, _QueueEntry entry) {
+  List<Widget> _entryProgressSection(WiTokens t, PublishQueueEntry entry) {
     final String label;
     double? fraction;
-    if (entry.status == _EntryStatus.encoding) {
+    if (entry.status == PublishEntryStatus.encoding) {
       fraction = entry.encodeFraction;
       label = 'Encoding ${tierLabel(entry.item.source.probe, entry.item.tier)}'
           '${fraction == null ? '…' : ' · ${(fraction * 100).round()}%'}';
@@ -939,7 +779,7 @@ class _PublishScreenState extends State<PublishScreen> {
     ];
   }
 
-  List<Widget> _entryErrorSection(WiTokens t, _QueueEntry entry) {
+  List<Widget> _entryErrorSection(WiTokens t, PublishQueueEntry entry) {
     return [
       Text(
         '${entry.item.outputName} failed',
@@ -954,15 +794,15 @@ class _PublishScreenState extends State<PublishScreen> {
         spacing: 12,
         children: [
           FilledButton(
-            onPressed: () => _errorAction?.complete(_ErrorAction.retry),
+            onPressed: () => _session.resolveError(PublishErrorAction.retry),
             child: const Text('Try again'),
           ),
           OutlinedButton(
-            onPressed: () => _errorAction?.complete(_ErrorAction.skip),
+            onPressed: () => _session.resolveError(PublishErrorAction.skip),
             child: const Text('Skip this file'),
           ),
           TextButton(
-            onPressed: () => _errorAction?.complete(_ErrorAction.stop),
+            onPressed: () => _session.resolveError(PublishErrorAction.stop),
             child: Text('Stop', style: TextStyle(color: t.ash)),
           ),
         ],
@@ -972,25 +812,28 @@ class _PublishScreenState extends State<PublishScreen> {
 
   List<Widget> _queueList(WiTokens t) {
     return [
-      for (final entry in _queue)
+      for (final entry in _session.queue)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 3),
           child: Row(
             children: [
               Icon(
                 switch (entry.status) {
-                  _EntryStatus.pending => Icons.schedule,
-                  _EntryStatus.encoding => Icons.movie_filter_outlined,
-                  _EntryStatus.uploading => Icons.cloud_upload_outlined,
-                  _EntryStatus.done => Icons.check_circle_outline,
-                  _EntryStatus.error => Icons.error_outline,
-                  _EntryStatus.skipped => Icons.remove_circle_outline,
+                  PublishEntryStatus.pending => Icons.schedule,
+                  PublishEntryStatus.encoding => Icons.movie_filter_outlined,
+                  PublishEntryStatus.uploading =>
+                    Icons.cloud_upload_outlined,
+                  PublishEntryStatus.done => Icons.check_circle_outline,
+                  PublishEntryStatus.error => Icons.error_outline,
+                  PublishEntryStatus.skipped => Icons.remove_circle_outline,
                 },
                 size: 16,
                 color: switch (entry.status) {
-                  _EntryStatus.done => t.signalOk,
-                  _EntryStatus.error => t.rust,
-                  _EntryStatus.pending || _EntryStatus.skipped => t.ash,
+                  PublishEntryStatus.done => t.signalOk,
+                  PublishEntryStatus.error => t.rust,
+                  PublishEntryStatus.pending ||
+                  PublishEntryStatus.skipped =>
+                    t.ash,
                   _ => t.accent,
                 },
               ),
@@ -1000,7 +843,7 @@ class _PublishScreenState extends State<PublishScreen> {
                   entry.item.outputName,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      color: entry.status == _EntryStatus.skipped
+                      color: entry.status == PublishEntryStatus.skipped
                           ? t.ash
                           : t.boneDim,
                       fontSize: 13),
@@ -1015,13 +858,12 @@ class _PublishScreenState extends State<PublishScreen> {
   // ── done ─────────────────────────────────────────────────────────────
 
   List<Widget> _doneChildren(WiTokens t) {
+    final queue = _session.queue;
     final published = _published;
-    final failed = _queue
-        .where((e) => e.status == _EntryStatus.error)
-        .length;
-    final skipped = _queue
-        .where((e) => e.status == _EntryStatus.skipped)
-        .length;
+    final failed =
+        queue.where((e) => e.status == PublishEntryStatus.error).length;
+    final skipped =
+        queue.where((e) => e.status == PublishEntryStatus.skipped).length;
     var paid = BigInt.zero;
     for (final e in published) {
       paid += e.result!.costAtto;
@@ -1049,7 +891,7 @@ class _PublishScreenState extends State<PublishScreen> {
       ),
       const SizedBox(height: 8),
       Text(
-        '${published.length} of ${_queue.length} uploads finished · '
+        '${published.length} of ${queue.length} uploads finished · '
         'paid ${formatUnits(paid)} ANT'
         '${skipped > 0 ? ' · $skipped skipped' : ''}'
         '${failed > 0 ? ' · $failed failed' : ''}',
@@ -1089,7 +931,7 @@ class _PublishScreenState extends State<PublishScreen> {
     ];
   }
 
-  Widget _publishedTile(WiTokens t, _QueueEntry entry) {
+  Widget _publishedTile(WiTokens t, PublishQueueEntry entry) {
     final result = entry.result!;
     final address = result.address;
     final short = address.length > 16

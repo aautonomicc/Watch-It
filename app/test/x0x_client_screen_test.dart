@@ -141,9 +141,20 @@ void main() {
     await open(tester);
 
     expect(find.text('Not available on this platform'), findsOneWidget);
+    // My W@tch is the second switch (Channels sits on top).
     final myWatchTile = tester.widget<SwitchListTile>(
-        find.byType(SwitchListTile).first);
+        find.byType(SwitchListTile).last);
     expect(myWatchTile.onChanged, isNull);
+    await close(tester);
+  });
+
+  testWidgets('Channels switch sits above My W@tch (CONTENT order)',
+      (tester) async {
+    await open(tester);
+    expect(
+      tester.getTopLeft(find.text('Channels')).dy,
+      lessThan(tester.getTopLeft(find.text('My W@tch')).dy),
+    );
     await close(tester);
   });
 }

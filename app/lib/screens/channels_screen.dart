@@ -694,6 +694,17 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
               style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
             ),
           ),
+        if (own.pendingAnnounce)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'The latest update is on the network but not announced yet '
+              '— subscribers are told automatically when Channels is '
+              'switched back on (Settings → Built-in x0x client).',
+              style: TextStyle(
+                  color: WiTokens.channelAmber, fontSize: 12, height: 1.4),
+            ),
+          ),
         if (_myItems.isEmpty)
           Text(
             'No items yet. Items are added one explicit pick at a time — '
@@ -885,19 +896,31 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
         ),
       );
       if (proceed != true || !mounted) return;
-      final id = await _api.publishManifest(build.path,
-          name: '${own.name} manifest');
-      if (!mounted) return;
-      final result = await showDialog<UploadResult>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => _PublishProgressDialog(api: _publishApi, id: id),
-      );
-      if (result != null) {
-        _snack('Published v${result.seq ?? '?'} — subscribers update '
-            'automatically');
-        // Refresh this machine's own amber list from the new manifest.
-        unawaited(ChannelService.instance.syncNow());
+      // The manifest file stays on disk until the finally below, so a
+      // failed publish can be retried from the progress dialog without
+      // rebuilding (already-stored chunks are free on the network side).
+      var again = true;
+      while (again && mounted) {
+        again = false;
+        final id = await _api.publishManifest(build.path,
+            name: '${own.name} manifest');
+        if (!mounted) return;
+        final outcome = await showDialog<Object>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => _PublishProgressDialog(api: _publishApi, id: id),
+        );
+        if (outcome is UploadResult) {
+          _snack(outcome.announced
+              ? 'Published v${outcome.seq ?? '?'} — subscribers update '
+                  'automatically'
+              : 'Published v${outcome.seq ?? '?'} — saved on this device; '
+                  'subscribers are told when Channels is switched back on');
+          // Refresh this machine's own amber list from the new manifest.
+          unawaited(ChannelService.instance.syncNow());
+        } else if (outcome == _PublishProgressDialog.retry) {
+          again = true;
+        }
       }
     } catch (e) {
       _snack('$e');
@@ -2369,11 +2392,15 @@ class _CostPreviewDialogState extends State<_CostPreviewDialog> {
 }
 
 /// Follows the publish job (encrypting → quoting → paying → storing →
-/// announcing) and pops with the result.
+/// announcing) and pops with the [UploadResult] — or, after a failure,
+/// with [retry] when the user chooses to try again.
 class _PublishProgressDialog extends StatefulWidget {
   const _PublishProgressDialog({required this.api, required this.id});
   final PublishApi api;
   final int id;
+
+  /// Sentinel pop value: restart the publish with the same manifest.
+  static const retry = 'retry';
 
   @override
   State<_PublishProgressDialog> createState() =>
@@ -2460,11 +2487,21 @@ class _PublishProgressDialogState extends State<_PublishProgressDialog> {
         ),
       ),
       actions: [
-        if (job?.phase == 'error')
+        if (job?.phase == 'error') ...[
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: Text('Close', style: TextStyle(color: t.ash)),
           ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: WiTokens.channelAmber,
+              foregroundColor: Colors.black,
+            ),
+            onPressed: () =>
+                Navigator.of(context).pop(_PublishProgressDialog.retry),
+            child: const Text('Try again'),
+          ),
+        ],
       ],
     );
   }
