@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -58,6 +59,23 @@ Uint8List manifestZip({
         'posters/$member', Uint8List.fromList(avatarBytes)));
   }
   return Uint8List.fromList(ZipEncoder().encode(archive));
+}
+
+/// A ChannelsApi whose status() can be held open, to park a sync cycle
+/// mid-flight.
+class _GatedApi extends ChannelsApi {
+  _GatedApi() : super(base: FakeEmbeddedHttp.base);
+
+  Completer<void>? gate;
+  int statusCalls = 0;
+
+  @override
+  Future<ChannelsStatus> status() async {
+    statusCalls++;
+    final g = gate;
+    if (g != null) await g.future;
+    return super.status();
+  }
 }
 
 void main() {
@@ -231,6 +249,33 @@ void main() {
       // Not marked imported — the next head check retries.
       final record = await ChannelService.instance.record(pubkey);
       expect(record!.importedSeq, 0);
+    });
+
+    test(
+        'checkNow during an in-flight cycle waits it out and runs a '
+        'fresh pass; syncNow joins the in-flight cycle', () async {
+      await seedSubscription();
+      fake.channelManifests[manifestAddr] = manifestZip(pubkey: pubkey);
+      final api = _GatedApi();
+      ChannelService.instance.api = api;
+      final gate = Completer<void>();
+      api.gate = gate;
+      final first = ChannelService.instance.syncNow(); // parked at status()
+      // A second syncNow while a cycle runs joins that cycle — it must
+      // not be a silent no-op (the old behaviour) nor a second pass.
+      final joined = ChannelService.instance.syncNow();
+      expect(identical(first, joined), isTrue);
+      final manual = ChannelService.instance.checkNow();
+      // Nothing beyond the parked pass has hit the core yet.
+      expect(api.statusCalls, 1);
+      api.gate = null;
+      gate.complete();
+      await first;
+      await manual;
+      // The manual press ran its own full pass after the first ended.
+      expect(api.statusCalls, 2);
+      final record = await ChannelService.instance.record(pubkey);
+      expect(record!.importedSeq, 2);
     });
   });
 
