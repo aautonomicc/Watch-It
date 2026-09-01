@@ -8,3 +8,6 @@ app/android/app/src/main/jniLibs/
 # AppImage build output
 dist/
 squashfs-root/
+
+# Pure-Dart package build state (cli/, packages/)
+.dart_tool/

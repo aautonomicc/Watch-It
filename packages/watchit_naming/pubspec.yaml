@@ -1,0 +1,16 @@
+name: watchit_naming
+description: >-
+  Shared media file-name parsing, sanitization, and generation for W@tch
+  and the upload CLI. One source of truth: the app parses names generated
+  here, so parser drift is impossible by construction.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  unorm_dart: ^0.3.0
+
+dev_dependencies:
+  test: ^1.25.0
