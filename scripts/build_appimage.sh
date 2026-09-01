@@ -11,7 +11,13 @@ OUT_DIR="$REPO_ROOT/dist"
 LINUXDEPLOY="${LINUXDEPLOY:-$HOME/tools/linuxdeploy-x86_64.AppImage}"
 APPIMAGETOOL="${APPIMAGETOOL:-$HOME/tools/appimagetool-x86_64.AppImage}"
 
-VERSION="$(grep '^version:' "$APP_DIR/pubspec.yaml" | awk '{print $2}' | cut -d+ -f1)"
+# Release naming: pubspec's `0.1.0+76` becomes `0.1.0-alpha.76` — the exact
+# name every GitHub release asset uses, so no manual rename in dist/.
+PUBSPEC_VERSION="$(grep '^version:' "$APP_DIR/pubspec.yaml" | awk '{print $2}')"
+VERSION="${PUBSPEC_VERSION%%+*}"
+if [[ "$PUBSPEC_VERSION" == *+* ]]; then
+  VERSION="$VERSION-alpha.${PUBSPEC_VERSION##*+}"
+fi
 BUNDLE="$APP_DIR/build/linux/x64/release/bundle"
 
 # Embedded Autonomi client: build the Rust cdylib for the host and drop it

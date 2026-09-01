@@ -52,4 +52,14 @@ echo "=== APK done $(date) ==="
 
 echo "=== AppImage build start $(date) ==="
 "$REPO/scripts/build_appimage.sh"
+
+# Both artifacts land in dist/ under their final release-asset names
+# (Watch-It-0.1.0-alpha.N.apk / -x86_64.AppImage), ready for gh release upload.
+PUBSPEC_VERSION="$(grep '^version:' "$REPO/app/pubspec.yaml" | awk '{print $2}')"
+VERSION="${PUBSPEC_VERSION%%+*}"
+[[ "$PUBSPEC_VERSION" == *+* ]] && VERSION="$VERSION-alpha.${PUBSPEC_VERSION##*+}"
+APK="$REPO/app/build/app/outputs/flutter-apk/app-release.apk"
+cp "$APK" "$REPO/dist/Watch-It-$VERSION.apk"
+echo "APK copied to dist/Watch-It-$VERSION.apk"
+ls -l "$REPO/dist/Watch-It-$VERSION"*
 echo "=== ALL BUILDS DONE $(date) ==="
