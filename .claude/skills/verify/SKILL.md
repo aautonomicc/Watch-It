@@ -52,10 +52,11 @@ Kill the app first (sqlite), then python3 sqlite3 into `watchit.sqlite`:
 `watch_states (address,position_ms,duration_ms,completed,updated_at)`.
 Poster files go in `<data>/posters/<poster_file>`.
 
-**GOTCHA — lookup_key**: computed by `parseMediaName` (metadata.dart); only
-*video* extensions are stripped, so `BegBlag.mp3` → `movie:begblag mp3:`
-(the `.mp3` stays, dots become spaces). Compute the key from the code, don't
-guess.
+**GOTCHA — lookup_key**: computed by `parseMediaName` (now in
+`packages/watchit_naming`, re-exported by metadata.dart). Since 2026-09-01
+audio extensions strip too, so `BegBlag.mp3` → `movie:begblag:` (before:
+`movie:begblag mp3:` — rows keyed the old way just re-match on demand).
+Compute the key from the code, don't guess.
 
 Known-good small test address (BegBlag.mp3, 15 MB, resolves in ~20s):
 `00ac7cbe1fe3e49fcd9e490eb313fabc2fe4407e67196292e961c3b34e9b1afa`
