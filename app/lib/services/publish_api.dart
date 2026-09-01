@@ -26,6 +26,10 @@ class PublishApi {
     return base.replaceFirst(RegExp(r'/+$'), '');
   }
 
+  /// The resolved server base — for unauthenticated sibling routes like
+  /// `GET /datamap/{addr}` (batch uploader's bundle bytes).
+  String get base => _base;
+
   Map<String, String> get _headers {
     final token = _tokenOverride ?? EmbeddedClient.authToken();
     return {

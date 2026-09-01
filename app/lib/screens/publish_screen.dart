@@ -14,6 +14,7 @@ import '../services/publish_api.dart';
 import '../services/publish_plan.dart';
 import '../services/publish_session.dart';
 import '../theme/tokens.dart';
+import 'batch_upload_screen.dart';
 import 'settings_screen.dart' show promptForText;
 import 'wallet_screen.dart';
 
@@ -312,6 +313,25 @@ class _PublishScreenState extends State<PublishScreen> {
       ),
       const SizedBox(height: 16),
       _walletRow(t),
+      const SizedBox(height: 16),
+      OutlinedButton.icon(
+        onPressed: () {
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => BatchUploadScreen(
+                apiBase: widget.apiBase, apiToken: widget.apiToken),
+          ));
+        },
+        icon: const Icon(Icons.auto_awesome, size: 18),
+        label: const Text('Batch upload with auto-matching'),
+      ),
+      const SizedBox(height: 6),
+      Text(
+        'For whole folders of music or video: files are matched against '
+        'MusicBrainz/TMDB, renamed to canonical W@tch names, and '
+        'uploaded unattended — already-uploaded files are skipped for '
+        'free.',
+        style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+      ),
       if (_ffmpegAvailable == false) ...[
         const SizedBox(height: 12),
         Text(

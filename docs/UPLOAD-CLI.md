@@ -6,6 +6,17 @@ parser/sanitizer/generator with the app via `packages/watchit_naming`, so
 a name the CLI writes always parses back to the intended title/year/ids
 in W@tch — parser drift is impossible by construction.
 
+**Also in the app (2026-09-01, desktop only):** the same pipeline runs
+inside W@tch as *Upload → Batch upload with auto-matching*
+(`app/lib/services/batch_upload.dart` + `screens/batch_upload_screen.dart`
+front-ending `cli/lib/` via the `watchit_upload` package export). The app
+swaps the `ant` CLI + `SECRET_KEY` for the embedded core's authed named
+`/upload` (paid from the in-app wallet) and `GET /datamap/{addr}`, and the
+terminal confirm loop for an on-screen confirm card — but shares this
+CLI's matcher, manifest lifecycle, and the content-hash ledger at
+`~/.watchit-upload/ledger.jsonl`, so files uploaded with either tool are
+never paid for twice by the other.
+
 ## What it does
 
 Turns a messy folder of media into canonically named, paid, private
