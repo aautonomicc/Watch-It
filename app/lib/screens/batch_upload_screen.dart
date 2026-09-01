@@ -15,6 +15,7 @@ import '../services/library_store.dart';
 import '../services/publish_api.dart';
 import '../theme/tokens.dart';
 import 'publish_screen.dart' show pickTargetLists, addEntriesToLists;
+import 'settings_screen.dart' show promptForText;
 import 'wallet_screen.dart';
 
 /// Batch upload with auto-matching — the upload CLI's prepare/upload
@@ -53,8 +54,14 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   final BatchUploadSession _session = BatchUploadSession.instance;
 
   final List<String> _paths = [];
-  final TextEditingController _listName =
-      TextEditingController(text: 'My uploads');
+
+  /// The batch's target list — names the .watch-list bundle and is the
+  /// done page's add-to-library default. Defaults to "Music" when the
+  /// picked files are mostly audio, else "My uploads"; a manual pick
+  /// from the dropdown sticks.
+  String _list = 'My uploads';
+  bool _listChosen = false;
+  List<String> _libraryLists = [];
   WalletStatus? _wallet;
 
   @override
@@ -62,13 +69,31 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     super.initState();
     _session.addListener(_onSession);
     _loadWallet();
+    _loadLists();
   }
 
   @override
   void dispose() {
     _session.removeListener(_onSession);
-    _listName.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadLists() async {
+    final lists = await LibraryStore.load();
+    if (!mounted) return;
+    setState(() {
+      _libraryLists = [
+        for (final l in lists)
+          if (!l.isChannel) l.title,
+      ];
+    });
+  }
+
+  /// Re-derive the default list from what's picked so far: a batch
+  /// that's mostly audio files lands in "Music".
+  void _updateDefaultList() {
+    if (_listChosen) return;
+    _list = defaultBatchList(_paths, fallback: _list);
   }
 
   void _onSession() {
@@ -99,6 +124,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       for (final f in files) {
         if (!_paths.contains(f.path)) _paths.add(f.path);
       }
+      _updateDefaultList();
     });
   }
 
@@ -107,9 +133,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     if (dir == null || !mounted) return;
     setState(() {
       if (!_paths.contains(dir)) _paths.add(dir);
-      if (_listName.text == 'My uploads') {
-        _listName.text = p.basename(dir);
-      }
+      _updateDefaultList();
     });
   }
 
@@ -128,9 +152,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
 
   Future<void> _start() async {
     if (_paths.isEmpty || !_session.idle) return;
-    final listName = _listName.text.trim().isEmpty
-        ? 'My uploads'
-        : _listName.text.trim();
+    final listName = _list.trim().isEmpty ? 'My uploads' : _list.trim();
     final tmdbKey = await AppSettings.tmdbApiKey();
     final workDir = await _workDir(listName);
     if (!mounted) return;
@@ -233,15 +255,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
             ),
           ),
         const SizedBox(height: 8),
-        TextField(
-          controller: _listName,
-          style: TextStyle(color: t.bone, fontSize: 14),
-          decoration: const InputDecoration(
-            labelText: 'List name',
-            helperText:
-                'Names the .watch-list bundle this batch produces.',
-          ),
-        ),
+        _listDropdown(t),
         const SizedBox(height: 16),
         FilledButton.icon(
           onPressed: _start,
@@ -250,6 +264,62 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
         ),
       ],
     ];
+  }
+
+  /// Sentinel dropdown value for "Create a new list…".
+  static const _kNewList = ' new-list';
+
+  /// Target-list picker: every library list plus the "Music" and
+  /// "My uploads" defaults, and a create-new entry. Music batches
+  /// default to "Music" (created on add when it doesn't exist yet).
+  Widget _listDropdown(WiTokens t) {
+    final options = <String>{..._libraryLists, 'Music', 'My uploads', _list}
+        .toList();
+    return DropdownButtonFormField<String>(
+      // Keyed by the selection: the default flips (e.g. to "Music") as
+      // files are picked, and a FormField would otherwise keep showing
+      // its first initialValue.
+      key: ValueKey(_list),
+      initialValue: _list,
+      decoration: const InputDecoration(
+        labelText: 'Add to list',
+        helperText: 'Where the uploads land in your library — also names '
+            'the .watch-list bundle. New lists are created on add.',
+      ),
+      dropdownColor: t.ink2,
+      style: TextStyle(color: t.bone, fontSize: 14),
+      items: [
+        for (final title in options)
+          DropdownMenuItem(value: title, child: Text(title)),
+        const DropdownMenuItem(
+            value: _kNewList, child: Text('Create a new list…')),
+      ],
+      onChanged: (v) async {
+        if (v == null) return;
+        if (v == _kNewList) {
+          final title = await promptForText(
+            context,
+            title: 'New list',
+            hint: 'e.g. Holiday videos',
+          );
+          final trimmed = title?.trim() ?? '';
+          if (trimmed.isNotEmpty && mounted) {
+            setState(() {
+              _list = trimmed;
+              _listChosen = true;
+            });
+          } else if (mounted) {
+            // Re-render so the dropdown snaps back off the sentinel.
+            setState(() {});
+          }
+          return;
+        }
+        setState(() {
+          _list = v;
+          _listChosen = true;
+        });
+      },
+    );
   }
 
   // ── preparing ────────────────────────────────────────────────────────
@@ -320,7 +390,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('CONFIRM MATCH',
+          Text(outcome.matched ? 'CONFIRM MATCH' : 'NO MATCH FOUND',
               style: TextStyle(
                   fontSize: 11,
                   letterSpacing: 1.5,
@@ -587,7 +657,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   Future<void> _manualEntryDialog(BatchConfirm confirm) async {
     final t = WiTokens.of(context);
     final defaults = confirm.outcome.sidecarDefaults;
-    final music = confirm.outcome.type == 'music';
+    var music = confirm.outcome.type == 'music';
     final title = TextEditingController(text: '${defaults['title'] ?? ''}');
     final year = TextEditingController(text: '${defaults['year'] ?? ''}');
     final artist =
@@ -599,72 +669,120 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     final episode =
         TextEditingController(text: '${defaults['episode'] ?? ''}');
     final description = TextEditingController();
+    String? artPath;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: t.ink2,
-        title: Text('Enter details',
-            style: TextStyle(color: t.bone, fontSize: 16)),
-        content: SizedBox(
-          width: 380,
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              Text(
-                'For content not in any database — home videos, personal '
-                'recordings, unreleased work. The details travel in the '
-                'list bundle so every device shows them.',
-                style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
-              ),
-              if (music) ...[
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: t.ink2,
+          title: Text('Enter details',
+              style: TextStyle(color: t.bone, fontSize: 16)),
+          content: SizedBox(
+            width: 380,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                Text(
+                  'For content not in any database — home videos, personal '
+                  'recordings, unreleased work. The details travel in the '
+                  'list bundle so every device shows them.',
+                  style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+                ),
+                const SizedBox(height: 10),
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(
+                        value: false,
+                        label: Text('Video'),
+                        icon: Icon(Icons.movie_outlined, size: 16)),
+                    ButtonSegment(
+                        value: true,
+                        label: Text('Music'),
+                        icon: Icon(Icons.music_note_outlined, size: 16)),
+                  ],
+                  selected: {music},
+                  onSelectionChanged: (sel) =>
+                      setDialogState(() => music = sel.first),
+                ),
+                if (music) ...[
+                  TextField(
+                      controller: artist,
+                      decoration:
+                          const InputDecoration(labelText: 'Artist')),
+                  TextField(
+                      controller: album,
+                      decoration: const InputDecoration(labelText: 'Album')),
+                  TextField(
+                      controller: title,
+                      decoration:
+                          const InputDecoration(labelText: 'Track title')),
+                  TextField(
+                      controller: track,
+                      decoration:
+                          const InputDecoration(labelText: 'Track number')),
+                ] else ...[
+                  TextField(
+                      controller: title,
+                      decoration: const InputDecoration(labelText: 'Title')),
+                  TextField(
+                      controller: season,
+                      decoration: const InputDecoration(
+                          labelText: 'Season (optional)')),
+                  TextField(
+                      controller: episode,
+                      decoration: const InputDecoration(
+                          labelText: 'Episode (optional)')),
+                ],
                 TextField(
-                    controller: artist,
+                    controller: year,
                     decoration:
-                        const InputDecoration(labelText: 'Artist')),
+                        const InputDecoration(labelText: 'Year (optional)')),
                 TextField(
-                    controller: album,
-                    decoration: const InputDecoration(labelText: 'Album')),
-                TextField(
-                    controller: title,
-                    decoration:
-                        const InputDecoration(labelText: 'Track title')),
-                TextField(
-                    controller: track,
-                    decoration:
-                        const InputDecoration(labelText: 'Track number')),
-              ] else ...[
-                TextField(
-                    controller: title,
-                    decoration: const InputDecoration(labelText: 'Title')),
-                TextField(
-                    controller: season,
+                    controller: description,
+                    maxLines: 3,
                     decoration: const InputDecoration(
-                        labelText: 'Season (optional)')),
-                TextField(
-                    controller: episode,
-                    decoration: const InputDecoration(
-                        labelText: 'Episode (optional)')),
+                        labelText: 'Description (optional)')),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final file = await openFile(acceptedTypeGroups: [
+                          const XTypeGroup(label: 'Images', extensions: [
+                            'jpg', 'jpeg', 'png', 'webp',
+                          ]),
+                        ]);
+                        if (file != null) {
+                          setDialogState(() => artPath = file.path);
+                        }
+                      },
+                      icon: const Icon(Icons.image_outlined, size: 16),
+                      label: Text(artPath == null
+                          ? 'Artwork from file…'
+                          : 'Change artwork…'),
+                    ),
+                    if (artPath != null) ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(p.basename(artPath!),
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: t.boneDim, fontSize: 12)),
+                      ),
+                    ],
+                  ],
+                ),
               ],
-              TextField(
-                  controller: year,
-                  decoration:
-                      const InputDecoration(labelText: 'Year (optional)')),
-              TextField(
-                  controller: description,
-                  maxLines: 3,
-                  decoration: const InputDecoration(
-                      labelText: 'Description (optional)')),
-            ],
+            ),
           ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text('Cancel', style: TextStyle(color: t.ash))),
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text('Save', style: TextStyle(color: t.accent))),
+          ],
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: Text('Cancel', style: TextStyle(color: t.ash))),
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: Text('Save', style: TextStyle(color: t.accent))),
-        ],
       ),
     );
     if (ok != true) return;
@@ -683,6 +801,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       episode: int.tryParse(episode.text.trim()),
       description:
           description.text.trim().isEmpty ? null : description.text.trim(),
+      art: artPath,
     ));
   }
 
@@ -956,9 +1075,15 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       const SizedBox(height: 16),
       if (uploaded.isNotEmpty) ...[
         FilledButton.icon(
-          onPressed: _addAllToLibrary,
+          onPressed: () => _addAllToLibrary(),
           icon: const Icon(Icons.video_library_outlined),
-          label: const Text('Add to library'),
+          label: Text('Add to "${_session.manifest?.listName ?? 'library'}"'),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: () => _addAllToLibrary(pickLists: true),
+          icon: const Icon(Icons.playlist_add),
+          label: const Text('Add to other lists…'),
         ),
         const SizedBox(height: 10),
         OutlinedButton.icon(
@@ -981,12 +1106,20 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     ];
   }
 
-  Future<void> _addAllToLibrary() async {
+  /// Add the uploads to the library — straight into the batch's chosen
+  /// list by default, or via the multi-list picker ([pickLists]).
+  Future<void> _addAllToLibrary({bool pickLists = false}) async {
     final uploaded = _session.uploadedEntries;
     if (uploaded.isEmpty) return;
-    final lists = await LibraryStore.load();
-    if (!mounted) return;
-    final chosen = await pickTargetLists(context, lists);
+    List<String>? chosen;
+    if (pickLists) {
+      final lists = await LibraryStore.load();
+      if (!mounted) return;
+      chosen = await pickTargetLists(context, lists);
+    } else {
+      final list = _session.manifest?.listName.trim();
+      chosen = [list == null || list.isEmpty ? 'My uploads' : list];
+    }
     if (chosen == null || chosen.isEmpty) return;
     final entries = [
       for (final e in uploaded)
@@ -1014,6 +1147,24 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     } catch (e) {
       _snack('Could not save the bundle: $e');
     }
+  }
+}
+
+/// The default target list for a batch of [paths] (files or folders):
+/// "Music" when the media files are mostly audio, else "My uploads".
+/// [fallback] survives empty or unreadable picks.
+String defaultBatchList(List<String> paths,
+    {String fallback = 'My uploads'}) {
+  try {
+    final files = collectMediaFiles(paths);
+    if (files.isEmpty) return fallback;
+    final audio = files
+        .where(
+            (f) => kAudioExtensions.contains(p.extension(f).toLowerCase()))
+        .length;
+    return audio * 2 > files.length ? 'Music' : 'My uploads';
+  } catch (_) {
+    return fallback;
   }
 }
 

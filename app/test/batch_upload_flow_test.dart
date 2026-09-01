@@ -1,9 +1,13 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:drift/drift.dart' show driftRuntimeOptions;
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:watchit/db/app_database.dart';
+import 'package:watchit/services/library_store.dart';
 import 'package:watchit/screens/batch_upload_screen.dart';
 import 'package:watchit/screens/publish_screen.dart';
 import 'package:watchit/services/batch_upload.dart';
@@ -25,6 +29,8 @@ class _NoFfmpeg extends FfmpegService {
 }
 
 void main() {
+  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
+
   late FakeEmbeddedHttp fake;
   late Directory tempDir;
 
@@ -83,7 +89,7 @@ void main() {
     fake.wallet = {'configured': true, 'address': '0xabc', 'storage': 'file'};
     final auto = mediaFile('auto.mp4', 1);
     final confirmMe = mediaFile('confirm.mp4', 2);
-    mediaFile('nomatch.mp4', 3);
+    final noMatch = mediaFile('nomatch.mp4', 3);
     final addrA = 'aa' * 32, addrB = 'bb' * 32;
     fake.uploadResults = [
       {
@@ -143,8 +149,11 @@ void main() {
     while (session.stage == BatchStage.preparing) {
       await Future<void>.delayed(const Duration(milliseconds: 20));
     }
-    // The search match waited for eyes; the tags match auto-accepted.
-    expect(confirmSeen, [confirmMe.path]);
+    // The search match AND the no-match file waited for eyes (the
+    // no-match card is where manual details/artwork can be entered);
+    // the tags match auto-accepted. Accepting the unmatched outcome
+    // lands it needs-attention.
+    expect(confirmSeen, [confirmMe.path, noMatch.path]);
     expect(session.readyCount, 2);
     expect(session.attentionCount, 1);
     expect(session.stage, BatchStage.review);
@@ -321,16 +330,9 @@ void main() {
         ));
       }
     });
-    // An unmatched file goes straight to needs-attention without a
-    // confirm — so hand the scripted matcher a confirm-grade match the
-    // listener overrides with the manual form.
-    session.matchOverride = scriptedMatcher({
-      'home-video.mp4': cli.MatchOutcome(
-          type: 'video',
-          name: 'Wrong Guess (1999).mp4',
-          method: 'search',
-          confidence: 'confirm'),
-    });
+    // An unmatched file raises the confirm card too (that IS the
+    // manual-entry entry point) — the listener answers it with the
+    // manual form's sidecar.
     await session.startPrepare(
       api: api(),
       paths: [tempDir.path],
@@ -359,6 +361,94 @@ void main() {
     expect(row['overview'], 'The big day.');
   });
 
+  test('defaultBatchList: mostly-audio batches default to Music', () {
+    final dir = dirIn('music-batch');
+    File('${dir.path}/a.mp3').writeAsBytesSync([1]);
+    File('${dir.path}/b.flac').writeAsBytesSync([1]);
+    File('${dir.path}/c.mp4').writeAsBytesSync([1]);
+    expect(defaultBatchList([dir.path]), 'Music');
+
+    final vids = dirIn('video-batch');
+    File('${vids.path}/a.mp4').writeAsBytesSync([1]);
+    File('${vids.path}/b.mkv').writeAsBytesSync([1]);
+    expect(defaultBatchList([vids.path]), 'My uploads');
+
+    expect(defaultBatchList(const [], fallback: 'Kept'), 'Kept');
+    expect(defaultBatchList(['/no/such/path'], fallback: 'Kept'), 'Kept');
+  });
+
+  testWidgets(
+      'no-match file raises the confirm card; manual form has type '
+      'toggle and artwork picker', (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    // The screen's list dropdown reads the library on open.
+    await LibraryStore.useForTesting(
+        AppDatabase.forTesting(NativeDatabase.memory()));
+    final mystery = mediaFile('mystery.mp4', 8);
+    final session = BatchUploadSession.instance;
+    session.matchOverride = scriptedMatcher({});
+    session.probeOverride = (path) async => null;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: BatchUploadScreen(apiBase: FakeEmbeddedHttp.base),
+    ));
+    await tester.pumpAndSettle();
+
+    // Prepare runs real file IO — drive it outside the fake-async zone.
+    await tester.runAsync(() async {
+      await session.startPrepare(
+        api: api(),
+        paths: [mystery.path],
+        listName: 'Mystery',
+        workDir: dirIn('work-nm'),
+        configDir: dirIn('config-nm'),
+      );
+      while (session.pendingConfirm == null) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    await tester.pump();
+
+    // The unmatched file waits for eyes instead of silently landing in
+    // needs-attention; there is no match to accept.
+    expect(find.text('NO MATCH FOUND'), findsOneWidget);
+    expect(find.text('Use this match'), findsNothing);
+    expect(find.text('Enter details…'), findsOneWidget);
+
+    await tester.tap(find.text('Enter details…'));
+    await tester.pumpAndSettle();
+    expect(find.text('Video'), findsOneWidget);
+    expect(find.text('Music'), findsOneWidget);
+    expect(find.text('Artwork from file…'), findsOneWidget);
+
+    // Flip to music — the manual fields follow.
+    await tester.tap(find.text('Music'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Artist'), 'Ella');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Album'), 'Home Tapes');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Track title'), 'Song One');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Track number'), '1');
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+
+    await tester.runAsync(() async {
+      while (session.stage == BatchStage.preparing) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    final entry = session.entries.single;
+    expect(entry.status, 'ready');
+    expect(entry.type, 'music');
+    expect(entry.custom, isTrue);
+  });
+
   testWidgets('Upload screen links to the batch uploader', (tester) async {
     tester.view.physicalSize = const Size(900, 2400);
     tester.view.devicePixelRatio = 1;
@@ -369,8 +459,11 @@ void main() {
           apiBase: FakeEmbeddedHttp.base, ffmpeg: _NoFfmpeg()),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('Batch upload with auto-matching'), findsOneWidget);
-    await tester.tap(find.text('Batch upload with auto-matching'));
+    // One primary way in; the tier flow is demoted to ADVANCED.
+    expect(find.text('Upload files or folders'), findsOneWidget);
+    expect(find.text('ADVANCED'), findsOneWidget);
+    expect(find.text('Encode quality versions…'), findsOneWidget);
+    await tester.tap(find.text('Upload files or folders'));
     await tester.pumpAndSettle();
     expect(find.byType(BatchUploadScreen), findsOneWidget);
     expect(find.text('Add files'), findsOneWidget);

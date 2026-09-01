@@ -7,7 +7,7 @@ a name the CLI writes always parses back to the intended title/year/ids
 in W@tch — parser drift is impossible by construction.
 
 **Also in the app (2026-09-01, desktop only):** the same pipeline runs
-inside W@tch as *Upload → Batch upload with auto-matching*
+inside W@tch as *Upload → Upload files or folders*
 (`app/lib/services/batch_upload.dart` + `screens/batch_upload_screen.dart`
 front-ending `cli/lib/` via the `watchit_upload` package export). The app
 swaps the `ant` CLI + `SECRET_KEY` for the embedded core's authed named
