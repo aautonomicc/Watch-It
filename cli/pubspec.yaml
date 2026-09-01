@@ -1,0 +1,25 @@
+name: watchit_upload
+description: >-
+  W@tch upload CLI — prepare/upload media batches to Autonomi with
+  database-matched canonical names, a persistent manifest, a content-hash
+  ledger, and .watch-list bundle output. See docs/UPLOAD-CLI.md.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  archive: ^4.0.9
+  crypto: ^3.0.6
+  http: ^1.2.0
+  path: ^1.9.0
+  watchit_naming:
+    path: ../packages/watchit_naming
+  yaml: ^3.1.2
+
+dev_dependencies:
+  test: ^1.25.0
+
+executables:
+  watchit-upload: watchit_upload
