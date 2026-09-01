@@ -54,10 +54,15 @@ dependencies:
   mobile_scanner: ^7.4.0
   # sha256 manifests for My W@tch artwork sync
   crypto: ^3.0.6
+  path: ^1.9.0
   # Shared file-name parser/sanitizer/generator — one source of truth with
   # the upload CLI (cli/), so CLI-generated names always parse correctly.
   watchit_naming:
     path: ../packages/watchit_naming
+  # Upload-pipeline domain layer (matcher/manifest/ledger/bundle) shared
+  # with the CLI — the desktop in-app batch uploader front-ends it.
+  watchit_upload:
+    path: ../cli
 
 # Vendored media_kit_video 2.0.1 with a Linux H/W-rendering fix: upstream
 # reads Flutter's EGL display via eglGetCurrentDisplay() on the platform

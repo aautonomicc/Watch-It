@@ -112,10 +112,12 @@ MediaProbe parseFfprobeJson(String jsonText) {
 }
 
 /// Run ffprobe on [path]. Returns null (with a stderr note) when ffprobe
-/// is missing or the file is not media.
-Future<MediaProbe?> probeFile(String path) async {
+/// is missing or the file is not media. [ffprobeBin] lets the app point
+/// at its bundled copy beside the executable; the CLI uses PATH.
+Future<MediaProbe?> probeFile(String path,
+    {String ffprobeBin = 'ffprobe'}) async {
   try {
-    final result = await Process.run('ffprobe', [
+    final result = await Process.run(ffprobeBin, [
       '-v', 'quiet',
       '-print_format', 'json',
       '-show_format',

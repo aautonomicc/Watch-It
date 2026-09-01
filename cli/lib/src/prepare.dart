@@ -54,7 +54,7 @@ Future<int> runPrepare(List<String> args) async {
 
   final config = CliConfig.load()..ensureDirs();
   final ledger = Ledger.load(config.ledgerFile);
-  final files = _collectFiles(paths);
+  final files = collectMediaFiles(paths);
   if (files.isEmpty) {
     stderr.writeln('no media files found under ${paths.join(', ')}');
     return 1;
@@ -102,7 +102,7 @@ Future<int> runPrepare(List<String> args) async {
       continue; // Already prepared; a new sidecar re-opens the entry.
     }
 
-    if (_cueSiblingProblem(path)) {
+    if (cueSiblingProblem(path)) {
       stdout.writeln('SKIP  ${p.basename(path)} — cue+single-file album '
           'rip; split into tracks first (e.g. with ffmpeg/shnsplit)');
       _upsert(manifest, existing,
@@ -113,7 +113,7 @@ Future<int> runPrepare(List<String> args) async {
     }
 
     stdout.write('…     ${p.basename(path)}\r');
-    final sha = await _sha256File(path);
+    final sha = await sha256OfFile(path);
     final size = File(path).lengthSync();
 
     final hit = ledger.lookup(sha);
@@ -270,7 +270,9 @@ void _upsert(Manifest m, ManifestEntry? existing, ManifestEntry entry) {
   }
 }
 
-List<String> _collectFiles(List<String> paths) {
+/// Expand files/folders into the sorted list of media files (public: the
+/// app's in-app uploader scans with the exact same rules).
+List<String> collectMediaFiles(List<String> paths) {
   final out = <String>[];
   final exts = {...kAudioExtensions, ...kVideoExtensions};
   for (final path in paths) {
@@ -296,7 +298,7 @@ List<String> _collectFiles(List<String> paths) {
 }
 
 /// A `.cue` sheet beside a lone audio file = an unsplit album rip.
-bool _cueSiblingProblem(String path) {
+bool cueSiblingProblem(String path) {
   final ext = p.extension(path).toLowerCase();
   if (!kAudioExtensions.contains(ext)) return false;
   final dir = File(path).parent;
@@ -309,7 +311,7 @@ bool _cueSiblingProblem(String path) {
   return cue && audio == 1;
 }
 
-Future<String> _sha256File(String path) async {
+Future<String> sha256OfFile(String path) async {
   final input = File(path).openRead();
   final digest = await sha256.bind(input).first;
   return digest.toString();
