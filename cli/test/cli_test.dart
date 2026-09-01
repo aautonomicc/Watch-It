@@ -346,6 +346,48 @@ track: 5
       final g3 = guessMusicName('plain.mp3');
       expect(g3.title, 'plain');
     });
+
+    test('albumGroupKey: mbid beats tags beats filename beats dir', () {
+      MediaProbe probe(Map<String, String> tags) =>
+          MediaProbe(hasAudio: true, hasRealVideo: false, tags: tags);
+      // Embedded release id groups regardless of messy tags.
+      expect(albumGroupKey('/x/a.mp3', probe({'musicbrainz_albumid': 'R1'})),
+          albumGroupKey('/y/b.flac',
+              probe({'musicbrainz_albumid': 'R1', 'album': 'Other'})));
+      // Artist/album tags, case-insensitive.
+      expect(
+          albumGroupKey('/x/a.mp3', probe({'artist': 'Band', 'album': 'Alb'})),
+          albumGroupKey('/x/b.mp3', probe({'artist': 'band', 'album': 'ALB'})));
+      // album_artist wins over per-track artist (feat. credits).
+      expect(
+          albumGroupKey(
+              '/x/a.mp3',
+              probe({
+                'album_artist': 'Band',
+                'artist': 'Band feat. X',
+                'album': 'Alb'
+              })),
+          albumGroupKey(
+              '/x/b.mp3',
+              probe({
+                'album_artist': 'Band',
+                'artist': 'Band',
+                'album': 'Alb'
+              })));
+      // Untagged: the `Artist - Album - NN Title` filename guess.
+      expect(albumGroupKey('/x/Band - Alb - 01 One.mp3', null),
+          albumGroupKey('/y/Band - Alb - 02 Two.mp3', null));
+      // Unparseable + untagged: one folder = one album.
+      expect(albumGroupKey('/x/one.mp3', null),
+          albumGroupKey('/x/two.mp3', null));
+      expect(albumGroupKey('/x/one.mp3', null),
+          isNot(albumGroupKey('/z/one.mp3', null)));
+      // Different albums never merge.
+      expect(
+          albumGroupKey('/x/a.mp3', probe({'artist': 'Band', 'album': 'A1'})),
+          isNot(albumGroupKey(
+              '/x/b.mp3', probe({'artist': 'Band', 'album': 'A2'}))));
+    });
   });
 
   group('config', () {

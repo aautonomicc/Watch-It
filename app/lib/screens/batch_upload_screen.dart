@@ -204,9 +204,10 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
         'Upload a folder of media with automatic naming and metadata: '
         'each file is matched against MusicBrainz (music) or TMDB '
         '(movies and shows), renamed to its canonical W@tch name, and '
-        'uploaded in one unattended batch. Files you already uploaded — '
-        'here or with the CLI — are recognized by content and never '
-        'paid for twice.',
+        'uploaded in one unattended batch. Music is reviewed one whole '
+        'album at a time, not track by track. Files you already '
+        'uploaded — here or with the CLI — are recognized by content '
+        'and never paid for twice.',
         style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
       ),
       const SizedBox(height: 8),
@@ -326,6 +327,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
 
   List<Widget> _preparingChildren(WiTokens t) {
     final confirm = _session.pendingConfirm;
+    final albumConfirm = _session.pendingAlbumConfirm;
     return [
       Text(
         'Matching files · ${_session.prepareDone} of '
@@ -341,13 +343,19 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
         backgroundColor: t.ink2,
       ),
       const SizedBox(height: 8),
-      if (confirm == null && _session.currentFile != null)
+      if (confirm == null &&
+          albumConfirm == null &&
+          _session.currentFile != null)
         Text(_session.currentFile!,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(color: t.boneDim, fontSize: 13)),
       if (confirm != null) ...[
         const SizedBox(height: 12),
         _confirmCard(t, confirm),
+      ],
+      if (albumConfirm != null) ...[
+        const SizedBox(height: 12),
+        _albumConfirmCard(t, albumConfirm),
       ],
       const SizedBox(height: 12),
       _countsLine(t),
@@ -479,6 +487,346 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
             ),
         ],
       ),
+    );
+  }
+
+  // ── album confirm card ───────────────────────────────────────────────
+
+  /// One card for a whole album: the release decision applies to every
+  /// track, so a rip is reviewed in one look instead of track by track.
+  Widget _albumConfirmCard(WiTokens t, AlbumConfirm confirm) {
+    final album = confirm.album;
+    final art = album?.artBytes;
+    final placed =
+        confirm.outcomes.where((o) => o?.matched ?? false).length;
+    final total = confirm.tracks.length;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: t.ink2,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: t.accent),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(album != null ? 'CONFIRM ALBUM MATCH' : 'NO ALBUM MATCH',
+              style: TextStyle(
+                  fontSize: 11,
+                  letterSpacing: 1.5,
+                  fontWeight: FontWeight.w700,
+                  color: t.accent)),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (art != null) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: Image.memory(Uint8List.fromList(art),
+                      width: 72, fit: BoxFit.contain),
+                ),
+                const SizedBox(width: 12),
+              ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (confirm.albumLine != null)
+                      Text(confirm.albumLine!,
+                          style: TextStyle(color: t.bone, fontSize: 14)),
+                    if (album == null)
+                      Text(
+                          'These files look like one album, but no '
+                          'release matched. Search MusicBrainz, paste a '
+                          'release ID, or enter the details once for all '
+                          'of them.',
+                          style: TextStyle(
+                              color: t.bone, fontSize: 13, height: 1.4)),
+                    const SizedBox(height: 4),
+                    Text(
+                        '$placed of $total tracks placed'
+                        '${placed < total && album != null ? ' — unplaced tracks are set aside for another pass' : ''}',
+                        style: TextStyle(color: t.boneDim, fontSize: 12)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (var i = 0; i < confirm.tracks.length; i++)
+            _albumTrackRow(t, confirm, i),
+          if (confirm.mbHits != null) _albumMbHitList(t, confirm),
+          const SizedBox(height: 12),
+          if (confirm.busy)
+            const LinearProgressIndicator()
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (album != null)
+                  FilledButton(
+                    onPressed: _session.albumAccept,
+                    child: Text('Use for all '
+                        '$placed track${placed == 1 ? '' : 's'}'),
+                  ),
+                OutlinedButton(
+                  onPressed: () => _albumSearchDialog(confirm),
+                  child: const Text('Search…'),
+                ),
+                OutlinedButton(
+                  onPressed: () => _albumPasteIdDialog(confirm),
+                  child: const Text('Paste ID…'),
+                ),
+                OutlinedButton(
+                  onPressed: () => _albumManualDialog(confirm),
+                  child: const Text('Enter details…'),
+                ),
+                TextButton(
+                  onPressed: _session.albumReject,
+                  child:
+                      Text('No match', style: TextStyle(color: t.rust)),
+                ),
+                TextButton(
+                  onPressed: _session.albumSkip,
+                  child:
+                      Text('Skip album', style: TextStyle(color: t.ash)),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _albumTrackRow(WiTokens t, AlbumConfirm confirm, int i) {
+    final out = confirm.outcomes[i];
+    final ok = out?.matched ?? false;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(ok ? Icons.check : Icons.help_outline,
+              size: 14, color: ok ? t.signalOk : t.rust),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              ok
+                  ? out!.name!
+                  : '${p.basename(confirm.tracks[i])} — not placed',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  color: ok ? t.boneDim : t.rust,
+                  fontSize: 12,
+                  fontFamily: ok ? wiMonoFamily : null,
+                  fontFamilyFallback: ok ? wiMonoFallback : null),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _albumMbHitList(WiTokens t, AlbumConfirm confirm) {
+    final hits = confirm.mbHits!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 8),
+        if (hits.isEmpty)
+          Text('No results.', style: TextStyle(color: t.ash, fontSize: 12)),
+        for (final hit in hits)
+          ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            title: Text(
+              '${hit.artist} — ${hit.title}'
+              '${hit.year != null ? ' (${hit.year})' : ''}',
+              style: TextStyle(color: t.bone, fontSize: 13),
+            ),
+            onTap: () => _session.albumPickMb(hit.mbid),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _albumSearchDialog(AlbumConfirm confirm) async {
+    final t = WiTokens.of(context);
+    final artist = TextEditingController(
+        text: '${confirm.defaults['artist'] ?? ''}');
+    final album =
+        TextEditingController(text: '${confirm.defaults['album'] ?? ''}');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text('Search MusicBrainz',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+                controller: artist,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: 'Artist')),
+            TextField(
+                controller: album,
+                decoration: const InputDecoration(labelText: 'Album')),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text('Cancel', style: TextStyle(color: t.ash))),
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text('Search', style: TextStyle(color: t.accent))),
+        ],
+      ),
+    );
+    if (ok == true && artist.text.trim().isNotEmpty) {
+      await _session.albumSearch(artist.text.trim(), album.text.trim());
+    }
+  }
+
+  Future<void> _albumPasteIdDialog(AlbumConfirm confirm) async {
+    final t = WiTokens.of(context);
+    final raw = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title:
+            Text('Paste an ID', style: TextStyle(color: t.bone, fontSize: 16)),
+        content: TextField(
+          controller: raw,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'ID or URL',
+            helperText: 'MusicBrainz release ID or URL — applied to '
+                'every track of the album',
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text('Cancel', style: TextStyle(color: t.ash))),
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text('Use', style: TextStyle(color: t.accent))),
+        ],
+      ),
+    );
+    if (ok == true && raw.text.trim().isNotEmpty) {
+      final recognized = await _session.albumPasteId(raw.text.trim());
+      if (!recognized) _snack('Not a MusicBrainz release ID');
+    }
+  }
+
+  /// Case B for a whole album: artist/album/year/artwork entered once,
+  /// track titles and numbers from each file's tags or name.
+  Future<void> _albumManualDialog(AlbumConfirm confirm) async {
+    final t = WiTokens.of(context);
+    final artist = TextEditingController(
+        text: '${confirm.defaults['artist'] ?? ''}');
+    final album =
+        TextEditingController(text: '${confirm.defaults['album'] ?? ''}');
+    final year =
+        TextEditingController(text: '${confirm.defaults['year'] ?? ''}');
+    final description = TextEditingController();
+    String? artPath;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: t.ink2,
+          title: Text('Enter album details',
+              style: TextStyle(color: t.bone, fontSize: 16)),
+          content: SizedBox(
+            width: 380,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                Text(
+                  'For an album not in any database — one entry covers '
+                  'all ${confirm.tracks.length} tracks; each track keeps '
+                  'its own title and number from its tags or file name.',
+                  style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                    controller: artist,
+                    autofocus: true,
+                    decoration: const InputDecoration(labelText: 'Artist')),
+                TextField(
+                    controller: album,
+                    decoration: const InputDecoration(labelText: 'Album')),
+                TextField(
+                    controller: year,
+                    decoration:
+                        const InputDecoration(labelText: 'Year (optional)')),
+                TextField(
+                    controller: description,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                        labelText: 'Description (optional)')),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final file = await openFile(acceptedTypeGroups: [
+                          const XTypeGroup(label: 'Images', extensions: [
+                            'jpg', 'jpeg', 'png', 'webp',
+                          ]),
+                        ]);
+                        if (file != null) {
+                          setDialogState(() => artPath = file.path);
+                        }
+                      },
+                      icon: const Icon(Icons.image_outlined, size: 16),
+                      label: Text(artPath == null
+                          ? 'Artwork from file…'
+                          : 'Change artwork…'),
+                    ),
+                    if (artPath != null) ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(p.basename(artPath!),
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: t.boneDim, fontSize: 12)),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text('Cancel', style: TextStyle(color: t.ash))),
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text('Save', style: TextStyle(color: t.accent))),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    if (artist.text.trim().isEmpty || album.text.trim().isEmpty) {
+      _snack('Artist and album are needed');
+      return;
+    }
+    await _session.albumManual(
+      artist: artist.text.trim(),
+      album: album.text.trim(),
+      year: int.tryParse(year.text.trim()),
+      description:
+          description.text.trim().isEmpty ? null : description.text.trim(),
+      artPath: artPath,
     );
   }
 
