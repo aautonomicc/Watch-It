@@ -56,6 +56,39 @@ class HomeShow extends HomeItem {
       seasons.fold(0, (sum, s) => sum + s.episodes.length);
 }
 
+/// An album folded into a single wall card: every track of one release
+/// (same parsed album lookup key — the `{mbid-...}` tag, or
+/// artist/album/year). Track `NN` plays the role `SxxEyy` does for TV.
+class HomeAlbum extends HomeItem {
+  const HomeAlbum({
+    required this.artist,
+    required this.album,
+    required this.tracks,
+  });
+
+  /// Artist/album names parsed from the file names — display fallback
+  /// (music has no TMDB-style canonical-title fetch; CLI-written names
+  /// already carry the MusicBrainz canonical data).
+  final String artist;
+  final String album;
+
+  /// The album's entries, sorted by disc then track number.
+  final List<MediaEntry> tracks;
+}
+
+class _AlbumBuilder {
+  _AlbumBuilder(this.artist, this.album, this.slot);
+
+  final String artist;
+  final String album;
+
+  /// Index in the items list where this album's card sits (the position
+  /// of its first track).
+  final int slot;
+
+  final tracks = <(int, int, MediaEntry)>[];
+}
+
 class _SeasonBuilder {
   _SeasonBuilder(this.show, this.season, this.slot);
 
@@ -127,19 +160,32 @@ class VersionKeys {
 }
 
 /// Fold a list's entries into home-wall items: entries whose file name
-/// carries an `S01E02`/`1x02` marker group per (show, season); other
-/// entries get one card per title, with multiple uploads of the same
-/// title (same parsed lookup key — e.g. a 480p and a 1080p copy) folded
-/// into a single [HomeEntry] carrying all versions. A group sits where
-/// its first entry appeared; episodes inside a group sort by episode
-/// number, versions keep library order.
+/// carries an `S01E02`/`1x02` marker group per (show, season); music
+/// tracks group per album ([HomeAlbum]); other entries get one card per
+/// title, with multiple uploads of the same title (same parsed lookup
+/// key — e.g. a 480p and a 1080p copy) folded into a single [HomeEntry]
+/// carrying all versions. A group sits where its first entry appeared;
+/// episodes/tracks inside a group sort by their number, versions keep
+/// library order.
 List<HomeItem> groupSeasons(List<MediaEntry> entries) {
   final items = <HomeItem?>[];
   final bySeason = <String, _SeasonBuilder>{};
   final byTitle = <String, _VersionBuilder>{};
+  final byAlbum = <String, _AlbumBuilder>{};
   final keys = VersionKeys(entries);
   for (final entry in entries) {
     final parsed = parseMediaName(entry.name);
+    if (parsed.isTrack) {
+      final key = parsed.lookupKey;
+      var builder = byAlbum[key];
+      if (builder == null) {
+        items.add(null); // reserve the slot; filled in below
+        builder = byAlbum[key] =
+            _AlbumBuilder(parsed.artist!, parsed.title, items.length - 1);
+      }
+      builder.tracks.add((parsed.disc ?? 1, parsed.track!, entry));
+      continue;
+    }
     if (!parsed.isEpisode) {
       final key = keys.keyFor(parsed);
       var builder = byTitle[key];
@@ -164,6 +210,15 @@ List<HomeItem> groupSeasons(List<MediaEntry> entries) {
     items[b.slot] = HomeEntry(
       b.entries.first,
       versions: b.entries.length > 1 ? b.entries : const [],
+    );
+  }
+  for (final b in byAlbum.values) {
+    b.tracks.sort((x, y) =>
+        x.$1 != y.$1 ? x.$1.compareTo(y.$1) : x.$2.compareTo(y.$2));
+    items[b.slot] = HomeAlbum(
+      artist: b.artist,
+      album: b.album,
+      tracks: [for (final (_, _, e) in b.tracks) e],
     );
   }
   for (final b in bySeason.values) {

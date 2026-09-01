@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'models/media_list.dart';
+import 'screens/album_screen.dart';
 import 'screens/detail_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
@@ -322,6 +323,13 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     );
   }
 
+  /// An album card opens the album page: cover art + tracklist.
+  Future<void> _openAlbum(HomeAlbum group) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => AlbumScreen(group: group)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
@@ -451,6 +459,11 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
               group: group,
               tokens: t,
               onTap: () => _openShow(group),
+            ),
+          HomeAlbum() && final album => AlbumCard(
+              group: album,
+              tokens: t,
+              onTap: () => _openAlbum(album),
             ),
           // groupShows never yields bare seasons.
           HomeSeason() => const SizedBox.shrink(),

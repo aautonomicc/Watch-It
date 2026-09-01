@@ -50,6 +50,30 @@ Rules of thumb:
   finds the show on TMDB and pulls the episode name and synopsis, the show
   poster, and genres.
 
+## Music
+
+An audio extension (`.flac .mp3 .ogg .oga .opus .m4a .wav .aac .wma`) marks a
+file as music — the coarse video/music discriminator. Music tracks follow their
+own convention (what the upload CLI's `prepare` writes):
+
+```
+Artist - Album (Year) - NN Title {mbid-<release-mbid>}.flac
+```
+
+- Track `NN` plays the role `SxxEyy` does for TV: every track of one release
+  folds into a single square **album card** on the wall and list pages, which
+  opens the album page (cover + tracklist). Multi-disc releases use `D-NN`
+  (`2-03`).
+- `{mbid-…}` is the MusicBrainz *release* id. It keys the album's metadata the
+  way `{imdb-…}` keys a movie's, and fetches the album's front cover from the
+  Cover Art Archive — keyless and free, no API key or settings needed (unlike
+  TMDB).
+- No mbid tag (case-B custom albums) still folds and displays — artist, album,
+  year, and track names all come from the file name; there is just no cover
+  fetch.
+- Audio files without a track marker (`BegBlag.mp3`) stay single entries, typed
+  music.
+
 ## Uploading from the app
 
 The desktop **Upload** flow (alpha.55+, named *Publish* before
