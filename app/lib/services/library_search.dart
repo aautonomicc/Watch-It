@@ -161,6 +161,24 @@ class SearchIndex {
               ));
             }
           }
+        case HomeAlbum():
+          // Each track searchable by artist/album (title words) and its
+          // own name (extra words); results open the track's detail page.
+          for (final trackEntry in item.tracks) {
+            final parsed = parseMediaName(trackEntry.name);
+            records.add(_Record(
+              EntryResult(trackEntry, isEpisode: false),
+              title: normalizeSearchText('${item.artist} ${item.album}'),
+              extraWords: [
+                if (parsed.trackTitle != null)
+                  ...normalizeSearchText(parsed.trackTitle!)
+                      .split(' ')
+                      .where((w) => w.isNotEmpty),
+                if (parsed.year != null) '${parsed.year}',
+              ],
+              year: parsed.year,
+            ));
+          }
         case HomeSeason():
           break; // groupShows never yields bare seasons
       }

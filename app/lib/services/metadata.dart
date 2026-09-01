@@ -140,10 +140,20 @@ MediaMetadata fallbackMetadataFor(MediaEntry entry) {
     episodeLabel: parsed.isEpisode
         ? 'S${parsed.season.toString().padLeft(2, '0')}'
             'E${parsed.episode.toString().padLeft(2, '0')}'
-        : null,
-    mediaType: parsed.isEpisode ? 'tv' : 'movie',
+        : trackLabel(parsed),
+    mediaType: parsed.isAudio
+        ? 'music'
+        : parsed.isEpisode
+            ? 'tv'
+            : 'movie',
   );
 }
+
+/// `05 · Track Title` label for a music track (the role the `SxxEyy`
+/// label plays for episodes); null for everything else. The file name is
+/// the only source — track numbers/titles have no metadata rows.
+String? trackLabel(ParsedName parsed) =>
+    parsed.isTrack ? '${parsed.trackMarker} · ${parsed.trackTitle}' : null;
 
 /// `2008-01-20` → `20 Jan 2008` for display; anything that is not an
 /// ISO date passes through unchanged.

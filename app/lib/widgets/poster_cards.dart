@@ -88,6 +88,76 @@ class PosterCard extends StatelessWidget {
   }
 }
 
+/// An album folded into one wall card: square cover art (music covers
+/// are 1:1, not the 2:3 poster shape) with the album title and
+/// artist/track count underneath. Tap opens the album page, which lists
+/// the tracks.
+class AlbumCard extends StatelessWidget {
+  const AlbumCard({
+    super.key,
+    required this.group,
+    required this.tokens,
+    required this.onTap,
+  });
+
+  final HomeAlbum group;
+  final WiTokens tokens;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = tokens;
+    // Any track's match carries the album title and cover art.
+    final meta = MetadataService.instance.metadataFor(group.tracks.first);
+    final n = group.tracks.length;
+    final badge = groupDownloadBadge(t, group.tracks);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        width: 120,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox(
+                width: 120,
+                height: 120,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    posterImage(meta, fit: BoxFit.cover) ??
+                        Container(
+                          color: t.ink2,
+                          child: Icon(Icons.album_outlined,
+                              color: t.ash, size: 40),
+                        ),
+                    ?badge,
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              meta.title.isEmpty ? group.album : meta.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11.5, color: t.boneDim),
+            ),
+            Text(
+              '${group.artist} · $n ${n == 1 ? 'track' : 'tracks'}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10.5, color: t.ash),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// A whole show folded into one wall card: the show's main poster with
 /// its name and season/episode counts underneath. Tap opens the show
 /// page, which lists the seasons.

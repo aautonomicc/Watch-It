@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import '../db/app_database.dart';
 import '../models/media_list.dart';
 import 'app_settings.dart';
+import 'caa_client.dart';
 import 'library_store.dart';
 import 'metadata.dart';
 import 'tmdb_client.dart';
@@ -72,6 +73,22 @@ class MetadataService extends ChangeNotifier {
       // listeners during build.
       _inFlight[key] ??= Future(() => _resolve(key, entry.name));
       meta = fallback;
+    }
+    if (parsed.isTrack) {
+      // All tracks of one album share the cached row (title/year/cover);
+      // the track's own number and name only exist in its file name, so
+      // re-attach them to whatever the shared row resolved to.
+      return MediaMetadata(
+        title: meta.title,
+        year: meta.year,
+        overview: meta.overview,
+        category: meta.category,
+        episodeLabel: trackLabel(parsed),
+        posterAsset: meta.posterAsset,
+        posterFilePath: meta.posterFilePath,
+        rating: meta.rating,
+        mediaType: meta.mediaType ?? 'music',
+      );
     }
     if (!parsed.isEpisode) return meta;
     // Show/season pages and cards read metadataFor(first episode), so
@@ -247,6 +264,10 @@ class MetadataService extends ChangeNotifier {
   }
 
   Future<MediaMetadata?> _fetch(String key, String fileName) async {
+    final parsed = parseMediaName(fileName);
+    // Audio never goes to TMDB: album metadata is in the file name and
+    // cover art comes keyless from the Cover Art Archive.
+    if (parsed.isAudio) return _fetchMusic(key, parsed);
     final apiKey = await _apiKeyProvider();
     if (apiKey.isEmpty) return null; // matching disabled; nothing cached
     final client = TmdbClient(apiKey: apiKey, client: _httpClient);
@@ -268,6 +289,60 @@ class MetadataService extends ChangeNotifier {
       // Only close clients we created — injected ones belong to the test.
       if (_httpClient == null) client.close();
     }
+  }
+
+  /// Music resolve: the file name already carries everything displayable
+  /// (artist/album/year/track — the CLI writes canonical MusicBrainz
+  /// data into it), so the only fetch is the album's front cover from
+  /// the Cover Art Archive, keyed by the `{mbid-...}` release id. No
+  /// mbid → nothing to fetch, the parsed fallback is already complete.
+  /// A transport error propagates (caught in [_resolve]) so nothing is
+  /// cached and the art is retried next session; a CAA 404 means the
+  /// release has no cover — cached as a found row without artwork.
+  Future<MediaMetadata?> _fetchMusic(String key, ParsedName parsed) async {
+    final mbid = parsed.releaseMbid;
+    if (mbid == null) return null;
+    String? posterFile;
+    String? posterPath;
+    final dir = await _postersDirProvider();
+    final f = File('${dir.path}/music_$mbid.jpg');
+    if (f.existsSync()) {
+      posterFile = 'music_$mbid.jpg';
+      posterPath = f.path;
+    } else {
+      final client = CaaClient(client: _httpClient);
+      try {
+        final bytes = await client.fetchFront(mbid);
+        if (bytes != null) {
+          dir.createSync(recursive: true);
+          // Sync IO on purpose — same fake-async rule as _persistMatch.
+          f.writeAsBytesSync(bytes, flush: true);
+          posterFile = 'music_$mbid.jpg';
+          posterPath = f.path;
+        }
+      } finally {
+        if (_httpClient == null) client.close();
+      }
+    }
+    final db = await LibraryStore.database();
+    await db.into(db.metadataCache).insertOnConflictUpdate(
+          MetadataCacheCompanion.insert(
+            lookupKey: key,
+            found: true,
+            title: Value(parsed.title),
+            year: Value(parsed.year),
+            posterFile: Value(posterFile),
+            mediaType: const Value('music'),
+            fetchedAt: DateTime.now().millisecondsSinceEpoch,
+            userEdited: const Value(false),
+          ),
+        );
+    return MediaMetadata(
+      title: parsed.title,
+      year: parsed.year,
+      posterFilePath: posterPath,
+      mediaType: 'music',
+    );
   }
 
   /// Whether TMDB lookups can run at all (a key is configured).

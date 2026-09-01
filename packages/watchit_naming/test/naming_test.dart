@@ -48,6 +48,57 @@ void main() {
       expect(parseMediaName('BegBlag.mp3').title, 'BegBlag');
       expect(parseMediaName('song.flac').title, 'song');
       expect(parseMediaName('song.opus').title, 'song');
+      expect(parseMediaName('BegBlag.mp3').isAudio, isTrue);
+      expect(parseMediaName('BegBlag.mp3').isTrack, isFalse);
+      expect(parseMediaName('Movie (2024).mp4').isAudio, isFalse);
+    });
+
+    test('music track convention', () {
+      final p = parseMediaName(
+          'The Rolling Stones - Let It Bleed (1969) - 05 Gimme Shelter '
+          '{mbid-c07f0676-9d95-4443-a841-b1cbcfa48f4e}.flac');
+      expect(p.isAudio, isTrue);
+      expect(p.isTrack, isTrue);
+      expect(p.artist, 'The Rolling Stones');
+      expect(p.title, 'Let It Bleed');
+      expect(p.album, 'Let It Bleed');
+      expect(p.year, 1969);
+      expect(p.track, 5);
+      expect(p.disc, isNull);
+      expect(p.trackTitle, 'Gimme Shelter');
+      expect(p.releaseMbid, 'c07f0676-9d95-4443-a841-b1cbcfa48f4e');
+      expect(p.lookupKey, 'mbid:c07f0676-9d95-4443-a841-b1cbcfa48f4e');
+      expect(p.trackMarker, '05');
+    });
+
+    test('multi-disc D-NN marker', () {
+      final p = parseMediaName('A - B (2000) - 2-03 T {mbid-abc}.flac');
+      expect(p.disc, 2);
+      expect(p.track, 3);
+      expect(p.trackTitle, 'T');
+      expect(p.trackMarker, '2-03');
+    });
+
+    test('case-B track without mbid keys on artist/album/year', () {
+      final p =
+          parseMediaName('Home Artist - Demos (2025) - 01 First Song.mp3');
+      expect(p.isTrack, isTrue);
+      expect(p.releaseMbid, isNull);
+      expect(p.lookupKey, 'music:home artist:demos:2025');
+    });
+
+    test('track without year', () {
+      final p = parseMediaName('Artist - Album - 07 Song.ogg');
+      expect(p.isTrack, isTrue);
+      expect(p.year, isNull);
+      expect(p.track, 7);
+      expect(p.lookupKey, 'music:artist:album:');
+    });
+
+    test('video names never parse as tracks', () {
+      final p = parseMediaName('Artist - Album (2000) - 05 Title.mp4');
+      expect(p.isTrack, isFalse);
+      expect(p.isAudio, isFalse);
     });
   });
 
@@ -157,7 +208,42 @@ void main() {
       final k1 = parseMediaName(name(1, 'One')).lookupKey;
       final k2 = parseMediaName(name(2, 'Two')).lookupKey;
       expect(k1, k2);
-      expect(k1, 'movie:artist - album:1990');
+      expect(k1, 'mbid:abc');
+    });
+
+    test('generated names round-trip every music field', () {
+      final n = musicFileName(
+          artist: 'The Rolling Stones',
+          album: 'Let It Bleed',
+          year: 1969,
+          track: 5,
+          title: 'Gimme Shelter',
+          releaseMbid: 'c07f0676-9d95-4443-a841-b1cbcfa48f4e',
+          ext: 'flac');
+      final p = parseMediaName(n);
+      expect(p.artist, 'The Rolling Stones');
+      expect(p.album, 'Let It Bleed');
+      expect(p.year, 1969);
+      expect(p.track, 5);
+      expect(p.trackTitle, 'Gimme Shelter');
+      expect(p.releaseMbid, 'c07f0676-9d95-4443-a841-b1cbcfa48f4e');
+    });
+
+    test('multi-disc generated names round-trip disc and track', () {
+      final n = musicFileName(
+          artist: 'A',
+          album: 'B',
+          year: 2000,
+          track: 3,
+          disc: 2,
+          discTotal: 2,
+          title: 'T',
+          releaseMbid: 'm0',
+          ext: 'flac');
+      final p = parseMediaName(n);
+      expect(p.disc, 2);
+      expect(p.track, 3);
+      expect(p.trackTitle, 'T');
     });
 
     test('long unicode title stays within 255 bytes, tag intact', () {

@@ -370,6 +370,28 @@ class _ListEditScreenState extends State<ListEditScreen> {
     );
   }
 
+  /// An album's tracks fold under a single expandable tile, like a
+  /// season's episodes; the group menu curates the whole album at once.
+  Widget _albumTile(WiTokens t, HomeAlbum group) {
+    final n = group.tracks.length;
+    return ExpansionTile(
+      controlAffinity: ListTileControlAffinity.leading,
+      iconColor: t.ash,
+      collapsedIconColor: t.ash,
+      shape: const Border(),
+      collapsedShape: const Border(),
+      tilePadding: const EdgeInsets.only(left: 8, right: 4),
+      childrenPadding: EdgeInsets.zero,
+      title: Text(group.album,
+          style: TextStyle(
+              color: t.bone, fontSize: 14, fontWeight: FontWeight.w600)),
+      subtitle: Text('${group.artist} · $n ${n == 1 ? 'track' : 'tracks'}',
+          style: TextStyle(color: t.ash, fontSize: 12)),
+      trailing: _entryMenu(t, group.tracks, '"${group.album}"'),
+      children: [for (final e in group.tracks) _entryRow(t, e, indent: 40)],
+    );
+  }
+
   Widget _showTile(WiTokens t, HomeShow group) {
     final seasons = group.seasons.length;
     final episodes = group.episodeCount;
@@ -437,6 +459,7 @@ class _ListEditScreenState extends State<ListEditScreen> {
                     for (final item in items)
                       switch (item) {
                         HomeShow() && final group => _showTile(t, group),
+                        HomeAlbum() && final album => _albumTile(t, album),
                         HomeEntry() && final single =>
                           single.allVersions.length > 1
                               ? _versionsTile(t, single)
