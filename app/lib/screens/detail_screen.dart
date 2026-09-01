@@ -188,78 +188,6 @@ class _DetailScreenState extends State<DetailScreen> {
     return url == null ? null : (url: url, local: false);
   }
 
-  /// Apply the pause-downloads-on-playback preference before streaming
-  /// starts. Returns true when downloads were paused for this playback
-  /// (the caller resumes them when the player closes). "Remember my
-  /// choice" on the prompt writes the preference for next time.
-  Future<bool> _maybePauseDownloads(BuildContext context) async {
-    final pref = await AppSettings.pauseDownloadsOnPlay();
-    switch (pref) {
-      case PauseDownloadsOnPlay.always:
-        return DownloadManager.instance.pauseAllForPlayback();
-      case PauseDownloadsOnPlay.never:
-        return false;
-      case PauseDownloadsOnPlay.ask:
-        break;
-    }
-    if (!context.mounted) return false;
-    final t = WiTokens.of(context);
-    var remember = false;
-    final pause = await showDialog<bool>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: t.ink2,
-          title: Text('Pause downloads while playing?',
-              style: TextStyle(color: t.bone, fontSize: 16)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Streaming and downloading share the network connection. '
-                'Pausing downloads gives playback the full bandwidth; '
-                'they resume automatically when the player closes.',
-                style: TextStyle(color: t.boneDim, fontSize: 13),
-              ),
-              const SizedBox(height: 8),
-              CheckboxListTile(
-                value: remember,
-                onChanged: (v) =>
-                    setDialogState(() => remember = v ?? false),
-                controlAffinity: ListTileControlAffinity.leading,
-                contentPadding: EdgeInsets.zero,
-                activeColor: t.accent,
-                title: Text('Remember my choice',
-                    style: TextStyle(color: t.boneDim, fontSize: 13)),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: Text('Keep downloading',
-                  style: TextStyle(color: t.ash)),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: Text('Pause downloads',
-                  style: TextStyle(color: t.accent)),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (pause == null) return false; // dismissed — leave downloads running
-    if (remember) {
-      await AppSettings.setPauseDownloadsOnPlay(pause
-          ? PauseDownloadsOnPlay.always
-          : PauseDownloadsOnPlay.never);
-    }
-    if (!pause) return false;
-    return DownloadManager.instance.pauseAllForPlayback();
-  }
-
   Future<void> _play(BuildContext context, {bool fromStart = false}) async {
     final source = _sourceFor(entry);
     final url = source?.url;
@@ -301,7 +229,7 @@ class _DetailScreenState extends State<DetailScreen> {
       }
       if (gate == StreamingGate.ask) {
         if (!context.mounted) return;
-        if (await _confirmCellularStreaming(context) != true) return;
+        if (await confirmCellularStreaming(context) != true) return;
         CellularStreamingConsent.granted = true;
       }
     }
@@ -310,7 +238,7 @@ class _DetailScreenState extends State<DetailScreen> {
     // streamed playback may pause active downloads (per the preference).
     var pausedForPlayback = false;
     if (!source.local && DownloadManager.instance.hasActive) {
-      pausedForPlayback = await _maybePauseDownloads(context);
+      pausedForPlayback = await maybePauseDownloadsForStreaming(context);
     }
     final meta = MetadataService.instance.metadataFor(entry);
     final bufferSizeMb = await AppSettings.bufferSizeMb();
@@ -343,36 +271,6 @@ class _DetailScreenState extends State<DetailScreen> {
     }
     // Refresh the Resume button with the position playback stopped at.
     await _loadState();
-  }
-
-  /// Once-per-session confirmation for streaming over mobile data
-  /// (the Ask policy in Settings → Network).
-  Future<bool?> _confirmCellularStreaming(BuildContext context) {
-    final t = WiTokens.of(context);
-    return showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: t.ink2,
-        title: Text("You're on mobile data",
-            style: TextStyle(color: t.bone, fontSize: 16)),
-        content: Text(
-          'Streaming uses your mobile-data allowance (a movie can be '
-          'several GB). Stream anyway? You will not be asked again '
-          'until the app restarts.',
-          style: TextStyle(color: t.boneDim, fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text('Cancel', style: TextStyle(color: t.ash)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Stream anyway', style: TextStyle(color: t.accent)),
-          ),
-        ],
-      ),
-    );
   }
 
   /// Download button action by state: start, pause, resume/retry, or
@@ -752,4 +650,108 @@ class _DetailScreenState extends State<DetailScreen> {
       ),
     );
   }
+}
+
+/// Apply the pause-downloads-on-playback preference before streaming
+/// starts. Returns true when downloads were paused for this playback
+/// (the caller resumes them when the player closes). "Remember my
+/// choice" on the prompt writes the preference for next time. Shared by
+/// DetailScreen's play flow and the album page's inline player.
+Future<bool> maybePauseDownloadsForStreaming(BuildContext context) async {
+  final pref = await AppSettings.pauseDownloadsOnPlay();
+  switch (pref) {
+    case PauseDownloadsOnPlay.always:
+      return DownloadManager.instance.pauseAllForPlayback();
+    case PauseDownloadsOnPlay.never:
+      return false;
+    case PauseDownloadsOnPlay.ask:
+      break;
+  }
+  if (!context.mounted) return false;
+  final t = WiTokens.of(context);
+  var remember = false;
+  final pause = await showDialog<bool>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text('Pause downloads while playing?',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Streaming and downloading share the network connection. '
+              'Pausing downloads gives playback the full bandwidth; '
+              'they resume automatically when the player closes.',
+              style: TextStyle(color: t.boneDim, fontSize: 13),
+            ),
+            const SizedBox(height: 8),
+            CheckboxListTile(
+              value: remember,
+              onChanged: (v) =>
+                  setDialogState(() => remember = v ?? false),
+              controlAffinity: ListTileControlAffinity.leading,
+              contentPadding: EdgeInsets.zero,
+              activeColor: t.accent,
+              title: Text('Remember my choice',
+                  style: TextStyle(color: t.boneDim, fontSize: 13)),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Keep downloading',
+                style: TextStyle(color: t.ash)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Pause downloads',
+                style: TextStyle(color: t.accent)),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (pause == null) return false; // dismissed — leave downloads running
+  if (remember) {
+    await AppSettings.setPauseDownloadsOnPlay(pause
+        ? PauseDownloadsOnPlay.always
+        : PauseDownloadsOnPlay.never);
+  }
+  if (!pause) return false;
+  return DownloadManager.instance.pauseAllForPlayback();
+}
+
+/// Once-per-session confirmation for streaming over mobile data
+/// (the Ask policy in Settings → Network). Shared by DetailScreen and
+/// the album page's inline player.
+Future<bool?> confirmCellularStreaming(BuildContext context) {
+  final t = WiTokens.of(context);
+  return showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: t.ink2,
+      title: Text("You're on mobile data",
+          style: TextStyle(color: t.bone, fontSize: 16)),
+      content: Text(
+        'Streaming uses your mobile-data allowance (a movie can be '
+        'several GB). Stream anyway? You will not be asked again '
+        'until the app restarts.',
+        style: TextStyle(color: t.boneDim, fontSize: 13),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text('Cancel', style: TextStyle(color: t.ash)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text('Stream anyway', style: TextStyle(color: t.accent)),
+        ),
+      ],
+    ),
+  );
 }

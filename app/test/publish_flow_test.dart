@@ -138,7 +138,7 @@ void main() {
   }
 
   Future<void> pickAndEstimate(WidgetTester tester) async {
-    await tester.tap(find.text('Choose files to upload'));
+    await tester.tap(find.text('Encode quality versions…'));
     await tester.pumpAndSettle();
   }
 
@@ -157,7 +157,7 @@ void main() {
     await openPublish(tester, _FakeFfmpeg({}));
     expect(find.text('No wallet set up yet'), findsOneWidget);
     expect(find.text('Set up wallet'), findsOneWidget);
-    expect(find.text('Choose files to upload'), findsOneWidget);
+    expect(find.text('Encode quality versions…'), findsOneWidget);
   });
 
   testWidgets(
@@ -458,7 +458,7 @@ void main() {
 
     // ...and come back: the same batch is still running and on show.
     await openPublish(tester, ffmpeg);
-    expect(find.text('Choose files to upload'), findsNothing);
+    expect(find.text('Encode quality versions…'), findsNothing);
     expect(find.textContaining('Uploading · task 1 of 1'), findsOneWidget);
 
     // It finishes while the page is open; the done page offers the
@@ -470,7 +470,7 @@ void main() {
     // Upload more resets to a fresh setup page.
     await tester.tap(find.text('Upload more'));
     await tester.pump();
-    expect(find.text('Choose files to upload'), findsOneWidget);
+    expect(find.text('Encode quality versions…'), findsOneWidget);
   });
 
   testWidgets('ffmpeg missing: as-is only banner, publish still works',

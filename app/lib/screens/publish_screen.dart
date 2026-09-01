@@ -314,33 +314,48 @@ class _PublishScreenState extends State<PublishScreen> {
       const SizedBox(height: 16),
       _walletRow(t),
       const SizedBox(height: 16),
-      OutlinedButton.icon(
-        onPressed: () {
-          Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => BatchUploadScreen(
-                apiBase: widget.apiBase, apiToken: widget.apiToken),
-          ));
-        },
-        icon: const Icon(Icons.auto_awesome, size: 18),
-        label: const Text('Batch upload with auto-matching'),
-      ),
-      const SizedBox(height: 6),
-      Text(
-        'For whole folders of music or video: files are matched against '
-        'MusicBrainz/TMDB, renamed to canonical W@tch names, and '
-        'uploaded unattended — already-uploaded files are skipped for '
-        'free.',
-        style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
-      ),
+      // One way in: the auto-matching uploader handles single files and
+      // whole folders alike (naming, metadata, dedup, unattended batch).
+      // The tier-encoding flow below is the advanced path for videos
+      // that need multiple quality versions.
+      if (_files.isEmpty && !_picking) ...[
+        FilledButton.icon(
+          onPressed: () {
+            Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => BatchUploadScreen(
+                  apiBase: widget.apiBase, apiToken: widget.apiToken),
+            ));
+          },
+          icon: const Icon(Icons.cloud_upload_outlined),
+          label: const Text('Upload files or folders'),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'One file or a whole folder: music and video are matched '
+          'against MusicBrainz/TMDB, renamed to canonical W@tch names, '
+          'and uploaded in one unattended batch — files you already '
+          'uploaded are recognized and never paid for twice.',
+          style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          'ADVANCED',
+          style: TextStyle(
+              fontSize: 11,
+              letterSpacing: 1.5,
+              fontWeight: FontWeight.w700,
+              color: t.ash),
+        ),
+        const SizedBox(height: 8),
+      ],
       if (_ffmpegAvailable == false) ...[
-        const SizedBox(height: 12),
         Text(
           'ffmpeg was not found beside the app, so quality tiers are '
           'unavailable — files can only be uploaded as-is.',
           style: TextStyle(color: t.rust, fontSize: 12, height: 1.4),
         ),
+        const SizedBox(height: 12),
       ],
-      const SizedBox(height: 16),
       ..._filesSection(t),
       if (_files.isNotEmpty && !_picking) ...[
         const SizedBox(height: 16),
@@ -379,14 +394,14 @@ class _PublishScreenState extends State<PublishScreen> {
       return [
         OutlinedButton.icon(
           onPressed: _pickFiles,
-          icon: const Icon(Icons.insert_drive_file_outlined),
-          label: const Text('Choose files to upload'),
+          icon: const Icon(Icons.movie_filter_outlined),
+          label: const Text('Encode quality versions…'),
         ),
         const SizedBox(height: 6),
         Text(
-          'Select several files at once to upload a whole series — '
-          'episodes named like "Show S01E02.mkv" group under one card '
-          'in the library.',
+          'For video that should upload in several qualities (e.g. 1080p '
+          'and 480p) so every device gets a version it plays smoothly. '
+          'Files keep their own names — no database matching.',
           style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
         ),
       ];

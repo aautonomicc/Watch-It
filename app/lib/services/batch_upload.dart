@@ -210,9 +210,15 @@ class BatchUploadSession extends ChangeNotifier {
         if (_aborted) return;
 
         // Auto-accept rule straight from the CLI: id-backed high
-        // confidence passes, everything else waits for the user.
-        if (outcome.matched &&
-            !(outcome.confidence == 'high' && outcome.method != 'search')) {
+        // confidence passes without eyes. Everything else — uncertain
+        // matches AND no-match-at-all files — raises the confirm card,
+        // so a file in no database can get manual details/artwork or a
+        // music/video flip on the spot instead of silently landing in
+        // needs-attention.
+        final autoAccept = outcome.matched &&
+            outcome.confidence == 'high' &&
+            outcome.method != 'search';
+        if (!autoAccept && !outcome.skip) {
           final confirmed = await _awaitConfirm(path, probe, outcome);
           if (_aborted) return;
           outcome = confirmed ??
