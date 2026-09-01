@@ -83,6 +83,27 @@ const kVideoExtensions = {
   return (artist: artist, album: album, title: title, track: track);
 }
 
+/// Key that groups audio files into one album for album-at-a-time
+/// review: an embedded MusicBrainz release id wins, then normalized
+/// artist/album tags, then the `Artist - Album - NN Title` filename
+/// guess, then the parent directory (one folder = one album for
+/// untagged, unparseable rips).
+String albumGroupKey(String path, MediaProbe? probe) {
+  String norm(String s) => s.trim().toLowerCase();
+  final mbid = probe?.releaseMbid;
+  if (mbid != null) return 'mbid:${norm(mbid)}';
+  final artist = probe?.tag('album_artist') ?? probe?.tag('artist');
+  final album = probe?.tag('album');
+  if (album != null && album.trim().isNotEmpty) {
+    return 'tags:${norm(artist ?? '')}:${norm(album)}';
+  }
+  final guess = guessMusicName(p.basename(path));
+  if (guess.album != null) {
+    return 'guess:${norm(guess.artist ?? '')}:${norm(guess.album!)}';
+  }
+  return 'dir:${p.dirname(path)}';
+}
+
 class Matcher {
   Matcher({
     required this.config,
@@ -135,6 +156,9 @@ class Matcher {
           track: s.track ?? probe?.trackNumber,
           disc: probe?.discNumber,
           recordingMbid: probe?.recordingMbid,
+          // Untagged, unnumbered tracks can still place by title.
+          titleHint: probe?.tag('title') ??
+              guessMusicName(p.basename(path)).title,
           ext: ext,
           method: 'sidecar',
           description: s.description,

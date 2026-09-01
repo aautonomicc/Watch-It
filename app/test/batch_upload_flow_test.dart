@@ -361,6 +361,291 @@ void main() {
     expect(row['overview'], 'The big day.');
   });
 
+  group('album-at-a-time review', () {
+    cli.MediaProbe albumProbe(int n, {String? mbid}) => cli.MediaProbe(
+          hasAudio: true,
+          hasRealVideo: false,
+          tags: {
+            'musicbrainz_albumid': ?mbid,
+            'artist': 'Band',
+            'album': 'Alb',
+            'title': 'Song $n',
+            'track': '$n',
+          },
+        );
+
+    /// Matcher stub for a 3-track release [mbid]: plain matches answer
+    /// with [method]/[confidence]; a release-mbid sidecar answers like
+    /// the real matcher's high-confidence sidecar path.
+    Future<cli.MatchOutcome> Function(String, cli.MediaProbe?,
+        {cli.Sidecar? sidecar, String? forcedType}) releaseMatcher(
+            String mbid,
+            {required String method,
+            required String confidence}) =>
+        (path, probe, {sidecar, forcedType}) async {
+          final n = probe?.trackNumber ??
+              cli.guessMusicName(path.split('/').last).track ??
+              0;
+          if (sidecar != null && sidecar.releaseMbid != mbid) {
+            throw StateError('unexpected release ${sidecar.releaseMbid}');
+          }
+          return cli.MatchOutcome(
+            type: 'music',
+            name: 'Band - Alb (1990) - 0$n Song $n {mbid-$mbid}.mp3',
+            ids: {'release_mbid': mbid},
+            method: sidecar != null ? 'sidecar' : method,
+            confidence: sidecar != null ? 'high' : confidence,
+            note: 'Band — Alb (1990), track $n "Song $n"',
+          );
+        };
+
+    test('tagged album auto-accepts whole — no cards at all', () async {
+      mediaFile('t1.mp3', 11);
+      mediaFile('t2.mp3', 12);
+      mediaFile('t3.mp3', 13);
+      final session = BatchUploadSession.instance;
+      session.probeOverride = (path) async {
+        final n = int.parse(path.split('/').last[1]);
+        return albumProbe(n, mbid: 'r1');
+      };
+      session.matchOverride =
+          releaseMatcher('r1', method: 'tags', confidence: 'high');
+      var cards = 0;
+      session.addListener(() {
+        if (session.pendingConfirm != null ||
+            session.pendingAlbumConfirm != null) {
+          cards++;
+        }
+      });
+      await session.startPrepare(
+        api: api(),
+        paths: [tempDir.path],
+        listName: 'Music',
+        workDir: dirIn('work'),
+        configDir: dirIn('config'),
+      );
+      while (session.stage == BatchStage.preparing) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(cards, 0);
+      expect(session.readyCount, 3);
+      for (final e in session.entries) {
+        expect(e.ids['release_mbid'], 'r1');
+        expect(e.type, 'music');
+      }
+    });
+
+    test('search match raises ONE album card, not track by track',
+        () async {
+      mediaFile('b1.mp3', 21);
+      mediaFile('b2.mp3', 22);
+      mediaFile('b3.mp3', 23);
+      final session = BatchUploadSession.instance;
+      session.probeOverride = (path) async {
+        final n = int.parse(path.split('/').last[1]);
+        return albumProbe(n);
+      };
+      session.matchOverride =
+          releaseMatcher('r2', method: 'search', confidence: 'confirm');
+      final albumCards = <AlbumConfirm>{};
+      session.addListener(() {
+        final c = session.pendingAlbumConfirm;
+        expect(session.pendingConfirm, isNull);
+        if (c != null && albumCards.add(c)) {
+          expect(c.tracks.length, 3);
+          // Every track already resolved against the one release.
+          expect(c.outcomes.every((o) => o?.matched ?? false), isTrue);
+          expect(c.albumLine, 'Band — Alb (1990)');
+          session.albumAccept();
+        }
+      });
+      await session.startPrepare(
+        api: api(),
+        paths: [tempDir.path],
+        listName: 'Music',
+        workDir: dirIn('work'),
+        configDir: dirIn('config'),
+      );
+      while (session.stage == BatchStage.preparing) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(albumCards.length, 1);
+      expect(session.readyCount, 3);
+      // Album order: track numbers 1..3 regardless of scan order.
+      final names = [
+        for (final e in session.entries)
+          if (e.status == 'ready') e.name,
+      ];
+      expect(names, [
+        'Band - Alb (1990) - 01 Song 1 {mbid-r2}.mp3',
+        'Band - Alb (1990) - 02 Song 2 {mbid-r2}.mp3',
+        'Band - Alb (1990) - 03 Song 3 {mbid-r2}.mp3',
+      ]);
+    });
+
+    test('album reject and skip land whole-album statuses', () async {
+      mediaFile('c1.mp3', 31);
+      mediaFile('c2.mp3', 32);
+      final session = BatchUploadSession.instance;
+      session.probeOverride = (path) async =>
+          albumProbe(int.parse(path.split('/').last[1]));
+      session.matchOverride =
+          releaseMatcher('r3', method: 'search', confidence: 'confirm');
+      final seen = <AlbumConfirm>{};
+      session.addListener(() {
+        final c = session.pendingAlbumConfirm;
+        if (c != null && seen.add(c)) session.albumReject();
+      });
+      await session.startPrepare(
+        api: api(),
+        paths: [tempDir.path],
+        listName: 'Music',
+        workDir: dirIn('work'),
+        configDir: dirIn('config'),
+      );
+      while (session.stage == BatchStage.preparing) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(seen.length, 1);
+      expect(session.attentionCount, 2);
+      expect(session.readyCount, 0);
+    });
+
+    test('no-match album: pick a searched release re-resolves all tracks',
+        () async {
+      mediaFile('Band - Tape - 01 One.mp3', 41);
+      mediaFile('Band - Tape - 02 Two.mp3', 42);
+      final session = BatchUploadSession.instance;
+      session.probeOverride = (path) async => null;
+      session.matchOverride = (path, probe, {sidecar, forcedType}) async {
+        if (sidecar?.releaseMbid == 'r9') {
+          final n = sidecar!.track!;
+          return cli.MatchOutcome(
+            type: 'music',
+            name: 'Band - Tape (1999) - 0$n T$n {mbid-r9}.mp3',
+            ids: {'release_mbid': 'r9'},
+            method: 'sidecar',
+            confidence: 'high',
+            note: 'Band — Tape (1999), track $n "T$n"',
+          );
+        }
+        return cli.MatchOutcome(type: 'music', note: 'no MB match');
+      };
+      var picked = false;
+      session.addListener(() {
+        final c = session.pendingAlbumConfirm;
+        if (c == null || picked) return;
+        picked = true;
+        expect(c.album, isNull); // NO ALBUM MATCH state
+        expect(c.defaults['artist'], 'Band');
+        expect(c.defaults['album'], 'Tape');
+        session.albumPickMb('r9').then((_) => session.albumAccept());
+      });
+      await session.startPrepare(
+        api: api(),
+        paths: [tempDir.path],
+        listName: 'Music',
+        workDir: dirIn('work'),
+        configDir: dirIn('config'),
+      );
+      while (session.stage == BatchStage.preparing) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(session.readyCount, 2);
+      final names = [for (final e in session.entries) e.name]..sort();
+      expect(names, [
+        'Band - Tape (1999) - 01 T1 {mbid-r9}.mp3',
+        'Band - Tape (1999) - 02 T2 {mbid-r9}.mp3',
+      ]);
+    });
+  });
+
+  testWidgets(
+      'unmatched album shows ONE card; album manual entry covers every '
+      'track', (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await LibraryStore.useForTesting(
+        AppDatabase.forTesting(NativeDatabase.memory()));
+    final tape = dirIn('tape');
+    File('${tape.path}/side-a.mp3').writeAsBytesSync(List.filled(64, 51));
+    File('${tape.path}/side-b.mp3').writeAsBytesSync(List.filled(64, 52));
+    final session = BatchUploadSession.instance;
+    session.probeOverride = (path) async => null;
+    session.matchOverride = (path, probe, {sidecar, forcedType}) async {
+      if (sidecar != null && sidecar.isManualEntry) {
+        return cli.MatchOutcome(
+          type: 'music',
+          name: '${sidecar.artist} - ${sidecar.album}'
+              '${sidecar.year != null ? ' (${sidecar.year})' : ''}'
+              ' - 0${sidecar.track} ${sidecar.title}.mp3',
+          method: 'sidecar',
+          confidence: 'high',
+          custom: true,
+          customFields: {
+            'artist': sidecar.artist,
+            'album': sidecar.album,
+            'title': sidecar.title,
+            'track': sidecar.track,
+          },
+        );
+      }
+      return cli.MatchOutcome(type: 'music', note: 'no MB match');
+    };
+
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: BatchUploadScreen(apiBase: FakeEmbeddedHttp.base),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.runAsync(() async {
+      await session.startPrepare(
+        api: api(),
+        paths: [tape.path],
+        listName: 'Music',
+        workDir: dirIn('work-alb'),
+        configDir: dirIn('config-alb'),
+      );
+      while (session.pendingAlbumConfirm == null) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    await tester.pump();
+
+    // One card for the whole folder, both tracks on it, no per-file card.
+    expect(find.text('NO ALBUM MATCH'), findsOneWidget);
+    expect(find.text('NO MATCH FOUND'), findsNothing);
+    expect(find.textContaining('side-a.mp3'), findsOneWidget);
+    expect(find.textContaining('side-b.mp3'), findsOneWidget);
+    expect(find.text('Skip album'), findsOneWidget);
+
+    await tester.tap(find.text('Enter details…'));
+    await tester.pumpAndSettle();
+    expect(find.text('Enter album details'), findsOneWidget);
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Artist'), 'Band');
+    await tester.enterText(find.widgetWithText(TextField, 'Album'), 'Tape');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Year (optional)'), '1999');
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+
+    await tester.runAsync(() async {
+      while (session.stage == BatchStage.preparing) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    expect(session.readyCount, 2);
+    for (final e in session.entries) {
+      expect(e.status, 'ready');
+      expect(e.type, 'music');
+      expect(e.custom, isTrue);
+      expect(e.name, contains('Band - Tape (1999)'));
+    }
+  });
+
   test('defaultBatchList: mostly-audio batches default to Music', () {
     final dir = dirIn('music-batch');
     File('${dir.path}/a.mp3').writeAsBytesSync([1]);

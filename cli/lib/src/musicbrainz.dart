@@ -206,18 +206,25 @@ class MusicBrainz {
 
   /// Cover Art Archive front cover (500px) for a release — square CAA
   /// front as-is per the music edge-case decisions. No key needed.
+  /// In-memory cached per release (definitive answers only, so a whole
+  /// album resolving track by track fetches its cover once; transport
+  /// errors stay retryable).
   Future<List<int>?> caaFrontCover(String releaseMbid) async {
+    if (_caaCache.containsKey(releaseMbid)) return _caaCache[releaseMbid];
     try {
       final res = await _client.get(
           Uri.parse('https://coverartarchive.org/release/$releaseMbid'
               '/front-500'),
           headers: {'User-Agent': kUserAgent});
-      if (res.statusCode != 200) return null;
-      return res.bodyBytes;
+      if (res.statusCode == 200) return _caaCache[releaseMbid] = res.bodyBytes;
+      if (res.statusCode == 404) return _caaCache[releaseMbid] = null;
+      return null;
     } catch (_) {
       return null;
     }
   }
+
+  final _caaCache = <String, List<int>?>{};
 
   void close() => _client.close();
 }
