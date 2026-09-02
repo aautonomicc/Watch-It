@@ -63,6 +63,31 @@ class _FakeFfmpeg extends FfmpegService {
   void cancel() {}
 }
 
+/// Mirrors HomeScreen's wiring: the startup resume offer fires from the
+/// first home build's initState.
+class _ResumeHost extends StatefulWidget {
+  const _ResumeHost({super.key, required this.configDir});
+  final Directory configDir;
+
+  @override
+  State<_ResumeHost> createState() => _ResumeHostState();
+}
+
+class _ResumeHostState extends State<_ResumeHost> {
+  @override
+  void initState() {
+    super.initState();
+    offerBatchResume(context,
+        apiBase: FakeEmbeddedHttp.base,
+        configDir: widget.configDir,
+        ffmpegOverride: _NoFfmpeg());
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      const Scaffold(body: SizedBox.shrink());
+}
+
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
@@ -1528,9 +1553,9 @@ entries:
     expect(session.skippedCount, 1);
   });
 
-  testWidgets('previous-uploads card: interrupted batches offer '
-      'Continue, finished ones hide behind Show, Dismiss retires a '
-      'batch, Delete (after confirm) removes its row',
+  testWidgets('previous-uploads card: finished batches are swept on '
+      'sight, interrupted ones offer Continue, Dismiss retires and '
+      'sweeps a batch, Delete (after confirm) removes its records',
       (tester) async {
     tester.view.physicalSize = const Size(900, 2400);
     tester.view.devicePixelRatio = 1;
@@ -1589,33 +1614,39 @@ entries:
     expect(find.textContaining('Half Way'), findsOneWidget);
     expect(find.text('Continue'), findsOneWidget);
     expect(find.textContaining('Needs Eyes'), findsOneWidget);
-    // The fully finished batch is hidden behind the Show toggle.
-    expect(find.textContaining('All Done'), findsNothing);
-    expect(find.text('1 finished batch kept as upload records'),
-        findsOneWidget);
-    await tester.tap(find.text('Show'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('All Done'), findsOneWidget);
-    expect(find.text('1 uploaded'), findsOneWidget);
     expect(find.text('1 uploaded · 1 ready'), findsOneWidget);
+    // The fully finished batch was swept on sight — row AND records
+    // gone, no kept-records pile.
+    expect(find.textContaining('All Done'), findsNothing);
+    expect(b.existsSync(), isFalse);
+    expect(find.text('Show'), findsNothing);
+    expect(find.textContaining('kept as upload records'), findsNothing);
 
-    // Dismiss retires the attention batch — with nothing left to do it
-    // becomes a finished record (still visible: Show is on).
+    // A batch with no recorded content hashes (Needs Eyes' manifest
+    // predates them) never offers the forget opt-in — nothing to
+    // forget. Rows sort newest first, so its delete button is last.
+    await tester.tap(find.byTooltip('Delete batch').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Delete this batch\'s records?'), findsOneWidget);
+    expect(find.byType(CheckboxListTile), findsNothing);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    // Dismiss gives up on the attention batch — nothing left to do, so
+    // the reload sweeps its records too.
     await tester.tap(find.text('Dismiss'));
     await tester.pumpAndSettle();
     expect(find.textContaining('from earlier uploads still'),
         findsNothing);
     expect(find.text('Previous uploads'), findsOneWidget);
-    expect(find.text('1 skipped'), findsOneWidget);
-    expect(find.text('2 finished batches kept as upload records'),
-        findsOneWidget);
+    expect(find.textContaining('Needs Eyes'), findsNothing);
+    expect(a.existsSync(), isFalse);
 
-    // Delete the interrupted batch (rows sort newest first, so its
-    // delete button is the first one) — confirm dialog, then gone.
-    // Only the batch's records go: library entries stay put. Its one
+    // Delete the interrupted batch — confirm dialog, then gone. Only
+    // the batch's records go: library entries stay put. Its one
     // uploaded entry offers the forget opt-in; ticking it drops that
     // hash from the shared ledger while other rows survive.
-    await tester.tap(find.byTooltip('Delete batch').first);
+    await tester.tap(find.byTooltip('Delete batch'));
     await tester.pumpAndSettle();
     expect(find.text('Delete this batch\'s records?'), findsOneWidget);
     expect(find.text('Also forget this upload'), findsOneWidget);
@@ -1625,20 +1656,196 @@ entries:
     await tester.pumpAndSettle();
     expect(cut.existsSync(), isFalse);
     expect(find.textContaining('Half Way'), findsNothing);
-    expect(find.textContaining('All Done'), findsOneWidget);
-    expect(find.textContaining('Needs Eyes'), findsOneWidget);
+    // Nothing left — the whole card is gone.
+    expect(find.text('Previous uploads'), findsNothing);
     final ledger =
         cli.Ledger.load(File('${config.path}/ledger.jsonl'));
     expect(ledger.lookup('aa11'), isNull);
     expect(ledger.lookup('keep')!.name, 'Elsewhere.mp4');
+  });
 
-    // A batch with no recorded content hashes (All Done's manifest
-    // predates them) never offers the opt-in — nothing to forget.
-    await tester.tap(find.byTooltip('Delete batch').last);
+  test('clear() sweeps a fully successful done batch\'s whole work '
+      'dir; a batch with failures keeps its records', () {
+    final session = BatchUploadSession.instance;
+    final work = dirIn('work-sweep');
+    final mf = File('${work.path}/watchit-manifest.yaml')
+      ..writeAsStringSync('''
+version: 1
+list_name: "Done"
+entries:
+  - source: "/x/a.mp4"
+    status: "uploaded"
+''');
+    session.manifest = cli.Manifest.load(mf);
+    session.workDir = work;
+    session.stage = BatchStage.done;
+    session.clear();
+    expect(work.existsSync(), isFalse);
+    expect(session.stage, BatchStage.idle);
+
+    // A failure keeps the work dir — it is the resume/retry state.
+    final work2 = dirIn('work-keep');
+    final mf2 = File('${work2.path}/watchit-manifest.yaml')
+      ..writeAsStringSync('''
+version: 1
+list_name: "Partial"
+entries:
+  - source: "/x/a.mp4"
+    status: "uploaded"
+  - source: "/x/b.mp4"
+    status: "failed"
+''');
+    session.manifest = cli.Manifest.load(mf2);
+    session.workDir = work2;
+    session.stage = BatchStage.done;
+    session.clear();
+    expect(work2.existsSync(), isTrue);
+  });
+
+  test('deleteFinishedBatches sweeps only finished batches (honouring '
+      'keepPath); scanInterruptedBatches lists the cut-short ones',
+      () async {
+    final src = mediaFile('sweep-src.mp4', 77);
+    final root = dirIn('root-sweep');
+    Directory seed(String name, String status, {String? source}) {
+      final d = Directory('${root.path}/$name')..createSync();
+      File('${d.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "$name"
+created: "2026-09-02T0$name"
+entries:
+  - source: "${source ?? src.path}"
+    status: "$status"
+''');
+      return d;
+    }
+
+    final finished = seed('1', 'uploaded');
+    final interrupted = seed('2', 'ready');
+    final attention = seed('3', 'needs-attention');
+    // Attention/ready rows whose source is gone are nothing to do —
+    // the batch counts finished and sweeps too.
+    final stale = seed('4', 'ready', source: '${root.path}/gone.mp4');
+    final kept = seed('5', 'uploaded');
+
+    expect(await deleteFinishedBatches(root, keepPath: kept.path), 2);
+    expect(finished.existsSync(), isFalse);
+    expect(stale.existsSync(), isFalse);
+    expect(interrupted.existsSync(), isTrue);
+    expect(attention.existsSync(), isTrue);
+    expect(kept.existsSync(), isTrue);
+
+    expect([
+      for (final b in await scanInterruptedBatches(root)) b.listName
+    ], ['2']);
+  });
+
+  testWidgets('startup resume prompt: sweeps finished records, offers '
+      'the cut-short batch, Continue reopens it at its review page',
+      (tester) async {
+    resetBatchResumeOffer();
+    final lost = mediaFile('resume-lost.mp4', 91);
+    final root = dirIn('root-prompt');
+    final cut = Directory('${root.path}/cut')..createSync();
+    File('${cut.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "Road Trip"
+created: "2026-09-02T12:00:00"
+entries:
+  - source: "${lost.path}"
+    status: "ready"
+    name: "Waiting (2001).mp4"
+  - source: "${lost.path}"
+    status: "uploaded"
+    name: "Done (2000).mp4"
+    address: "${'ee' * 32}"
+''');
+    final done = Directory('${root.path}/done')..createSync();
+    File('${done.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "Old Records"
+entries:
+  - source: "${lost.path}"
+    status: "uploaded"
+''');
+    batchResumeRootOverride = () async => root;
+    addTearDown(() => batchResumeRootOverride = null);
+    fake.wallet = {'configured': true, 'address': '0xabc', 'storage': 'file'};
+    final session = BatchUploadSession.instance;
+    session.probeOverride = (path) async => null;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: _ResumeHost(configDir: dirIn('config-prompt')),
+    ));
     await tester.pumpAndSettle();
-    expect(find.text('Delete this batch\'s records?'), findsOneWidget);
-    expect(find.byType(CheckboxListTile), findsNothing);
-    await tester.tap(find.text('Cancel'));
+    expect(find.text('Finish an interrupted upload?'), findsOneWidget);
+    expect(find.textContaining('"Road Trip" was cut short'),
+        findsOneWidget);
+    expect(find.textContaining('never paid for twice'), findsOneWidget);
+    // The startup pass swept the finished batch's records.
+    expect(done.existsSync(), isFalse);
+
+    await tester.tap(find.text('Continue upload'));
     await tester.pumpAndSettle();
+    expect(find.byType(BatchUploadScreen), findsOneWidget);
+    expect(session.stage, BatchStage.review);
+    expect(session.uploadedCount, 1);
+    expect(session.readyCount, 1);
+  });
+
+  testWidgets('startup resume prompt: several cut-short batches open '
+      'the management list, Not now leaves them, offered once per '
+      'launch', (tester) async {
+    resetBatchResumeOffer();
+    final lost = mediaFile('resume-lost2.mp4', 92);
+    final root = dirIn('root-prompt2');
+    for (final name in ['one', 'two']) {
+      final d = Directory('${root.path}/$name')..createSync();
+      File('${d.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "Batch $name"
+entries:
+  - source: "${lost.path}"
+    status: "ready"
+''');
+    }
+    batchResumeRootOverride = () async => root;
+    addTearDown(() => batchResumeRootOverride = null);
+    final config = dirIn('config-prompt2');
+
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: _ResumeHost(key: const ValueKey('h1'), configDir: config),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('2 upload batches were cut short'),
+        findsOneWidget);
+    await tester.tap(find.text('Not now'));
+    await tester.pumpAndSettle();
+    expect(find.byType(BatchUploadScreen), findsNothing);
+    expect(Directory('${root.path}/one').existsSync(), isTrue);
+
+    // Once per launch: a second home build must not re-prompt.
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: _ResumeHost(key: const ValueKey('h2'), configDir: config),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Finish an interrupted upload?'), findsNothing);
+
+    // Re-armed (next launch): Continue with several waiting opens the
+    // batch screen's management list instead of resuming one blindly.
+    resetBatchResumeOffer();
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: _ResumeHost(key: const ValueKey('h3'), configDir: config),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue upload'));
+    await tester.pumpAndSettle();
+    expect(find.byType(BatchUploadScreen), findsOneWidget);
+    expect(find.text('Continue'), findsNWidgets(2));
+    expect(BatchUploadSession.instance.idle, isTrue);
   });
 }

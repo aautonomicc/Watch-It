@@ -1490,23 +1490,23 @@ class BatchUploadSession extends ChangeNotifier {
     unawaited(_upload(retry));
   }
 
-  /// Abort whatever is running and forget the session (the manifest and
-  /// any uploads already paid for stay on disk / in the ledger).
+  /// Abort whatever is running and forget the session (any uploads
+  /// already paid for stay in the ledger and on the network).
   void clear() {
     // A fully successful batch is closed for good when the user leaves
-    // the done page — reclaim its working artwork and any encode
-    // leftovers (encodes can be GBs). The manifest, datamaps, and
-    // bundle stay: they are the upload's record.
+    // the done page — its whole work dir goes (manifest, datamaps,
+    // bundle, encode leftovers). Nothing load-bearing lives there:
+    // library entries, the files on the network, root maps in the
+    // embedded client's store, and the dedup hashes in the shared
+    // ledger all sit elsewhere, so finished batches leave no records
+    // to pile up.
     if (stage == BatchStage.done &&
         failedCount == 0 &&
         attentionCount == 0 &&
         workDir != null) {
-      for (final sub in ['encodes', 'art']) {
-        try {
-          Directory(p.join(workDir!.path, sub))
-              .deleteSync(recursive: true);
-        } catch (_) {}
-      }
+      try {
+        workDir!.deleteSync(recursive: true);
+      } catch (_) {}
     }
     _aborted = true;
     _mb?.close();
@@ -1766,10 +1766,44 @@ Future<List<PreviousBatch>> scanPreviousBatches(Directory root) async {
   return result;
 }
 
+/// Batches an interrupted upload left waiting — still-`ready` (or
+/// `failed`) files whose source exists — newest first. What the
+/// startup resume prompt offers to continue after a crash or
+/// unexpected shutdown.
+Future<List<PreviousBatch>> scanInterruptedBatches(
+        Directory root) async =>
+    [
+      for (final b in await scanPreviousBatches(root))
+        if (b.interrupted) b,
+    ];
+
+/// Delete every fully finished batch under [root] (all entries
+/// uploaded, deduped, or skipped). A finished batch's work dir holds
+/// nothing load-bearing — playback addresses live in the library, root
+/// maps in the embedded client's store, dedup hashes in the shared
+/// ledger — so finished batches are swept on sight instead of piling
+/// up as records (user decision 2026-09-02; the Delete dialog's "also
+/// forget" opt-in is knowingly given up with them). [keepPath]
+/// protects the live session's own work dir. Returns batches removed.
+Future<int> deleteFinishedBatches(Directory root,
+    {String? keepPath}) async {
+  var removed = 0;
+  for (final b in await scanPreviousBatches(root)) {
+    if (!b.finished) continue;
+    if (keepPath != null && p.equals(b.workDir.path, keepPath)) continue;
+    try {
+      b.workDir.deleteSync(recursive: true);
+      removed++;
+    } catch (_) {}
+  }
+  return removed;
+}
+
 /// Dismiss [batch]: its needs-attention entries are marked `skipped` in
-/// the manifest, so the attention scan stops surfacing it. Nothing else
-/// changes — uploads stay in the ledger, the bundle stays on disk, and
-/// the files can always go through a fresh batch later.
+/// the manifest, so the attention scan stops surfacing it. Uploads stay
+/// in the ledger and the files can always go through a fresh batch
+/// later — but with nothing left to do the batch counts as finished,
+/// and the next scan sweeps its records away.
 void dismissBatch(PreviousBatch batch) {
   final file =
       File(p.join(batch.workDir.path, 'watchit-manifest.yaml'));
