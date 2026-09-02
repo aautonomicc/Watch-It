@@ -36,13 +36,16 @@ library private by construction.
    re-leaks every title in it.)
 5. **Metadata like the big apps.** From the file name alone, fetch artwork,
    description, and category from the same public databases the media servers use
-   (TMDB), so a bare file list becomes a rich, browsable collection.
+   (TMDB for video; MusicBrainz + Cover Art Archive for music, keyless),
+   so a bare file list becomes a rich, browsable collection.
 6. **Stream or keep.** Play instantly from the network, or download for offline —
    downloaded items keep the full library experience.
 7. **Publish from the app.** Getting media *onto* the network shouldn't need
-   a terminal either: pick files, choose quality tiers, pay with a built-in
-   wallet, and the upload lands in the library with its datamap on-device
-   (shipped for desktop in alpha.55/.56).
+   a terminal either: pick files or whole folders, let the app match them
+   against the databases and name them canonically, choose quality tiers,
+   pay with a built-in wallet, and the uploads land in the library with
+   their datamaps on-device (shipped for desktop in alpha.55/.56; batch
+   auto-matching in alpha.77–.79).
 8. **Play everything.** libmpv-based engine: every container/codec, subtitles,
    multiple audio tracks, chapters.
 9. **Own your data.** Watch history, resume points, lists, and cached metadata stored
@@ -57,7 +60,9 @@ library private by construction.
 - **No server compatibility.** No Plex/Emby/Jellyfin/Silo client support — stripped
   out by design. Autonomi is the only remote source.
 - **Not a server itself.** No transcoding for other devices, no user management.
-- **No live TV / DVR, no music-first experience** in v1.
+- **No live TV / DVR** in v1. (Music was originally out of scope too,
+  but shipped in alpha.76–.79: album wall, inline album player, artist
+  pages — W@tch stays video-first, with music as a full library type.)
 - **No piracy features** — W@tch plays what its users hold datamaps for on
   Autonomi; it ships no torrent/debrid integrations.
 
