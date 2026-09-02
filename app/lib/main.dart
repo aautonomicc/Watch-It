@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'models/media_list.dart';
 import 'screens/album_screen.dart';
 import 'screens/artist_screen.dart';
+import 'screens/batch_upload_screen.dart' show offerBatchResume;
 import 'screens/detail_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
@@ -242,6 +243,10 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     ChannelService.revision.addListener(_reload);
     // Wall cards badge their download state — have the queue loaded.
     unawaited(DownloadManager.instance.ensureLoaded());
+    // A crash or shutdown can leave a batch upload cut short — once per
+    // launch, offer to continue it (and sweep finished batch records).
+    // A silent no-op on mobile or with nothing interrupted.
+    unawaited(offerBatchResume(context));
     _reload();
   }
 

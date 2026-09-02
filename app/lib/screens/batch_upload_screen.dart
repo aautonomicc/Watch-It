@@ -16,7 +16,7 @@ import '../services/library_store.dart';
 import '../services/publish_plan.dart' as plan;
 import '../services/publish_api.dart';
 import '../theme/tokens.dart';
-import 'publish_screen.dart' show pickTargetLists;
+import 'publish_screen.dart' show isDesktopPlatform, pickTargetLists;
 import 'settings_screen.dart' show promptForText;
 import 'wallet_screen.dart';
 
@@ -35,6 +35,8 @@ class BatchUploadScreen extends StatefulWidget {
     this.workDirProvider,
     this.configDir,
     this.batchRootProvider,
+    this.resumeDir,
+    this.ffmpegOverride,
   });
 
   /// Test overrides for the embedded server base URL / auth token.
@@ -50,6 +52,15 @@ class BatchUploadScreen extends StatefulWidget {
   /// Test override for the earlier-batches root the needs-attention
   /// scan reads (`<support>/batch_uploads` normally).
   final Future<Directory> Function()? batchRootProvider;
+
+  /// When set, the screen immediately continues this interrupted batch
+  /// (the startup resume prompt's "Continue upload"): it reopens at its
+  /// review page with already-uploaded files kept.
+  final Directory? resumeDir;
+
+  /// Test override for the ffmpeg wrapper (a real one spawns processes
+  /// that hang the fake-async zone).
+  final FfmpegService? ffmpegOverride;
 
   @override
   State<BatchUploadScreen> createState() => _BatchUploadScreenState();
@@ -71,7 +82,6 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   List<String> _libraryLists = [];
   WalletStatus? _wallet;
   List<PreviousBatch> _previous = [];
-  bool _showFinished = false;
   bool _rights = false;
   late BatchStage _lastStage = _session.stage;
 
@@ -82,6 +92,10 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     _loadWallet();
     _loadLists();
     _loadAttention();
+    final resume = widget.resumeDir;
+    if (resume != null) {
+      scheduleMicrotask(() => _resumeFromDir(resume));
+    }
   }
 
   @override
@@ -113,12 +127,21 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       : Directory(p.join(
           (await getApplicationSupportDirectory()).path, 'batch_uploads'));
 
-  /// Earlier batches — every work dir with a manifest, attention counts
-  /// included.
+  /// Earlier batches still needing work. Fully finished batches are
+  /// swept away first (their work dirs hold nothing load-bearing), so
+  /// only unfinished ones surface.
   Future<void> _loadAttention() async {
     try {
-      final batches = await scanPreviousBatches(await _batchRoot());
-      if (mounted) setState(() => _previous = batches);
+      final root = await _batchRoot();
+      // The live session's dir must survive: at the done stage it looks
+      // finished while the done page still serves its bundle.
+      await deleteFinishedBatches(root,
+          keepPath: _session.workDir?.path);
+      final batches = await scanPreviousBatches(root);
+      if (mounted) {
+        setState(() =>
+            _previous = [for (final b in batches) if (!b.finished) b]);
+      }
     } catch (_) {
       // No support dir (tests) — nothing to surface.
     }
@@ -139,25 +162,30 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       tmdbKey: tmdbKey,
       ffprobeBin: locateFfprobeBin(),
       configDir: widget.configDir,
-      ffmpeg: FfmpegService(),
+      ffmpeg: widget.ffmpegOverride ?? FfmpegService(),
     );
   }
 
   /// Continue an interrupted batch: reopen it at its review page —
   /// already-uploaded files are skipped, the rest upload from there.
-  Future<void> _continueBatch(PreviousBatch batch) async {
+  Future<void> _continueBatch(PreviousBatch batch) =>
+      _resumeFromDir(batch.workDir);
+
+  Future<void> _resumeFromDir(Directory dir) async {
     if (!_session.idle) return;
     await _session.resumeBatch(
       api: _api,
-      workDir: batch.workDir,
+      workDir: dir,
       ffprobeBin: locateFfprobeBin(),
       configDir: widget.configDir,
-      ffmpeg: FfmpegService(),
+      ffmpeg: widget.ffmpegOverride ?? FfmpegService(),
     );
   }
 
-  /// Dismiss: stop surfacing the batch's needs-attention files (they
-  /// flip to skipped in its manifest; ledger and bundle untouched).
+  /// Dismiss: give up on the batch's needs-attention files (they flip
+  /// to skipped, so with nothing left to do the batch counts as
+  /// finished and the reload sweeps its records; the ledger keeps its
+  /// uploads either way).
   void _dismissBatch(PreviousBatch batch) {
     try {
       dismissBatch(batch);
@@ -318,7 +346,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       tmdbKey: tmdbKey,
       ffprobeBin: locateFfprobeBin(),
       configDir: widget.configDir,
-      ffmpeg: FfmpegService(),
+      ffmpeg: widget.ffmpegOverride ?? FfmpegService(),
     );
   }
 
@@ -428,15 +456,11 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     ];
   }
 
-  /// Earlier batches as a management list: unfinished batches (files
-  /// needing attention, or an upload that was cut short) with Continue
-  /// / Review / Dismiss / Delete. Fully finished batches are records,
-  /// not work — they hide behind a one-line Show toggle instead of
-  /// piling up (Delete stays reachable there to clear the history;
-  /// library entries and network uploads are never touched).
+  /// Earlier batches as a management list: files needing attention or
+  /// an upload that was cut short, with Continue / Review / Dismiss /
+  /// Delete. Fully finished batches never appear — they are swept
+  /// automatically (library entries and network uploads untouched).
   Widget _previousUploadsCard(WiTokens t) {
-    final unfinished = [for (final b in _previous) if (!b.finished) b];
-    final finished = [for (final b in _previous) if (b.finished) b];
     final total =
         _previous.fold(0, (n, b) => n + b.attentionSources.length);
     return Container(
@@ -470,28 +494,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          for (final batch in unfinished) _previousBatchRow(t, batch),
-          if (_showFinished)
-            for (final batch in finished) _previousBatchRow(t, batch),
-          if (finished.isNotEmpty)
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '${finished.length} finished '
-                    '${finished.length == 1 ? 'batch' : 'batches'} '
-                    'kept as upload records',
-                    style: TextStyle(color: t.ash, fontSize: 12),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () =>
-                      setState(() => _showFinished = !_showFinished),
-                  child: Text(_showFinished ? 'Hide' : 'Show',
-                      style: TextStyle(color: t.ash)),
-                ),
-              ],
-            ),
+          for (final batch in _previous) _previousBatchRow(t, batch),
         ],
       ),
     );
@@ -2081,7 +2084,10 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       if (_session.bundlePath != null)
         Text(
           'Bundle: ${_session.bundlePath}\nShare this .watch-list file to '
-          'hand everything you uploaded to another device or person.',
+          'hand everything you uploaded to another device or person.'
+          '${allGood ? ' Use "Save bundle to…" to keep a copy — a fully '
+              'successful batch\'s working files are tidied away when '
+              'you press Done.' : ''}',
           style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
         ),
       const SizedBox(height: 16),
@@ -2204,6 +2210,94 @@ String defaultBatchList(List<String> paths,
   } catch (_) {
     return fallback;
   }
+}
+
+bool _batchResumeOffered = false;
+
+/// Test hook: re-arm the once-per-launch resume offer.
+@visibleForTesting
+void resetBatchResumeOffer() => _batchResumeOffered = false;
+
+/// Test hook: where [offerBatchResume] scans for batch work dirs
+/// (`<support>/batch_uploads` normally).
+Future<Directory> Function()? batchResumeRootOverride;
+
+/// Once per launch (from the home screen's first build): if a crash or
+/// shutdown left a batch upload cut short, offer to continue it —
+/// "Continue upload" opens the batch screen resuming the newest one
+/// (or, with several waiting, at their management list). The same pass
+/// sweeps fully finished batch records left behind by a crash on the
+/// done page or by older versions. Desktop-only, like the batch
+/// uploader itself; a silent no-op when nothing is interrupted.
+Future<void> offerBatchResume(
+  BuildContext context, {
+  String? apiBase,
+  String? apiToken,
+  Directory? configDir,
+  FfmpegService? ffmpegOverride,
+}) async {
+  if (_batchResumeOffered || !isDesktopPlatform) return;
+  _batchResumeOffered = true;
+  if (!BatchUploadSession.instance.idle) return;
+  final List<PreviousBatch> interrupted;
+  try {
+    final root = batchResumeRootOverride != null
+        ? await batchResumeRootOverride!()
+        : Directory(p.join((await getApplicationSupportDirectory()).path,
+            'batch_uploads'));
+    await deleteFinishedBatches(root);
+    interrupted = await scanInterruptedBatches(root);
+  } catch (_) {
+    return; // No support dir (tests) — nothing to offer.
+  }
+  if (interrupted.isEmpty || !context.mounted) return;
+  final newest = interrupted.first;
+  final waiting = newest.resumableSources.length;
+  final t = WiTokens.of(context);
+  final resume = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: t.ink2,
+      title: Text('Finish an interrupted upload?',
+          style: TextStyle(color: t.bone, fontSize: 16)),
+      content: Text(
+        interrupted.length == 1
+            ? 'The upload batch "${newest.listName}" was cut short — '
+                '$waiting ${waiting == 1 ? 'file' : 'files'} never made '
+                'it up (W@tch closed or the computer shut down '
+                'mid-upload). Continuing is safe: anything already '
+                'uploaded is recognised and never paid for twice. You '
+                'can also continue later from the Upload page.'
+            : '${interrupted.length} upload batches were cut short '
+                'before they finished. Continuing is safe: anything '
+                'already uploaded is recognised and never paid for '
+                'twice. You can also continue later from the Upload '
+                'page.',
+        style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text('Not now', style: TextStyle(color: t.ash)),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Continue upload'),
+        ),
+      ],
+    ),
+  );
+  if (resume != true || !context.mounted) return;
+  await Navigator.of(context).push(MaterialPageRoute(
+    builder: (_) => BatchUploadScreen(
+      apiBase: apiBase,
+      apiToken: apiToken,
+      configDir: configDir,
+      batchRootProvider: batchResumeRootOverride,
+      resumeDir: interrupted.length == 1 ? newest.workDir : null,
+      ffmpegOverride: ffmpegOverride,
+    ),
+  ));
 }
 
 /// The bundled ffprobe beside the executable (AppImage / Windows zip
