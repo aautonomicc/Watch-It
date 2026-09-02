@@ -159,6 +159,103 @@ class AlbumCard extends StatelessWidget {
   }
 }
 
+/// All of an artist's albums folded into one wall card (the music mirror
+/// of [ShowCard]): a 2×2 collage of album covers with the artist name
+/// and album/track counts underneath. Tap opens the artist page, which
+/// lists the albums.
+class ArtistCard extends StatelessWidget {
+  const ArtistCard({
+    super.key,
+    required this.group,
+    required this.tokens,
+    required this.onTap,
+  });
+
+  final HomeArtist group;
+  final WiTokens tokens;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = tokens;
+    // A user-corrected artist credit (Edit track details) beats the
+    // parsed name, same as on AlbumCard.
+    final meta =
+        MetadataService.instance.metadataFor(group.albums.first.tracks.first);
+    final albums = group.albums;
+    final tracks = group.trackCount;
+    final badge =
+        groupDownloadBadge(t, [for (final a in albums) ...a.tracks]);
+    // One collage quarter — fewer than four albums cycle their covers
+    // around the grid.
+    Widget cell(int i) {
+      final album = albums[i % albums.length];
+      final m = MetadataService.instance.metadataFor(album.tracks.first);
+      return Expanded(
+        child: posterImage(m, fit: BoxFit.cover) ??
+            Container(
+              color: t.ink2,
+              child: Icon(Icons.album_outlined, color: t.ash, size: 20),
+            ),
+      );
+    }
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        width: 120,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox(
+                width: 120,
+                height: 120,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Column(children: [
+                      Expanded(
+                          child: Row(children: [
+                        cell(0),
+                        const SizedBox(width: 1),
+                        cell(1),
+                      ])),
+                      const SizedBox(height: 1),
+                      Expanded(
+                          child: Row(children: [
+                        cell(2),
+                        const SizedBox(width: 1),
+                        cell(3),
+                      ])),
+                    ]),
+                    ?badge,
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              meta.artist ?? group.artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11.5, color: t.boneDim),
+            ),
+            Text(
+              '${albums.length} albums · $tracks tracks',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10.5, color: t.ash),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// A whole show folded into one wall card: the show's main poster with
 /// its name and season/episode counts underneath. Tap opens the show
 /// page, which lists the seasons.

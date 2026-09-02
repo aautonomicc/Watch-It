@@ -372,8 +372,35 @@ class _ListEditScreenState extends State<ListEditScreen> {
 
   /// An album's tracks fold under a single expandable tile, like a
   /// season's episodes; the group menu curates the whole album at once.
-  Widget _albumTile(WiTokens t, HomeAlbum group) {
+  /// Nested under an artist tile the album indents like a season.
+  Widget _albumTile(WiTokens t, HomeAlbum group, {bool nested = false}) {
     final n = group.tracks.length;
+    return ExpansionTile(
+      controlAffinity: ListTileControlAffinity.leading,
+      iconColor: t.ash,
+      collapsedIconColor: t.ash,
+      shape: const Border(),
+      collapsedShape: const Border(),
+      tilePadding: EdgeInsets.only(left: nested ? 24 : 8, right: 4),
+      childrenPadding: EdgeInsets.zero,
+      title: Text(group.album,
+          style: TextStyle(
+              color: t.bone, fontSize: 14, fontWeight: FontWeight.w600)),
+      subtitle: Text('${group.artist} · $n ${n == 1 ? 'track' : 'tracks'}',
+          style: TextStyle(color: t.ash, fontSize: 12)),
+      trailing: _entryMenu(t, group.tracks, '"${group.album}"'),
+      children: [
+        for (final e in group.tracks)
+          _entryRow(t, e, indent: nested ? 56 : 40),
+      ],
+    );
+  }
+
+  /// An artist's albums fold under one expandable tile, mirroring the
+  /// show → season tree; the group menu curates every track at once.
+  Widget _artistTile(WiTokens t, HomeArtist group) {
+    final all = [for (final a in group.albums) ...a.tracks];
+    final n = group.albums.length;
     return ExpansionTile(
       controlAffinity: ListTileControlAffinity.leading,
       iconColor: t.ash,
@@ -382,13 +409,16 @@ class _ListEditScreenState extends State<ListEditScreen> {
       collapsedShape: const Border(),
       tilePadding: const EdgeInsets.only(left: 8, right: 4),
       childrenPadding: EdgeInsets.zero,
-      title: Text(group.album,
+      title: Text(group.artist,
           style: TextStyle(
               color: t.bone, fontSize: 14, fontWeight: FontWeight.w600)),
-      subtitle: Text('${group.artist} · $n ${n == 1 ? 'track' : 'tracks'}',
+      subtitle: Text(
+          '$n albums · ${all.length} ${all.length == 1 ? 'track' : 'tracks'}',
           style: TextStyle(color: t.ash, fontSize: 12)),
-      trailing: _entryMenu(t, group.tracks, '"${group.album}"'),
-      children: [for (final e in group.tracks) _entryRow(t, e, indent: 40)],
+      trailing: _entryMenu(t, all, '"${group.artist}"'),
+      children: [
+        for (final a in group.albums) _albumTile(t, a, nested: true),
+      ],
     );
   }
 
@@ -460,6 +490,8 @@ class _ListEditScreenState extends State<ListEditScreen> {
                       switch (item) {
                         HomeShow() && final group => _showTile(t, group),
                         HomeAlbum() && final album => _albumTile(t, album),
+                        HomeArtist() && final artist =>
+                          _artistTile(t, artist),
                         HomeEntry() && final single =>
                           single.allVersions.length > 1
                               ? _versionsTile(t, single)

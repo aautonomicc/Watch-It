@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'models/media_list.dart';
 import 'screens/album_screen.dart';
+import 'screens/artist_screen.dart';
 import 'screens/detail_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
@@ -330,6 +331,13 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     );
   }
 
+  /// An artist card opens the artist page: their albums as tiles.
+  Future<void> _openArtist(HomeArtist group) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ArtistScreen(group: group)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
@@ -464,6 +472,11 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
               group: album,
               tokens: t,
               onTap: () => _openAlbum(album),
+            ),
+          HomeArtist() && final artist => ArtistCard(
+              group: artist,
+              tokens: t,
+              onTap: () => _openArtist(artist),
             ),
           // groupShows never yields bare seasons.
           HomeSeason() => const SizedBox.shrink(),

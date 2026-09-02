@@ -1074,6 +1074,63 @@ void main() {
     expect(session.entries.single.name, 'Found (2002).mp4');
   });
 
+  testWidgets('earlier-batches card refreshes when the session returns '
+      'to setup', (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final file = mediaFile('mystery.mp4', 68);
+    final root = dirIn('batch_uploads');
+    final old = Directory('${root.path}/old-batch')..createSync();
+    File('${old.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "Old Batch"
+entries:
+  - source: "${file.path}"
+    status: "needs-attention"
+''');
+    final session = BatchUploadSession.instance;
+    session.probeOverride = (path) async => null;
+    session.matchOverride = scriptedMatcher({
+      'mystery.mp4': cli.MatchOutcome(
+          type: 'video',
+          name: 'Solved (2001).mp4',
+          method: 'id',
+          confidence: 'high'),
+    });
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: BatchUploadScreen(
+          apiBase: FakeEmbeddedHttp.base,
+          batchRootProvider: () async => root),
+    ));
+    await tester.pumpAndSettle();
+    expect(
+        find.text('1 file from earlier batches still needs attention'),
+        findsOneWidget);
+
+    // The Review flow re-runs prepare over the batch's own work dir;
+    // the file resolves and the batch is closed. Back on the setup
+    // page the card must be gone WITHOUT leaving the screen (it used
+    // to stay until the screen was reopened).
+    await tester.runAsync(() async {
+      await session.startPrepare(
+        api: api(),
+        paths: [file.path],
+        listName: 'Old Batch',
+        workDir: old,
+        configDir: dirIn('config-refresh'),
+      );
+      while (session.stage == BatchStage.preparing) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      session.clear();
+    });
+    await tester.pumpAndSettle();
+    expect(
+        find.textContaining('from earlier batches still'), findsNothing);
+  });
+
   testWidgets('carousel header: N of M with back/forward arrows',
       (tester) async {
     tester.view.physicalSize = const Size(900, 2400);

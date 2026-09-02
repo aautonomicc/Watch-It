@@ -64,16 +64,45 @@ class HomeAlbum extends HomeItem {
     required this.artist,
     required this.album,
     required this.tracks,
+    this.year,
+    this.isCompilation = false,
   });
 
   /// Artist/album names parsed from the file names — display fallback
   /// (music has no TMDB-style canonical-title fetch; CLI-written names
-  /// already carry the MusicBrainz canonical data).
+  /// already carry the MusicBrainz canonical data). An album whose
+  /// tracks credit different artists reads `Various Artists`.
   final String artist;
   final String album;
 
+  /// Release year parsed from the file names, when present.
+  final int? year;
+
+  /// True for compilations — a `Various Artists` credit, or tracks
+  /// whose parsed artists disagree. Compilations never fold under an
+  /// artist card ([groupShows]); they stand alone on the wall.
+  final bool isCompilation;
+
   /// The album's entries, sorted by disc then track number.
   final List<MediaEntry> tracks;
+}
+
+/// All of one artist's albums folded into a single wall card (the music
+/// mirror of [HomeShow]): once an artist has two or more albums in the
+/// list they share one tile that opens the artist page. Single-album
+/// artists and compilations stay as [HomeAlbum] cards.
+class HomeArtist extends HomeItem {
+  const HomeArtist({required this.artist, required this.albums});
+
+  /// Artist name parsed from the file names (display fallback, as on
+  /// [HomeAlbum]).
+  final String artist;
+
+  /// The artist's albums present in the list, sorted by year then
+  /// title; never fewer than two.
+  final List<HomeAlbum> albums;
+
+  int get trackCount => albums.fold(0, (sum, a) => sum + a.tracks.length);
 }
 
 class _AlbumBuilder {
@@ -87,6 +116,13 @@ class _AlbumBuilder {
   final int slot;
 
   final tracks = <(int, int, MediaEntry)>[];
+
+  /// Distinct per-track artist credits (lowercased) — more than one
+  /// marks the album a compilation.
+  final artists = <String>{};
+
+  /// First parsed release year seen on a track.
+  int? year;
 }
 
 class _SeasonBuilder {
@@ -184,6 +220,8 @@ List<HomeItem> groupSeasons(List<MediaEntry> entries) {
             _AlbumBuilder(parsed.artist!, parsed.title, items.length - 1);
       }
       builder.tracks.add((parsed.disc ?? 1, parsed.track!, entry));
+      builder.artists.add(parsed.artist!.trim().toLowerCase());
+      builder.year ??= parsed.year;
       continue;
     }
     if (!parsed.isEpisode) {
@@ -215,9 +253,17 @@ List<HomeItem> groupSeasons(List<MediaEntry> entries) {
   for (final b in byAlbum.values) {
     b.tracks.sort((x, y) =>
         x.$1 != y.$1 ? x.$1.compareTo(y.$1) : x.$2.compareTo(y.$2));
+    // Tracks crediting different artists mark a compilation — so does
+    // an explicit Various Artists credit (the naming convention for
+    // compilations, docs/NAMING.md).
+    final mixed = b.artists.length > 1;
+    final artist = mixed ? 'Various Artists' : b.artist;
     items[b.slot] = HomeAlbum(
-      artist: b.artist,
+      artist: artist,
       album: b.album,
+      year: b.year,
+      isCompilation:
+          mixed || artist.trim().toLowerCase() == 'various artists',
       tracks: [for (final (_, _, e) in b.tracks) e],
     );
   }
@@ -232,32 +278,62 @@ List<HomeItem> groupSeasons(List<MediaEntry> entries) {
   return items.cast<HomeItem>();
 }
 
-/// Fold [groupSeasons]' per-season groups further, so every season of one
-/// show shares a single [HomeShow] card — the home wall shows the show's
-/// main poster once however many seasons the list holds. The card sits
-/// where the show's first episode appeared; seasons sort by number.
+/// Fold [groupSeasons]' groups further, so every season of one show
+/// shares a single [HomeShow] card and — the music mirror — every album
+/// of one artist shares a [HomeArtist] card once the artist has two or
+/// more albums in the list. Compilations ([HomeAlbum.isCompilation])
+/// and single-album artists keep their own album card. A group's card
+/// sits where its first entry appeared; seasons sort by number, an
+/// artist's albums by year then title.
 List<HomeItem> groupShows(List<MediaEntry> entries) {
   final items = <HomeItem?>[];
   final slotByShow = <String, int>{};
   final seasonsByShow = <String, List<HomeSeason>>{};
+  final slotByArtist = <String, int>{};
+  final albumsByArtist = <String, List<HomeAlbum>>{};
   for (final item in groupSeasons(entries)) {
-    if (item is! HomeSeason) {
+    if (item is HomeSeason) {
+      final key = item.show.toLowerCase();
+      final seasons = seasonsByShow.putIfAbsent(key, () {
+        slotByShow[key] = items.length;
+        items.add(null); // reserve the slot; filled in below
+        return [];
+      });
+      seasons.add(item);
+    } else if (item is HomeAlbum && !item.isCompilation) {
+      final key = item.artist.trim().toLowerCase();
+      final albums = albumsByArtist.putIfAbsent(key, () {
+        slotByArtist[key] = items.length;
+        items.add(null); // reserve the slot; filled in below
+        return [];
+      });
+      albums.add(item);
+    } else {
       items.add(item);
-      continue;
     }
-    final key = item.show.toLowerCase();
-    final seasons = seasonsByShow.putIfAbsent(key, () {
-      slotByShow[key] = items.length;
-      items.add(null); // reserve the slot; filled in below
-      return [];
-    });
-    seasons.add(item);
   }
   for (final entry in slotByShow.entries) {
     final seasons = seasonsByShow[entry.key]!
       ..sort((a, b) => a.season.compareTo(b.season));
     items[entry.value] =
         HomeShow(show: seasons.first.show, seasons: seasons);
+  }
+  for (final entry in slotByArtist.entries) {
+    final albums = albumsByArtist[entry.key]!;
+    // Folding starts at the second album — one album is just an album.
+    if (albums.length == 1) {
+      items[entry.value] = albums.single;
+      continue;
+    }
+    albums.sort((a, b) {
+      final ya = a.year ?? 1 << 30;
+      final yb = b.year ?? 1 << 30;
+      return ya != yb
+          ? ya.compareTo(yb)
+          : a.album.toLowerCase().compareTo(b.album.toLowerCase());
+    });
+    items[entry.value] =
+        HomeArtist(artist: albums.first.artist, albums: albums);
   }
   return items.cast<HomeItem>();
 }

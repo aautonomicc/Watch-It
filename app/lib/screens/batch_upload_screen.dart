@@ -72,6 +72,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   WalletStatus? _wallet;
   List<AttentionBatch> _attention = [];
   bool _rights = false;
+  late BatchStage _lastStage = _session.stage;
 
   @override
   void initState() {
@@ -141,7 +142,18 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   }
 
   void _onSession() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    // A batch rewrites its manifest as files are decided/uploaded — a
+    // one-shot initState scan left the earlier-batches card stale until
+    // the screen was reopened. Re-scan (and refresh the list options a
+    // finished batch may have created) on every stage change, so the
+    // setup page is current the moment the session returns to it.
+    if (_session.stage != _lastStage) {
+      _lastStage = _session.stage;
+      _loadAttention();
+      _loadLists();
+    }
+    setState(() {});
   }
 
   Future<void> _loadWallet() async {

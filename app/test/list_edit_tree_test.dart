@@ -81,6 +81,42 @@ void main() {
     expect(find.text('Showname.S02E01.mkv'), findsNothing);
   });
 
+  testWidgets('an artist with two albums groups artist → album → track',
+      (tester) async {
+    MediaEntry track(String album, int year, int n, String title, int i) =>
+        MediaEntry(
+            name: 'Solo Star - $album ($year) - 0$n $title.mp3',
+            address: _addr(10 + i));
+    await LibraryStore.save([
+      MediaList(id: 'l1', title: 'Music', entries: [
+        track('First Album', 1990, 1, 'Opening', 1),
+        track('First Album', 1990, 2, 'Filler', 2),
+        track('Second Album', 1992, 1, 'Comeback', 3),
+      ]),
+    ]);
+    await tester.pumpWidget(page());
+    await tester.pumpAndSettle();
+
+    // Top level: one collapsed artist tile, no album or track rows.
+    expect(find.text('Solo Star'), findsOneWidget);
+    expect(find.text('2 albums · 3 tracks'), findsOneWidget);
+    expect(find.text('First Album'), findsNothing);
+
+    // Expand the artist: albums appear, tracks still folded.
+    await tester.tap(find.text('Solo Star'));
+    await tester.pumpAndSettle();
+    expect(find.text('First Album'), findsOneWidget);
+    expect(find.text('Second Album'), findsOneWidget);
+    expect(find.textContaining('01 Opening'), findsNothing);
+
+    // Expand an album: its tracks appear.
+    await tester.tap(find.text('First Album'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('01 Opening'), findsOneWidget);
+    expect(find.textContaining('02 Filler'), findsOneWidget);
+    expect(find.textContaining('01 Comeback'), findsNothing);
+  });
+
   testWidgets('removing a season asks and drops its episodes',
       (tester) async {
     await seed();
