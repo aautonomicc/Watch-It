@@ -110,24 +110,40 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   Use & Disclaimer page — also gated on first launch; update-check
   toggle + "Update available" row on desktop)
 
-### 7. Upload (desktop, alpha.55/.56; renamed from Publish 2026-08-27)
+### 7. Upload (desktop, alpha.55+; renamed from Publish 2026-08-27;
+###    one flow since 2026-09-02)
 - Settings → CONTENT tile below My Media (desktop-only; lived in the
   home drawer until 2026-08-29), subtitle "Private · only your
   devices" — the word "publish" is reserved for the public Channels
-- Multi-select file pick with "Add more" / per-file remove; per-file
-  probe verdict line ("1080p H.264 10-bit — many devices can't play
-  this" / "480p H.264 — plays everywhere")
-- Quality checkboxes — High 1080p / Medium 720p / Low 480p (H.264+AAC
-  MP4, never upscaled) or Original as-is — with per-tier
-  "applies to N of M · ≈size · ≈ANT" and a summed live cost estimate
-- Rights/permanence confirm gate → sequential encode→upload queue with
-  progress and per-item retry/skip → done page: per-title address +
-  copy, add-all-to-library via the list picker, save-all `.datamap`
-  files
+- ONE way in: "Upload files or folders" opens the batch uploader
+  (auto naming/metadata via MusicBrainz/TMDB, content-hash ledger
+  dedup, unattended paid batch, .watch-list bundle). The old separate
+  tier-encoding flow was deleted 2026-09-02 — quality versions live on
+  the batch review page now. The Upload page also points at files
+  from earlier batches still needing attention.
+- Batch setup: Add files / Add a folder, target-list choice as
+  done-page-style buttons (`Add to "Music"` + "Choose another
+  list…"; music-heavy picks default to Music), and a
+  needs-attention card listing earlier batches with a per-batch
+  Review button (re-runs matching over just those files under the
+  original list)
+- Matching: auto-accepts id-backed high-confidence matches; everything
+  else queues into a "Review matches · N of M" carousel after the
+  scan — back/forward arrows revisit any card, answering a decided
+  card replaces the earlier answer, and review-page rows reopen their
+  card on tap. Music is reviewed one whole album at a time.
+- Review page: per-output list, QUALITY checkboxes for video entries
+  (Medium/Low/High offered per probe, H.264+AAC MP4, never upscaled;
+  Original as-is; each tier uploads per video and folds into the
+  version picker), tier-aware live cost estimate, rights/permanence
+  confirm gate
+- Upload: encodes tiers on the fly, one manifest/ledger/bundle row per
+  output; done page reports the automatic add to the chosen list
+  ("Added N titles to …"), keeps "Add to other lists…" / "Save
+  bundle to…", and Done returns to the home wall
 - The running batch lives in an app-wide session (2026-08-30):
   leaving the page mid-upload loses nothing — returning shows the
-  batch where it stands (progress, a pending error's
-  retry/skip/stop, or the done page with its library actions)
+  batch where it stands
 
 ### 8. My W@tch (alpha.61/.62)
 - Lives under Settings → CONTENT, directly below Channels, since

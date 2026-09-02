@@ -77,17 +77,21 @@ class MetadataService extends ChangeNotifier {
     if (parsed.isTrack) {
       // All tracks of one album share the cached row (title/year/cover);
       // the track's own number and name only exist in its file name, so
-      // re-attach them to whatever the shared row resolved to.
+      // re-attach them to whatever the shared row resolved to. A
+      // user-authored track row (Edit details on the track) overrides
+      // the file-name label.
+      final track = _overlayFor(trackLookupKey(parsed)!);
       return MediaMetadata(
         title: meta.title,
         year: meta.year,
         overview: meta.overview,
         category: meta.category,
-        episodeLabel: trackLabel(parsed),
+        episodeLabel: track?.episodeLabel ?? trackLabel(parsed),
         posterAsset: meta.posterAsset,
         posterFilePath: meta.posterFilePath,
         rating: meta.rating,
         mediaType: meta.mediaType ?? 'music',
+        artist: meta.artist ?? parsed.artist,
       );
     }
     if (!parsed.isEpisode) return meta;
@@ -146,6 +150,7 @@ class MetadataService extends ChangeNotifier {
         title: row.title,
         year: row.year,
         overview: row.overview,
+        episodeLabel: row.episodeLabel,
         posterFilePath: posterPath,
       );
       notifyListeners();
@@ -260,6 +265,7 @@ class MetadataService extends ChangeNotifier {
       stillFilePath: existingFile(row.stillFile),
       showPosterFilePath: existingFile(row.showPosterFile),
       mediaType: row.mediaType,
+      artist: row.artist,
     );
   }
 
@@ -335,6 +341,7 @@ class MetadataService extends ChangeNotifier {
             mediaType: const Value('music'),
             fetchedAt: DateTime.now().millisecondsSinceEpoch,
             userEdited: const Value(false),
+            artist: Value(parsed.artist),
           ),
         );
     return MediaMetadata(
@@ -342,6 +349,7 @@ class MetadataService extends ChangeNotifier {
       year: parsed.year,
       posterFilePath: posterPath,
       mediaType: 'music',
+      artist: parsed.artist,
     );
   }
 
@@ -493,11 +501,16 @@ class _CachedMiss implements Exception {
 /// match stored in the episode rows.
 class _UserOverlay {
   const _UserOverlay(
-      {this.title, this.year, this.overview, this.posterFilePath});
+      {this.title,
+      this.year,
+      this.overview,
+      this.episodeLabel,
+      this.posterFilePath});
 
   final String? title;
   final int? year;
   final String? overview;
+  final String? episodeLabel;
   final String? posterFilePath;
 }
 

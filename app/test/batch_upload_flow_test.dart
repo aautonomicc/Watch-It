@@ -14,6 +14,9 @@ import 'package:watchit/services/batch_upload.dart';
 import 'package:watchit/services/bundle.dart';
 import 'package:watchit/services/ffmpeg.dart';
 import 'package:watchit/services/publish_api.dart';
+import 'package:watchit/services/publish_plan.dart'
+    show MediaProbe, PublishTier;
+import 'package:watchit/services/user_metadata.dart' show metadataRowFor;
 import 'package:watchit/services/terms.dart';
 import 'package:watchit/theme/tokens.dart';
 import 'package:watchit_upload/watchit_upload.dart' as cli;
@@ -28,16 +31,51 @@ class _NoFfmpeg extends FfmpegService {
   Future<bool> get available async => false;
 }
 
+/// App-side probe/encode without real processes: probes come from a
+/// canned map by base name, encodes write a small real file (the
+/// session hashes and uploads it) and report completion.
+class _FakeFfmpeg extends FfmpegService {
+  _FakeFfmpeg(this.probes);
+  final Map<String, MediaProbe?> probes;
+  final List<String> encodes = [];
+
+  @override
+  Future<bool> get available async => true;
+
+  @override
+  Future<MediaProbe?> probe(String path) async =>
+      probes[path.split('/').last];
+
+  @override
+  Future<void> encode({
+    required String input,
+    required String output,
+    required PublishTier tier,
+    MediaProbe? probe,
+    void Function(double? fraction)? onProgress,
+  }) async {
+    encodes.add(output.split('/').last);
+    File(output).writeAsBytesSync(List.filled(32, encodes.length));
+    onProgress?.call(1);
+  }
+
+  @override
+  void cancel() {}
+}
+
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
   late FakeEmbeddedHttp fake;
   late Directory tempDir;
 
-  setUp(() {
+  setUp(() async {
     SharedPreferences.setMockInitialValues(
         {'terms_accepted_version_v1': kTermsVersion});
     BatchUploadSession.resetForTesting();
+    // The done-stage seed + auto-add touch the library database.
+    await LibraryStore.useForTesting(
+        AppDatabase.forTesting(NativeDatabase.memory()));
     fake = FakeEmbeddedHttp();
     HttpOverrides.global = fake;
     tempDir = Directory.systemTemp.createTempSync('wi-batch-test');
@@ -744,14 +782,333 @@ void main() {
           apiBase: FakeEmbeddedHttp.base, ffmpeg: _NoFfmpeg()),
     ));
     await tester.pumpAndSettle();
-    // One primary way in; the tier flow is demoted to ADVANCED.
+    // One way in — the tier flow lives on the batch review page now.
     expect(find.text('Upload files or folders'), findsOneWidget);
-    expect(find.text('ADVANCED'), findsOneWidget);
-    expect(find.text('Encode quality versions…'), findsOneWidget);
+    expect(find.text('Encode quality versions…'), findsNothing);
     await tester.tap(find.text('Upload files or folders'));
     await tester.pumpAndSettle();
     expect(find.byType(BatchUploadScreen), findsOneWidget);
     expect(find.text('Add files'), findsOneWidget);
     expect(find.text('Add a folder'), findsOneWidget);
+  });
+
+  test('carousel: an earlier answer can be revisited and replaced',
+      () async {
+    final a = mediaFile('a.mp4', 61);
+    mediaFile('b.mp4', 62);
+    final session = BatchUploadSession.instance;
+    session.probeOverride = (path) async => null;
+    session.matchOverride = scriptedMatcher({
+      'a.mp4': cli.MatchOutcome(
+          type: 'video',
+          name: 'Alpha (2000).mp4',
+          method: 'search',
+          confidence: 'confirm'),
+      'b.mp4': cli.MatchOutcome(
+          type: 'video',
+          name: 'Beta (2001).mp4',
+          method: 'search',
+          confidence: 'confirm'),
+    });
+    await session.startPrepare(
+      api: api(),
+      paths: [tempDir.path],
+      listName: 'Carousel',
+      workDir: dirIn('work-car'),
+      configDir: dirIn('config-car'),
+    );
+    while (!session.reviewingMatches) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    // Both cards queued during the scan; answered one at a time.
+    expect(session.confirmables.length, 2);
+    expect(session.pendingConfirm!.path, a.path);
+    session.confirmAccept();
+    expect(session.pendingConfirm!.path, endsWith('b.mp4'));
+    // Back/forward navigation reaches the answered card.
+    session.confirmPrevious();
+    expect(session.pendingConfirm!.path, a.path);
+    expect(session.pendingConfirm!.decided, isTrue);
+    session.confirmNext();
+    session.confirmAccept();
+    while (session.stage == BatchStage.preparing) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(session.stage, BatchStage.review);
+    expect(session.readyCount, 2);
+
+    // Reopen the first decision from the summary and change it: the
+    // manifest record is replaced, not duplicated.
+    expect(session.canReopen(a.path), isTrue);
+    session.reopenConfirmForSource(a.path);
+    expect(session.stage, BatchStage.preparing);
+    expect(session.pendingConfirm!.path, a.path);
+    session.confirmSkip();
+    while (session.stage == BatchStage.preparing) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(session.stage, BatchStage.review);
+    expect(session.readyCount, 1);
+    expect(session.skippedCount, 1);
+    expect(session.entries.length, 2);
+  });
+
+  test('done: batch auto-adds to the chosen list and seeds local '
+      'metadata from its own bundle', () async {
+    fake.wallet = {'configured': true, 'address': '0xabc', 'storage': 'file'};
+    mediaFile('home-movie.mp4', 63);
+    final addr = 'ee' * 32;
+    fake.uploadResult = {
+      'address': addr,
+      'size': 64,
+      'chunks': 3,
+      'cost_atto': '1000',
+      'gas_wei': '1',
+    };
+    fake.datamaps[addr] = [8, 8, 8];
+    final session = BatchUploadSession.instance;
+    session.matchOverride = scriptedMatcher({});
+    session.probeOverride = (path) async => null;
+    var manualSent = false;
+    session.addListener(() {
+      final c = session.pendingConfirm;
+      if (c != null && !manualSent) {
+        manualSent = true;
+        session.confirmManual(cli.Sidecar(
+          type: 'video',
+          title: 'Garden Party',
+          year: 2021,
+          description: 'Backyard afternoon.',
+        ));
+      }
+    });
+    await session.startPrepare(
+      api: api(),
+      paths: [tempDir.path],
+      listName: 'Family',
+      workDir: dirIn('work-seed'),
+      configDir: dirIn('config-seed'),
+    );
+    while (session.stage != BatchStage.review) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    await session.startUpload();
+    while (session.stage != BatchStage.done) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+
+    // Auto-added to the setup page's list — the done page reports it.
+    expect(session.autoAddedList, 'Family');
+    expect(session.autoAddedCount, 1);
+    final lists = await LibraryStore.load();
+    final family = lists.singleWhere((l) => l.title == 'Family');
+    expect(family.entries.single.name, 'Garden Party (2021).mp4');
+    expect(family.entries.single.address, addr);
+
+    // The manual-entry details reached the LOCAL metadata cache (the
+    // old bug: they only travelled in the bundle).
+    final row = await metadataRowFor('movie:garden party:2021');
+    expect(row, isNotNull);
+    expect(row!.userEdited, isTrue);
+    expect(row.title, 'Garden Party');
+    expect(row.overview, 'Backyard afternoon.');
+  });
+
+  test('quality tiers: a video entry expands into per-tier encodes, '
+      'manifest rows, bundle members and library versions', () async {
+    fake.wallet = {'configured': true, 'address': '0xabc', 'storage': 'file'};
+    final vid = mediaFile('show-tape.mkv', 64);
+    final addr1 = 'a1' * 32, addr2 = 'b2' * 32;
+    fake.uploadResults = [
+      {
+        'address': addr1,
+        'size': 32,
+        'chunks': 3,
+        'cost_atto': '1000',
+        'gas_wei': '1',
+      },
+      {
+        'address': addr2,
+        'size': 32,
+        'chunks': 3,
+        'cost_atto': '1000',
+        'gas_wei': '1',
+      },
+    ];
+    fake.datamaps[addr1] = [1, 1];
+    fake.datamaps[addr2] = [2, 2];
+
+    final session = BatchUploadSession.instance;
+    session.probeOverride = (path) async => null;
+    session.matchOverride = scriptedMatcher({
+      'show-tape.mkv': cli.MatchOutcome(
+        type: 'video',
+        name: 'Show Tape (1999).mkv',
+        ids: {'imdb': 'tt0000001'},
+        method: 'tags',
+        confidence: 'high',
+      ),
+    });
+    final ffmpeg = _FakeFfmpeg({
+      'show-tape.mkv': const MediaProbe(
+        hasVideo: true,
+        width: 1280,
+        height: 720,
+        videoCodec: 'hevc',
+        pixelFormat: 'yuv420p10le',
+        hasAudio: true,
+        audioCodec: 'eac3',
+        container: 'matroska,webm',
+        durationSeconds: 60,
+      ),
+    });
+    await session.startPrepare(
+      api: api(),
+      paths: [vid.path],
+      listName: 'Tapes',
+      workDir: dirIn('work-tiers'),
+      configDir: dirIn('config-tiers'),
+      ffmpeg: ffmpeg,
+    );
+    while (session.stage == BatchStage.preparing ||
+        session.tiers.isEmpty) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    // 720p HEVC source: Medium + Low offered and default-ticked,
+    // Original offered but unticked (not universal).
+    expect(session.readyVideoEntries.length, 1);
+    expect(session.tiers, {PublishTier.medium, PublishTier.low});
+    expect(session.plannedUploadCount, 2);
+
+    await session.startUpload();
+    while (session.stage != BatchStage.done) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    // Two encodes, two uploads, two manifest rows under tier names.
+    expect(ffmpeg.encodes, [
+      'Show Tape (1999) [720p].mp4',
+      'Show Tape (1999) [480p].mp4',
+    ]);
+    final names = [
+      for (final e in session.entries)
+        if (e.status == 'uploaded') e.name,
+    ];
+    expect(names, [
+      'Show Tape (1999) [720p].mp4',
+      'Show Tape (1999) [480p].mp4',
+    ]);
+    expect(session.videoInfoByName['Show Tape (1999) [720p].mp4'],
+        '720p H.264');
+    // Both versions land in the auto-added list and the bundle.
+    final lists = await LibraryStore.load();
+    final tapes = lists.singleWhere((l) => l.title == 'Tapes');
+    expect(tapes.entries.length, 2);
+    expect(tapes.entries.first.videoInfo, '720p H.264');
+    final parsed = parseBundle(
+        Uint8List.fromList(File(session.bundlePath!).readAsBytesSync()));
+    expect(parsed.datamapMembers.keys, containsAll([
+      'Show Tape (1999) [720p].mp4.datamap',
+      'Show Tape (1999) [480p].mp4.datamap',
+    ]));
+    // The ledger carries one row per output (content-hash of each).
+    final ledger = File('${tempDir.path}/config-tiers/ledger.jsonl');
+    expect(ledger.readAsLinesSync().length, 2);
+  });
+
+  test('needs-attention resume: a second pass over the same work dir '
+      're-matches and replaces the entry', () async {
+    final file = mediaFile('lost.mp4', 65);
+    final config = dirIn('config-att');
+    final work = dirIn('work-att');
+    var session = BatchUploadSession.instance;
+    session.probeOverride = (path) async => null;
+    session.matchOverride = scriptedMatcher({});
+    session.addListener(() {
+      if (session.pendingConfirm != null) session.confirmReject();
+    });
+    await session.startPrepare(
+      api: api(),
+      paths: [file.path],
+      listName: 'Lost Batch',
+      workDir: work,
+      configDir: config,
+    );
+    while (session.stage == BatchStage.preparing) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(session.attentionCount, 1);
+
+    // The manifest on disk is what the attention scan reads.
+    final batches = await scanAttentionBatches(Directory(tempDir.path));
+    expect(batches.length, 1);
+    expect(batches.single.listName, 'Lost Batch');
+    expect(batches.single.sources, [file.path]);
+
+    // Second pass (the Review button): the file re-matches and its
+    // needs-attention row is replaced by the ready one.
+    BatchUploadSession.resetForTesting();
+    session = BatchUploadSession.instance;
+    session.probeOverride = (path) async => null;
+    session.matchOverride = scriptedMatcher({
+      'lost.mp4': cli.MatchOutcome(
+          type: 'video',
+          name: 'Found (2002).mp4',
+          method: 'search',
+          confidence: 'confirm'),
+    });
+    session.addListener(() {
+      if (session.pendingConfirm != null) session.confirmAccept();
+    });
+    await session.startPrepare(
+      api: api(),
+      paths: batches.single.sources,
+      listName: batches.single.listName,
+      workDir: batches.single.workDir,
+      configDir: config,
+    );
+    while (session.stage == BatchStage.preparing) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    expect(session.entries.length, 1);
+    expect(session.entries.single.status, 'ready');
+    expect(session.entries.single.name, 'Found (2002).mp4');
+  });
+
+  testWidgets('carousel header: N of M with back/forward arrows',
+      (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    mediaFile('one.mp4', 66);
+    mediaFile('two.mp4', 67);
+    final session = BatchUploadSession.instance;
+    session.probeOverride = (path) async => null;
+    session.matchOverride = scriptedMatcher({});
+
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: BatchUploadScreen(apiBase: FakeEmbeddedHttp.base),
+    ));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await session.startPrepare(
+        api: api(),
+        paths: [tempDir.path],
+        listName: 'Two',
+        workDir: dirIn('work-carw'),
+        configDir: dirIn('config-carw'),
+      );
+      while (!session.reviewingMatches) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    await tester.pump();
+    expect(find.text('Review matches · 1 of 2'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.pump();
+    expect(find.text('Review matches · 2 of 2'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await tester.pump();
+    expect(find.text('Review matches · 1 of 2'), findsOneWidget);
   });
 }

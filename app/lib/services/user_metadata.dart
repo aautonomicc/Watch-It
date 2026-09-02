@@ -89,6 +89,8 @@ void _deleteUserPosters(Directory dir, String prefix, {String? keep}) {
 /// = keep the current label; the episode editor writes `SxxEyy · Name`.
 /// [category] absent = keep the current genres; the Describe page writes
 /// a `'Horror · Thriller'`-style value (or null to clear).
+/// [artist] absent = keep the current album artist; the music editor
+/// writes it (music rows only).
 Future<void> saveUserDetails({
   required String lookupKey,
   required String title,
@@ -97,6 +99,7 @@ Future<void> saveUserDetails({
   Value<String?> episodeLabel = const Value.absent(),
   Value<String?> posterFile = const Value.absent(),
   Value<String?> category = const Value.absent(),
+  Value<String?> artist = const Value.absent(),
   Future<Directory> Function()? postersDirProvider,
 }) async {
   final db = await LibraryStore.database();
@@ -127,6 +130,7 @@ Future<void> saveUserDetails({
           posterFile: Value(newPoster),
           mediaType: Value(existing?.mediaType),
           tmdbId: Value(existing?.tmdbId),
+          artist: artist.present ? artist : Value(existing?.artist),
           fetchedAt: DateTime.now().millisecondsSinceEpoch,
           rating: Value(existing?.rating),
           showOverview: Value(existing?.showOverview),
@@ -181,6 +185,7 @@ Future<void> applyRemoteUserDetails({
           posterFile: Value(poster),
           mediaType: Value(existing?.mediaType),
           tmdbId: Value(existing?.tmdbId),
+          artist: Value(existing?.artist),
           fetchedAt: updatedMs,
           rating: Value(existing?.rating),
           showOverview: Value(existing?.showOverview),

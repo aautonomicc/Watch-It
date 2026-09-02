@@ -320,3 +320,34 @@ class LibraryStore {
     });
   }
 }
+
+/// Merge [entries] into every list named in [chosen] (created when
+/// missing), deduplicating by address — the Upload done pages'
+/// add-to-library semantics, shared by the batch uploader's automatic
+/// add and the channel-publish flow. Channel lists mirror someone's
+/// manifest and are never targets.
+Future<void> addEntriesToLists(
+    List<MediaEntry> entries, List<String> chosen) async {
+  final lists = await LibraryStore.load();
+  final updated = List<MediaList>.of(lists);
+  var idBase = DateTime.now().microsecondsSinceEpoch;
+  for (final title in chosen) {
+    final i = updated.indexWhere((l) =>
+        !l.isChannel && l.title.toLowerCase() == title.toLowerCase());
+    if (i < 0) {
+      updated
+          .add(MediaList(id: '${idBase++}', title: title, entries: entries));
+    } else {
+      final existing = updated[i].entries.map((e) => e.address).toSet();
+      final fresh = [
+        for (final entry in entries)
+          if (!existing.contains(entry.address)) entry,
+      ];
+      if (fresh.isNotEmpty) {
+        updated[i] = updated[i]
+            .copyWith(entries: [...updated[i].entries, ...fresh]);
+      }
+    }
+  }
+  await LibraryStore.save(updated);
+}

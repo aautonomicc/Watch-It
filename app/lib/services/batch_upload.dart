@@ -6,8 +6,13 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:watchit_upload/watchit_upload.dart';
 
+import '../models/media_list.dart';
+import 'bundle.dart' show parseBundle, seedBundle;
 import 'embedded_client.dart';
+import 'ffmpeg.dart' show FfmpegService;
+import 'library_store.dart' show addEntriesToLists;
 import 'publish_api.dart';
+import 'publish_plan.dart' as plan;
 
 /// The one running in-app batch-upload session (desktop only) — the
 /// upload CLI's prepare/upload pipeline (cli/, docs/UPLOAD-CLI.md)
@@ -20,10 +25,12 @@ import 'publish_api.dart';
 /// .watch-list bundle writer. Replaced: the `ant` CLI + SECRET_KEY layer
 /// becomes the embedded core's authed `/upload` (named uploads, paid
 /// from the keychain wallet) + `GET /datamap/{addr}` for the bundle
-/// bytes; the terminal confirm loop becomes [BatchConfirm] driven by the
-/// Batch upload screen.
+/// bytes; the terminal confirm loop becomes the [confirmables] carousel
+/// driven by the Batch upload screen — every match needing eyes is
+/// queued during the scan and reviewed afterwards, with back/forward
+/// navigation so an earlier answer can be changed.
 ///
-/// Lives outside the screen (PublishSession's pattern) so navigating
+/// Lives outside the screen (survive-navigation pattern) so navigating
 /// away mid-prepare or mid-upload loses nothing.
 class BatchUploadSession extends ChangeNotifier {
   BatchUploadSession._();
@@ -33,8 +40,7 @@ class BatchUploadSession extends ChangeNotifier {
   @visibleForTesting
   static void resetForTesting() {
     instance._aborted = true;
-    instance._failPendingConfirm();
-    instance._failPendingAlbumConfirm();
+    instance._ffmpeg?.cancel();
     instance = BatchUploadSession._();
   }
 
@@ -46,6 +52,7 @@ class BatchUploadSession extends ChangeNotifier {
   Matcher? _matcher;
   MusicBrainz? _mb;
   Tmdb? _tmdb;
+  FfmpegService? _ffmpeg;
   Directory? workDir;
   String _ffprobeBin = 'ffprobe';
   bool _aborted = false;
@@ -61,8 +68,43 @@ class BatchUploadSession extends ChangeNotifier {
   int prepareDone = 0;
   int prepareTotal = 0;
   String? currentFile;
-  BatchConfirm? pendingConfirm;
-  AlbumConfirm? pendingAlbumConfirm;
+
+  /// Everything that needs the user's eyes, in scan order — a
+  /// [BatchConfirm] per lone file, an [AlbumConfirm] per album group.
+  /// Filled during the scan, reviewed as a carousel afterwards; decided
+  /// cards stay navigable so an earlier answer can be replaced (each
+  /// decision upserts the manifest entry).
+  final List<Object> confirmables = [];
+  int confirmIndex = 0;
+  bool _confirmPhase = false;
+
+  /// The carousel is showing (scan finished, cards to review — or a
+  /// card reopened from the summary).
+  bool get reviewingMatches => _confirmPhase && confirmables.isNotEmpty;
+
+  Object? get _currentConfirmable =>
+      _confirmPhase && confirmIndex < confirmables.length
+          ? confirmables[confirmIndex]
+          : null;
+
+  BatchConfirm? get pendingConfirm {
+    final c = _currentConfirmable;
+    return c is BatchConfirm ? c : null;
+  }
+
+  AlbumConfirm? get pendingAlbumConfirm {
+    final c = _currentConfirmable;
+    return c is AlbumConfirm ? c : null;
+  }
+
+  int get undecidedConfirmCount =>
+      confirmables.where(_undecided).length;
+
+  static bool _undecided(Object c) => switch (c) {
+        final BatchConfirm f => !f.decided,
+        final AlbumConfirm a => !a.decided,
+        _ => false,
+      };
 
   // ── cost / wallet ────────────────────────────────────────────────────
   Map<String, Object?>? costEstimate; // per manifest.cost shape
@@ -70,12 +112,36 @@ class BatchUploadSession extends ChangeNotifier {
   String? prepareError;
   WalletBalances? balances;
 
+  // ── quality tiers (video entries only) ───────────────────────────────
+
+  /// App-side ffprobe results for ready video entries, keyed by source
+  /// path — drives the review page's QUALITY section. Music and
+  /// unprobeable files never appear here and upload as-is.
+  final Map<String, plan.MediaProbe?> videoProbes = {};
+
+  /// Selected quality tiers, applied to every ready video entry they
+  /// fit (same global-selection model the old Upload tier flow used).
+  Set<plan.PublishTier> tiers = {};
+  bool _tiersInitialized = false;
+
+  /// Per-output `1080p H.264`-style labels for the library entries.
+  final Map<String, String?> videoInfoByName = {};
+
   // ── upload progress ──────────────────────────────────────────────────
   int uploadDone = 0;
   int uploadTotal = 0;
   UploadJob? currentJob;
   String? currentUploadName;
+  double? encodeFraction;
   String? bundlePath;
+  List<_UploadTask> _tasks = [];
+
+  // ── done page ────────────────────────────────────────────────────────
+
+  /// The list the finished batch was automatically added to (the
+  /// setup-page choice), null when the auto-add did not run/failed.
+  String? autoAddedList;
+  int autoAddedCount = 0;
 
   bool get idle => stage == BatchStage.idle;
 
@@ -94,7 +160,8 @@ class BatchUploadSession extends ChangeNotifier {
   /// Kick off the prepare pass over [paths] (files and/or folders).
   /// [tmdbKey] comes from the app's Settings → Metadata key, falling
   /// back to the CLI config; [ffprobeBin] from FfmpegService's location
-  /// logic (bundled binary beside the executable, then PATH).
+  /// logic (bundled binary beside the executable, then PATH); [ffmpeg]
+  /// enables the review page's quality-tier encodes for video entries.
   Future<void> startPrepare({
     required PublishApi api,
     required List<String> paths,
@@ -104,11 +171,13 @@ class BatchUploadSession extends ChangeNotifier {
     String? tmdbKey,
     String ffprobeBin = 'ffprobe',
     Directory? configDir,
+    FfmpegService? ffmpeg,
   }) async {
     assert(idle);
     _aborted = false;
     _api = api;
     _ffprobeBin = ffprobeBin;
+    _ffmpeg = ffmpeg;
     this.workDir = workDir..createSync(recursive: true);
     final config = CliConfig.load(home: configDir)..ensureDirs();
     _ledger = Ledger.load(config.ledgerFile);
@@ -120,11 +189,21 @@ class BatchUploadSession extends ChangeNotifier {
     stage = BatchStage.preparing;
     prepareDone = 0;
     prepareTotal = 0;
+    confirmables.clear();
+    confirmIndex = 0;
+    _confirmPhase = false;
+    videoProbes.clear();
+    tiers = {};
+    _tiersInitialized = false;
+    videoInfoByName.clear();
+    _tasks = [];
     costEstimate = null;
     estimateError = null;
     prepareError = null;
     balances = null;
     bundlePath = null;
+    autoAddedList = null;
+    autoAddedCount = 0;
     notifyListeners();
     unawaited(_prepare(paths));
   }
@@ -159,11 +238,13 @@ class BatchUploadSession extends ChangeNotifier {
           sidecar: sidecar, forcedType: forcedType);
 
   /// The prepare pass — runPrepare's loop with the terminal review
-  /// swapped for [pendingConfirm] and sidecar skeletons swapped for the
-  /// in-app manual form (rejects simply land `needs-attention`). Audio
-  /// files without a per-file sidecar are deferred into album groups
-  /// (albumGroupKey) and reviewed one whole album at a time — one
-  /// release picked for every track, never track by track.
+  /// swapped for the deferred [confirmables] queue and sidecar skeletons
+  /// swapped for the in-app manual form (rejects simply land
+  /// `needs-attention`). Audio files without a per-file sidecar are
+  /// deferred into album groups (albumGroupKey) and reviewed one whole
+  /// album at a time — one release picked for every track, never track
+  /// by track. Files the auto-accept rule doesn't cover queue up during
+  /// the scan and are reviewed together once it finishes.
   Future<void> _prepare(List<String> paths) async {
     final m = manifest!;
     try {
@@ -221,7 +302,7 @@ class BatchUploadSession extends ChangeNotifier {
               .add(_PendingTrack(path, sha, size, probe, existing));
           continue;
         }
-        await _matchAndRecord(path, sha, size, probe, sidecar, existing);
+        await _matchOrDefer(path, sha, size, probe, sidecar, existing);
         if (_aborted) return;
         prepareDone++;
         m.save();
@@ -235,7 +316,7 @@ class BatchUploadSession extends ChangeNotifier {
           final tr = group.single;
           currentFile = p.basename(tr.path);
           notifyListeners();
-          await _matchAndRecord(
+          await _matchOrDefer(
               tr.path, tr.sha, tr.size, tr.probe, null, tr.existing);
           if (_aborted) return;
           prepareDone++;
@@ -248,45 +329,42 @@ class BatchUploadSession extends ChangeNotifier {
       }
       currentFile = null;
       m.save();
-      stage = BatchStage.review;
-      notifyListeners();
-      await _estimate();
+      if (confirmables.any(_undecided)) {
+        _confirmPhase = true;
+        confirmIndex = confirmables.indexWhere(_undecided);
+        notifyListeners();
+      } else {
+        await _finishPrepare();
+      }
     } catch (e) {
       if (_aborted) return;
       currentFile = null;
       prepareError = '$e';
+      _confirmPhase = false;
       m.save();
       stage = BatchStage.review;
       notifyListeners();
     }
   }
 
-  /// The per-file leg: match, hold for the confirm card when the CLI's
-  /// auto-accept rule (id-backed high confidence) doesn't apply, record.
-  Future<void> _matchAndRecord(String path, String sha, int size,
+  /// The per-file leg: match, then either record straight away (the
+  /// CLI's id-backed high-confidence auto-accept) or queue a confirm
+  /// card. Everything else — uncertain matches AND no-match-at-all
+  /// files — waits for eyes, so a file in no database can get manual
+  /// details/artwork or a music/video flip instead of silently landing
+  /// in needs-attention.
+  Future<void> _matchOrDefer(String path, String sha, int size,
       MediaProbe? probe, Sidecar? sidecar, ManifestEntry? existing) async {
-    var outcome = await _match(path, probe, sidecar: sidecar);
+    final outcome = await _match(path, probe, sidecar: sidecar);
     if (_aborted) return;
-
-    // Auto-accept rule straight from the CLI: id-backed high
-    // confidence passes without eyes. Everything else — uncertain
-    // matches AND no-match-at-all files — raises the confirm card,
-    // so a file in no database can get manual details/artwork or a
-    // music/video flip on the spot instead of silently landing in
-    // needs-attention.
     final autoAccept = outcome.matched &&
         outcome.confidence == 'high' &&
         outcome.method != 'search';
-    if (!autoAccept && !outcome.skip) {
-      final confirmed = await _awaitConfirm(path, probe, outcome);
-      if (_aborted) return;
-      outcome = confirmed ??
-          MatchOutcome(
-              type: outcome.type,
-              note: 'match rejected at confirm',
-              sidecarDefaults: outcome.sidecarDefaults);
+    if (autoAccept || outcome.skip) {
+      _recordOutcome(path, sha, size, outcome, existing);
+    } else {
+      confirmables.add(BatchConfirm._(path, probe, outcome, sha, size));
     }
-    _recordOutcome(path, sha, size, outcome, existing);
   }
 
   void _recordOutcome(String path, String sha, int size,
@@ -330,9 +408,9 @@ class BatchUploadSession extends ChangeNotifier {
   // ── album flow ───────────────────────────────────────────────────────
 
   /// One album group: find the release once (Picard-tagged tracks get
-  /// first say), resolve every track against it, then either auto-accept
-  /// (id-backed high confidence, all tracks placed) or raise ONE
-  /// [pendingAlbumConfirm] for the whole album.
+  /// first say), resolve every track against it, then either record it
+  /// whole (id-backed high confidence, all tracks placed) or queue ONE
+  /// [AlbumConfirm] for the whole album.
   Future<void> _prepareAlbum(List<_PendingTrack> tracks) async {
     final m = manifest!;
     int trackNoOf(_PendingTrack t) =>
@@ -378,31 +456,32 @@ class BatchUploadSession extends ChangeNotifier {
         album.confidence == 'high' &&
         album.method != 'search' &&
         allPlaced;
-    var result = outcomes;
-    if (!autoAccept) {
-      final confirmed = await _awaitAlbumConfirm(tracks, outcomes, album);
-      if (_aborted) return;
-      result = confirmed ??
-          [
-            for (final o in outcomes)
-              MatchOutcome(
-                  type: 'music',
-                  note: o?.note ?? 'album match rejected at confirm'),
-          ];
+    if (autoAccept) {
+      for (var i = 0; i < tracks.length; i++) {
+        final tr = tracks[i];
+        _recordOutcome(tr.path, tr.sha, tr.size,
+            outcomes[i]!, tr.existing);
+      }
+    } else {
+      final first = tracks.first;
+      final guess = guessMusicName(p.basename(first.path));
+      confirmables.add(AlbumConfirm._(
+        [for (final t in tracks) t.path],
+        [for (final t in tracks) t.probe],
+        [for (final t in tracks) t.sha],
+        [for (final t in tracks) t.size],
+        outcomes,
+        album,
+        {
+          'artist': first.probe?.tag('album_artist') ??
+              first.probe?.tag('artist') ??
+              guess.artist,
+          'album': first.probe?.tag('album') ?? guess.album,
+          'year': first.probe?.year,
+        },
+      ));
     }
-    for (var i = 0; i < tracks.length; i++) {
-      final tr = tracks[i];
-      _recordOutcome(
-          tr.path,
-          tr.sha,
-          tr.size,
-          result[i] ??
-              MatchOutcome(
-                  type: 'music',
-                  note: outcomes[i]?.note ?? 'no album match'),
-          tr.existing);
-      prepareDone++;
-    }
+    prepareDone += tracks.length;
     m.save();
     notifyListeners();
   }
@@ -440,44 +519,123 @@ class BatchUploadSession extends ChangeNotifier {
     }
   }
 
-  // ── confirm flow ─────────────────────────────────────────────────────
+  // ── confirm carousel ─────────────────────────────────────────────────
 
-  Future<MatchOutcome?> _awaitConfirm(
-      String path, MediaProbe? probe, MatchOutcome outcome) {
-    final confirm = BatchConfirm._(path, probe, outcome);
-    pendingConfirm = confirm;
+  /// Show another card of the queue (back/forward arrows). Decided
+  /// cards reopen with their answer replaceable.
+  void confirmGoTo(int index) {
+    if (!_confirmPhase || confirmables.isEmpty) return;
+    confirmIndex = index.clamp(0, confirmables.length - 1);
     notifyListeners();
-    return confirm._completer.future.whenComplete(() {
-      pendingConfirm = null;
-      notifyListeners();
-    });
   }
 
-  void _failPendingConfirm() {
-    final c = pendingConfirm;
-    if (c != null && !c._completer.isCompleted) {
-      c._completer.complete(MatchOutcome(type: c.outcome.type, skip: true));
+  void confirmPrevious() => confirmGoTo(confirmIndex - 1);
+  void confirmNext() => confirmGoTo(confirmIndex + 1);
+
+  /// Reopen the card that decided [source] (a manifest entry's source
+  /// path) from the review summary.
+  bool canReopen(String source) => _confirmIndexFor(source) >= 0;
+
+  void reopenConfirmForSource(String source) {
+    final i = _confirmIndexFor(source);
+    if (i < 0) return;
+    confirmIndex = i;
+    _confirmPhase = true;
+    stage = BatchStage.preparing;
+    notifyListeners();
+  }
+
+  int _confirmIndexFor(String source) {
+    for (var i = 0; i < confirmables.length; i++) {
+      final c = confirmables[i];
+      if (c is BatchConfirm && c.path == source) return i;
+      if (c is AlbumConfirm && c.tracks.contains(source)) return i;
     }
+    return -1;
+  }
+
+  /// Leave the carousel for the review summary — only once every card
+  /// has an answer.
+  void finishConfirms() {
+    if (!_confirmPhase || confirmables.any(_undecided)) return;
+    unawaited(_finishPrepare());
+  }
+
+  /// Record the decision for the current card and move on: to the next
+  /// unanswered card, or (none left) to the review summary.
+  void _decideCurrent(BatchConfirm c, MatchOutcome outcome) {
+    final m = manifest!;
+    _recordOutcome(c.path, c.sha, c.size, outcome, m.bySource(c.path));
+    c.decided = true;
+    m.save();
+    _advanceConfirm();
+  }
+
+  void _decideAlbum(AlbumConfirm c, List<MatchOutcome?> result) {
+    final m = manifest!;
+    for (var i = 0; i < c.tracks.length; i++) {
+      final out = result[i] ??
+          MatchOutcome(
+              type: 'music',
+              note: c.outcomes[i]?.note ?? 'no album match');
+      _recordOutcome(
+          c.tracks[i], c.shas[i], c.sizes[i], out, m.bySource(c.tracks[i]));
+    }
+    c.decided = true;
+    m.save();
+    _advanceConfirm();
+  }
+
+  void _advanceConfirm() {
+    for (var i = confirmIndex + 1; i < confirmables.length; i++) {
+      if (_undecided(confirmables[i])) {
+        confirmIndex = i;
+        notifyListeners();
+        return;
+      }
+    }
+    final first = confirmables.indexWhere(_undecided);
+    if (first >= 0) {
+      confirmIndex = first;
+      notifyListeners();
+      return;
+    }
+    unawaited(_finishPrepare());
+  }
+
+  /// All matches settled — on to the review summary: probe video
+  /// entries for the QUALITY section, then the cost estimate.
+  Future<void> _finishPrepare() async {
+    _confirmPhase = false;
+    stage = BatchStage.review;
+    notifyListeners();
+    await _probeVideos();
+    await _estimate();
   }
 
   void confirmAccept() {
     final c = pendingConfirm;
-    if (c == null || c._completer.isCompleted) return;
-    c._completer.complete(c.outcome);
+    if (c == null || c.busy) return;
+    _decideCurrent(c, c.outcome);
   }
 
   void confirmSkip() {
     final c = pendingConfirm;
-    if (c == null || c._completer.isCompleted) return;
-    c._completer.complete(MatchOutcome(type: c.outcome.type, skip: true));
+    if (c == null || c.busy) return;
+    _decideCurrent(c, MatchOutcome(type: c.outcome.type, skip: true));
   }
 
   /// Reject: no name for this file — it lands `needs-attention` and can
   /// be fixed with the manual form or another prepare pass.
   void confirmReject() {
     final c = pendingConfirm;
-    if (c == null || c._completer.isCompleted) return;
-    c._completer.complete(null);
+    if (c == null || c.busy) return;
+    _decideCurrent(
+        c,
+        MatchOutcome(
+            type: c.outcome.type,
+            note: 'match rejected at confirm',
+            sidecarDefaults: c.outcome.sidecarDefaults));
   }
 
   Future<void> confirmToggleType() async {
@@ -584,7 +742,13 @@ class BatchUploadSession extends ChangeNotifier {
     try {
       final out = await _match(c.path, c.probe, sidecar: sidecar);
       if (out.matched && out.confidence == 'high' && out.method == 'sidecar') {
-        if (!c._completer.isCompleted) c._completer.complete(out);
+        // Keep the card showing what was decided — reopening it from
+        // the summary shows the answer, not the stale pre-answer state.
+        c.outcome = out;
+        c.mbHits = null;
+        c.tmdbHits = null;
+        c.busy = false;
+        _decideCurrent(c, out);
         return;
       }
       c.outcome = out;
@@ -596,55 +760,20 @@ class BatchUploadSession extends ChangeNotifier {
     }
   }
 
-  // ── album confirm flow ───────────────────────────────────────────────
-
-  Future<List<MatchOutcome?>?> _awaitAlbumConfirm(List<_PendingTrack> tracks,
-      List<MatchOutcome?> outcomes, MatchOutcome? album) {
-    final first = tracks.first;
-    final guess = guessMusicName(p.basename(first.path));
-    final confirm = AlbumConfirm._(
-      [for (final t in tracks) t.path],
-      [for (final t in tracks) t.probe],
-      outcomes,
-      album,
-      {
-        'artist': first.probe?.tag('album_artist') ??
-            first.probe?.tag('artist') ??
-            guess.artist,
-        'album': first.probe?.tag('album') ?? guess.album,
-        'year': first.probe?.year,
-      },
-    );
-    pendingAlbumConfirm = confirm;
-    currentFile = null;
-    notifyListeners();
-    return confirm._completer.future.whenComplete(() {
-      pendingAlbumConfirm = null;
-      notifyListeners();
-    });
-  }
-
-  void _failPendingAlbumConfirm() {
-    final c = pendingAlbumConfirm;
-    if (c != null && !c._completer.isCompleted) {
-      c._completer.complete([
-        for (final _ in c.tracks) MatchOutcome(type: 'music', skip: true),
-      ]);
-    }
-  }
+  // ── album confirm actions ────────────────────────────────────────────
 
   /// Accept the album as resolved: placed tracks upload, unplaced ones
   /// land `needs-attention`.
   void albumAccept() {
     final c = pendingAlbumConfirm;
-    if (c == null || c._completer.isCompleted) return;
-    c._completer.complete(List.of(c.outcomes));
+    if (c == null || c.busy) return;
+    _decideAlbum(c, List.of(c.outcomes));
   }
 
   void albumSkip() {
     final c = pendingAlbumConfirm;
-    if (c == null || c._completer.isCompleted) return;
-    c._completer.complete([
+    if (c == null || c.busy) return;
+    _decideAlbum(c, [
       for (final _ in c.tracks) MatchOutcome(type: 'music', skip: true),
     ]);
   }
@@ -653,8 +782,13 @@ class BatchUploadSession extends ChangeNotifier {
   /// `needs-attention` for another pass.
   void albumReject() {
     final c = pendingAlbumConfirm;
-    if (c == null || c._completer.isCompleted) return;
-    c._completer.complete(null);
+    if (c == null || c.busy) return;
+    _decideAlbum(c, [
+      for (final o in c.outcomes)
+        MatchOutcome(
+            type: 'music',
+            note: o?.note ?? 'album match rejected at confirm'),
+    ]);
   }
 
   /// Manual album search; results land in [AlbumConfirm.mbHits].
@@ -711,8 +845,8 @@ class BatchUploadSession extends ChangeNotifier {
 
   /// Case B for a whole album not in any database: one manual form
   /// (artist/album/year/art) applied to every track, per-track titles
-  /// and numbers from tags or the file names. Completes the confirm
-  /// when every track resolves.
+  /// and numbers from tags or the file names. Decides the card when
+  /// every track resolves.
   Future<void> albumManual({
     required String artist,
     required String album,
@@ -745,15 +879,107 @@ class BatchUploadSession extends ChangeNotifier {
       }
       c.album = c.outcomes.firstWhere((o) => o?.matched ?? false,
           orElse: () => c.outcomes.first);
-      if (c.outcomes.every((o) => o?.matched ?? false) &&
-          !c._completer.isCompleted) {
-        c._completer.complete(List.of(c.outcomes));
+      if (c.outcomes.every((o) => o?.matched ?? false)) {
+        c.busy = false;
+        _decideAlbum(c, List.of(c.outcomes));
+        return;
       }
     } finally {
       c.busy = false;
       notifyListeners();
     }
   }
+
+  // ── quality tiers ────────────────────────────────────────────────────
+
+  /// Probe every ready video entry with the app-side ffprobe wrapper
+  /// (publish_plan's codec-aware probe — the CLI's music-centric probe
+  /// lacks codec/container fields) so the review page can offer encode
+  /// tiers. Music entries and files that can't be probed upload as-is.
+  Future<void> _probeVideos() async {
+    final ff = _ffmpeg;
+    if (ff == null || !await ff.available) return;
+    for (final e in _byStatus('ready')) {
+      if (_aborted) return;
+      if (e.type == 'music' || videoProbes.containsKey(e.source)) continue;
+      try {
+        videoProbes[e.source] = await ff.probe(e.source);
+      } catch (_) {
+        videoProbes[e.source] = null;
+      }
+    }
+    if (!_tiersInitialized) {
+      _tiersInitialized = true;
+      tiers = {
+        for (final probe in videoProbes.values)
+          if (probe?.hasVideo ?? false) ...plan.defaultTiers(probe),
+      };
+    }
+    notifyListeners();
+  }
+
+  /// Ready entries the QUALITY section applies to.
+  List<ManifestEntry> get readyVideoEntries => [
+        for (final e in _byStatus('ready'))
+          if (videoProbes[e.source]?.hasVideo ?? false) e,
+      ];
+
+  /// Tiers any ready video entry offers, encode tiers first.
+  List<plan.PublishTier> get offeredTiers {
+    final offered = <plan.PublishTier>{
+      for (final e in readyVideoEntries)
+        ...plan.offeredTiers(videoProbes[e.source]),
+    };
+    return [
+      ...plan.kEncodeTierOrder.where(offered.contains),
+      if (offered.contains(plan.PublishTier.original))
+        plan.PublishTier.original,
+    ];
+  }
+
+  void setTier(plan.PublishTier tier, bool selected) {
+    if (selected) {
+      tiers.add(tier);
+    } else {
+      tiers.remove(tier);
+    }
+    _tiersInitialized = true;
+    notifyListeners();
+    unawaited(_estimate());
+  }
+
+  /// The tier expansion for one ready entry: the planned per-tier
+  /// outputs, empty when the entry uploads as-is (music, unprobeable,
+  /// or no selected tier applies).
+  List<plan.PublishItem> _videoItems(ManifestEntry e) {
+    if (_ffmpeg == null) return const [];
+    final probe = videoProbes[e.source];
+    if (probe == null || !probe.hasVideo) return const [];
+    final src = plan.PublishSource(
+      path: e.source,
+      name: e.name ?? p.basename(e.source),
+      size: e.sizeBytes ?? 0,
+      probe: probe,
+    );
+    return plan.buildQueue([src], tiers);
+  }
+
+  /// Uploads the batch will run, tier expansion included.
+  int get plannedUploadCount {
+    var n = 0;
+    for (final e in _byStatus('ready')) {
+      final items = _videoItems(e);
+      n += items.isEmpty ? 1 : items.length;
+    }
+    return n;
+  }
+
+  /// Videos none of the selected tiers cover — they upload as-is (the
+  /// review page calls it out).
+  List<ManifestEntry> get uncoveredVideoEntries => [
+        for (final e in readyVideoEntries)
+          if (_videoItems(e).isEmpty) e,
+      ];
 
   // ── cost estimate ────────────────────────────────────────────────────
 
@@ -768,7 +994,15 @@ class BatchUploadSession extends ChangeNotifier {
           BigInt.from(quote.chunkCount == 0 ? 1 : quote.chunkCount);
       var totalChunks = 0;
       for (final e in ready) {
-        totalChunks += Ant.chunksFor(e.sizeBytes ?? 0);
+        final items = _videoItems(e);
+        if (items.isEmpty) {
+          totalChunks += Ant.chunksFor(e.sizeBytes ?? 0);
+        } else {
+          for (final item in items) {
+            totalChunks +=
+                Ant.chunksFor(item.predictedBytes ?? e.sizeBytes ?? 0);
+          }
+        }
       }
       final totalAtto = perChunkAtto * BigInt.from(totalChunks);
       costEstimate = {
@@ -805,24 +1039,76 @@ class BatchUploadSession extends ChangeNotifier {
 
   /// Upload every `ready` entry under its final name — the CLI's
   /// runUpload with the core's named `/upload` replacing the staging
-  /// symlink + `ant file upload`. Manifest saved per state change;
-  /// failures get one retry pass; ends with the .watch-list bundle.
+  /// symlink + `ant file upload`. Video entries with selected quality
+  /// tiers expand into one upload per tier (encoded on the fly, sibling
+  /// manifest rows added so the bundle and library carry every
+  /// version). Manifest saved per state change; failures get one retry
+  /// pass; ends with the .watch-list bundle, a local metadata seed, and
+  /// the automatic add to the chosen list.
   Future<void> startUpload() async {
-    if (stage != BatchStage.review && stage != BatchStage.done) return;
+    if (stage != BatchStage.review) return;
     stage = BatchStage.uploading;
     uploadDone = 0;
-    final pending = _byStatus('ready');
-    uploadTotal = pending.length;
+    _tasks = _buildTasks();
+    uploadTotal = _tasks.length;
     notifyListeners();
-    unawaited(_upload(pending));
+    unawaited(_upload(_tasks));
   }
 
-  Future<void> _upload(List<ManifestEntry> pending) async {
+  List<_UploadTask> _buildTasks() {
+    final m = manifest!;
+    final tasks = <_UploadTask>[];
+    final entries = List<ManifestEntry>.of(m.entries);
+    for (final e in _byStatus('ready')) {
+      final items = _videoItems(e);
+      if (items.isEmpty) {
+        tasks.add(_UploadTask(e));
+        continue;
+      }
+      final probe = videoProbes[e.source];
+      // First output rides the source's manifest row; the other tiers
+      // get sibling rows so every version lands in the manifest, the
+      // ledger, the bundle, and the library (version-picker fold).
+      e.name = items.first.outputName;
+      videoInfoByName[items.first.outputName] =
+          plan.tierVideoInfo(probe, items.first.tier);
+      tasks.add(_UploadTask(e, tierItem: items.first));
+      var at = entries.indexOf(e) + 1;
+      for (final item in items.skip(1)) {
+        final clone = ManifestEntry(
+          source: e.source,
+          status: 'ready',
+          sha256: e.sha256,
+          sizeBytes: e.sizeBytes,
+          type: e.type,
+          name: item.outputName,
+          ids: Map.of(e.ids),
+          matchMethod: e.matchMethod,
+          confidence: e.confidence,
+          art: e.art,
+          description: e.description,
+          custom: e.custom,
+          customFields: Map.of(e.customFields),
+        );
+        entries.insert(at++, clone);
+        videoInfoByName[item.outputName] =
+            plan.tierVideoInfo(probe, item.tier);
+        tasks.add(_UploadTask(clone, tierItem: item));
+      }
+    }
+    m.entries = entries;
+    m.save();
+    return tasks;
+  }
+
+  Future<void> _upload(List<_UploadTask> tasks) async {
     final m = manifest!;
     final datamapsDir = Directory(p.join(workDir!.path, 'datamaps'))
       ..createSync(recursive: true);
+    final encodesDir = Directory(p.join(workDir!.path, 'encodes'));
 
-    Future<void> uploadOne(ManifestEntry entry) async {
+    Future<void> uploadOne(_UploadTask task) async {
+      final entry = task.entry;
       final name = entry.name;
       if (name == null) {
         entry.status = 'failed';
@@ -832,9 +1118,39 @@ class BatchUploadSession extends ChangeNotifier {
       }
       currentUploadName = name;
       currentJob = null;
+      encodeFraction = null;
       notifyListeners();
       try {
-        final id = await _api!.startUpload(entry.source, name: name);
+        var uploadPath = entry.source;
+        final item = task.tierItem;
+        if (item != null && item.needsEncode) {
+          // A retry after an upload failure reuses the finished encode.
+          var temp = task.tempPath;
+          if (temp == null || !File(temp).existsSync()) {
+            encodesDir.createSync(recursive: true);
+            temp = p.join(encodesDir.path, name);
+            await _ffmpeg!.encode(
+              input: entry.source,
+              output: temp,
+              tier: item.tier,
+              probe: item.source.probe,
+              onProgress: (fraction) {
+                encodeFraction = fraction;
+                notifyListeners();
+              },
+            );
+            if (_aborted) return;
+            task.tempPath = temp;
+          }
+          encodeFraction = null;
+          // The ledger keys by content, so the encoded output gets its
+          // own hash and size (the source's stay on its own row).
+          entry.sha256 = await sha256OfFile(temp);
+          entry.sizeBytes = File(temp).lengthSync();
+          m.save();
+          uploadPath = temp;
+        }
+        final id = await _api!.startUpload(uploadPath, name: name);
         while (true) {
           await Future<void>.delayed(const Duration(seconds: 1));
           if (_aborted) return;
@@ -860,12 +1176,13 @@ class BatchUploadSession extends ChangeNotifier {
               sha256: entry.sha256 ?? '',
               name: name,
               sizeBytes:
-                  entry.sizeBytes ?? File(entry.source).lengthSync(),
+                  entry.sizeBytes ?? File(uploadPath).lengthSync(),
               date: entry.uploadedAt!,
               address: entry.address,
               datamapPath: mapPath,
               manifestPath: m.file.absolute.path,
             ));
+            task.deleteTemp();
             return;
           }
           if (job.phase == 'error') {
@@ -879,23 +1196,30 @@ class BatchUploadSession extends ChangeNotifier {
       }
     }
 
-    for (final entry in pending) {
+    for (final task in tasks) {
       if (_aborted) return;
-      await uploadOne(entry);
+      await uploadOne(task);
       uploadDone++;
       notifyListeners();
     }
     // Retry pass: one more attempt for anything that failed this run.
-    final retries = pending.where((e) => e.status == 'failed').toList();
-    for (final entry in retries) {
+    final retries =
+        tasks.where((t) => t.entry.status == 'failed').toList();
+    for (final task in retries) {
       if (_aborted) return;
-      entry.status = 'ready';
-      await uploadOne(entry);
+      task.entry.status = 'ready';
+      await uploadOne(task);
       notifyListeners();
     }
     _writeBundle();
+    await _seedBundleLocally();
+    await _autoAddToLibrary();
     currentUploadName = null;
     currentJob = null;
+    encodeFraction = null;
+    try {
+      if (encodesDir.existsSync()) encodesDir.deleteSync(recursive: true);
+    } catch (_) {}
     stage = BatchStage.done;
     m.save();
     notifyListeners();
@@ -950,6 +1274,48 @@ class BatchUploadSession extends ChangeNotifier {
     bundlePath = out.path;
   }
 
+  /// Seed the LOCAL metadata cache and posters from the batch's own
+  /// bundle — manual-entry (case-B) details and artwork otherwise only
+  /// travel in the bundle and never show on this device (matched files
+  /// masked the gap because their ids re-fetch). Gap-fill semantics:
+  /// existing local rows always win.
+  Future<void> _seedBundleLocally() async {
+    final path = bundlePath;
+    if (path == null) return;
+    try {
+      final bytes = Uint8List.fromList(File(path).readAsBytesSync());
+      await seedBundle(parseBundle(bytes), importHistory: false);
+    } catch (_) {
+      // Best-effort — the bundle itself still carries everything.
+    }
+  }
+
+  /// Add the finished uploads to the list chosen on the setup page —
+  /// the user already picked it there, so the done page reports the
+  /// result instead of asking again.
+  Future<void> _autoAddToLibrary() async {
+    final uploaded = uploadedEntries;
+    final list = manifest?.listName.trim();
+    if (uploaded.isEmpty || list == null || list.isEmpty) return;
+    try {
+      await addEntriesToLists([
+        for (final e in uploaded)
+          MediaEntry(
+            name: e.name!,
+            address: e.address!,
+            sizeBytes: e.sizeBytes,
+            videoInfo: videoInfoByName[e.name!],
+          ),
+      ], [
+        list,
+      ]);
+      autoAddedList = list;
+      autoAddedCount = uploaded.length;
+    } catch (_) {
+      // The done page falls back to the manual add button.
+    }
+  }
+
   /// Entries that made it onto the network this session — the done
   /// page's add-to-library rows.
   List<ManifestEntry> get uploadedEntries => [
@@ -963,41 +1329,57 @@ class BatchUploadSession extends ChangeNotifier {
   /// Flip this run's failures back to ready and run the upload again.
   void retryFailed() {
     if (stage != BatchStage.done) return;
-    for (final e in _byStatus('failed')) {
-      e.status = 'ready';
+    final retry =
+        [for (final t in _tasks) if (t.entry.status == 'failed') t];
+    if (retry.isEmpty) return;
+    for (final t in retry) {
+      t.entry.status = 'ready';
     }
     manifest?.save();
-    startUpload();
+    stage = BatchStage.uploading;
+    uploadDone = 0;
+    uploadTotal = retry.length;
+    notifyListeners();
+    unawaited(_upload(retry));
   }
 
   /// Abort whatever is running and forget the session (the manifest and
   /// any uploads already paid for stay on disk / in the ledger).
   void clear() {
     _aborted = true;
-    _failPendingConfirm();
-    _failPendingAlbumConfirm();
     _mb?.close();
     _tmdb?.close();
+    _ffmpeg?.cancel();
     _mb = null;
     _tmdb = null;
     _matcher = null;
     _ledger = null;
     _api = null;
+    _ffmpeg = null;
     manifest = null;
     workDir = null;
     stage = BatchStage.idle;
-    pendingConfirm = null;
-    pendingAlbumConfirm = null;
+    confirmables.clear();
+    confirmIndex = 0;
+    _confirmPhase = false;
+    videoProbes.clear();
+    tiers = {};
+    _tiersInitialized = false;
+    videoInfoByName.clear();
+    _tasks = [];
     costEstimate = null;
     estimateError = null;
     prepareError = null;
     balances = null;
     bundlePath = null;
+    autoAddedList = null;
+    autoAddedCount = 0;
     prepareDone = prepareTotal = 0;
     uploadDone = uploadTotal = 0;
     currentFile = null;
     currentUploadName = null;
     currentJob = null;
+    encodeFraction = null;
     notifyListeners();
   }
 }
@@ -1006,17 +1388,22 @@ enum BatchStage { idle, preparing, review, uploading, done }
 
 /// One file waiting for the user's eyes — the CLI's beets-style confirm
 /// prompt as data. Every action funnels back through Matcher.matchFile
-/// with a synthetic sidecar, exactly like the terminal loop.
+/// with a synthetic sidecar, exactly like the terminal loop. Lives in
+/// the session's [BatchUploadSession.confirmables] carousel; once
+/// [decided], reopening it and answering again replaces the earlier
+/// manifest record.
 class BatchConfirm {
-  BatchConfirm._(this.path, this.probe, this.outcome);
+  BatchConfirm._(this.path, this.probe, this.outcome, this.sha, this.size);
 
   final String path;
   final MediaProbe? probe;
+  final String sha;
+  final int size;
   MatchOutcome outcome;
   List<MbSearchHit>? mbHits;
   List<TmdbHit>? tmdbHits;
   bool busy = false;
-  final _completer = Completer<MatchOutcome?>();
+  bool decided = false;
 }
 
 /// One audio file waiting for its album group to be prepared.
@@ -1030,17 +1417,40 @@ class _PendingTrack {
   final ManifestEntry? existing;
 }
 
+/// One planned upload: a manifest entry, optionally through a quality
+/// tier's encode first.
+class _UploadTask {
+  _UploadTask(this.entry, {this.tierItem});
+
+  final ManifestEntry entry;
+  final plan.PublishItem? tierItem;
+
+  /// Finished encode output, kept across a failed upload for the retry.
+  String? tempPath;
+
+  void deleteTemp() {
+    final path = tempPath;
+    tempPath = null;
+    if (path == null) return;
+    try {
+      File(path).deleteSync();
+    } catch (_) {}
+  }
+}
+
 /// A whole album waiting for the user's eyes — one card, one release
 /// decision, applied to every track. Search/paste-id/manual actions
 /// re-resolve ALL tracks so an album can never end up split across
 /// releases.
 class AlbumConfirm {
-  AlbumConfirm._(
-      this.tracks, this.probes, this.outcomes, this.album, this.defaults);
+  AlbumConfirm._(this.tracks, this.probes, this.shas, this.sizes,
+      this.outcomes, this.album, this.defaults);
 
   /// Source paths in album order (disc, then track number).
   final List<String> tracks;
   final List<MediaProbe?> probes;
+  final List<String> shas;
+  final List<int> sizes;
 
   /// Per-track outcome as currently resolved; null or unmatched =
   /// couldn't be placed on the release (lands `needs-attention` on
@@ -1056,7 +1466,7 @@ class AlbumConfirm {
 
   List<MbSearchHit>? mbHits;
   bool busy = false;
-  final _completer = Completer<List<MatchOutcome?>?>();
+  bool decided = false;
 
   /// "Artist — Album (Year)" from the representative note (the note's
   /// leading segment before its ", track N" suffix).
@@ -1066,4 +1476,48 @@ class AlbumConfirm {
     final cut = note.indexOf(', track ');
     return cut < 0 ? note : note.substring(0, cut);
   }
+}
+
+/// One earlier batch whose manifest still lists needs-attention files —
+/// surfaced on the Upload/Batch setup pages so they stop being
+/// forgotten. Only files that still exist on disk count.
+class AttentionBatch {
+  AttentionBatch(this.workDir, this.listName, this.sources);
+
+  final Directory workDir;
+  final String listName;
+
+  /// Source paths of the needs-attention entries, existing files only.
+  final List<String> sources;
+}
+
+/// Scan `<support>/batch_uploads/*/watchit-manifest.yaml` for batches
+/// with unresolved needs-attention entries. Reviewing one re-runs
+/// prepare over just those files in the batch's own work dir, under its
+/// original list.
+Future<List<AttentionBatch>> scanAttentionBatches(Directory root) async {
+  final result = <AttentionBatch>[];
+  try {
+    if (!root.existsSync()) return result;
+    for (final dir in root.listSync()) {
+      if (dir is! Directory) continue;
+      final file = File(p.join(dir.path, 'watchit-manifest.yaml'));
+      if (!file.existsSync()) continue;
+      try {
+        final m = Manifest.load(file);
+        final sources = [
+          for (final e in m.entries)
+            if (e.status == 'needs-attention' &&
+                File(e.source).existsSync())
+              e.source,
+        ];
+        if (sources.isNotEmpty) {
+          result.add(AttentionBatch(dir, m.listName, sources));
+        }
+      } catch (_) {
+        // Unreadable manifest — skip the batch.
+      }
+    }
+  } catch (_) {}
+  return result;
 }

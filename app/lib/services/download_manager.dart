@@ -494,13 +494,25 @@ class DownloadManager extends ChangeNotifier {
   }
 
   /// Directory new downloads land in: the test override, then the
-  /// user-chosen folder (desktop), then app-private `downloads/`.
+  /// user-chosen folder (desktop), then the system Downloads folder
+  /// (desktop default — where users look for downloaded files), then
+  /// app-private `downloads/` (Android/iOS, or no Downloads dir).
   Future<Directory> _downloadsDir() async {
     final override = _directoryOverride;
     if (override != null) return override.create(recursive: true);
     final custom = await AppSettings.downloadDirPath();
     if (custom != null && custom.isNotEmpty) {
       return Directory(custom).create(recursive: true);
+    }
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      try {
+        final downloads = await getDownloadsDirectory();
+        if (downloads != null) {
+          return Directory(downloads.path).create(recursive: true);
+        }
+      } catch (_) {
+        // Fall through to app-private storage.
+      }
     }
     final support = await getApplicationSupportDirectory();
     return Directory('${support.path}/downloads').create(recursive: true);

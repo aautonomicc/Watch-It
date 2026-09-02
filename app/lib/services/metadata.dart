@@ -28,6 +28,7 @@ class MediaMetadata {
     this.showPosterFilePath,
     this.episodePosterFilePath,
     this.mediaType,
+    this.artist,
   });
 
   final String title;
@@ -75,6 +76,11 @@ class MediaMetadata {
   /// slot — so season tiles and headers, which read the first episode's
   /// metadata, never show one episode's artwork.
   final String? episodePosterFilePath;
+
+  /// Music entries: the album artist ([title] is then the album name).
+  /// From the cache row when set (user-editable), else the parsed file
+  /// name.
+  final String? artist;
 }
 
 /// XOR address of the built-in default movie seeded on first run — the
@@ -146,6 +152,7 @@ MediaMetadata fallbackMetadataFor(MediaEntry entry) {
         : parsed.isEpisode
             ? 'tv'
             : 'movie',
+    artist: parsed.artist,
   );
 }
 
@@ -154,6 +161,14 @@ MediaMetadata fallbackMetadataFor(MediaEntry entry) {
 /// the only source — track numbers/titles have no metadata rows.
 String? trackLabel(ParsedName parsed) =>
     parsed.isTrack ? '${parsed.trackMarker} · ${parsed.trackTitle}' : null;
+
+/// Cache key for one track's user-authored label (`<albumKey>:tD-NN`) —
+/// the slot a music track's own Edit details write to, overlaid onto the
+/// shared album row like the show/season keys are for TV. Null for
+/// non-tracks.
+String? trackLookupKey(ParsedName parsed) => parsed.isTrack
+    ? '${parsed.lookupKey}:t${parsed.disc ?? 1}-${parsed.track}'
+    : null;
 
 /// `2008-01-20` → `20 Jan 2008` for display; anything that is not an
 /// ISO date passes through unchanged.

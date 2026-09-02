@@ -11,10 +11,12 @@ import 'package:watchit_upload/watchit_upload.dart' hide MediaProbe;
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
 import '../services/batch_upload.dart';
+import '../services/ffmpeg.dart' show FfmpegService;
 import '../services/library_store.dart';
+import '../services/publish_plan.dart' as plan;
 import '../services/publish_api.dart';
 import '../theme/tokens.dart';
-import 'publish_screen.dart' show pickTargetLists, addEntriesToLists;
+import 'publish_screen.dart' show pickTargetLists;
 import 'settings_screen.dart' show promptForText;
 import 'wallet_screen.dart';
 
@@ -32,6 +34,7 @@ class BatchUploadScreen extends StatefulWidget {
     this.apiToken,
     this.workDirProvider,
     this.configDir,
+    this.batchRootProvider,
   });
 
   /// Test overrides for the embedded server base URL / auth token.
@@ -43,6 +46,10 @@ class BatchUploadScreen extends StatefulWidget {
 
   /// Test override for the CLI-config/ledger directory.
   final Directory? configDir;
+
+  /// Test override for the earlier-batches root the needs-attention
+  /// scan reads (`<support>/batch_uploads` normally).
+  final Future<Directory> Function()? batchRootProvider;
 
   @override
   State<BatchUploadScreen> createState() => _BatchUploadScreenState();
@@ -63,6 +70,8 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   bool _listChosen = false;
   List<String> _libraryLists = [];
   WalletStatus? _wallet;
+  List<AttentionBatch> _attention = [];
+  bool _rights = false;
 
   @override
   void initState() {
@@ -70,6 +79,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     _session.addListener(_onSession);
     _loadWallet();
     _loadLists();
+    _loadAttention();
   }
 
   @override
@@ -94,6 +104,40 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   void _updateDefaultList() {
     if (_listChosen) return;
     _list = defaultBatchList(_paths, fallback: _list);
+  }
+
+  /// Earlier batches whose manifests still hold needs-attention files.
+  Future<void> _loadAttention() async {
+    try {
+      final root = widget.batchRootProvider != null
+          ? await widget.batchRootProvider!()
+          : Directory(p.join(
+              (await getApplicationSupportDirectory()).path,
+              'batch_uploads'));
+      final batches = await scanAttentionBatches(root);
+      if (mounted) setState(() => _attention = batches);
+    } catch (_) {
+      // No support dir (tests) — nothing to surface.
+    }
+  }
+
+  /// Re-run prepare over one earlier batch's needs-attention files, in
+  /// its own work dir under its original list — the files re-match and
+  /// raise their confirm cards again.
+  Future<void> _reviewAttention(AttentionBatch batch) async {
+    if (!_session.idle) return;
+    final tmdbKey = await AppSettings.tmdbApiKey();
+    if (!mounted) return;
+    await _session.startPrepare(
+      api: _api,
+      paths: batch.sources,
+      listName: batch.listName,
+      workDir: batch.workDir,
+      tmdbKey: tmdbKey,
+      ffprobeBin: locateFfprobeBin(),
+      configDir: widget.configDir,
+      ffmpeg: FfmpegService(),
+    );
   }
 
   void _onSession() {
@@ -164,6 +208,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       tmdbKey: tmdbKey,
       ffprobeBin: locateFfprobeBin(),
       configDir: widget.configDir,
+      ffmpeg: FfmpegService(),
     );
   }
 
@@ -233,6 +278,10 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
           ),
         ],
       ),
+      if (_attention.isNotEmpty) ...[
+        const SizedBox(height: 16),
+        _attentionCard(t),
+      ],
       if (_paths.isNotEmpty) ...[
         const SizedBox(height: 12),
         for (final path in _paths)
@@ -256,7 +305,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
             ),
           ),
         const SizedBox(height: 8),
-        _listDropdown(t),
+        ..._listPicker(t),
         const SizedBox(height: 16),
         FilledButton.icon(
           onPressed: _start,
@@ -267,60 +316,155 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     ];
   }
 
-  /// Sentinel dropdown value for "Create a new list…".
-  static const _kNewList = ' new-list';
-
-  /// Target-list picker: every library list plus the "Music" and
-  /// "My uploads" defaults, and a create-new entry. Music batches
-  /// default to "Music" (created on add when it doesn't exist yet).
-  Widget _listDropdown(WiTokens t) {
-    final options = <String>{..._libraryLists, 'Music', 'My uploads', _list}
-        .toList();
-    return DropdownButtonFormField<String>(
-      // Keyed by the selection: the default flips (e.g. to "Music") as
-      // files are picked, and a FormField would otherwise keep showing
-      // its first initialValue.
-      key: ValueKey(_list),
-      initialValue: _list,
-      decoration: const InputDecoration(
-        labelText: 'Add to list',
-        helperText: 'Where the uploads land in your library — also names '
-            'the .watch-list bundle. New lists are created on add.',
+  /// Files from earlier batches that keep showing up as needs-attention
+  /// in their manifests — a Review button reopens each batch's confirm
+  /// cards under its original list.
+  Widget _attentionCard(WiTokens t) {
+    final total = _attention.fold(0, (n, b) => n + b.sources.length);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: t.ink2,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: t.line),
       ),
-      dropdownColor: t.ink2,
-      style: TextStyle(color: t.bone, fontSize: 14),
-      items: [
-        for (final title in options)
-          DropdownMenuItem(value: title, child: Text(title)),
-        const DropdownMenuItem(
-            value: _kNewList, child: Text('Create a new list…')),
-      ],
-      onChanged: (v) async {
-        if (v == null) return;
-        if (v == _kNewList) {
-          final title = await promptForText(
-            context,
-            title: 'New list',
-            hint: 'e.g. Holiday videos',
-          );
-          final trimmed = title?.trim() ?? '';
-          if (trimmed.isNotEmpty && mounted) {
-            setState(() {
-              _list = trimmed;
-              _listChosen = true;
-            });
-          } else if (mounted) {
-            // Re-render so the dropdown snaps back off the sentinel.
-            setState(() {});
-          }
-          return;
-        }
-        setState(() {
-          _list = v;
-          _listChosen = true;
-        });
-      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.help_outline, color: t.rust, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '$total ${total == 1 ? 'file' : 'files'} from earlier '
+                  'batches still ${total == 1 ? 'needs' : 'need'} '
+                  'attention',
+                  style: TextStyle(
+                      color: t.bone,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (final batch in _attention)
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${batch.listName} · ${batch.sources.length} '
+                    '${batch.sources.length == 1 ? 'file' : 'files'}',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: t.boneDim, fontSize: 13),
+                  ),
+                ),
+                OutlinedButton(
+                  onPressed: () => _reviewAttention(batch),
+                  child: const Text('Review'),
+                ),
+              ],
+            ),
+        ],
+      ),
     );
+  }
+
+  /// Target-list choice, done-page button style (no dropdown): the
+  /// filled button shows where the batch will land, the outlined one
+  /// changes it. Music batches default to "Music" (created on add when
+  /// it doesn't exist yet).
+  List<Widget> _listPicker(WiTokens t) {
+    return [
+      Wrap(
+        spacing: 10,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          FilledButton.tonalIcon(
+            onPressed: _chooseList,
+            icon: const Icon(Icons.video_library_outlined, size: 18),
+            label: Text('Add to "$_list"'),
+          ),
+          OutlinedButton.icon(
+            onPressed: _chooseList,
+            icon: const Icon(Icons.playlist_add, size: 18),
+            label: const Text('Choose another list…'),
+          ),
+        ],
+      ),
+      const SizedBox(height: 6),
+      Text(
+        'Where the uploads land in your library — also names the '
+        '.watch-list bundle. New lists are created on add.',
+        style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+      ),
+    ];
+  }
+
+  Future<void> _chooseList() async {
+    final t = WiTokens.of(context);
+    final options =
+        <String>{..._libraryLists, 'Music', 'My uploads', _list}.toList();
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        backgroundColor: t.ink2,
+        title: Text('Add to list',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        children: [
+          for (final title in options)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(context).pop(title),
+              child: Row(
+                children: [
+                  Icon(
+                    title == _list
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    size: 18,
+                    color: title == _list ? t.accent : t.ash,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(title,
+                        style: TextStyle(color: t.bone, fontSize: 14)),
+                  ),
+                ],
+              ),
+            ),
+          SimpleDialogOption(
+            onPressed: () async {
+              final title = await promptForText(
+                context,
+                title: 'New list',
+                hint: 'e.g. Holiday videos',
+              );
+              final trimmed = title?.trim() ?? '';
+              if (context.mounted) {
+                Navigator.of(context)
+                    .pop(trimmed.isEmpty ? null : trimmed);
+              }
+            },
+            child: Row(
+              children: [
+                Icon(Icons.add, size: 18, color: t.accent),
+                const SizedBox(width: 10),
+                Text('Create a new list…',
+                    style: TextStyle(color: t.accent, fontSize: 14)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    if (picked != null && picked.trim().isNotEmpty && mounted) {
+      setState(() {
+        _list = picked.trim();
+        _listChosen = true;
+      });
+    }
   }
 
   // ── preparing ────────────────────────────────────────────────────────
@@ -328,27 +472,77 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   List<Widget> _preparingChildren(WiTokens t) {
     final confirm = _session.pendingConfirm;
     final albumConfirm = _session.pendingAlbumConfirm;
+    final reviewing = _session.reviewingMatches;
+    final decided = switch (_session.confirmables.elementAtOrNull(
+        _session.confirmIndex)) {
+      final BatchConfirm c => c.decided,
+      final AlbumConfirm a => a.decided,
+      _ => false,
+    };
     return [
-      Text(
-        'Matching files · ${_session.prepareDone} of '
-        '${_session.prepareTotal}',
-        style: TextStyle(
-            color: t.bone, fontSize: 16, fontWeight: FontWeight.w600),
-      ),
-      const SizedBox(height: 8),
-      LinearProgressIndicator(
-        value: _session.prepareTotal == 0
-            ? null
-            : _session.prepareDone / _session.prepareTotal,
-        backgroundColor: t.ink2,
-      ),
-      const SizedBox(height: 8),
-      if (confirm == null &&
-          albumConfirm == null &&
-          _session.currentFile != null)
-        Text(_session.currentFile!,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: t.boneDim, fontSize: 13)),
+      if (reviewing) ...[
+        // Carousel over everything that needed eyes: ←/→ revisit
+        // earlier cards, answering a decided one replaces the earlier
+        // answer (mistakes stay fixable).
+        Row(
+          children: [
+            IconButton(
+              tooltip: 'Previous',
+              onPressed: _session.confirmIndex > 0
+                  ? _session.confirmPrevious
+                  : null,
+              icon: const Icon(Icons.chevron_left),
+            ),
+            Expanded(
+              child: Text(
+                'Review matches · ${_session.confirmIndex + 1} of '
+                '${_session.confirmables.length}',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    color: t.bone,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Next',
+              onPressed:
+                  _session.confirmIndex < _session.confirmables.length - 1
+                      ? _session.confirmNext
+                      : null,
+              icon: const Icon(Icons.chevron_right),
+            ),
+          ],
+        ),
+        if (decided) ...[
+          const SizedBox(height: 4),
+          Text(
+            'Already answered — a new choice replaces the earlier one.',
+            style: TextStyle(color: t.ash, fontSize: 12),
+          ),
+        ],
+      ] else ...[
+        Text(
+          'Matching files · ${_session.prepareDone} of '
+          '${_session.prepareTotal}',
+          style: TextStyle(
+              color: t.bone, fontSize: 16, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        LinearProgressIndicator(
+          value: _session.prepareTotal == 0
+              ? null
+              : _session.prepareDone / _session.prepareTotal,
+          backgroundColor: t.ink2,
+        ),
+        const SizedBox(height: 8),
+        if (confirm == null &&
+            albumConfirm == null &&
+            _session.currentFile != null)
+          Text(_session.currentFile!,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: t.boneDim, fontSize: 13)),
+      ],
       if (confirm != null) ...[
         const SizedBox(height: 12),
         _confirmCard(t, confirm),
@@ -356,6 +550,14 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       if (albumConfirm != null) ...[
         const SizedBox(height: 12),
         _albumConfirmCard(t, albumConfirm),
+      ],
+      if (reviewing && _session.undecidedConfirmCount == 0) ...[
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: _session.finishConfirms,
+          icon: const Icon(Icons.done_all),
+          label: const Text('Back to summary'),
+        ),
       ],
       const SizedBox(height: 12),
       _countsLine(t),
@@ -1157,6 +1359,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
 
   List<Widget> _reviewChildren(WiTokens t) {
     final ready = _session.readyCount;
+    final planned = _session.plannedUploadCount;
     final total = _session.estimatedTotalAtto;
     final wallet = _wallet;
     return [
@@ -1165,6 +1368,14 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
               color: t.bone, fontSize: 16, fontWeight: FontWeight.w600)),
       const SizedBox(height: 8),
       _countsLine(t),
+      if (_session.confirmables.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Text(
+          'Tap a reviewed file below to reopen its match card and '
+          'change the answer.',
+          style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+        ),
+      ],
       if (_session.prepareError != null) ...[
         const SizedBox(height: 8),
         Text('Prepare stopped early: ${_session.prepareError}',
@@ -1181,6 +1392,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       ],
       const SizedBox(height: 12),
       ..._entryTiles(t),
+      ..._qualitySection(t),
       const SizedBox(height: 12),
       if (total != null)
         Container(
@@ -1194,8 +1406,8 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '$ready ${ready == 1 ? 'upload' : 'uploads'} · estimated '
-                'cost ≈${formatUnits(total)} ANT (+ gas)',
+                '$planned ${planned == 1 ? 'upload' : 'uploads'} · '
+                'estimated cost ≈${formatUnits(total)} ANT (+ gas)',
                 style: TextStyle(
                     color: t.bone,
                     fontSize: 15,
@@ -1267,12 +1479,28 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
           ],
         ),
       const SizedBox(height: 8),
+      if (ready > 0)
+        CheckboxListTile(
+          value: _rights,
+          contentPadding: EdgeInsets.zero,
+          controlAffinity: ListTileControlAffinity.leading,
+          title: Text(
+            'I have the right to upload '
+            '${ready == 1 ? 'this file' : 'these files'} — '
+            '${ready == 1 ? 'it is' : 'they are'} my own work, '
+            'verifiably public domain, or a personal copy for private '
+            'use.',
+            style: TextStyle(color: t.bone, fontSize: 13),
+          ),
+          onChanged: (v) => setState(() => _rights = v ?? false),
+        ),
+      const SizedBox(height: 8),
       FilledButton.icon(
-        onPressed: ready > 0 && (wallet?.configured ?? false)
+        onPressed: ready > 0 && _rights && (wallet?.configured ?? false)
             ? _session.startUpload
             : null,
         icon: const Icon(Icons.cloud_upload_outlined),
-        label: Text(ready <= 1 ? 'Upload' : 'Upload $ready files'),
+        label: Text(planned <= 1 ? 'Upload' : 'Upload $planned files'),
       ),
       const SizedBox(height: 8),
       TextButton(
@@ -1282,10 +1510,167 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     ];
   }
 
+  /// QUALITY tiers for the batch's video entries (the old Upload tier
+  /// flow relocated to where the batch is reviewed): each ticked tier
+  /// is encoded with the bundled ffmpeg and uploaded for every video it
+  /// applies to; same-title versions fold into one library card with a
+  /// version picker. Hidden when the batch has no (probeable) videos.
+  List<Widget> _qualitySection(WiTokens t) {
+    final videos = _session.readyVideoEntries;
+    final ordered = _session.offeredTiers;
+    if (videos.isEmpty ||
+        (ordered.length == 1 &&
+            ordered.single == plan.PublishTier.original)) {
+      return const [];
+    }
+    final uncovered = _session.uncoveredVideoEntries;
+    return [
+      const SizedBox(height: 16),
+      Row(
+        children: [
+          Text(
+            'QUALITY',
+            style: TextStyle(
+                fontSize: 11,
+                letterSpacing: 1.5,
+                fontWeight: FontWeight.w700,
+                color: t.ash),
+          ),
+          const SizedBox(width: 2),
+          IconButton(
+            tooltip: 'Why multiple versions?',
+            visualDensity: VisualDensity.compact,
+            icon: Icon(Icons.info_outline, color: t.ash, size: 16),
+            onPressed: () => _showWhyVersionsDialog(t),
+          ),
+        ],
+      ),
+      Text(
+        'Devices and connections vary — smaller versions play smoothly '
+        'where the full-quality file can\'t. Each ticked quality is '
+        'encoded and uploaded for every video it applies to; your '
+        'library shows one card with a version picker.',
+        style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+      ),
+      for (final tier in ordered) _tierTile(t, tier, videos),
+      if (uncovered.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            '${uncovered.length} '
+            '${uncovered.length == 1 ? 'video matches' : 'videos match'} '
+            'none of the ticked qualities and will upload as-is.',
+            style: TextStyle(color: t.rust, fontSize: 12, height: 1.4),
+          ),
+        ),
+    ];
+  }
+
+  Widget _tierTile(
+      WiTokens t, plan.PublishTier tier, List<ManifestEntry> videos) {
+    final applicable = [
+      for (final e in videos)
+        if (plan
+            .offeredTiers(_session.videoProbes[e.source])
+            .contains(tier))
+          e,
+    ];
+    var knownBytes = 0;
+    var anyUnknown = false;
+    for (final e in applicable) {
+      final bytes = plan.predictedSizeBytes(
+          _session.videoProbes[e.source], tier, e.sizeBytes ?? 0);
+      if (bytes == null) {
+        anyUnknown = true;
+      } else {
+        knownBytes += bytes;
+      }
+    }
+    final spec = plan.kTierSpecs[tier];
+    final title = tier == plan.PublishTier.original
+        ? 'Original files (as-is)'
+        : '${spec!.name} · ${spec.label} H.264';
+    final details = [
+      if (videos.length > 1)
+        'applies to ${applicable.length} of ${videos.length} videos',
+      if (knownBytes > 0)
+        '≈${formatBytes(knownBytes)}${anyUnknown ? '+' : ''}',
+    ].join(' · ');
+    return CheckboxListTile(
+      dense: true,
+      value: _session.tiers.contains(tier),
+      contentPadding: EdgeInsets.zero,
+      controlAffinity: ListTileControlAffinity.leading,
+      title: Text(title, style: TextStyle(color: t.bone, fontSize: 14)),
+      subtitle: details.isEmpty
+          ? null
+          : Text(details, style: TextStyle(color: t.ash, fontSize: 12)),
+      onChanged: (v) => _session.setTier(tier, v ?? false),
+    );
+  }
+
+  /// The full "why" story behind the quality tiers, one tap away from
+  /// where the choice is made (moved from the old Upload tier flow).
+  void _showWhyVersionsDialog(WiTokens t) {
+    final style = TextStyle(color: t.boneDim, fontSize: 13, height: 1.5);
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text('Why multiple versions?',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'One file rarely suits every viewer. A full-quality file '
+                'can stutter or fail entirely on phones, TVs and older '
+                'computers, and it needs a fast connection to stream '
+                'without buffering. Smaller versions play everywhere and '
+                'start quickly even on slow links.',
+                style: style,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Uploads to Autonomi are permanent — a file can\'t be '
+                'replaced with a re-encoded copy later. Any quality you '
+                'want your devices to have needs to be uploaded now.',
+                style: style,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'The extra versions don\'t clutter anyone\'s library: '
+                'uploads of the same title share a single card, and its '
+                'page has a version picker where you choose what plays '
+                'best on each device.',
+                style: style,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text('Close', style: TextStyle(color: t.accent)),
+          ),
+        ],
+      ),
+    );
+  }
+
   List<Widget> _entryTiles(WiTokens t) {
+    final reopenable =
+        _session.stage == BatchStage.review;
     return [
       for (final e in _session.entries)
-        Padding(
+        InkWell(
+          onTap: reopenable && _session.canReopen(e.source)
+              ? () => _session.reopenConfirmForSource(e.source)
+              : null,
+          child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 3),
           child: Row(
             children: [
@@ -1319,6 +1704,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
               ),
             ],
           ),
+          ),
         ),
     ];
   }
@@ -1327,18 +1713,22 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
 
   List<Widget> _uploadingChildren(WiTokens t) {
     final job = _session.currentJob;
+    final encoding = _session.encodeFraction;
     final phase = job?.phase ?? 'starting';
     final total = job?.total ?? 0;
     final done = job?.done ?? 0;
-    final label = switch (phase) {
-      'starting' => 'Starting upload…',
-      'encrypting' => 'Encrypting file…',
-      'quoting' =>
-        'Getting storage quotes${total > 0 ? ' ($done of $total)' : '…'}',
-      'paying' => 'Paying for storage…',
-      'storing' => 'Storing chunks${total > 0 ? ' ($done of $total)' : '…'}',
-      _ => phase,
-    };
+    final label = encoding != null
+        ? 'Encoding · ${(encoding * 100).round()}%'
+        : switch (phase) {
+            'starting' => 'Starting upload…',
+            'encrypting' => 'Encrypting file…',
+            'quoting' =>
+              'Getting storage quotes${total > 0 ? ' ($done of $total)' : '…'}',
+            'paying' => 'Paying for storage…',
+            'storing' =>
+              'Storing chunks${total > 0 ? ' ($done of $total)' : '…'}',
+            _ => phase,
+          };
     return [
       Text(
         'Uploading · ${(_session.uploadDone + 1).clamp(1, _session.uploadTotal == 0 ? 1 : _session.uploadTotal)} '
@@ -1360,7 +1750,8 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
             style: TextStyle(color: t.bone, fontSize: 14)),
       const SizedBox(height: 8),
       LinearProgressIndicator(
-        value: phase == 'storing' && total > 0 ? done / total : null,
+        value: encoding ??
+            (phase == 'storing' && total > 0 ? done / total : null),
         backgroundColor: t.ink2,
       ),
       const SizedBox(height: 8),
@@ -1422,11 +1813,31 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
         ),
       const SizedBox(height: 16),
       if (uploaded.isNotEmpty) ...[
-        FilledButton.icon(
-          onPressed: () => _addAllToLibrary(),
-          icon: const Icon(Icons.video_library_outlined),
-          label: Text('Add to "${_session.manifest?.listName ?? 'library'}"'),
-        ),
+        // The list was chosen on the setup page, so the batch added
+        // itself there — report the result instead of asking again.
+        if (_session.autoAddedList != null)
+          Row(
+            children: [
+              Icon(Icons.check_circle_outline,
+                  color: t.signalOk, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Added ${_session.autoAddedCount} '
+                  '${_session.autoAddedCount == 1 ? 'title' : 'titles'} '
+                  'to "${_session.autoAddedList}".',
+                  style: TextStyle(color: t.bone, fontSize: 13),
+                ),
+              ),
+            ],
+          )
+        else
+          FilledButton.icon(
+            onPressed: () => _addAllToLibrary(),
+            icon: const Icon(Icons.video_library_outlined),
+            label:
+                Text('Add to "${_session.manifest?.listName ?? 'library'}"'),
+          ),
         const SizedBox(height: 10),
         OutlinedButton.icon(
           onPressed: () => _addAllToLibrary(pickLists: true),
@@ -1448,7 +1859,12 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
           label: Text('Retry $failed failed'),
         ),
       TextButton(
-        onPressed: _session.clear,
+        onPressed: () {
+          _session.clear();
+          // Done means done — back to the home wall, not the upload
+          // stack.
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        },
         child: Text('Done', style: TextStyle(color: t.ash)),
       ),
     ];
@@ -1475,6 +1891,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
           name: e.name!,
           address: e.address!,
           sizeBytes: e.sizeBytes,
+          videoInfo: _session.videoInfoByName[e.name!],
         ),
     ];
     await addEntriesToLists(entries, chosen);
