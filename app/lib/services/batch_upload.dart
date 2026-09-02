@@ -69,6 +69,21 @@ class BatchUploadSession extends ChangeNotifier {
   int prepareTotal = 0;
   String? currentFile;
 
+  /// What the scan is doing to [currentFile] right now — drives the
+  /// per-file step line on the preparing page, so the slow legs (the
+  /// fingerprint read of a multi-GB movie) don't look like a hang.
+  PrepareStep? prepareStep;
+
+  /// Fingerprint progress (0–1) for the current file. Only set while
+  /// [prepareStep] is [PrepareStep.fingerprint].
+  double? hashFraction;
+
+  void _setPrepareStep(PrepareStep? step) {
+    prepareStep = step;
+    hashFraction = null;
+    notifyListeners();
+  }
+
   /// Everything that needs the user's eyes, in scan order — a
   /// [BatchConfirm] per lone file, an [AlbumConfirm] per album group.
   /// Filled during the scan, reviewed as a carousel afterwards; decided
@@ -189,6 +204,8 @@ class BatchUploadSession extends ChangeNotifier {
     stage = BatchStage.preparing;
     prepareDone = 0;
     prepareTotal = 0;
+    prepareStep = null;
+    hashFraction = null;
     confirmables.clear();
     confirmIndex = 0;
     _confirmPhase = false;
@@ -264,6 +281,8 @@ class BatchUploadSession extends ChangeNotifier {
     manifest = m;
     prepareDone = prepareTotal = 0;
     currentFile = null;
+    prepareStep = null;
+    hashFraction = null;
     confirmables.clear();
     confirmIndex = 0;
     _confirmPhase = false;
@@ -349,8 +368,21 @@ class BatchUploadSession extends ChangeNotifier {
           notifyListeners();
           continue;
         }
-        final sha = await sha256OfFile(path);
         final size = File(path).lengthSync();
+        prepareStep = PrepareStep.fingerprint;
+        hashFraction = size == 0 ? null : 0;
+        notifyListeners();
+        var lastNotified = 0.0;
+        final sha = await sha256OfFile(path, onBytes: (read) {
+          if (size == 0) return;
+          final f = read / size;
+          // Throttled — the callback fires per 64KB chunk.
+          if (f - lastNotified >= 0.01) {
+            lastNotified = f;
+            hashFraction = f;
+            notifyListeners();
+          }
+        });
         final hit = _ledger!.lookup(sha);
         if (hit != null) {
           _upsert(
@@ -362,9 +394,10 @@ class BatchUploadSession extends ChangeNotifier {
                 ..address = hit.address
                 ..datamap = hit.datamapPath);
           prepareDone++;
-          notifyListeners();
+          _setPrepareStep(null);
           continue;
         }
+        _setPrepareStep(PrepareStep.mediaInfo);
         final probe = await _probe(path);
         if (_aborted) return;
         if (sidecar == null &&
@@ -372,11 +405,14 @@ class BatchUploadSession extends ChangeNotifier {
           albums
               .putIfAbsent(albumGroupKey(path, probe), () => [])
               .add(_PendingTrack(path, sha, size, probe, existing));
+          _setPrepareStep(null);
           continue;
         }
+        _setPrepareStep(PrepareStep.match);
         await _matchOrDefer(path, sha, size, probe, sidecar, existing);
         if (_aborted) return;
         prepareDone++;
+        prepareStep = null;
         m.save();
         notifyListeners();
       }
@@ -387,11 +423,13 @@ class BatchUploadSession extends ChangeNotifier {
           // music/video toggle).
           final tr = group.single;
           currentFile = p.basename(tr.path);
+          prepareStep = PrepareStep.match;
           notifyListeners();
           await _matchOrDefer(
               tr.path, tr.sha, tr.size, tr.probe, null, tr.existing);
           if (_aborted) return;
           prepareDone++;
+          prepareStep = null;
           m.save();
           notifyListeners();
         } else {
@@ -400,6 +438,8 @@ class BatchUploadSession extends ChangeNotifier {
         }
       }
       currentFile = null;
+      prepareStep = null;
+      hashFraction = null;
       m.save();
       if (confirmables.any(_undecided)) {
         _confirmPhase = true;
@@ -411,6 +451,8 @@ class BatchUploadSession extends ChangeNotifier {
     } catch (e) {
       if (_aborted) return;
       currentFile = null;
+      prepareStep = null;
+      hashFraction = null;
       prepareError = '$e';
       _confirmPhase = false;
       m.save();
@@ -515,6 +557,7 @@ class BatchUploadSession extends ChangeNotifier {
     MatchOutcome? album;
     for (final i in order) {
       currentFile = p.basename(tracks[i].path);
+      prepareStep = PrepareStep.match;
       notifyListeners();
       final out = await _match(tracks[i].path, tracks[i].probe);
       if (_aborted) return;
@@ -563,6 +606,7 @@ class BatchUploadSession extends ChangeNotifier {
       },
     )..decided = autoAccept);
     prepareDone += tracks.length;
+    prepareStep = null;
     m.save();
     notifyListeners();
   }
@@ -1495,6 +1539,8 @@ class BatchUploadSession extends ChangeNotifier {
     prepareDone = prepareTotal = 0;
     uploadDone = uploadTotal = 0;
     currentFile = null;
+    prepareStep = null;
+    hashFraction = null;
     currentUploadName = null;
     currentJob = null;
     encodeFraction = null;
@@ -1503,6 +1549,12 @@ class BatchUploadSession extends ChangeNotifier {
 }
 
 enum BatchStage { idle, preparing, review, uploading, done }
+
+/// The per-file legs of the prepare scan, in order: [fingerprint] reads
+/// the whole file once for the dedup ledger (the slow leg on big
+/// files), [mediaInfo] is the ffprobe pass, [match] the MusicBrainz /
+/// TMDB lookup.
+enum PrepareStep { fingerprint, mediaInfo, match }
 
 /// One file waiting for the user's eyes — the CLI's beets-style confirm
 /// prompt as data. Every action funnels back through Matcher.matchFile

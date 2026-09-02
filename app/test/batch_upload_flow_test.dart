@@ -710,6 +710,92 @@ void main() {
     expect(defaultBatchList(['/no/such/path'], fallback: 'Kept'), 'Kept');
   });
 
+  test('prepare reports per-file steps and fingerprint progress', () async {
+    mediaFile('movie.mp4', 7);
+    final session = BatchUploadSession.instance;
+    session.probeOverride = (path) async => null;
+    session.matchOverride = scriptedMatcher({
+      'movie.mp4': cli.MatchOutcome(
+        type: 'video',
+        name: 'Movie (2001) {imdb-tt0000001}.mp4',
+        ids: {'imdb': 'tt0000001'},
+        method: 'tags',
+        confidence: 'high',
+      ),
+    });
+
+    final steps = <PrepareStep?>[];
+    final fractions = <double>[];
+    session.addListener(() {
+      if (steps.isEmpty || steps.last != session.prepareStep) {
+        steps.add(session.prepareStep);
+      }
+      final f = session.hashFraction;
+      if (f != null) fractions.add(f);
+    });
+
+    await session.startPrepare(
+      api: api(),
+      paths: [tempDir.path],
+      listName: 'Steps',
+      workDir: dirIn('work-steps'),
+      configDir: dirIn('config-steps'),
+    );
+    while (session.stage == BatchStage.preparing) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    expect(steps.whereType<PrepareStep>().toList(),
+        [PrepareStep.fingerprint, PrepareStep.mediaInfo, PrepareStep.match]);
+    // The fingerprint read reported byte progress up to the whole file.
+    expect(fractions, isNotEmpty);
+    expect(fractions.last, 1.0);
+    // Cleared once the scan is over.
+    expect(session.prepareStep, isNull);
+    expect(session.hashFraction, isNull);
+  });
+
+  testWidgets('preparing page explains the fingerprint step with its own '
+      'progress bar', (tester) async {
+    final session = BatchUploadSession.instance;
+    session.stage = BatchStage.preparing;
+    session.prepareTotal = 1;
+    session.currentFile = 'Big Movie (2001).mp4';
+    session.prepareStep = PrepareStep.fingerprint;
+    session.hashFraction = 0.42;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: BatchUploadScreen(apiBase: FakeEmbeddedHttp.base),
+    ));
+    await tester.pump();
+
+    expect(find.textContaining('Fingerprinting · 42%'), findsOneWidget);
+    expect(find.textContaining('never paid for twice'), findsOneWidget);
+    // The batch bar plus the per-file fingerprint bar.
+    expect(find.byType(LinearProgressIndicator), findsNWidgets(2));
+
+    // Database lookup step: no second bar, wording follows the file type.
+    session.prepareStep = PrepareStep.match;
+    session.hashFraction = null;
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: BatchUploadScreen(apiBase: FakeEmbeddedHttp.base),
+    ));
+    await tester.pump();
+    expect(find.text('Looking it up on the movie database (TMDB)…'),
+        findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+
+    session.currentFile = '01 Track.mp3';
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: BatchUploadScreen(apiBase: FakeEmbeddedHttp.base),
+    ));
+    await tester.pump();
+    expect(find.text('Looking it up on MusicBrainz…'), findsOneWidget);
+  });
+
   testWidgets(
       'no-match file raises the confirm card; manual form has type '
       'toggle and artwork picker', (tester) async {

@@ -311,8 +311,17 @@ bool cueSiblingProblem(String path) {
   return cue && audio == 1;
 }
 
-Future<String> sha256OfFile(String path) async {
-  final input = File(path).openRead();
+/// [onBytes] reports cumulative bytes read — the whole file is read
+/// once, so hashing a multi-GB movie takes tens of seconds and callers
+/// can show progress.
+Future<String> sha256OfFile(String path,
+    {void Function(int bytesRead)? onBytes}) async {
+  var read = 0;
+  final input = File(path).openRead().map((chunk) {
+    read += chunk.length;
+    onBytes?.call(read);
+    return chunk;
+  });
   final digest = await sha256.bind(input).first;
   return digest.toString();
 }
