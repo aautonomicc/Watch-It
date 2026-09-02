@@ -17,10 +17,12 @@ import 'package:watchit/screens/media_lists_screen.dart';
 import 'package:watchit/services/bundle.dart';
 import 'package:watchit/services/connectivity.dart';
 import 'package:watchit/services/embedded_client.dart';
+import 'package:watchit/services/import_review.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata.dart';
 import 'package:watchit/services/watch_state.dart';
 import 'package:watchit/theme/tokens.dart';
+import 'package:watchit_upload/watchit_upload.dart' as cli;
 
 import 'fake_embedded_http.dart';
 
@@ -66,6 +68,7 @@ Uint8List _zipOf(Map<String, List<int>> members) {
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
   late FakeEmbeddedHttp fake;
+  late Directory configDir;
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
@@ -74,18 +77,43 @@ void main() {
     WatchStateStore.instance = WatchStateStore();
     fake = FakeEmbeddedHttp();
     HttpOverrides.global = fake;
+    configDir = Directory.systemTemp.createTempSync('wi-import-config');
+    // Loose datamaps go through the match/review flow; an echo matcher
+    // auto-accepts every name unchanged so these tests keep exercising
+    // the import routing itself (import_review_test.dart covers the
+    // matching behaviors).
+    ImportReviewSession.resetForTesting();
+    ImportReviewSession.instance.matchOverride =
+        (path, probe, {sidecar, forcedType}) async => cli.MatchOutcome(
+              type: 'video',
+              name: path,
+              method: 'tags',
+              confidence: 'high',
+              note: path,
+            );
   });
 
   tearDown(() {
+    ImportReviewSession.resetForTesting();
     HttpOverrides.global = null;
     ConnectivityMonitor.instance = ConnectivityMonitor();
+    try {
+      configDir.deleteSync(recursive: true);
+    } catch (_) {}
   });
 
   Future<void> openMediaLists(WidgetTester tester) async {
     await tester.pumpWidget(MaterialApp(
       theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
-      home: const MediaListsScreen(importBase: FakeEmbeddedHttp.base),
+      home: MediaListsScreen(
+          importBase: FakeEmbeddedHttp.base, importConfigDir: configDir),
     ));
+    await tester.pumpAndSettle();
+  }
+
+  /// The review screen's done page → back on Media lists.
+  Future<void> finishReview(WidgetTester tester) async {
+    await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
   }
 
@@ -350,7 +378,10 @@ void main() {
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Imported "Imported"'), findsOneWidget);
+      // The auto-accepted review lands on the done page.
+      expect(find.textContaining('Added 2 entries to Imported'),
+          findsOneWidget);
+      await finishReview(tester);
       final list = (await LibraryStore.load())
           .firstWhere((l) => l.title == 'Imported');
       expect(list.entries.map((e) => e.name),
@@ -382,10 +413,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('already exists'), findsNothing);
-      expect(find.textContaining('Merged into 1 existing list'),
-          findsOneWidget);
-      expect(find.textContaining('1 duplicate entry skipped'),
-          findsOneWidget);
+      await finishReview(tester);
       final list = (await LibraryStore.load())
           .firstWhere((l) => l.title == 'Movies');
       expect(list.entries.map((e) => e.address), [
@@ -410,6 +438,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('Add'));
       await tester.pumpAndSettle();
+      await finishReview(tester);
 
       final lists = await LibraryStore.load();
       for (final title in ['Movies', 'Kids']) {
@@ -443,7 +472,9 @@ void main() {
       await tester.tap(find.text('Add'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Imported "Fresh"'), findsOneWidget);
+      expect(find.textContaining('Added 2 entries to Fresh'),
+          findsOneWidget);
+      await finishReview(tester);
       final lists = await LibraryStore.load();
       expect(lists.firstWhere((l) => l.title == 'Fresh').entries,
           hasLength(2));
@@ -480,6 +511,9 @@ void main() {
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
+      // The good file went through review; the note about the bad one
+      // shows once the review pops back.
+      await finishReview(tester);
       expect(find.textContaining('1 file skipped (not a data map)'),
           findsOneWidget);
       final list = (await LibraryStore.load())
@@ -510,6 +544,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('Add'));
       await tester.pumpAndSettle();
+      await finishReview(tester);
 
       final lists = await LibraryStore.load();
       expect(
@@ -542,6 +577,7 @@ void main() {
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
+      await finishReview(tester);
       expect(find.textContaining('1 file skipped (not recognised)'),
           findsOneWidget);
       final list = (await LibraryStore.load())
@@ -837,7 +873,9 @@ void main() {
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Imported "Imported"'), findsOneWidget);
+      expect(find.textContaining('Added 1 entry to Imported'),
+          findsOneWidget);
+      await finishReview(tester);
     });
 
     testWidgets('a local bundle-only pick imports without the warning',

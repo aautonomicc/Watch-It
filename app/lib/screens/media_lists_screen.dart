@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show PlatformException;
+import 'package:path_provider/path_provider.dart'
+    show getApplicationSupportDirectory;
 import 'package:share_plus/share_plus.dart' show SharePlus, ShareParams;
 
 import '../models/media_list.dart';
@@ -15,12 +17,14 @@ import '../services/connectivity.dart';
 import '../services/datamap_import.dart';
 import '../services/channel_service.dart';
 import '../services/home_sections.dart';
+import '../services/import_review.dart';
 import '../services/library_store.dart';
 import '../services/list_import.dart';
 import '../services/metadata_service.dart';
 import '../theme/tokens.dart';
 import '../widgets/channel_avatar.dart';
 import '../widgets/channel_badge.dart';
+import 'import_review_screen.dart';
 import 'list_edit_screen.dart';
 import 'list_home_screen.dart';
 import 'settings_screen.dart' show promptForText;
@@ -33,11 +37,16 @@ import 'settings_screen.dart' show promptForText;
 /// inside the import flow ("Add to library" → "Create new list") — the
 /// one place media enters the app.
 class MediaListsScreen extends StatefulWidget {
-  const MediaListsScreen({super.key, this.importBase});
+  const MediaListsScreen({super.key, this.importBase, this.importConfigDir});
 
   /// Embedded-server URL override for datamap/bundle imports (tests);
   /// null means the real embedded client.
   final String? importBase;
+
+  /// Override for the import matcher's config/cache directory (tests,
+  /// and platforms without a HOME); null means `~/.watchit-upload` —
+  /// the MusicBrainz cache shared with the uploader and the CLI.
+  final Directory? importConfigDir;
 
   @override
   State<MediaListsScreen> createState() => _MediaListsScreenState();
@@ -355,13 +364,15 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     );
   }
 
-  /// Import [files] as datamap entries into every list in [listTitles],
-  /// behind a "File X of Y" progress dialog with Cancel (a shrunk map
-  /// expands over the network, ~20s each). Failed files are skipped and
+  /// Import [files] as datamap entries into every list in [listTitles]:
+  /// derive each map's address behind a "File X of Y" progress dialog
+  /// with Cancel (a shrunk map expands over the network, ~20s each),
+  /// then hand the results to the match/review flow
+  /// ([ImportReviewSession] + [ImportReviewScreen]) which sorts them
+  /// music/video, renames clean matches to canonical W@tch names, and
+  /// adds them to the checked lists. Failed files are skipped and
   /// reported — when every file fails, the first failure's own message
-  /// says why (offline, not a data map, …). Titles the user checked
-  /// that already exist merge without the clash dialog — checking the
-  /// box already answered that question.
+  /// says why (offline, not a data map, …).
   Future<void> _importDatamaps(
     List<({String name, Uint8List bytes})> files, {
     required List<String> listTitles,
@@ -430,30 +441,58 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
               '${firstError ?? ''}');
       return;
     }
-    final existing = {
-      for (final l in _lists ?? <MediaList>[]) l.title.toLowerCase()
-    };
-    await _applyImportedLists(
-      [
-        for (final title in listTitles)
-          ParsedMediaList(title: title, entries: entries),
-      ],
-      mergeExisting: {
-        for (final title in listTitles)
-          if (existing.contains(title.toLowerCase()))
-            title.toLowerCase(),
-      },
-      extraNotes: [
-        if (failed > 0)
-          '$failed ${failed == 1 ? 'file' : 'files'} skipped (not a '
-              'data map)',
-        if (cancelled && attempted < files.length)
-          '${files.length - attempted} '
-              '${files.length - attempted == 1 ? 'file' : 'files'} '
-              'not imported (cancelled)',
-        ...extraNotes,
-      ],
-    );
+    // The imported maps now go through the same match/review flow as
+    // uploads (2026-09-02 decision): clean matches auto-accept, the
+    // rest get the confirm carousel, and the review screen adds the
+    // results to the chosen lists itself.
+    final session = ImportReviewSession.instance;
+    if (!session.idle) {
+      // A leftover review is still open — reopen it instead of losing
+      // it; the just-picked maps are stored and re-import instantly.
+      _showError('An earlier import review was still open — finish it, '
+          'then add the new files again.');
+    } else {
+      final tmdbKey = await AppSettings.tmdbApiKey();
+      final configDir = await _importMatcherConfigDir();
+      if (!mounted) return;
+      await session.start(
+        files: [
+          for (final e in entries)
+            ImportCandidate(
+                name: e.name, address: e.address, sizeBytes: e.sizeBytes),
+        ],
+        lists: listTitles,
+        tmdbKey: tmdbKey,
+        configDir: configDir,
+      );
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => const ImportReviewScreen()));
+    await _reload();
+    final notes = [
+      if (failed > 0)
+        '$failed ${failed == 1 ? 'file' : 'files'} skipped (not a '
+            'data map)',
+      if (cancelled && attempted < files.length)
+        '${files.length - attempted} '
+            '${files.length - attempted == 1 ? 'file' : 'files'} '
+            'not imported (cancelled)',
+      ...extraNotes,
+    ];
+    if (notes.isNotEmpty) _showError(notes.join(' · '));
+  }
+
+  /// Where the import matcher keeps its config and MusicBrainz cache:
+  /// the real `~/.watchit-upload` on desktop (shared with the uploader
+  /// and the CLI), an app-support subdirectory on phones (no HOME).
+  Future<Directory?> _importMatcherConfigDir() async {
+    if (widget.importConfigDir != null) return widget.importConfigDir;
+    if (Platform.isAndroid || Platform.isIOS) {
+      final support = await getApplicationSupportDirectory();
+      return Directory('${support.path}/upload_config');
+    }
+    return null;
   }
 
   /// A `<name>.watch-list.datamap` pick: download the bundle the map
