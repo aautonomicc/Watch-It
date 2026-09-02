@@ -1250,6 +1250,7 @@ entries:
     status: "needs-attention"
   - source: "${lost.path}"
     status: "uploaded"
+    sha256: "aaaa"
 ''');
     final b = Directory('${root.path}/done-batch')..createSync();
     File('${b.path}/watchit-manifest.yaml').writeAsStringSync('''
@@ -1259,6 +1260,13 @@ created: "2026-09-01T10:00:00"
 entries:
   - source: "${lost.path}"
     status: "uploaded"
+    sha256: "cccc"
+  - source: "/other/deduped.mp4"
+    status: "already-uploaded"
+    sha256: "dddd"
+  - source: "/other/skipped.mp4"
+    status: "skipped"
+    sha256: "eeee"
 ''');
 
     final batches = await scanPreviousBatches(root);
@@ -1269,7 +1277,16 @@ entries:
         {'needs-attention': 2, 'uploaded': 1});
     // Only files still on disk are reviewable.
     expect(att.attentionSources, [lost.path]);
+    expect(att.interrupted, isFalse);
+    expect(att.finished, isFalse);
+    expect(att.uploadedShas, ['aaaa']);
+    // Deduped rows count as this batch's uploads too; skipped don't.
+    expect(batches.last.uploadedShas, ['cccc', 'dddd']);
+    // Every entry uploaded/skipped and nothing to resume = finished —
+    // the setup page hides these behind the Show toggle.
     expect(batches.last.needsAttention, isFalse);
+    expect(batches.last.interrupted, isFalse);
+    expect(batches.last.finished, isTrue);
 
     // Dismiss: the manifest's needs-attention rows flip to skipped, so
     // the attention scan stops surfacing the batch.
@@ -1278,22 +1295,181 @@ entries:
     final rescanned = await scanPreviousBatches(root);
     expect(rescanned.first.counts,
         {'skipped': 2, 'uploaded': 1});
+    expect(rescanned.first.finished, isTrue);
 
     // Delete: the whole work dir goes.
     deleteBatch(rescanned.first);
     expect(a.existsSync(), isFalse);
     expect([for (final x in await scanPreviousBatches(root)) x.listName],
         ['Done Batch']);
+
+    // Forget: the opt-in drops exactly this batch's hashes from the
+    // shared ledger — other batches' rows survive.
+    final config = dirIn('config-forget');
+    File('${config.path}/ledger.jsonl').writeAsStringSync('''
+{"sha256":"cccc","name":"C.mp4","size_bytes":1,"date":"d"}
+{"sha256":"dddd","name":"D.mp4","size_bytes":2,"date":"d"}
+{"sha256":"ffff","name":"Other.mp4","size_bytes":3,"date":"d"}
+''');
+    final done = (await scanPreviousBatches(root)).single;
+    expect(forgetUploads(done, configDir: config), 2);
+    final ledger = cli.Ledger.load(File('${config.path}/ledger.jsonl'));
+    expect(ledger.lookup('cccc'), isNull);
+    expect(ledger.lookup('dddd'), isNull);
+    expect(ledger.lookup('ffff')!.name, 'Other.mp4');
   });
 
-  testWidgets('previous-uploads card: Dismiss clears the attention '
-      'line, Delete (after confirm) removes the batch row',
+  test('resumeBatch: an interrupted upload continues where it stopped — '
+      'uploaded entries kept, failed retried, missing sources fail '
+      'cleanly', () async {
+    fake.wallet = {'configured': true, 'address': '0xabc', 'storage': 'file'};
+    final readyFile = mediaFile('resume-ready.mp4', 80);
+    final failedFile = mediaFile('resume-failed.mp4', 81);
+    final work = dirIn('work-resume');
+    Directory('${work.path}/datamaps').createSync();
+    final doneMap = File('${work.path}/datamaps/Done (2001).mp4.datamap')
+      ..writeAsBytesSync([7, 7, 7]);
+    final addrDone = 'aa' * 32, addrB = 'bb' * 32, addrC = 'cc' * 32;
+    File('${work.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "Cut Short"
+created: "2026-09-02T10:00:00"
+entries:
+  - source: "/gone/done-source.mp4"
+    status: "uploaded"
+    name: "Done (2001).mp4"
+    address: "$addrDone"
+    datamap: "${doneMap.path}"
+  - source: "${readyFile.path}"
+    status: "ready"
+    name: "Ready (2002).mp4"
+    size_bytes: 64
+  - source: "${failedFile.path}"
+    status: "failed"
+    name: "Failed (2003).mp4"
+    error: "upload died mid-flight"
+  - source: "/gone/vanished.mp4"
+    status: "ready"
+    name: "Vanished (2004).mp4"
+''');
+    fake.uploadResults = [
+      {
+        'address': addrB,
+        'size': 64,
+        'chunks': 3,
+        'cost_atto': '1000',
+        'gas_wei': '1',
+      },
+      {
+        'address': addrC,
+        'size': 64,
+        'chunks': 3,
+        'cost_atto': '1000',
+        'gas_wei': '1',
+      },
+    ];
+    fake.datamaps[addrB] = [1];
+    fake.datamaps[addrC] = [2];
+
+    final session = BatchUploadSession.instance;
+    await session.resumeBatch(
+        api: api(), workDir: work, configDir: dirIn('config-resume'));
+    expect(session.stage, BatchStage.review);
+    expect(session.uploadedCount, 1);
+    expect(session.readyCount, 2); // still-ready + the flipped failure
+    expect(session.failedCount, 1); // its source file is gone
+
+    await session.startUpload();
+    while (session.stage == BatchStage.uploading) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    expect(session.stage, BatchStage.done);
+    expect(session.uploadedCount, 3);
+    expect(session.failedCount, 1);
+    // Everything on the network — the earlier upload too — lands in
+    // the batch's list and bundle.
+    expect(session.autoAddedList, 'Cut Short');
+    expect(session.autoAddedCount, 3);
+    final parsed = parseBundle(
+        Uint8List.fromList(File(session.bundlePath!).readAsBytesSync()));
+    expect(
+        parsed.datamapMembers.keys,
+        containsAll([
+          'Done (2001).mp4.datamap',
+          'Ready (2002).mp4.datamap',
+          'Failed (2003).mp4.datamap',
+        ]));
+  });
+
+  test('resumeBatch: tier-expansion siblings collapse and already-'
+      'uploaded outputs are never planned again', () async {
+    fake.wallet = {'configured': true, 'address': '0xabc', 'storage': 'file'};
+    final video = mediaFile('resume-video.mp4', 82);
+    final work = dirIn('work-resume2');
+    final addr = 'dd' * 32;
+    // Interrupted after the 480p tier uploaded: the manifest still
+    // holds the source row AND its sibling, both ready.
+    File('${work.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "Tiered"
+created: "2026-09-02T10:00:00"
+entries:
+  - source: "${video.path}"
+    status: "ready"
+    name: "Movie (2000) [480p].mp4"
+  - source: "${video.path}"
+    status: "ready"
+    name: "Movie (2000) [360p].mp4"
+  - source: "${video.path}"
+    status: "uploaded"
+    name: "Movie (2000) [480p].mp4"
+    address: "$addr"
+''');
+    final session = BatchUploadSession.instance;
+    await session.resumeBatch(
+        api: api(), workDir: work, configDir: dirIn('config-resume2'));
+    // One ready row per source survives the collapse.
+    expect(session.readyCount, 1);
+    expect(session.uploadedCount, 1);
+    // Its name is a tier output already on the network — startUpload
+    // must not pay for it again (no ffmpeg here, so no re-expansion).
+    await session.startUpload();
+    while (session.stage == BatchStage.uploading) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    expect(session.stage, BatchStage.done);
+    expect(session.uploadedCount, 1);
+    expect(session.skippedCount, 1);
+  });
+
+  testWidgets('previous-uploads card: interrupted batches offer '
+      'Continue, finished ones hide behind Show, Dismiss retires a '
+      'batch, Delete (after confirm) removes its row',
       (tester) async {
     tester.view.physicalSize = const Size(900, 2400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final lost = mediaFile('lost3.mp4', 71);
     final root = dirIn('batch_uploads3');
+    final cut = Directory('${root.path}/cut-batch')..createSync();
+    File('${cut.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "Half Way"
+created: "2026-09-02T11:00:00"
+entries:
+  - source: "${lost.path}"
+    status: "ready"
+    name: "Half (2001).mp4"
+  - source: "${lost.path}"
+    status: "uploaded"
+    name: "Other (2002).mp4"
+    sha256: "aa11"
+''');
+    final config = dirIn('config-prevcard');
+    File('${config.path}/ledger.jsonl').writeAsStringSync('''
+{"sha256":"aa11","name":"Other (2002).mp4","size_bytes":1,"date":"d"}
+{"sha256":"keep","name":"Elsewhere.mp4","size_bytes":2,"date":"d"}
+''');
     final a = Directory('${root.path}/att-batch')..createSync();
     File('${a.path}/watchit-manifest.yaml').writeAsStringSync('''
 version: 1
@@ -1316,32 +1492,67 @@ entries:
       theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
       home: BatchUploadScreen(
           apiBase: FakeEmbeddedHttp.base,
+          configDir: config,
           batchRootProvider: () async => root),
     ));
     await tester.pumpAndSettle();
     expect(
         find.text('1 file from earlier uploads still needs attention'),
         findsOneWidget);
+    // The interrupted batch offers Continue; the attention one Review.
+    expect(find.textContaining('Half Way'), findsOneWidget);
+    expect(find.text('Continue'), findsOneWidget);
     expect(find.textContaining('Needs Eyes'), findsOneWidget);
+    // The fully finished batch is hidden behind the Show toggle.
+    expect(find.textContaining('All Done'), findsNothing);
+    expect(find.text('1 finished batch kept as upload records'),
+        findsOneWidget);
+    await tester.tap(find.text('Show'));
+    await tester.pumpAndSettle();
     expect(find.textContaining('All Done'), findsOneWidget);
     expect(find.text('1 uploaded'), findsOneWidget);
+    expect(find.text('1 uploaded · 1 ready'), findsOneWidget);
 
+    // Dismiss retires the attention batch — with nothing left to do it
+    // becomes a finished record (still visible: Show is on).
     await tester.tap(find.text('Dismiss'));
     await tester.pumpAndSettle();
     expect(find.textContaining('from earlier uploads still'),
         findsNothing);
     expect(find.text('Previous uploads'), findsOneWidget);
     expect(find.text('1 skipped'), findsOneWidget);
+    expect(find.text('2 finished batches kept as upload records'),
+        findsOneWidget);
 
-    // Delete the dismissed batch (rows sort newest first, so its
+    // Delete the interrupted batch (rows sort newest first, so its
     // delete button is the first one) — confirm dialog, then gone.
+    // Only the batch's records go: library entries stay put. Its one
+    // uploaded entry offers the forget opt-in; ticking it drops that
+    // hash from the shared ledger while other rows survive.
     await tester.tap(find.byTooltip('Delete batch').first);
     await tester.pumpAndSettle();
     expect(find.text('Delete this batch\'s records?'), findsOneWidget);
+    expect(find.text('Also forget this upload'), findsOneWidget);
+    await tester.tap(find.byType(CheckboxListTile));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Delete'));
     await tester.pumpAndSettle();
-    expect(a.existsSync(), isFalse);
-    expect(find.textContaining('Needs Eyes'), findsNothing);
+    expect(cut.existsSync(), isFalse);
+    expect(find.textContaining('Half Way'), findsNothing);
     expect(find.textContaining('All Done'), findsOneWidget);
+    expect(find.textContaining('Needs Eyes'), findsOneWidget);
+    final ledger =
+        cli.Ledger.load(File('${config.path}/ledger.jsonl'));
+    expect(ledger.lookup('aa11'), isNull);
+    expect(ledger.lookup('keep')!.name, 'Elsewhere.mp4');
+
+    // A batch with no recorded content hashes (All Done's manifest
+    // predates them) never offers the opt-in — nothing to forget.
+    await tester.tap(find.byTooltip('Delete batch').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Delete this batch\'s records?'), findsOneWidget);
+    expect(find.byType(CheckboxListTile), findsNothing);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
   });
 }
