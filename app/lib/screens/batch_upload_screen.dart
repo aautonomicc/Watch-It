@@ -71,6 +71,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   List<String> _libraryLists = [];
   WalletStatus? _wallet;
   List<PreviousBatch> _previous = [];
+  bool _showFinished = false;
   bool _rights = false;
   late BatchStage _lastStage = _session.stage;
 
@@ -142,6 +143,19 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     );
   }
 
+  /// Continue an interrupted batch: reopen it at its review page —
+  /// already-uploaded files are skipped, the rest upload from there.
+  Future<void> _continueBatch(PreviousBatch batch) async {
+    if (!_session.idle) return;
+    await _session.resumeBatch(
+      api: _api,
+      workDir: batch.workDir,
+      ffprobeBin: locateFfprobeBin(),
+      configDir: widget.configDir,
+      ffmpeg: FfmpegService(),
+    );
+  }
+
   /// Dismiss: stop surfacing the batch's needs-attention files (they
   /// flip to skipped in its manifest; ledger and bundle untouched).
   void _dismissBatch(PreviousBatch batch) {
@@ -153,35 +167,74 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
 
   /// Delete a batch's records after a confirm — manifest, datamaps,
   /// bundle, artwork, encode leftovers. Uploaded files stay on the
-  /// network and in the shared ledger (never re-paid).
+  /// network and in the shared ledger (never re-paid) unless the
+  /// "also forget" opt-in is ticked, which drops the batch's hashes
+  /// from the ledger too — the full "make the app forget" action.
   Future<void> _deleteBatch(PreviousBatch batch) async {
     final t = WiTokens.of(context);
+    var forget = false;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: t.ink2,
-        title: Text('Delete this batch\'s records?',
-            style: TextStyle(color: t.bone, fontSize: 16)),
-        content: Text(
-          'Removes the batch\'s manifest, saved bundle, and working '
-          'files from this device, freeing their disk space. Files '
-          'already uploaded stay on the network and are still '
-          'recognized — they are never paid for twice.',
-          style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: t.ink2,
+          title: Text('Delete this batch\'s records?',
+              style: TextStyle(color: t.bone, fontSize: 16)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Removes only the batch\'s own records — its manifest, '
+                'saved bundle, and working files — freeing their disk '
+                'space. Anything already added to your library stays '
+                'there, files already uploaded stay on the network, and '
+                'they are still recognized — never paid for twice.',
+                style:
+                    TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
+              ),
+              if (batch.uploadedShas.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                CheckboxListTile(
+                  value: forget,
+                  onChanged: (v) =>
+                      setDialogState(() => forget = v ?? false),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: Text(
+                      batch.uploadedShas.length == 1
+                          ? 'Also forget this upload'
+                          : 'Also forget these '
+                              '${batch.uploadedShas.length} uploads',
+                      style: TextStyle(color: t.bone, fontSize: 13)),
+                  subtitle: Text(
+                    'Removes them from the upload history, so putting '
+                    'the same files through a new batch uploads — and '
+                    'pays — again. What\'s already on the network stays '
+                    'there either way; this only makes this app forget.',
+                    style: TextStyle(
+                        color: t.boneDim, fontSize: 12, height: 1.35),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text('Cancel', style: TextStyle(color: t.ash)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text('Delete', style: TextStyle(color: t.rust)),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text('Cancel', style: TextStyle(color: t.ash)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Delete', style: TextStyle(color: t.rust)),
-          ),
-        ],
       ),
     );
     if (confirmed != true || !mounted) return;
+    if (forget) forgetUploads(batch, configDir: widget.configDir);
     deleteBatch(batch);
     await _loadAttention();
   }
@@ -375,12 +428,15 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     ];
   }
 
-  /// Earlier batches as a management list: every batch's name, date,
-  /// and status counts, with Review (reopen the confirm cards) and
-  /// Dismiss for needs-attention batches, and Delete for any batch —
-  /// old runs stop haunting new uploads and their disk space is
-  /// reclaimable.
+  /// Earlier batches as a management list: unfinished batches (files
+  /// needing attention, or an upload that was cut short) with Continue
+  /// / Review / Dismiss / Delete. Fully finished batches are records,
+  /// not work — they hide behind a one-line Show toggle instead of
+  /// piling up (Delete stays reachable there to clear the history;
+  /// library entries and network uploads are never touched).
   Widget _previousUploadsCard(WiTokens t) {
+    final unfinished = [for (final b in _previous) if (!b.finished) b];
+    final finished = [for (final b in _previous) if (b.finished) b];
     final total =
         _previous.fold(0, (n, b) => n + b.attentionSources.length);
     return Container(
@@ -414,7 +470,28 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          for (final batch in _previous) _previousBatchRow(t, batch),
+          for (final batch in unfinished) _previousBatchRow(t, batch),
+          if (_showFinished)
+            for (final batch in finished) _previousBatchRow(t, batch),
+          if (finished.isNotEmpty)
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${finished.length} finished '
+                    '${finished.length == 1 ? 'batch' : 'batches'} '
+                    'kept as upload records',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () =>
+                      setState(() => _showFinished = !_showFinished),
+                  child: Text(_showFinished ? 'Hide' : 'Show',
+                      style: TextStyle(color: t.ash)),
+                ),
+              ],
+            ),
         ],
       ),
     );
@@ -464,6 +541,11 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
               ],
             ),
           ),
+          if (batch.interrupted)
+            OutlinedButton(
+              onPressed: () => _continueBatch(batch),
+              child: const Text('Continue'),
+            ),
           if (batch.needsAttention) ...[
             OutlinedButton(
               onPressed: () => _reviewAttention(batch),
@@ -687,10 +769,13 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   Widget _countsLine(WiTokens t) {
     final parts = [
       if (_session.readyCount > 0) '${_session.readyCount} ready',
+      if (_session.uploadedCount > 0)
+        '${_session.uploadedCount} uploaded',
       if (_session.dedupCount > 0)
         '${_session.dedupCount} already uploaded',
       if (_session.attentionCount > 0)
         '${_session.attentionCount} need attention',
+      if (_session.failedCount > 0) '${_session.failedCount} failed',
       if (_session.skippedCount > 0) '${_session.skippedCount} skipped',
     ];
     if (parts.isEmpty) return const SizedBox.shrink();
@@ -1607,13 +1692,36 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
           ),
           onChanged: (v) => setState(() => _rights = v ?? false),
         ),
+      // A batch where every file deduped against the ledger has nothing
+      // to pay for, but finishing it still adds the files back to the
+      // chosen list (and rebuilds the bundle) — the free way to restore
+      // something deleted from the library by mistake.
+      if (ready == 0 && _session.dedupCount > 0) ...[
+        Text(
+          'Everything here is already on the network — finishing is '
+          'free and adds ${_session.dedupCount == 1 ? 'it' : 'them'} '
+          'to "${_session.manifest?.listName ?? 'the list'}".',
+          style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+        ),
+        const SizedBox(height: 8),
+      ],
       const SizedBox(height: 8),
       FilledButton.icon(
-        onPressed: ready > 0 && _rights && (wallet?.configured ?? false)
-            ? _session.startUpload
-            : null,
-        icon: const Icon(Icons.cloud_upload_outlined),
-        label: Text(planned <= 1 ? 'Upload' : 'Upload $planned files'),
+        onPressed: ready > 0
+            ? (_rights && (wallet?.configured ?? false)
+                ? _session.startUpload
+                : null)
+            : _session.dedupCount > 0
+                ? _session.startUpload
+                : null,
+        icon: Icon(ready == 0 && _session.dedupCount > 0
+            ? Icons.library_add_outlined
+            : Icons.cloud_upload_outlined),
+        label: Text(ready == 0 && _session.dedupCount > 0
+            ? 'Add to library'
+            : planned <= 1
+                ? 'Upload'
+                : 'Upload $planned files'),
       ),
       const SizedBox(height: 8),
       TextButton(

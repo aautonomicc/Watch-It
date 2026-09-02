@@ -91,6 +91,26 @@ class Ledger {
   int get length => _bySha.length;
   Iterable<LedgerEntry> get entries => _bySha.values;
 
+  /// Forget uploads: rewrite the file without the given hashes — the
+  /// one deliberate exception to append-only, backing the app's
+  /// explicit "forget these uploads" action. A forgotten file is
+  /// treated as brand new on its next prepare (re-uploaded and re-paid)
+  /// even though its bytes stay on the network forever. Returns how
+  /// many rows were dropped.
+  int removeAll(Iterable<String> sha256s) {
+    var removed = 0;
+    for (final sha in sha256s.toSet()) {
+      if (_bySha.remove(sha) != null) removed++;
+    }
+    if (removed == 0) return 0;
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync(
+        [for (final e in _bySha.values) '${jsonEncode(e.toJson())}\n']
+            .join(),
+        flush: true);
+    return removed;
+  }
+
   /// Append-only write; the in-memory index updates with it.
   void append(LedgerEntry entry) {
     file.parent.createSync(recursive: true);

@@ -211,6 +211,78 @@ class BatchUploadSession extends ChangeNotifier {
   static String? _blank(String? s) =>
       (s == null || s.trim().isEmpty) ? null : s.trim();
 
+  /// Reopen an interrupted batch at its review page — the Previous
+  /// uploads Continue button. The manifest's still-`ready` entries (and
+  /// `failed` ones, flipped back) are offered for upload again;
+  /// everything already uploaded is left alone, so the batch picks up
+  /// where it was cut short instead of starting over or re-paying.
+  Future<void> resumeBatch({
+    required PublishApi api,
+    required Directory workDir,
+    String ffprobeBin = 'ffprobe',
+    Directory? configDir,
+    FfmpegService? ffmpeg,
+  }) async {
+    assert(idle);
+    final file = File(p.join(workDir.path, 'watchit-manifest.yaml'));
+    final Manifest m;
+    try {
+      m = Manifest.load(file);
+    } catch (_) {
+      return; // Unreadable/missing manifest — nothing to resume.
+    }
+    _aborted = false;
+    _api = api;
+    _ffprobeBin = ffprobeBin;
+    _ffmpeg = ffmpeg;
+    this.workDir = workDir;
+    final config = CliConfig.load(home: configDir)..ensureDirs();
+    _ledger = Ledger.load(config.ledgerFile);
+    // Per-tier sibling rows from an interrupted video upload collapse
+    // back to one ready row per source — tiers are re-picked on the
+    // review page and re-expand at upload (already-uploaded tier
+    // outputs are never planned again, see _videoItems).
+    final seenReadySource = <String>{};
+    final entries = <ManifestEntry>[];
+    for (final e in m.entries) {
+      if (e.status == 'failed') {
+        e.status = 'ready';
+        e.error = null;
+      }
+      if (e.status == 'ready') {
+        if (!File(e.source).existsSync()) {
+          e.status = 'failed';
+          e.error = 'source file no longer exists';
+        } else if (!seenReadySource.add(e.source)) {
+          continue;
+        }
+      }
+      entries.add(e);
+    }
+    m.entries = entries;
+    m.save();
+    manifest = m;
+    prepareDone = prepareTotal = 0;
+    currentFile = null;
+    confirmables.clear();
+    confirmIndex = 0;
+    _confirmPhase = false;
+    videoProbes.clear();
+    tiers = {};
+    _tiersInitialized = false;
+    videoInfoByName.clear();
+    _tasks = [];
+    costEstimate = null;
+    estimateError = null;
+    prepareError = null;
+    balances = null;
+    bundlePath = null;
+    autoAddedList = null;
+    autoAddedCount = 0;
+    uploadDone = uploadTotal = 0;
+    await _finishPrepare();
+  }
+
   Manifest _loadOrCreateManifest(String listName) {
     final file = File(p.join(workDir!.path, 'watchit-manifest.yaml'));
     if (file.existsSync()) {
@@ -970,8 +1042,23 @@ class BatchUploadSession extends ChangeNotifier {
       size: e.sizeBytes ?? 0,
       probe: probe,
     );
-    return plan.buildQueue([src], tiers);
+    // A resumed batch may already hold some tier outputs (sibling rows
+    // uploaded before the interruption) — never plan those again.
+    final done = _uploadedNamesFor(e.source);
+    return [
+      for (final item in plan.buildQueue([src], tiers))
+        if (!done.contains(item.outputName)) item,
+    ];
   }
+
+  /// Final names this batch already put on the network for [source].
+  Set<String> _uploadedNamesFor(String source) => {
+        for (final e in entries)
+          if (e.source == source &&
+              (e.status == 'uploaded' || e.status == 'already-uploaded') &&
+              e.name != null)
+            e.name!,
+      };
 
   /// Uploads the batch will run, tier expansion included.
   int get plannedUploadCount {
@@ -1071,6 +1158,13 @@ class BatchUploadSession extends ChangeNotifier {
     for (final e in _byStatus('ready')) {
       final items = _videoItems(e);
       if (items.isEmpty) {
+        if (_uploadedNamesFor(e.source).contains(e.name)) {
+          // Resumed batch: every selected version of this source is
+          // already on the network — nothing left to pay for.
+          e.status = 'skipped';
+          e.error = 'already uploaded in this batch';
+          continue;
+        }
         tasks.add(_UploadTask(e));
         continue;
       }
@@ -1532,7 +1626,7 @@ Future<List<AttentionBatch>> scanAttentionBatches(Directory root) async => [
 class PreviousBatch {
   PreviousBatch(
       this.workDir, this.listName, this.created, this.counts,
-      this.attentionSources);
+      this.attentionSources, this.resumableSources, this.uploadedShas);
 
   final Directory workDir;
   final String listName;
@@ -1547,7 +1641,26 @@ class PreviousBatch {
   /// what the Review button re-runs prepare over.
   final List<String> attentionSources;
 
+  /// Source paths of the still-`ready` (and `failed`) entries whose
+  /// file still exists — an interrupted upload the Continue button can
+  /// resume.
+  final List<String> resumableSources;
+
+  /// Content hashes of the batch's uploaded/deduped entries — what the
+  /// Delete dialog's "also forget" opt-in removes from the shared
+  /// ledger.
+  final List<String> uploadedShas;
+
   bool get needsAttention => attentionSources.isNotEmpty;
+
+  /// The batch was cut short mid-upload — something matched and paid-
+  /// for-nothing-yet is still waiting to go up.
+  bool get interrupted => resumableSources.isNotEmpty;
+
+  /// Nothing left to do: every entry is uploaded, deduped, or skipped
+  /// (and no attention/resumable file survives on disk). Finished
+  /// batches are records, not work — the setup page hides them.
+  bool get finished => !needsAttention && !interrupted;
 }
 
 /// Every batch work dir under [root] with a readable manifest, newest
@@ -1576,6 +1689,19 @@ Future<List<PreviousBatch>> scanPreviousBatches(Directory root) async {
               if (e.status == 'needs-attention' &&
                   File(e.source).existsSync())
                 e.source,
+          ],
+          [
+            for (final e in m.entries)
+              if ((e.status == 'ready' || e.status == 'failed') &&
+                  File(e.source).existsSync())
+                e.source,
+          ],
+          [
+            for (final e in m.entries)
+              if ((e.status == 'uploaded' ||
+                      e.status == 'already-uploaded') &&
+                  e.sha256 != null)
+                e.sha256!,
           ],
         ));
       } catch (_) {
@@ -1610,6 +1736,25 @@ void deleteBatch(PreviousBatch batch) {
   try {
     batch.workDir.deleteSync(recursive: true);
   } catch (_) {}
+}
+
+/// The explicit "forget these uploads" opt-in on the Delete dialog:
+/// drop [batch]'s content hashes from the shared upload ledger, so
+/// nothing in the app remembers those files were ever uploaded.
+/// Deliberately NOT tied to deleting media from the library — the
+/// bytes on the network are permanent either way, and a kept ledger
+/// row is what makes re-adding a file free. A forgotten file put
+/// through a new batch is uploaded and PAID FOR again. Returns how
+/// many ledger rows were removed.
+int forgetUploads(PreviousBatch batch, {Directory? configDir}) {
+  if (batch.uploadedShas.isEmpty) return 0;
+  try {
+    final ledger =
+        Ledger.load(CliConfig.load(home: configDir).ledgerFile);
+    return ledger.removeAll(batch.uploadedShas);
+  } catch (_) {
+    return 0;
+  }
 }
 
 /// Directory name for a new batch under `<support>/batch_uploads`: the

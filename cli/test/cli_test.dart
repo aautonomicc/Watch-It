@@ -123,6 +123,31 @@ void main() {
       expect(back.lookup('bb')!.name, 'M.flac');
       expect(back.lookup('cc'), isNull);
     });
+
+    test('removeAll forgets rows and survives a reload', () {
+      final file = File(p.join(tmp.path, 'ledger-forget.jsonl'));
+      final ledger = Ledger.load(file);
+      ledger.append(LedgerEntry(
+          sha256: 'aa', name: 'A.mp4', sizeBytes: 1, date: 'd'));
+      ledger.append(LedgerEntry(
+          sha256: 'bb', name: 'B.mp4', sizeBytes: 2, date: 'd'));
+      ledger.append(LedgerEntry(
+          sha256: 'cc', name: 'C.mp4', sizeBytes: 3, date: 'd'));
+      // Unknown hashes are counted zero times, known ones once.
+      expect(ledger.removeAll(['bb', 'zz', 'bb']), 1);
+      expect(ledger.lookup('bb'), isNull);
+      expect(ledger.length, 2);
+      final back = Ledger.load(file);
+      expect(back.lookup('aa')!.name, 'A.mp4');
+      expect(back.lookup('bb'), isNull);
+      expect(back.lookup('cc')!.name, 'C.mp4');
+      // Nothing matched — the file is left alone.
+      expect(back.removeAll(['zz']), 0);
+      // A forgotten file can be uploaded (appended) again.
+      back.append(LedgerEntry(
+          sha256: 'bb', name: 'B2.mp4', sizeBytes: 2, date: 'd2'));
+      expect(Ledger.load(file).lookup('bb')!.name, 'B2.mp4');
+    });
   });
 
   group('ffprobe parsing', () {
