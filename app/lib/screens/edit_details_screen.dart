@@ -35,6 +35,11 @@ enum EditDetailsScope {
   /// One season, written under the season key: season artwork and
   /// synopsis. Reached from the season page.
   season,
+
+  /// A whole music album, written under the shared album row: artist,
+  /// album, year, description, and the album's cover artwork. Reached
+  /// from the album page; [EditDetailsScreen.entry] is any track of it.
+  album,
 }
 
 /// Edit details: user-authored details and artwork written to the
@@ -112,14 +117,25 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
   bool get _episodeScope =>
       _scope == EditDetailsScope.entry && _parsed.isEpisode;
 
-  /// A music track: every field is editable — artist/description/
-  /// artwork write the album's shared row, the track title its own
-  /// per-track row (mistakes in any of them stay fixable). Album, year,
-  /// and the track number are IDENTITY (they come from the file name
-  /// and drive the wall's album fold), so changing them renames entries:
-  /// the number renames this track, album/year rename the whole album.
+  /// A music track: every field is editable — the description writes
+  /// the album's shared row; the track title, artist, and ARTWORK write
+  /// the track's OWN per-track row, so editing one track never touches
+  /// its siblings (album-level artwork/artist live on the album page's
+  /// editor). Album, year, and the track number are IDENTITY (they come
+  /// from the file name and drive the wall's album fold), so changing
+  /// them renames entries: the number renames this track, album/year
+  /// rename the whole album.
   bool get _trackScope =>
       _scope == EditDetailsScope.entry && _parsed.isTrack;
+
+  /// The album page's editor: artist/description/artwork write the
+  /// album's shared row (what every track and the wall card show);
+  /// album/year rename the whole album like the track editor does.
+  bool get _albumScope => _scope == EditDetailsScope.album;
+
+  /// Either music editor — they share the Artist/Album/Year fields and
+  /// the album/year rename semantics.
+  bool get _musicScope => _trackScope || _albumScope;
 
   @override
   void initState() {
@@ -128,6 +144,7 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     _parsed = parseMediaName(widget.entry.name);
     _lookupKey = switch (_scope) {
       EditDetailsScope.entry => _parsed.lookupKey,
+      EditDetailsScope.album => _parsed.lookupKey,
       EditDetailsScope.show => _parsed.showLookupKey,
       EditDetailsScope.season =>
         _parsed.seasonLookupKey ?? _parsed.lookupKey,
@@ -138,7 +155,9 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
             : _meta.title);
     _year = TextEditingController(text: _meta.year?.toString() ?? '');
     _artist = TextEditingController(
-        text: _meta.artist ?? _parsed.artist ?? '');
+        text: _trackScope
+            ? _meta.trackArtist ?? _meta.artist ?? ''
+            : _meta.artist ?? _parsed.artist ?? '');
     _trackTitle = TextEditingController(
         text: _trackScope
             ? episodeNameFromLabel(_meta.episodeLabel) ??
@@ -153,6 +172,7 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
       EditDetailsScope.show => _meta.showOverview ?? '',
       EditDetailsScope.season => _meta.seasonOverview ?? '',
       EditDetailsScope.entry => _meta.overview ?? '',
+      EditDetailsScope.album => _meta.overview ?? '',
     });
     _initialTitle = _title.text.trim();
     _initialYear = _year.text.trim();
@@ -168,8 +188,11 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     if (!mounted) return;
     setState(() {
       _row = row;
-      _userEdited =
-          (row?.userEdited ?? false) || (trackRow?.userEdited ?? false);
+      // Remove-my-edits clears what THIS scope writes: the track editor
+      // its per-track row, everything else its shared row.
+      _userEdited = _trackScope
+          ? (trackRow?.userEdited ?? false)
+          : (row?.userEdited ?? false);
       _frameSourceAvailable = ffmpegAvailable && _frameSource() != null;
     });
   }
@@ -270,7 +293,11 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
   Widget? _currentPosterImage() => switch (_scope) {
         EditDetailsScope.show => showPosterImage(_meta, fit: BoxFit.cover),
         EditDetailsScope.season => posterImage(_meta, fit: BoxFit.cover),
-        EditDetailsScope.entry => _episodeScope
+        // The album editor edits the shared album cover; the track
+        // editor only the track's OWN artwork (the album cover its rows
+        // merely sit under belongs to the album editor).
+        EditDetailsScope.album => posterImage(_meta, fit: BoxFit.cover),
+        EditDetailsScope.entry => _episodeScope || _trackScope
             ? episodePosterImage(_meta, fit: BoxFit.cover)
             : posterImage(_meta, fit: BoxFit.cover),
       };
@@ -298,6 +325,7 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     // saves below.
     var parsed = _parsed;
     var lookupKey = _lookupKey;
+    var entry = widget.entry;
     String? carriedPoster;
     if (_trackScope) {
       final track = int.tryParse(_track.text.trim());
@@ -309,7 +337,6 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
         _failSave('Track and disc must be numbers.');
         return;
       }
-      var entry = widget.entry;
       if (track != _parsed.track || disc != _parsed.disc) {
         final result = await renumberTrackEntry(entry,
             track: track,
@@ -328,8 +355,10 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
           videoInfo: entry.videoInfo,
         );
       }
-      // Album and year are identity too — they drive the album fold, so
-      // an edited album/year renames the WHOLE album. Only user intent
+    }
+    if (_musicScope) {
+      // Album and year are identity — they drive the album fold, so an
+      // edited album/year renames the WHOLE album. Only user intent
       // triggers it: a touched field, or a prefill that was itself a
       // user edit (the pre-rename-era album override, healed on Save) —
       // a database match's canonical title merely differing from the
@@ -358,14 +387,24 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
         carriedPoster = result.carriedPosterFile;
       }
     }
-    Value<String?> posterFile = const Value.absent();
+    // Where staged artwork lands: the track editor writes the track's
+    // OWN row — one track's art never replaces its siblings' or the
+    // album cover — every other scope the shared row it edits.
+    Value<String?> rowPoster = const Value.absent();
+    Value<String?> trackPoster = const Value.absent();
     if (_newPosterBytes != null) {
-      posterFile = Value(await saveUserPoster(lookupKey, _newPosterBytes!,
-          postersDirProvider: widget.postersDirProvider));
+      final saved = await saveUserPoster(
+          _trackScope ? trackLookupKey(parsed)! : lookupKey,
+          _newPosterBytes!,
+          postersDirProvider: widget.postersDirProvider);
+      _trackScope ? trackPoster = Value(saved) : rowPoster = Value(saved);
     } else if (_removePoster) {
-      posterFile = const Value(null);
-    } else if (carriedPoster != null) {
-      posterFile = Value(carriedPoster);
+      _trackScope
+          ? trackPoster = const Value(null)
+          : rowPoster = const Value(null);
+    }
+    if (!rowPoster.present && carriedPoster != null) {
+      rowPoster = Value(carriedPoster);
     }
     // Episode/season rows never take the typed text as the row title —
     // the row keeps its stored show title (falling back to the one on
@@ -380,13 +419,13 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
       episodeLabel: _episodeScope
           ? Value(text.isEmpty ? _episodeMarker : '$_episodeMarker · $text')
           : const Value.absent(),
-      posterFile: posterFile,
-      artist: _trackScope
+      posterFile: rowPoster,
+      artist: _albumScope
           ? Value(artistText.isEmpty ? null : artistText)
           : const Value.absent(),
       postersDirProvider: widget.postersDirProvider,
     );
-    if (_trackScope) await _saveTrackTitle(text, parsed);
+    if (_trackScope) await _saveTrackRow(text, parsed, trackPoster);
     if (mounted) Navigator.of(context).pop(true);
   }
 
@@ -397,16 +436,37 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
-  /// The track's own title lives in a per-track row (`<albumKey>:tD-NN`)
-  /// overlaid onto the shared album row — typing the file name's title
-  /// back (or clearing the field) removes the override. [parsed] is the
-  /// entry as saved — the renumbered name when this save renamed it.
-  Future<void> _saveTrackTitle(String albumTitle, ParsedName parsed) async {
+  /// Everything scoped to this one track — its own title, artist
+  /// credit, and artwork — lives in a per-track row (`<albumKey>:tD-NN`)
+  /// overlaid onto the shared album row, so editing it never touches
+  /// the album's other tracks. Typing the file name's title (or the
+  /// album's own credit) back removes that override; when nothing
+  /// per-track remains the row is deleted entirely. [parsed] is the
+  /// entry as saved — the renamed name when this save renamed it.
+  Future<void> _saveTrackRow(String albumTitle, ParsedName parsed,
+      Value<String?> poster) async {
     final trackKey = trackLookupKey(parsed);
     if (trackKey == null) return;
     final typed = _trackTitle.text.trim();
     final original = parsed.trackTitle ?? '';
-    if (typed.isEmpty || typed == original) {
+    final customTitle =
+        (typed.isEmpty || typed == original) ? null : typed;
+    // The track's no-override credit: its file name's artist, falling
+    // back to the album's shared credit.
+    final artistTyped = _artist.text.trim();
+    final baseline = parsed.artist ?? _row?.artist ?? _meta.artist ?? '';
+    final customArtist =
+        (artistTyped.isEmpty || artistTyped == baseline)
+            ? null
+            : artistTyped;
+    // Re-read the row at the (possibly renamed) key — a rename above
+    // migrated the old row's artwork/artist there already, and this
+    // save must not throw that away.
+    final existing = await metadataRowFor(trackKey);
+    final keepsArt = poster.present
+        ? poster.value != null
+        : existing?.posterFile != null;
+    if (customTitle == null && customArtist == null && !keepsArt) {
       await clearUserEdits(trackKey,
           postersDirProvider: widget.postersDirProvider);
       return;
@@ -414,7 +474,11 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     await saveUserDetails(
       lookupKey: trackKey,
       title: albumTitle,
-      episodeLabel: Value('${parsed.trackMarker} · $typed'),
+      episodeLabel: Value(customTitle == null
+          ? null
+          : '${parsed.trackMarker} · $customTitle'),
+      posterFile: poster,
+      artist: Value(customArtist),
       postersDirProvider: widget.postersDirProvider,
     );
   }
@@ -446,13 +510,12 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    await clearUserEdits(_lookupKey,
+    // Each scope removes only what it writes: the track editor its
+    // per-track row (siblings and the album row untouched), everything
+    // else its shared row.
+    await clearUserEdits(
+        _trackScope ? trackLookupKey(_parsed)! : _lookupKey,
         postersDirProvider: widget.postersDirProvider);
-    final trackKey = _trackScope ? trackLookupKey(_parsed) : null;
-    if (trackKey != null) {
-      await clearUserEdits(trackKey,
-          postersDirProvider: widget.postersDirProvider);
-    }
     if (mounted) Navigator.of(context).pop(true);
   }
 
@@ -480,6 +543,7 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
         EditDetailsScope.show => 'Edit show details',
         EditDetailsScope.season =>
           'Edit season ${_parsed.season} details',
+        EditDetailsScope.album => 'Edit album details',
         EditDetailsScope.entry => _episodeScope
             ? 'Edit episode details'
             : _trackScope
@@ -491,11 +555,15 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     final target = switch (_scope) {
       EditDetailsScope.show => 'the whole show, everywhere it appears',
       EditDetailsScope.season => 'this season only',
+      EditDetailsScope.album =>
+        'the whole album — its artist, name, year, description, and '
+            'cover artwork',
       EditDetailsScope.entry => _episodeScope
           ? 'this episode only'
           : _trackScope
-              ? 'the whole album (artist, album, year, description, '
-                  'artwork) and this track\'s own title and number'
+              ? 'this track only (its title, number, artist, and '
+                  'artwork) — the description, and the album cover on '
+                  'the album page, belong to the whole album'
               : 'this title',
     };
     return 'Details entered here are yours and apply to $target: they '
@@ -588,11 +656,12 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
             ],
           ),
           const SizedBox(height: 20),
-          if (_trackScope) ...[
+          if (_musicScope) ...[
             TextField(
               controller: _artist,
               style: TextStyle(color: t.bone, fontSize: 14),
-              decoration: _fieldDecoration(t, 'Artist'),
+              decoration: _fieldDecoration(
+                  t, _trackScope ? 'Artist — this track' : 'Artist'),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -608,41 +677,50 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
               decoration: _fieldDecoration(t, 'Year (optional)'),
             ),
             const SizedBox(height: 12),
-            TextField(
-              controller: _trackTitle,
-              style: TextStyle(color: t.bone, fontSize: 14),
-              decoration: _fieldDecoration(
-                  t, 'Track title — ${_parsed.trackMarker}'),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _track,
-                    keyboardType: TextInputType.number,
-                    style: TextStyle(color: t.bone, fontSize: 14),
-                    decoration: _fieldDecoration(t, 'Track number'),
+            if (_trackScope) ...[
+              TextField(
+                controller: _trackTitle,
+                style: TextStyle(color: t.bone, fontSize: 14),
+                decoration: _fieldDecoration(
+                    t, 'Track title — ${_parsed.trackMarker}'),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _track,
+                      keyboardType: TextInputType.number,
+                      style: TextStyle(color: t.bone, fontSize: 14),
+                      decoration: _fieldDecoration(t, 'Track number'),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: _disc,
-                    keyboardType: TextInputType.number,
-                    style: TextStyle(color: t.bone, fontSize: 14),
-                    decoration: _fieldDecoration(t, 'Disc (optional)'),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: _disc,
+                      keyboardType: TextInputType.number,
+                      style: TextStyle(color: t.bone, fontSize: 14),
+                      decoration: _fieldDecoration(t, 'Disc (optional)'),
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
+                ],
+              ),
+              const SizedBox(height: 6),
+            ],
             Text(
-              'Album, year, and the track number are part of the file '
-              'name and decide how tracks group into albums. Changing '
-              'the album or year renames every track of this album (so '
-              'tracks given the same album and year combine into one); '
-              'changing the number renames this entry.',
+              _trackScope
+                  ? 'Album, year, and the track number are part of the '
+                      'file name and decide how tracks group into '
+                      'albums. Changing the album or year renames every '
+                      'track of this album (so tracks given the same '
+                      'album and year combine into one); changing the '
+                      'number renames this entry.'
+                  : 'Album and year are part of each track\'s file name '
+                      'and decide how tracks group into albums. '
+                      'Changing them renames every track of this album '
+                      '(so albums given the same name and year combine '
+                      'into one).',
               style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
             ),
             const SizedBox(height: 12),
@@ -781,24 +859,56 @@ Future<RenumberResult> renumberTrackEntry(
   ]);
   // The per-track override row's key embeds the number — move it.
   final oldKey = trackLookupKey(parsed)!;
-  final newKey = trackLookupKey(newParsed)!;
-  if (oldKey != newKey) {
-    final row = await metadataRowFor(oldKey);
-    if (row != null) {
-      final customName = episodeNameFromLabel(row.episodeLabel);
-      await clearUserEdits(oldKey,
-          postersDirProvider: postersDirProvider);
-      if (customName != null) {
-        await saveUserDetails(
-          lookupKey: newKey,
-          title: row.title ?? parsed.title,
-          episodeLabel: Value('$marker · $customName'),
-          postersDirProvider: postersDirProvider,
-        );
-      }
-    }
+  if (oldKey != trackLookupKey(newParsed)) {
+    await _migrateTrackRow(
+        oldKey: oldKey,
+        newParsed: newParsed,
+        rowTitle: parsed.title,
+        postersDirProvider: postersDirProvider);
   }
   return (newName: newName, error: null);
+}
+
+/// Move a per-track override row from [oldKey] to the renamed track's
+/// key, relabelling its `NN · Title` marker and carrying its artist
+/// credit and artwork — the row holds this track's own state, which
+/// must survive a rename.
+Future<void> _migrateTrackRow({
+  required String oldKey,
+  required ParsedName newParsed,
+  required String rowTitle,
+  Future<Directory> Function()? postersDirProvider,
+}) async {
+  final row = await metadataRowFor(oldKey);
+  if (row == null) return;
+  final customName = episodeNameFromLabel(row.episodeLabel);
+  final artist = row.artist;
+  // Read the artwork bytes BEFORE clearUserEdits deletes the old key's
+  // `user_` files.
+  Uint8List? posterBytes;
+  if (row.posterFile != null) {
+    final dir = await (postersDirProvider ?? defaultPostersDir)();
+    final f = File('${dir.path}/${row.posterFile}');
+    if (f.existsSync()) posterBytes = f.readAsBytesSync();
+  }
+  await clearUserEdits(oldKey, postersDirProvider: postersDirProvider);
+  if (customName == null && artist == null && posterBytes == null) return;
+  final newKey = trackLookupKey(newParsed)!;
+  Value<String?> poster = const Value.absent();
+  if (posterBytes != null) {
+    poster = Value(await saveUserPoster(newKey, posterBytes,
+        postersDirProvider: postersDirProvider));
+  }
+  await saveUserDetails(
+    lookupKey: newKey,
+    title: rowTitle,
+    episodeLabel: Value(customName == null
+        ? null
+        : '${newParsed.trackMarker} · $customName'),
+    posterFile: poster,
+    artist: Value(artist),
+    postersDirProvider: postersDirProvider,
+  );
 }
 
 /// An album-identity edit's outcome: the edited entry's renamed name,
@@ -930,46 +1040,103 @@ Future<AlbumRenameResult> renameTrackAlbum(
               : e,
       ]),
   ]);
-  // Per-track override rows key on the album — move them along.
+  // Per-track override rows key on the album — move them along, with
+  // their artist credits and artwork.
   for (final r in renames.entries) {
     final op = parseMediaName(r.key);
     final np = parseMediaName(r.value);
     final oldKey = trackLookupKey(op);
-    final newKey = trackLookupKey(np);
-    if (oldKey == null || newKey == null || oldKey == newKey) continue;
-    final row = await metadataRowFor(oldKey);
-    if (row == null) continue;
-    final customName = episodeNameFromLabel(row.episodeLabel);
-    await clearUserEdits(oldKey, postersDirProvider: postersDirProvider);
-    if (customName != null) {
-      await saveUserDetails(
-        lookupKey: newKey,
-        title: np.title,
-        episodeLabel: Value('${np.trackMarker} · $customName'),
-        postersDirProvider: postersDirProvider,
-      );
-    }
+    if (oldKey == null || oldKey == trackLookupKey(np)) continue;
+    await _migrateTrackRow(
+        oldKey: oldKey,
+        newParsed: np,
+        rowTitle: np.title,
+        postersDirProvider: postersDirProvider);
   }
-  // Album artwork follows the rename when the target album has none —
-  // a fresh copy under the new key (never a shared file, so clearing
-  // one key's edits can't orphan the other's artwork).
+  // Album artwork follows the rename when the merged album shows none —
+  // a fresh copy under the row album surfaces actually read (never a
+  // shared file, so clearing one key's edits can't orphan the other's
+  // artwork). When the merged album KEEPS its own cover, the old
+  // album's art follows each moved track as per-track artwork instead
+  // — merging albums never makes artwork that displayed before the
+  // merge disappear.
   String? carried;
   final newParsed = parseMediaName(selfNewName);
-  if (newParsed.lookupKey != parsed.lookupKey) {
+  // The row album surfaces read: the album page and cards call
+  // metadataFor on the fold's FIRST track, and cache keys embed the
+  // artist — so under a mixed-artist fold that first track's key is
+  // the cover slot, not necessarily the edited track's.
+  final displayKey = await _albumDisplayKey(entry.address, selfNewName);
+  if (displayKey != null && newParsed.lookupKey != parsed.lookupKey) {
     final oldRow = await metadataRowFor(parsed.lookupKey);
-    final newRow = await metadataRowFor(newParsed.lookupKey);
+    final displayRow = await metadataRowFor(displayKey);
     final oldPoster = oldRow?.posterFile;
-    if (oldPoster != null && newRow?.posterFile == null) {
+    if (oldPoster != null && oldPoster != displayRow?.posterFile) {
       final dir = await (postersDirProvider ?? defaultPostersDir)();
       final f = File('${dir.path}/$oldPoster');
       if (f.existsSync()) {
-        carried = await saveUserPoster(
-            newParsed.lookupKey, f.readAsBytesSync(),
-            postersDirProvider: postersDirProvider);
+        final bytes = f.readAsBytesSync();
+        if (displayRow?.posterFile == null) {
+          final name = await saveUserPoster(displayKey, bytes,
+              postersDirProvider: postersDirProvider);
+          await saveUserDetails(
+            lookupKey: displayKey,
+            title: displayRow?.title ?? newParsed.title,
+            year: displayRow?.year ?? newParsed.year,
+            overview: displayRow?.overview,
+            posterFile: Value(name),
+            postersDirProvider: postersDirProvider,
+          );
+          if (displayKey == newParsed.lookupKey) carried = name;
+        } else {
+          for (final r in renames.entries) {
+            final np = parseMediaName(r.value);
+            final trackKey = trackLookupKey(np);
+            if (trackKey == null) continue;
+            if ((await metadataRowFor(trackKey))?.posterFile != null) {
+              continue; // the track's own art wins
+            }
+            final name = await saveUserPoster(trackKey, bytes,
+                postersDirProvider: postersDirProvider);
+            await saveUserDetails(
+              lookupKey: trackKey,
+              title: np.title,
+              posterFile: Value(name),
+              postersDirProvider: postersDirProvider,
+            );
+          }
+        }
       }
     }
   }
   return (newName: selfNewName, error: null, carriedPosterFile: carried);
+}
+
+/// The lookup key of the fold-first track of the album now holding the
+/// renamed entry ([address] + [name]) — the cache row its cover and
+/// header read; null when the entry is in no list (nothing to show).
+Future<String?> _albumDisplayKey(String address, String name) async {
+  for (final list in await LibraryStore.load()) {
+    if (!list.entries.any((e) => e.address == address && e.name == name)) {
+      continue;
+    }
+    final keys = AlbumKeys(list.entries);
+    final foldKey = keys.keyFor(parseMediaName(name));
+    final tracks = [
+      for (final e in list.entries)
+        if (parseMediaName(e.name) case final p
+            when p.isTrack && keys.keyFor(p) == foldKey)
+          (entry: e, parsed: p),
+    ];
+    if (tracks.isEmpty) return null;
+    tracks.sort((a, b) {
+      final d = (a.parsed.disc ?? 1).compareTo(b.parsed.disc ?? 1);
+      if (d != 0) return d;
+      return (a.parsed.track ?? 0).compareTo(b.parsed.track ?? 0);
+    });
+    return tracks.first.parsed.lookupKey;
+  }
+  return null;
 }
 
 /// Grid of frames sampled evenly across the video — tap one to use it

@@ -79,7 +79,9 @@ class MetadataService extends ChangeNotifier {
       // the track's own number and name only exist in its file name, so
       // re-attach them to whatever the shared row resolved to. A
       // user-authored track row (Edit details on the track) overrides
-      // the file-name label.
+      // the file-name label and carries the track's OWN artwork and
+      // artist credit — per-entry slots, so album covers and cards
+      // (which read the first track) never show one track's edits.
       final track = _overlayFor(trackLookupKey(parsed)!);
       return MediaMetadata(
         title: meta.title,
@@ -89,9 +91,11 @@ class MetadataService extends ChangeNotifier {
         episodeLabel: track?.episodeLabel ?? trackLabel(parsed),
         posterAsset: meta.posterAsset,
         posterFilePath: meta.posterFilePath,
+        episodePosterFilePath: track?.posterFilePath,
         rating: meta.rating,
         mediaType: meta.mediaType ?? 'music',
         artist: meta.artist ?? parsed.artist,
+        trackArtist: track?.artist ?? parsed.artist,
       );
     }
     if (!parsed.isEpisode) return meta;
@@ -152,6 +156,7 @@ class MetadataService extends ChangeNotifier {
         overview: row.overview,
         episodeLabel: row.episodeLabel,
         posterFilePath: posterPath,
+        artist: row.artist,
       );
       notifyListeners();
     } catch (e) {
@@ -496,22 +501,24 @@ class _CachedMiss implements Exception {
   const _CachedMiss();
 }
 
-/// A user-authored show/season cache row, reduced to the fields that
-/// overlay episode metadata. Fields left null fall back to the TMDB
-/// match stored in the episode rows.
+/// A user-authored show/season/track cache row, reduced to the fields
+/// that overlay entry metadata. Fields left null fall back to the
+/// shared row's values.
 class _UserOverlay {
   const _UserOverlay(
       {this.title,
       this.year,
       this.overview,
       this.episodeLabel,
-      this.posterFilePath});
+      this.posterFilePath,
+      this.artist});
 
   final String? title;
   final int? year;
   final String? overview;
   final String? episodeLabel;
   final String? posterFilePath;
+  final String? artist;
 }
 
 /// Poster widget for [meta]: cached TMDB artwork beats the bundled asset;
@@ -524,16 +531,18 @@ Widget? posterImage(MediaMetadata meta, {BoxFit? fit}) {
   return null;
 }
 
-/// The user's own artwork for an episode entry (Edit details on that
-/// episode), never season or show art; `null` for everything else.
+/// The user's own artwork for an episode or music-track entry (Edit
+/// details on that entry), never season/show/album art; `null` for
+/// everything else.
 Widget? episodePosterImage(MediaMetadata meta, {BoxFit? fit}) {
   if (meta.episodePosterFilePath == null) return null;
   return Image.file(File(meta.episodePosterFilePath!), fit: fit);
 }
 
 /// Poster for an entry's own surfaces (its detail page, per-entry
-/// cards): an episode's user artwork beats the season-art slot. Same as
-/// [posterImage] for non-episodes.
+/// cards, the playing track's cover): an episode's or track's user
+/// artwork beats the season/album-art slot. Same as [posterImage] for
+/// everything else.
 Widget? entryPosterImage(MediaMetadata meta, {BoxFit? fit}) =>
     episodePosterImage(meta, fit: fit) ?? posterImage(meta, fit: fit);
 

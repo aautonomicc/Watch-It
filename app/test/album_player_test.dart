@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:drift/drift.dart' show driftRuntimeOptions;
+import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,8 +16,10 @@ import 'package:watchit/services/download_manager.dart';
 import 'package:watchit/services/embedded_client.dart';
 import 'package:watchit/services/favourites.dart';
 import 'package:watchit/services/library_store.dart';
+import 'package:watchit/services/metadata.dart';
 import 'package:watchit/services/metadata_service.dart';
 import 'package:watchit/services/season_grouping.dart';
+import 'package:watchit/services/user_metadata.dart';
 import 'package:watchit/theme/tokens.dart';
 
 /// The album page's inline player: tap-to-play, transport controls,
@@ -139,6 +141,62 @@ void main() {
     expect(find.byType(DetailScreen), findsNothing);
     // Play album is folded away while something plays.
     expect(find.text('Play album'), findsNothing);
+  });
+
+  testWidgets('the pencil opens the album editor; a playing track '
+      'shows its own artwork and artist', (tester) async {
+    final postersDir = Directory.systemTemp.createTempSync('wi-albart');
+    addTearDown(() => postersDir.deleteSync(recursive: true));
+    MetadataService.instance = MetadataService(
+        apiKeyProvider: () async => '',
+        postersDirProvider: () async => postersDir);
+    // A real (1x1 transparent) PNG — the cover renders it.
+    File('${postersDir.path}/own.png').writeAsBytesSync([
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00,
+      0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
+      0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89,
+      0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x62,
+      0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4,
+      0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60,
+      0x82,
+    ]);
+    // Track 2 carries its own artwork and artist credit in its
+    // per-track row (Edit track details).
+    final parsed2 = parseMediaName(_track(2, 'Love In Vain').name);
+    await saveUserDetails(
+      lookupKey: trackLookupKey(parsed2)!,
+      title: 'Let It Bleed',
+      artist: const Value('Merry Clayton'),
+      posterFile: const Value('own.png'),
+      postersDirProvider: () async => postersDir,
+    );
+    await pumpAlbum(tester);
+
+    expect(find.byTooltip('Edit album details'), findsOneWidget);
+    // The track row shows its own credit beside the title.
+    expect(find.textContaining('Merry Clayton'), findsOneWidget);
+    // No track-own art on show while nothing plays.
+    Finder ownArt() => find.byWidgetPredicate((w) =>
+        w is Image &&
+        w.image is FileImage &&
+        (w.image as FileImage).file.path.endsWith('own.png'));
+    expect(ownArt(), findsNothing);
+
+    // The row title carries the credit suffix, so match by substring.
+    // (No pumpAndSettle while playing — the glow pulse never settles.)
+    await tester.tap(find.textContaining('Love In Vain'));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(seconds: 1));
+    // The cover swapped to the playing track's own artwork, and the
+    // now-playing block names its credit (row + now-playing).
+    expect(ownArt(), findsOneWidget);
+    expect(find.textContaining('Merry Clayton'), findsNWidgets(2));
+
+    // The pencil opens the album-scope editor.
+    await tester.tap(find.byTooltip('Edit album details'));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Edit album details'), findsOneWidget);
   });
 
   testWidgets('play/pause toggles; next and completion advance in order',

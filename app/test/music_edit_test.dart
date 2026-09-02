@@ -126,14 +126,16 @@ void main() {
 
     expect(find.text('Edit track details'), findsOneWidget);
     // All fields present, prefilled from the file name.
-    expect(find.widgetWithText(TextField, 'Artist'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Artist — this track'),
+        findsOneWidget);
     expect(find.widgetWithText(TextField, 'Album'), findsOneWidget);
     expect(find.text('Misspelt Artist'), findsOneWidget);
     expect(find.text('Misspelt Album'), findsOneWidget);
     expect(find.text('First Song'), findsOneWidget);
 
     await tester.enterText(
-        find.widgetWithText(TextField, 'Artist'), 'Fixed Artist');
+        find.widgetWithText(TextField, 'Artist — this track'),
+        'Fixed Artist');
     await tester.enterText(
         find.widgetWithText(TextField, 'Album'), 'Fixed Album');
     await tester.enterText(
@@ -153,9 +155,13 @@ void main() {
     final albumRow = await metadataRowFor(parsed.lookupKey);
     expect(albumRow!.userEdited, isTrue);
     expect(albumRow.title, 'Fixed Album');
-    expect(albumRow.artist, 'Fixed Artist');
+    // The typed artist is a PER-TRACK credit — the album's shared
+    // credit is edited from the album page, so this track's fix never
+    // leaks onto its siblings or the wall card.
+    expect(albumRow.artist, isNull);
     final trackRow = await metadataRowFor(trackLookupKey(parsed)!);
     expect(trackRow!.episodeLabel, '01 · Fixed Song');
+    expect(trackRow.artist, 'Fixed Artist');
   });
 
   testWidgets(
@@ -525,5 +531,155 @@ void main() {
       'Misspelt Artist - My Album (2006) - 01 First Song.mp3',
       'Misspelt Artist - My Album (2006) - 02 Second Song.mp3',
     ]);
+  });
+
+  // ── per-track artwork & artist (isolated from the album row) ──
+
+  test('per-track artwork and artist overlay only that track', () async {
+    final t1 = track(1, 'One');
+    final t2 = track(2, 'Two');
+    await seedAlbum([t1, t2]);
+    final parsed = parseMediaName(t1.name);
+    File('${postersDir.path}/album.jpg').writeAsBytesSync([1]);
+    await saveUserDetails(
+      lookupKey: parsed.lookupKey,
+      title: 'Misspelt Album',
+      artist: const Value('Album Artist'),
+      posterFile: const Value('album.jpg'),
+      postersDirProvider: () async => postersDir,
+    );
+    File('${postersDir.path}/track1.jpg').writeAsBytesSync([2]);
+    await saveUserDetails(
+      lookupKey: trackLookupKey(parsed)!,
+      title: 'Misspelt Album',
+      artist: const Value('Guest Singer'),
+      posterFile: const Value('track1.jpg'),
+      postersDirProvider: () async => postersDir,
+    );
+    final service = MetadataService.instance;
+    service.metadataFor(t1);
+    service.metadataFor(t2);
+    await service.whenIdle();
+    final m1 = service.metadataFor(t1);
+    final m2 = service.metadataFor(t2);
+    // Track 1's own slots carry its art and credit…
+    expect(m1.episodePosterFilePath, endsWith('track1.jpg'));
+    expect(m1.trackArtist, 'Guest Singer');
+    // …while the album-level slots (what covers and cards read) keep
+    // the shared values.
+    expect(m1.posterFilePath, endsWith('album.jpg'));
+    expect(m1.artist, 'Album Artist');
+    // The sibling is untouched: no own art, file-name credit.
+    expect(m2.episodePosterFilePath, isNull);
+    expect(m2.trackArtist, 'Misspelt Artist');
+    expect(m2.posterFilePath, endsWith('album.jpg'));
+  });
+
+  test('merging into an album that keeps its cover moves the old '
+      'cover onto the merged track', () async {
+    final single = MediaEntry(
+        name: 'Solo - Lone Hit (2006) - 02 Hit.mp3', address: 'aa' * 32);
+    final existing = MediaEntry(
+        name: 'Band - My Album (2006) - 01 Opener.mp3',
+        address: 'bb' * 32);
+    await seedAlbum([single, existing]);
+    final singleParsed = parseMediaName(single.name);
+    final targetParsed = parseMediaName(existing.name);
+    File('${postersDir.path}/single.jpg').writeAsBytesSync([7]);
+    File('${postersDir.path}/target.jpg').writeAsBytesSync([8]);
+    await saveUserDetails(
+      lookupKey: singleParsed.lookupKey,
+      title: 'Lone Hit',
+      posterFile: const Value('single.jpg'),
+      postersDirProvider: () async => postersDir,
+    );
+    await saveUserDetails(
+      lookupKey: targetParsed.lookupKey,
+      title: 'My Album',
+      posterFile: const Value('target.jpg'),
+      postersDirProvider: () async => postersDir,
+    );
+    final result = await renameTrackAlbum(single,
+        album: 'My Album',
+        year: 2006,
+        postersDirProvider: () async => postersDir);
+    expect(result.error, isNull);
+    // The target album keeps its own cover — nothing carried to the
+    // album level…
+    expect(result.carriedPosterFile, isNull);
+    expect((await metadataRowFor(targetParsed.lookupKey))!.posterFile,
+        'target.jpg');
+    // …but the single's art followed the track as its own artwork, so
+    // what displayed before the merge still displays.
+    final np = parseMediaName(result.newName!);
+    final trackRow = await metadataRowFor(trackLookupKey(np)!);
+    expect(trackRow!.posterFile, isNotNull);
+    expect(
+        File('${postersDir.path}/${trackRow.posterFile}')
+            .readAsBytesSync(),
+        [7]);
+  });
+
+  test('renumbering a track carries its per-track artist and artwork',
+      () async {
+    final entry = track(1, 'First Song');
+    await seedAlbum([entry, track(2, 'Second Song')]);
+    final parsed = parseMediaName(entry.name);
+    File('${postersDir.path}/own.jpg').writeAsBytesSync([9]);
+    await saveUserDetails(
+      lookupKey: trackLookupKey(parsed)!,
+      title: 'Misspelt Album',
+      artist: const Value('Guest'),
+      posterFile: const Value('own.jpg'),
+      episodeLabel: const Value('01 · Custom Name'),
+      postersDirProvider: () async => postersDir,
+    );
+    final result = await renumberTrackEntry(entry,
+        track: 7, postersDirProvider: () async => postersDir);
+    expect(result.error, isNull);
+    expect(await metadataRowFor(trackLookupKey(parsed)!), isNull);
+    final np = parseMediaName(result.newName!);
+    final row = await metadataRowFor(trackLookupKey(np)!);
+    expect(row!.artist, 'Guest');
+    expect(row.episodeLabel, '07 · Custom Name');
+    expect(row.posterFile, isNotNull);
+    expect(
+        File('${postersDir.path}/${row.posterFile}').readAsBytesSync(),
+        [9]);
+  });
+
+  testWidgets('album editor writes the shared row without touching '
+      'track fields or names', (tester) async {
+    tester.view.physicalSize = const Size(900, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final entry = track(1, 'First Song');
+    await seedAlbum([entry, track(2, 'Second Song')]);
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: EditDetailsScreen(
+        entry: entry,
+        scope: EditDetailsScope.album,
+        ffmpeg: _NoFfmpeg(),
+        postersDirProvider: () async => postersDir,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit album details'), findsOneWidget);
+    // Album-level fields only — no per-track fields here.
+    expect(find.widgetWithText(TextField, 'Artist'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Track number'), findsNothing);
+    expect(find.textContaining('Track title'), findsNothing);
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Artist'), 'Corrected Band');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    final parsed = parseMediaName(entry.name);
+    final row = await metadataRowFor(parsed.lookupKey);
+    expect(row!.userEdited, isTrue);
+    expect(row.artist, 'Corrected Band');
+    // Untouched album/year fields never rename.
+    expect((await LibraryStore.load()).single.entries.first.name,
+        entry.name);
   });
 }
