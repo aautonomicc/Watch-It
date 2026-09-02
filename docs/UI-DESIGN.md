@@ -222,7 +222,9 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   Describe-this-item, whose Check TMDB button fills title/description/
   artwork from a previewed TMDB match → rights attestation → encode +
   upload → staged, with an optional add-to-library leg; "Add an item
-  already in the library" keeps the picker for existing uploads) and
+  already in the library" keeps the picker for existing uploads —
+  list first, then the list's items as the editor's nested tree:
+  artist → album → track, show → season → episode, versions folded) and
   "Publish update" with a live cost preview; Restore channel by phrase
 - Settings is untouched — publishing is an activity, not a setting
 
@@ -323,6 +325,11 @@ cards with the next release) on the wall and list grids, the album page
 with inline player (transport row, seek bar, glow-pulsing cover), the
 artist page, and the one-flow batch Upload screen — match-review
 carousel, QUALITY on the review page, needs-attention resume, and a
-track-scope Edit details editor.
+track-scope Edit details editor. Alpha.84 splits the music editors:
+the album page's pencil edits the album (artist, name, year,
+description, cover), the track editor edits that track only (title,
+number, artist, artwork — shown on its rows, its detail page, and as
+the cover while it plays), and upload/import list defaults follow the
+media type (Music / TV Shows / Movies).
 Still to come from this document: filter/sort + fast-scroller on
 the grid, the full desktop keyboard map, mobile gestures, and the TV layout.

@@ -15,6 +15,7 @@ import '../services/app_settings.dart';
 import '../services/bundle.dart';
 import '../services/connectivity.dart';
 import '../services/datamap_import.dart';
+import '../services/default_list.dart';
 import '../services/channel_service.dart';
 import '../services/home_sections.dart';
 import '../services/import_review.dart';
@@ -201,7 +202,14 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     ];
     if (datamaps.isNotEmpty) {
       if (!mounted) return;
-      final titles = await _pickTargetLists();
+      // Same type-driven default the batch uploader uses: the picker
+      // pre-checks Music / TV Shows / Movies from the picked names
+      // (media type is in the file name; the .datamap suffix strips).
+      final titles = await _pickTargetLists(
+          suggested: defaultListForNames([
+        for (final d in datamaps)
+          mediaNameFromDatamapFileName(d.name) ?? d.name,
+      ], fallback: 'Imported'));
       if (titles == null || titles.isEmpty) return;
       await _importDatamaps(datamaps,
           listTitles: titles, extraNotes: skippedNotes);
@@ -215,14 +223,17 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
   /// chosen titles, or null on cancel. New titles are only pseudo-rows
   /// here; nothing is saved until the import confirms. An empty library
   /// skips the checklist and goes straight to the new-list prompt.
-  Future<List<String>?> _pickTargetLists() async {
+  /// [suggested] pre-checks that list (added as a pseudo-row when it
+  /// doesn't exist yet) — the type-driven Music/TV Shows/Movies
+  /// default; unticking it costs one tap.
+  Future<List<String>?> _pickTargetLists({String? suggested}) async {
     final existing = _lists ?? [];
     if (existing.isEmpty) {
       final title = await promptForText(
         context,
         title: 'New media list',
         hint: 'List title',
-        initial: 'Imported',
+        initial: suggested ?? 'Imported',
       );
       final trimmed = title?.trim();
       if (trimmed == null || trimmed.isEmpty) return null;
@@ -233,6 +244,13 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       for (final l in existing) (title: l.title, count: l.entries.length),
     ];
     final checked = <String>{}; // lowercased titles
+    if (suggested != null) {
+      if (!rows.any(
+          (r) => r.title.toLowerCase() == suggested.toLowerCase())) {
+        rows.add((title: suggested, count: 0));
+      }
+      checked.add(suggested.toLowerCase());
+    }
     return showDialog<List<String>>(
       context: context,
       builder: (context) => StatefulBuilder(

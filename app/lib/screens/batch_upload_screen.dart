@@ -10,6 +10,7 @@ import 'package:watchit_upload/watchit_upload.dart' hide MediaProbe;
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
 import '../services/batch_upload.dart';
+import '../services/default_list.dart';
 import '../services/ffmpeg.dart' show FfmpegService;
 import '../services/library_store.dart';
 import '../services/publish_plan.dart' as plan;
@@ -74,9 +75,9 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   final List<String> _paths = [];
 
   /// The batch's target list — names the .watch-list bundle and is the
-  /// done page's add-to-library default. Defaults to "Music" when the
-  /// picked files are mostly audio, else "My uploads"; a manual pick
-  /// from the dropdown sticks.
+  /// done page's add-to-library default. Defaults by media type:
+  /// "Music" / "TV Shows" / "Movies" ([defaultBatchList]); a manual
+  /// pick from the dropdown sticks.
   String _list = 'My uploads';
   bool _listChosen = false;
   List<String> _libraryLists = [];
@@ -115,8 +116,9 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     });
   }
 
-  /// Re-derive the default list from what's picked so far: a batch
-  /// that's mostly audio files lands in "Music".
+  /// Re-derive the default list from what's picked so far: mostly
+  /// audio lands in "Music", mostly episodes in "TV Shows", other
+  /// video in "Movies".
   void _updateDefaultList() {
     if (_listChosen) return;
     _list = defaultBatchList(_paths, fallback: _list);
@@ -1424,19 +1426,17 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   }
 }
 
-/// The default target list for a batch of [paths] (files or folders):
-/// "Music" when the media files are mostly audio, else "My uploads".
+/// The default target list for a batch of [paths] (files or folders),
+/// by media type: "Music" when the files are mostly audio, "TV Shows"
+/// when mostly episodes, else "Movies" ([defaultListForNames]).
 /// [fallback] survives empty or unreadable picks.
 String defaultBatchList(List<String> paths,
     {String fallback = 'My uploads'}) {
   try {
     final files = collectMediaFiles(paths);
     if (files.isEmpty) return fallback;
-    final audio = files
-        .where(
-            (f) => kAudioExtensions.contains(p.extension(f).toLowerCase()))
-        .length;
-    return audio * 2 > files.length ? 'Music' : 'My uploads';
+    return defaultListForNames([for (final f in files) p.basename(f)],
+        fallback: fallback);
   } catch (_) {
     return fallback;
   }
