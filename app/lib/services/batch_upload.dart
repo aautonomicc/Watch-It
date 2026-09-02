@@ -11,8 +11,11 @@ import 'bundle.dart' show parseBundle, seedBundle;
 import 'embedded_client.dart';
 import 'ffmpeg.dart' show FfmpegService;
 import 'library_store.dart' show addEntriesToLists;
+import 'match_review.dart';
 import 'publish_api.dart';
 import 'publish_plan.dart' as plan;
+
+export 'match_review.dart' show AlbumConfirm, BatchConfirm, MatchReviewSession;
 
 /// The one running in-app batch-upload session (desktop only) — the
 /// upload CLI's prepare/upload pipeline (cli/, docs/UPLOAD-CLI.md)
@@ -32,7 +35,7 @@ import 'publish_plan.dart' as plan;
 ///
 /// Lives outside the screen (survive-navigation pattern) so navigating
 /// away mid-prepare or mid-upload loses nothing.
-class BatchUploadSession extends ChangeNotifier {
+class BatchUploadSession extends MatchReviewSession {
   BatchUploadSession._();
 
   static BatchUploadSession instance = BatchUploadSession._();
@@ -84,42 +87,9 @@ class BatchUploadSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Everything that needs the user's eyes, in scan order — a
-  /// [BatchConfirm] per lone file, an [AlbumConfirm] per album group.
-  /// Filled during the scan, reviewed as a carousel afterwards; decided
-  /// cards stay navigable so an earlier answer can be replaced (each
-  /// decision upserts the manifest entry).
-  final List<Object> confirmables = [];
-  int confirmIndex = 0;
-  bool _confirmPhase = false;
-
-  /// The carousel is showing (scan finished, cards to review — or a
-  /// card reopened from the summary).
-  bool get reviewingMatches => _confirmPhase && confirmables.isNotEmpty;
-
-  Object? get _currentConfirmable =>
-      _confirmPhase && confirmIndex < confirmables.length
-          ? confirmables[confirmIndex]
-          : null;
-
-  BatchConfirm? get pendingConfirm {
-    final c = _currentConfirmable;
-    return c is BatchConfirm ? c : null;
-  }
-
-  AlbumConfirm? get pendingAlbumConfirm {
-    final c = _currentConfirmable;
-    return c is AlbumConfirm ? c : null;
-  }
-
-  int get undecidedConfirmCount =>
-      confirmables.where(_undecided).length;
-
-  static bool _undecided(Object c) => switch (c) {
-        final BatchConfirm f => !f.decided,
-        final AlbumConfirm a => !a.decided,
-        _ => false,
-      };
+  // Carousel state (confirmables, confirmIndex, the confirm/album
+  // actions) lives in MatchReviewSession; each decision here upserts
+  // the manifest entry via the record hooks below.
 
   // ── cost / wallet ────────────────────────────────────────────────────
   Map<String, Object?>? costEstimate; // per manifest.cost shape
@@ -208,7 +178,7 @@ class BatchUploadSession extends ChangeNotifier {
     hashFraction = null;
     confirmables.clear();
     confirmIndex = 0;
-    _confirmPhase = false;
+    confirmPhase = false;
     videoProbes.clear();
     tiers = {};
     _tiersInitialized = false;
@@ -285,7 +255,7 @@ class BatchUploadSession extends ChangeNotifier {
     hashFraction = null;
     confirmables.clear();
     confirmIndex = 0;
-    _confirmPhase = false;
+    confirmPhase = false;
     videoProbes.clear();
     tiers = {};
     _tiersInitialized = false;
@@ -321,12 +291,19 @@ class BatchUploadSession extends ChangeNotifier {
       probeOverride?.call(path) ??
       probeFile(path, ffprobeBin: _ffprobeBin);
 
-  Future<MatchOutcome> _match(String path, MediaProbe? probe,
+  @override
+  Future<MatchOutcome> runMatch(String path, MediaProbe? probe,
           {Sidecar? sidecar, String? forcedType}) =>
       matchOverride?.call(path, probe,
           sidecar: sidecar, forcedType: forcedType) ??
       _matcher!.matchFile(path, probe,
           sidecar: sidecar, forcedType: forcedType);
+
+  @override
+  MusicBrainz? get mbClient => _mb;
+
+  @override
+  Tmdb? get tmdbClient => _tmdb;
 
   /// The prepare pass — runPrepare's loop with the terminal review
   /// swapped for the deferred [confirmables] queue and sidecar skeletons
@@ -441,9 +418,9 @@ class BatchUploadSession extends ChangeNotifier {
       prepareStep = null;
       hashFraction = null;
       m.save();
-      if (confirmables.any(_undecided)) {
-        _confirmPhase = true;
-        confirmIndex = confirmables.indexWhere(_undecided);
+      if (confirmables.any(MatchReviewSession.isUndecided)) {
+        confirmPhase = true;
+        confirmIndex = confirmables.indexWhere(MatchReviewSession.isUndecided);
         notifyListeners();
       } else {
         await _finishPrepare();
@@ -454,7 +431,7 @@ class BatchUploadSession extends ChangeNotifier {
       prepareStep = null;
       hashFraction = null;
       prepareError = '$e';
-      _confirmPhase = false;
+      confirmPhase = false;
       m.save();
       stage = BatchStage.review;
       notifyListeners();
@@ -472,7 +449,7 @@ class BatchUploadSession extends ChangeNotifier {
   /// automatic answer stays fixable.
   Future<void> _matchOrDefer(String path, String sha, int size,
       MediaProbe? probe, Sidecar? sidecar, ManifestEntry? existing) async {
-    final outcome = await _match(path, probe, sidecar: sidecar);
+    final outcome = await runMatch(path, probe, sidecar: sidecar);
     if (_aborted) return;
     final autoAccept = outcome.matched &&
         outcome.confidence == 'high' &&
@@ -481,10 +458,10 @@ class BatchUploadSession extends ChangeNotifier {
       _recordOutcome(path, sha, size, outcome, existing);
       if (autoAccept) {
         confirmables.add(
-            BatchConfirm._(path, probe, outcome, sha, size)..decided = true);
+            BatchConfirm(path, probe, outcome, sha, size)..decided = true);
       }
     } else {
-      confirmables.add(BatchConfirm._(path, probe, outcome, sha, size));
+      confirmables.add(BatchConfirm(path, probe, outcome, sha, size));
     }
   }
 
@@ -559,7 +536,7 @@ class BatchUploadSession extends ChangeNotifier {
       currentFile = p.basename(tracks[i].path);
       prepareStep = PrepareStep.match;
       notifyListeners();
-      final out = await _match(tracks[i].path, tracks[i].probe);
+      final out = await runMatch(tracks[i].path, tracks[i].probe);
       if (_aborted) return;
       outcomes[i] = out;
       if (out.matched && out.ids['release_mbid'] != null) {
@@ -590,7 +567,7 @@ class BatchUploadSession extends ChangeNotifier {
     // (cover art, track placement) is visible and replaceable.
     final first = tracks.first;
     final guess = guessMusicName(p.basename(first.path));
-    confirmables.add(AlbumConfirm._(
+    confirmables.add(AlbumConfirm(
       [for (final t in tracks) t.path],
       [for (final t in tracks) t.probe],
       [for (final t in tracks) t.sha],
@@ -625,7 +602,7 @@ class BatchUploadSession extends ChangeNotifier {
       final tr = tracks[i];
       currentFile = p.basename(tr.path);
       notifyListeners();
-      outcomes[i] = await _match(tr.path, tr.probe,
+      outcomes[i] = await runMatch(tr.path, tr.probe,
           sidecar: Sidecar(
             type: 'music',
             releaseMbid: mbid,
@@ -644,18 +621,7 @@ class BatchUploadSession extends ChangeNotifier {
     }
   }
 
-  // ── confirm carousel ─────────────────────────────────────────────────
-
-  /// Show another card of the queue (back/forward arrows). Decided
-  /// cards reopen with their answer replaceable.
-  void confirmGoTo(int index) {
-    if (!_confirmPhase || confirmables.isEmpty) return;
-    confirmIndex = index.clamp(0, confirmables.length - 1);
-    notifyListeners();
-  }
-
-  void confirmPrevious() => confirmGoTo(confirmIndex - 1);
-  void confirmNext() => confirmGoTo(confirmIndex + 1);
+  // ── confirm carousel (core lives in MatchReviewSession) ─────────────
 
   /// Reopen the card that decided [source] (a manifest entry's source
   /// path) from the review summary.
@@ -665,7 +631,7 @@ class BatchUploadSession extends ChangeNotifier {
     final i = _confirmIndexFor(source);
     if (i < 0) return;
     confirmIndex = i;
-    _confirmPhase = true;
+    confirmPhase = true;
     stage = BatchStage.preparing;
     notifyListeners();
   }
@@ -679,24 +645,16 @@ class BatchUploadSession extends ChangeNotifier {
     return -1;
   }
 
-  /// Leave the carousel for the review summary — only once every card
-  /// has an answer.
-  void finishConfirms() {
-    if (!_confirmPhase || confirmables.any(_undecided)) return;
-    unawaited(_finishPrepare());
-  }
-
-  /// Record the decision for the current card and move on: to the next
-  /// unanswered card, or (none left) to the review summary.
-  void _decideCurrent(BatchConfirm c, MatchOutcome outcome) {
+  /// A card decision upserts the manifest entry it covers.
+  @override
+  void recordConfirmDecision(BatchConfirm c, MatchOutcome outcome) {
     final m = manifest!;
     _recordOutcome(c.path, c.sha, c.size, outcome, m.bySource(c.path));
-    c.decided = true;
     m.save();
-    _advanceConfirm();
   }
 
-  void _decideAlbum(AlbumConfirm c, List<MatchOutcome?> result) {
+  @override
+  void recordAlbumDecision(AlbumConfirm c, List<MatchOutcome?> result) {
     final m = manifest!;
     for (var i = 0; i < c.tracks.length; i++) {
       final out = result[i] ??
@@ -706,313 +664,20 @@ class BatchUploadSession extends ChangeNotifier {
       _recordOutcome(
           c.tracks[i], c.shas[i], c.sizes[i], out, m.bySource(c.tracks[i]));
     }
-    c.decided = true;
     m.save();
-    _advanceConfirm();
   }
 
-  void _advanceConfirm() {
-    for (var i = confirmIndex + 1; i < confirmables.length; i++) {
-      if (_undecided(confirmables[i])) {
-        confirmIndex = i;
-        notifyListeners();
-        return;
-      }
-    }
-    final first = confirmables.indexWhere(_undecided);
-    if (first >= 0) {
-      confirmIndex = first;
-      notifyListeners();
-      return;
-    }
-    unawaited(_finishPrepare());
-  }
+  @override
+  Future<void> onReviewFinished() => _finishPrepare();
 
   /// All matches settled — on to the review summary: probe video
   /// entries for the QUALITY section, then the cost estimate.
   Future<void> _finishPrepare() async {
-    _confirmPhase = false;
+    confirmPhase = false;
     stage = BatchStage.review;
     notifyListeners();
     await _probeVideos();
     await _estimate();
-  }
-
-  void confirmAccept() {
-    final c = pendingConfirm;
-    if (c == null || c.busy) return;
-    _decideCurrent(c, c.outcome);
-  }
-
-  void confirmSkip() {
-    final c = pendingConfirm;
-    if (c == null || c.busy) return;
-    _decideCurrent(c, MatchOutcome(type: c.outcome.type, skip: true));
-  }
-
-  /// Reject: no name for this file — it lands `needs-attention` and can
-  /// be fixed with the manual form or another prepare pass.
-  void confirmReject() {
-    final c = pendingConfirm;
-    if (c == null || c.busy) return;
-    _decideCurrent(
-        c,
-        MatchOutcome(
-            type: c.outcome.type,
-            note: 'match rejected at confirm',
-            sidecarDefaults: c.outcome.sidecarDefaults));
-  }
-
-  Future<void> confirmToggleType() async {
-    final c = pendingConfirm;
-    if (c == null || c.busy) return;
-    c.busy = true;
-    notifyListeners();
-    try {
-      final flipped = c.outcome.type == 'music' ? 'video' : 'music';
-      final out = await _match(c.path, c.probe, forcedType: flipped);
-      if (!out.matched) {
-        // Nothing on the other side either — keep waiting with the note.
-        c.outcome = MatchOutcome(
-            type: flipped,
-            note: out.note ?? 'no match as $flipped',
-            sidecarDefaults: out.sidecarDefaults);
-      } else {
-        c.outcome = out;
-      }
-    } finally {
-      c.busy = false;
-      notifyListeners();
-    }
-  }
-
-  /// Manual music search; results land in [BatchConfirm.mbHits].
-  Future<void> confirmSearchMusic(String artist, String album) async {
-    final c = pendingConfirm;
-    if (c == null || c.busy || _mb == null) return;
-    c.busy = true;
-    notifyListeners();
-    try {
-      c.mbHits =
-          (await _mb!.searchReleases(artist, album, limit: 8)).toList();
-      c.tmdbHits = null;
-    } finally {
-      c.busy = false;
-      notifyListeners();
-    }
-  }
-
-  /// Manual video search; results land in [BatchConfirm.tmdbHits].
-  Future<void> confirmSearchVideo(String title,
-      {int? year, required bool tv}) async {
-    final c = pendingConfirm;
-    if (c == null || c.busy || _tmdb == null) return;
-    c.busy = true;
-    notifyListeners();
-    try {
-      c.tmdbHits = (await _tmdb!.search(title, year: year, tv: tv))
-          .take(8)
-          .toList();
-      c.mbHits = null;
-    } finally {
-      c.busy = false;
-      notifyListeners();
-    }
-  }
-
-  Future<void> confirmPickMb(String mbid) => _rematchWith(Sidecar(
-      type: 'music',
-      releaseMbid: mbid,
-      track: pendingConfirm?.probe?.trackNumber));
-
-  Future<void> confirmPickTmdb(int tmdbId, {required bool tv}) =>
-      _rematchWith(Sidecar(type: 'video', tmdb: tmdbId, tmdbTv: tv));
-
-  /// Paste an id/URL — MusicBrainz release, IMDb tt…, tmdb movie:N/tv:N.
-  /// Returns false when nothing recognizable was in [raw].
-  Future<bool> confirmPasteId(String raw) async {
-    final mbid = RegExp(
-            r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
-            caseSensitive: false)
-        .firstMatch(raw);
-    final imdb = RegExp(r'tt\d+').firstMatch(raw);
-    final tmdbM =
-        RegExp(r'^(movie|tv)\s*[:/]\s*(\d+)$').firstMatch(raw.trim());
-    if (mbid != null) {
-      await confirmPickMb(mbid.group(0)!.toLowerCase());
-      return true;
-    }
-    if (imdb != null) {
-      await _rematchWith(Sidecar(type: 'video', imdb: imdb.group(0)));
-      return true;
-    }
-    if (tmdbM != null) {
-      await confirmPickTmdb(int.parse(tmdbM.group(2)!),
-          tv: tmdbM.group(1) == 'tv');
-      return true;
-    }
-    return false;
-  }
-
-  /// Case B — content in no database: the manual form's fields become a
-  /// synthetic manual-entry sidecar, giving an id-tag-free name plus a
-  /// userEdited bundle row exactly like the CLI's edited skeleton.
-  Future<void> confirmManual(Sidecar sidecar) => _rematchWith(sidecar);
-
-  Future<void> _rematchWith(Sidecar sidecar) async {
-    final c = pendingConfirm;
-    if (c == null || c.busy) return;
-    c.busy = true;
-    notifyListeners();
-    try {
-      final out = await _match(c.path, c.probe, sidecar: sidecar);
-      if (out.matched && out.confidence == 'high' && out.method == 'sidecar') {
-        // Keep the card showing what was decided — reopening it from
-        // the summary shows the answer, not the stale pre-answer state.
-        c.outcome = out;
-        c.mbHits = null;
-        c.tmdbHits = null;
-        c.busy = false;
-        _decideCurrent(c, out);
-        return;
-      }
-      c.outcome = out;
-      c.mbHits = null;
-      c.tmdbHits = null;
-    } finally {
-      c.busy = false;
-      notifyListeners();
-    }
-  }
-
-  // ── album confirm actions ────────────────────────────────────────────
-
-  /// Accept the album as resolved: placed tracks upload, unplaced ones
-  /// land `needs-attention`.
-  void albumAccept() {
-    final c = pendingAlbumConfirm;
-    if (c == null || c.busy) return;
-    _decideAlbum(c, List.of(c.outcomes));
-  }
-
-  void albumSkip() {
-    final c = pendingAlbumConfirm;
-    if (c == null || c.busy) return;
-    _decideAlbum(c, [
-      for (final _ in c.tracks) MatchOutcome(type: 'music', skip: true),
-    ]);
-  }
-
-  /// Reject: no release for these files — every track lands
-  /// `needs-attention` for another pass.
-  void albumReject() {
-    final c = pendingAlbumConfirm;
-    if (c == null || c.busy) return;
-    _decideAlbum(c, [
-      for (final o in c.outcomes)
-        MatchOutcome(
-            type: 'music',
-            note: o?.note ?? 'album match rejected at confirm'),
-    ]);
-  }
-
-  /// Manual album search; results land in [AlbumConfirm.mbHits].
-  Future<void> albumSearch(String artist, String album) async {
-    final c = pendingAlbumConfirm;
-    if (c == null || c.busy || _mb == null) return;
-    c.busy = true;
-    notifyListeners();
-    try {
-      c.mbHits =
-          (await _mb!.searchReleases(artist, album, limit: 8)).toList();
-    } finally {
-      c.busy = false;
-      notifyListeners();
-    }
-  }
-
-  /// Re-resolve the whole album against a picked release.
-  Future<void> albumPickMb(String mbid) async {
-    final c = pendingAlbumConfirm;
-    if (c == null || c.busy) return;
-    c.busy = true;
-    notifyListeners();
-    try {
-      for (var i = 0; i < c.tracks.length; i++) {
-        c.outcomes[i] = await _match(c.tracks[i], c.probes[i],
-            sidecar: Sidecar(
-              type: 'music',
-              releaseMbid: mbid,
-              track: c.probes[i]?.trackNumber ??
-                  guessMusicName(p.basename(c.tracks[i])).track,
-            ));
-      }
-      c.album = c.outcomes.firstWhere((o) => o?.matched ?? false,
-          orElse: () => c.outcomes.first);
-      c.mbHits = null;
-    } finally {
-      c.busy = false;
-      notifyListeners();
-    }
-  }
-
-  /// Paste a MusicBrainz release id/URL for the whole album. Returns
-  /// false when nothing recognizable was in [raw].
-  Future<bool> albumPasteId(String raw) async {
-    final mbid = RegExp(
-            r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
-            caseSensitive: false)
-        .firstMatch(raw);
-    if (mbid == null) return false;
-    await albumPickMb(mbid.group(0)!.toLowerCase());
-    return true;
-  }
-
-  /// Case B for a whole album not in any database: one manual form
-  /// (artist/album/year/art) applied to every track, per-track titles
-  /// and numbers from tags or the file names. Decides the card when
-  /// every track resolves.
-  Future<void> albumManual({
-    required String artist,
-    required String album,
-    int? year,
-    String? description,
-    String? artPath,
-  }) async {
-    final c = pendingAlbumConfirm;
-    if (c == null || c.busy) return;
-    c.busy = true;
-    notifyListeners();
-    try {
-      for (var i = 0; i < c.tracks.length; i++) {
-        final probe = c.probes[i];
-        final guess = guessMusicName(p.basename(c.tracks[i]));
-        final title = probe?.tag('title') ??
-            guess.title ??
-            p.basenameWithoutExtension(c.tracks[i]);
-        c.outcomes[i] = await _match(c.tracks[i], probe,
-            sidecar: Sidecar(
-              type: 'music',
-              artist: artist,
-              album: album,
-              title: title,
-              track: probe?.trackNumber ?? guess.track ?? i + 1,
-              year: year,
-              description: description,
-              art: artPath,
-            ));
-      }
-      c.album = c.outcomes.firstWhere((o) => o?.matched ?? false,
-          orElse: () => c.outcomes.first);
-      if (c.outcomes.every((o) => o?.matched ?? false)) {
-        c.busy = false;
-        _decideAlbum(c, List.of(c.outcomes));
-        return;
-      }
-    } finally {
-      c.busy = false;
-      notifyListeners();
-    }
   }
 
   // ── quality tiers ────────────────────────────────────────────────────
@@ -1523,7 +1188,7 @@ class BatchUploadSession extends ChangeNotifier {
     stage = BatchStage.idle;
     confirmables.clear();
     confirmIndex = 0;
-    _confirmPhase = false;
+    confirmPhase = false;
     videoProbes.clear();
     tiers = {};
     _tiersInitialized = false;
@@ -1556,26 +1221,6 @@ enum BatchStage { idle, preparing, review, uploading, done }
 /// TMDB lookup.
 enum PrepareStep { fingerprint, mediaInfo, match }
 
-/// One file waiting for the user's eyes — the CLI's beets-style confirm
-/// prompt as data. Every action funnels back through Matcher.matchFile
-/// with a synthetic sidecar, exactly like the terminal loop. Lives in
-/// the session's [BatchUploadSession.confirmables] carousel; once
-/// [decided], reopening it and answering again replaces the earlier
-/// manifest record.
-class BatchConfirm {
-  BatchConfirm._(this.path, this.probe, this.outcome, this.sha, this.size);
-
-  final String path;
-  final MediaProbe? probe;
-  final String sha;
-  final int size;
-  MatchOutcome outcome;
-  List<MbSearchHit>? mbHits;
-  List<TmdbHit>? tmdbHits;
-  bool busy = false;
-  bool decided = false;
-}
-
 /// One audio file waiting for its album group to be prepared.
 class _PendingTrack {
   _PendingTrack(this.path, this.sha, this.size, this.probe, this.existing);
@@ -1605,46 +1250,6 @@ class _UploadTask {
     try {
       File(path).deleteSync();
     } catch (_) {}
-  }
-}
-
-/// A whole album waiting for the user's eyes — one card, one release
-/// decision, applied to every track. Search/paste-id/manual actions
-/// re-resolve ALL tracks so an album can never end up split across
-/// releases.
-class AlbumConfirm {
-  AlbumConfirm._(this.tracks, this.probes, this.shas, this.sizes,
-      this.outcomes, this.album, this.defaults);
-
-  /// Source paths in album order (disc, then track number).
-  final List<String> tracks;
-  final List<MediaProbe?> probes;
-  final List<String> shas;
-  final List<int> sizes;
-
-  /// Per-track outcome as currently resolved; null or unmatched =
-  /// couldn't be placed on the release (lands `needs-attention` on
-  /// accept).
-  final List<MatchOutcome?> outcomes;
-
-  /// The outcome that named the release — carries the album note and
-  /// cover art. Null when nothing matched at all.
-  MatchOutcome? album;
-
-  /// Artist/album/year prefills for the search and manual-entry forms.
-  final Map<String, Object?> defaults;
-
-  List<MbSearchHit>? mbHits;
-  bool busy = false;
-  bool decided = false;
-
-  /// "Artist — Album (Year)" from the representative note (the note's
-  /// leading segment before its ", track N" suffix).
-  String? get albumLine {
-    final note = album?.note;
-    if (note == null) return null;
-    final cut = note.indexOf(', track ');
-    return cut < 0 ? note : note.substring(0, cut);
   }
 }
 
