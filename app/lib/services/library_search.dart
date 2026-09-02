@@ -127,6 +127,32 @@ class SearchIndex {
             if (seen.add(e.address.toLowerCase().replaceFirst('0x', ''))) e,
     ];
     final records = <_Record>[];
+    // Each track searchable by artist/album (title words), its own name
+    // and — on compilations, where the album credit reads Various
+    // Artists — its own track's artist (extra words); results open the
+    // track's detail page.
+    void indexAlbum(HomeAlbum album) {
+      for (final trackEntry in album.tracks) {
+        final parsed = parseMediaName(trackEntry.name);
+        records.add(_Record(
+          EntryResult(trackEntry, isEpisode: false),
+          title: normalizeSearchText('${album.artist} ${album.album}'),
+          extraWords: [
+            if (parsed.trackTitle != null)
+              ...normalizeSearchText(parsed.trackTitle!)
+                  .split(' ')
+                  .where((w) => w.isNotEmpty),
+            if (parsed.artist != null && parsed.artist != album.artist)
+              ...normalizeSearchText(parsed.artist!)
+                  .split(' ')
+                  .where((w) => w.isNotEmpty),
+            if (parsed.year != null) '${parsed.year}',
+          ],
+          year: parsed.year,
+        ));
+      }
+    }
+
     for (final item in groupShows(entries)) {
       switch (item) {
         case HomeEntry(:final entry):
@@ -162,23 +188,9 @@ class SearchIndex {
             }
           }
         case HomeAlbum():
-          // Each track searchable by artist/album (title words) and its
-          // own name (extra words); results open the track's detail page.
-          for (final trackEntry in item.tracks) {
-            final parsed = parseMediaName(trackEntry.name);
-            records.add(_Record(
-              EntryResult(trackEntry, isEpisode: false),
-              title: normalizeSearchText('${item.artist} ${item.album}'),
-              extraWords: [
-                if (parsed.trackTitle != null)
-                  ...normalizeSearchText(parsed.trackTitle!)
-                      .split(' ')
-                      .where((w) => w.isNotEmpty),
-                if (parsed.year != null) '${parsed.year}',
-              ],
-              year: parsed.year,
-            ));
-          }
+          indexAlbum(item);
+        case HomeArtist():
+          item.albums.forEach(indexAlbum);
         case HomeSeason():
           break; // groupShows never yields bare seasons
       }

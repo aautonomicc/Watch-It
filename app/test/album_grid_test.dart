@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/screens/album_screen.dart';
+import 'package:watchit/screens/artist_screen.dart';
 import 'package:watchit/services/connectivity.dart';
 import 'package:watchit/services/download_manager.dart';
 import 'package:watchit/services/embedded_client.dart';
@@ -107,6 +108,71 @@ void main() {
       final items =
           groupShows([MediaEntry(name: 'BegBlag.mp3', address: _addr(3))]);
       expect(items.single, isA<HomeEntry>());
+    });
+  });
+
+  group('groupShows artist folding', () {
+    MediaEntry t(String artist, String album, int year, int n,
+            String title, int addr) =>
+        MediaEntry(
+            name: '$artist - $album ($year) - '
+                '${n.toString().padLeft(2, '0')} $title.mp3',
+            address: _addr(addr));
+
+    test('two albums by one artist fold into a HomeArtist by year', () {
+      final items = groupShows([
+        t('The Rolling Stones', 'Let It Bleed', 1969, 1, 'Gimme Shelter', 1),
+        t('Other Artist', 'Elsewhere', 1990, 1, 'Something', 2),
+        t('The Rolling Stones', 'Let It Bleed', 1969, 2, 'Love In Vain', 3),
+        t('The Rolling Stones', 'Beggars Banquet', 1968, 1,
+            'Sympathy For the Devil', 4),
+      ]);
+      expect(items, hasLength(2));
+      // The artist card sits where their first album appeared.
+      final artist = items.first as HomeArtist;
+      expect(artist.artist, 'The Rolling Stones');
+      expect(artist.trackCount, 3);
+      // Albums sorted by year: Beggars Banquet (1968) first.
+      expect([for (final a in artist.albums) a.album],
+          ['Beggars Banquet', 'Let It Bleed']);
+      expect([for (final a in artist.albums) a.year], [1968, 1969]);
+      // The lone other-artist album stays an album card.
+      expect((items[1] as HomeAlbum).album, 'Elsewhere');
+    });
+
+    test('Various Artists albums are compilations and never fold', () {
+      final items = groupShows([
+        t('Various Artists', 'Hits 1', 1999, 1, 'One', 1),
+        t('Various Artists', 'Hits 2', 2000, 1, 'Two', 2),
+      ]);
+      expect(items, hasLength(2));
+      for (final item in items) {
+        expect((item as HomeAlbum).isCompilation, isTrue);
+      }
+    });
+
+    test('per-track artist mismatch marks a compilation that stands '
+        'alone beside the artist fold', () {
+      // Two tracks of one release (shared mbid key) crediting different
+      // artists, plus two normal albums by one of them.
+      MediaEntry mixed(String artist, int n, String title, int addr) =>
+          MediaEntry(
+              name: '$artist - Duets (2001) - 0$n $title '
+                  '{mbid-$_mbid}.mp3',
+              address: _addr(addr));
+      final items = groupShows([
+        mixed('Singer A', 1, 'First', 1),
+        mixed('Singer B', 2, 'Second', 2),
+        t('Singer A', 'Solo One', 1995, 1, 'Alone', 3),
+        t('Singer A', 'Solo Two', 1997, 1, 'Still Alone', 4),
+      ]);
+      expect(items, hasLength(2));
+      final comp = items.first as HomeAlbum;
+      expect(comp.isCompilation, isTrue);
+      expect(comp.artist, 'Various Artists');
+      final artist = items[1] as HomeArtist;
+      expect(artist.artist, 'Singer A');
+      expect(artist.albums, hasLength(2));
     });
   });
 
@@ -229,6 +295,54 @@ void main() {
       // Square cover art frame (1:1, not the 2:3 poster shape).
       final box = tester.getSize(find.byType(ClipRRect));
       expect(box.width, box.height);
+    });
+
+    HomeArtist artist() => groupShows([
+          _track(1, 'Gimme Shelter'),
+          _track(2, 'Love In Vain'),
+          MediaEntry(
+              name: 'The Rolling Stones - Beggars Banquet (1968) - '
+                  '01 Sympathy For the Devil.mp3',
+              address: _addr(400)),
+        ]).single as HomeArtist;
+
+    testWidgets('ArtistCard shows artist and album/track counts',
+        (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: Scaffold(
+          body: ArtistCard(
+              group: artist(), tokens: WiTokens.dark, onTap: () {}),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('The Rolling Stones'), findsOneWidget);
+      expect(find.text('2 albums · 3 tracks'), findsOneWidget);
+      // Square collage frame, like the album card.
+      final box = tester.getSize(find.byType(ClipRRect));
+      expect(box.width, box.height);
+    });
+
+    testWidgets('ArtistScreen lists the albums; tapping one opens its '
+        'album page', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: ArtistScreen(group: artist()),
+      ));
+      await tester.pumpAndSettle();
+      // App bar + header both carry the artist name.
+      expect(find.text('The Rolling Stones'), findsNWidgets(2));
+      expect(find.text('2 albums · 3 tracks'), findsOneWidget);
+      expect(find.text('ALBUMS'), findsOneWidget);
+      // Albums sorted by year — Beggars Banquet (1968) first.
+      final x68 = tester.getTopLeft(find.text('Beggars Banquet')).dx;
+      final x69 = tester.getTopLeft(find.text('Let It Bleed')).dx;
+      expect(x68, lessThan(x69));
+      await tester.tap(find.text('Let It Bleed'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlbumScreen), findsOneWidget);
+      expect(find.text('TRACKS'), findsOneWidget);
+      expect(find.text('Gimme Shelter'), findsOneWidget);
     });
 
     testWidgets('AlbumScreen lists the tracks in order', (tester) async {

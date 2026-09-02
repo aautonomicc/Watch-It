@@ -13,6 +13,7 @@ import '../widgets/channel_info_card.dart';
 import '../widgets/library_drawer.dart';
 import '../widgets/poster_cards.dart';
 import 'album_screen.dart';
+import 'artist_screen.dart';
 import 'detail_screen.dart';
 import 'show_screen.dart';
 
@@ -75,6 +76,13 @@ class _ListHomeScreenState extends State<ListHomeScreen> {
     await _reload();
   }
 
+  Future<void> _openArtist(HomeArtist group) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ArtistScreen(group: group)),
+    );
+    await _reload();
+  }
+
   /// The metadata that carries an item's genres: the entry's own match,
   /// or — for a folded show — any episode's match, whose category IS the
   /// show's genre list.
@@ -84,6 +92,7 @@ class _ListHomeScreenState extends State<ListHomeScreen> {
       HomeShow(:final seasons) => seasons.first.episodes.first,
       HomeSeason(:final episodes) => episodes.first,
       HomeAlbum(:final tracks) => tracks.first,
+      HomeArtist(:final albums) => albums.first.tracks.first,
     };
     return genreNames(MetadataService.instance.metadataFor(entry).category);
   }
@@ -293,6 +302,11 @@ class _ListHomeScreenState extends State<ListHomeScreen> {
             group: album,
             tokens: t,
             onTap: () => _openAlbum(album),
+          ),
+        HomeArtist() && final artist => ArtistCard(
+            group: artist,
+            tokens: t,
+            onTap: () => _openArtist(artist),
           ),
         // groupShows never yields bare seasons.
         HomeSeason() => const SizedBox.shrink(),

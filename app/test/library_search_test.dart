@@ -130,5 +130,35 @@ void main() {
       expect(index().query('   '), isEmpty);
       expect(index().query('!?'), isEmpty);
     });
+
+    test('artist-folded albums keep every track searchable', () {
+      // Two albums by one artist fold into a HomeArtist on the wall —
+      // the index must still reach each album's tracks.
+      final i = SearchIndex.build([
+        _list([
+          _e('Solo Star - First Album (1990) - 01 Opening Song.mp3', 21),
+          _e('Solo Star - Second Album (1992) - 01 Comeback.mp3', 22),
+        ]),
+      ]);
+      expect(i.query('solo star'), hasLength(2));
+      expect((i.query('comeback').single as EntryResult).entry.name,
+          'Solo Star - Second Album (1992) - 01 Comeback.mp3');
+      expect(i.query('first album'), hasLength(1));
+    });
+
+    test("a compilation track's own artist is searchable", () {
+      const mbid = 'c07f0676-9d95-4443-a841-b1cbcfa48f4e';
+      final i = SearchIndex.build([
+        _list([
+          _e('Singer A - Duets (2001) - 01 First {mbid-$mbid}.mp3', 31),
+          _e('Singer B - Duets (2001) - 02 Second {mbid-$mbid}.mp3', 32),
+        ]),
+      ]);
+      // The album credit reads Various Artists; the per-track credit
+      // still finds its track.
+      expect((i.query('singer b').single as EntryResult).entry.name,
+          contains('02 Second'));
+      expect(i.query('various artists'), hasLength(2));
+    });
   });
 }
