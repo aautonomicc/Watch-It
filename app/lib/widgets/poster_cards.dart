@@ -146,7 +146,8 @@ class AlbumCard extends StatelessWidget {
               style: TextStyle(fontSize: 11.5, color: t.boneDim),
             ),
             Text(
-              '${meta.artist ?? group.artist} · $n '
+              // A compilation's group credit beats any single track's row.
+              '${group.isCompilation ? group.artist : meta.artist ?? group.artist} · $n '
               '${n == 1 ? 'track' : 'tracks'}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
