@@ -372,4 +372,74 @@ void main() {
       expect(parseMediaName(n!).trackTitle, '20th Century Boy');
     });
   });
+
+  group('realbumedMusicFileName (album-identity edit)', () {
+    test('swaps album and year, everything else verbatim', () {
+      expect(
+          realbumedMusicFileName(
+              'Singer A - Loose Single (1999) - 01 Road Song.mp3',
+              album: 'My Album',
+              year: 2006),
+          'Singer A - My Album (2006) - 01 Road Song.mp3');
+    });
+
+    test('adds a year where the name had none, and removes one', () {
+      expect(
+          realbumedMusicFileName('A - Old - 03 T.mp3',
+              album: 'New', year: 2001),
+          'A - New (2001) - 03 T.mp3');
+      expect(
+          realbumedMusicFileName('A - Old (2001) - 03 T.mp3', album: 'New'),
+          'A - New - 03 T.mp3');
+    });
+
+    test('drops the mbid tag — the edit overrides the database match',
+        () {
+      final n = realbumedMusicFileName(
+          'The Rolling Stones - Let It Bleed (1969) - 01 Gimme Shelter '
+          '{mbid-499485cb-8fdf-3acb-a83b-b7b86f898d75}.mp3',
+          album: 'My Mix',
+          year: 2006);
+      expect(n,
+          'The Rolling Stones - My Mix (2006) - 01 Gimme Shelter.mp3');
+      expect(parseMediaName(n!).releaseMbid, isNull);
+    });
+
+    test('multi-disc marker survives', () {
+      expect(
+          realbumedMusicFileName('A - Old (1999) - 2-03 T.flac',
+              album: 'New', year: 1999),
+          'A - New (1999) - 2-03 T.flac');
+    });
+
+    test('typed album is sanitized', () {
+      expect(
+          realbumedMusicFileName('A - Old - 01 T.mp3',
+              album: 'Best: Vol/1'),
+          'A - Best - Vol-1 - 01 T.mp3');
+    });
+
+    test('digit-only album and dashed album round-trip', () {
+      final digits =
+          realbumedMusicFileName('A - Old - 01 T.mp3', album: '1999')!;
+      expect(digits, 'A - 1999 - 01 T.mp3');
+      final p = parseMediaName(digits);
+      expect(p.album, '1999');
+      expect(p.year, isNull);
+      expect(
+          realbumedMusicFileName('A - Old - 01 T.mp3',
+              album: 'My - Album', year: 2006),
+          'A - My - Album (2006) - 01 T.mp3');
+    });
+
+    test('non-track and empty album refuse', () {
+      expect(
+          realbumedMusicFileName('The.Movie.2024.1080p.mkv', album: 'X'),
+          isNull);
+      expect(realbumedMusicFileName('Loose Song.mp3', album: 'X'), isNull);
+      expect(
+          realbumedMusicFileName('A - Old - 01 T.mp3', album: '  ??  '),
+          isNull);
+    });
+  });
 }

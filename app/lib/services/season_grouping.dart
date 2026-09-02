@@ -264,6 +264,12 @@ class AlbumKeys {
     return 'music:$album:$year';
   }
 
+  /// The cluster BEFORE the same-number-different-artist split guard —
+  /// what the fold would be if track numbers didn't collide. The album
+  /// rename's collision check compares clusters so a would-be split is
+  /// caught and refused instead of quietly splitting the album apart.
+  String clusterFor(ParsedName parsed) => _clusterFor(parsed);
+
   /// The fold key for track [parsed]: its cluster, plus the artist when
   /// the cluster proved to be two same-named albums.
   String keyFor(ParsedName parsed) {
