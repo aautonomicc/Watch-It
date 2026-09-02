@@ -80,6 +80,14 @@ Artist - Album (Year) - NN Title {mbid-<release-mbid>}.flac
   stay separate.
 - Audio files without a track marker (`BegBlag.mp3`) stay single entries, typed
   music.
+- Because album, year, and track number ARE the grouping, the in-app track
+  editor treats them as identity: changing the track number renames that
+  entry, and changing the album or year renames **every track of the album**
+  (dropping any `{mbid-…}` tag — the edit overrides the database match). This
+  is how loose singles combine into one album: give each the same album name
+  and year (with distinct track numbers) and they fold into a single card.
+  Editing artist, description, track title, or artwork never renames — those
+  are metadata overrides.
 
 ## Uploading from the app
 

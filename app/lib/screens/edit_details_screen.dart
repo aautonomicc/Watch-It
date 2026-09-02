@@ -84,6 +84,13 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
   late final ParsedName _parsed;
   late final String _lookupKey;
 
+  /// The title/year field text as prefilled — a track's album/year only
+  /// rename the album when the user touched the field (or the differing
+  /// prefill was itself a user edit), never because a database match's
+  /// canonical title merely differs from the file name.
+  late final String _initialTitle;
+  late final String _initialYear;
+
   /// The cache row under [_lookupKey] at open time, if any — the source
   /// for fields the editor preserves rather than shows (an episode row's
   /// stored title, a season row's year).
@@ -105,9 +112,12 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
   bool get _episodeScope =>
       _scope == EditDetailsScope.entry && _parsed.isEpisode;
 
-  /// A music track: every field is editable — artist/album/year/
-  /// description/artwork write the album's shared row, the track title
-  /// its own per-track row (mistakes in any of them stay fixable).
+  /// A music track: every field is editable — artist/description/
+  /// artwork write the album's shared row, the track title its own
+  /// per-track row (mistakes in any of them stay fixable). Album, year,
+  /// and the track number are IDENTITY (they come from the file name
+  /// and drive the wall's album fold), so changing them renames entries:
+  /// the number renames this track, album/year rename the whole album.
   bool get _trackScope =>
       _scope == EditDetailsScope.entry && _parsed.isTrack;
 
@@ -144,6 +154,8 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
       EditDetailsScope.season => _meta.seasonOverview ?? '',
       EditDetailsScope.entry => _meta.overview ?? '',
     });
+    _initialTitle = _title.text.trim();
+    _initialYear = _year.text.trim();
     unawaited(_load());
   }
 
@@ -285,6 +297,8 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     // migrates the per-track row to the renamed key) before the field
     // saves below.
     var parsed = _parsed;
+    var lookupKey = _lookupKey;
+    String? carriedPoster;
     if (_trackScope) {
       final track = int.tryParse(_track.text.trim());
       final disc = _disc.text.trim().isEmpty
@@ -295,8 +309,9 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
         _failSave('Track and disc must be numbers.');
         return;
       }
+      var entry = widget.entry;
       if (track != _parsed.track || disc != _parsed.disc) {
-        final result = await renumberTrackEntry(widget.entry,
+        final result = await renumberTrackEntry(entry,
             track: track,
             disc: disc,
             postersDirProvider: widget.postersDirProvider);
@@ -305,14 +320,52 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
           return;
         }
         parsed = parseMediaName(result.newName!);
+        entry = MediaEntry(
+          name: result.newName!,
+          address: entry.address,
+          addedAt: entry.addedAt,
+          sizeBytes: entry.sizeBytes,
+          videoInfo: entry.videoInfo,
+        );
+      }
+      // Album and year are identity too — they drive the album fold, so
+      // an edited album/year renames the WHOLE album. Only user intent
+      // triggers it: a touched field, or a prefill that was itself a
+      // user edit (the pre-rename-era album override, healed on Save) —
+      // a database match's canonical title merely differing from the
+      // file name never renames anything by itself.
+      final yearText = _year.text.trim();
+      final newYear = yearText.isEmpty ? null : int.tryParse(yearText);
+      if (yearText.isNotEmpty && newYear == null) {
+        _failSave('Year must be a number.');
+        return;
+      }
+      final touched =
+          text != _initialTitle || yearText != _initialYear;
+      final differs =
+          sanitizeNamePart(text) != parsed.title || newYear != parsed.year;
+      if (differs && (touched || (_row?.userEdited ?? false))) {
+        final result = await renameTrackAlbum(entry,
+            album: text,
+            year: newYear,
+            postersDirProvider: widget.postersDirProvider);
+        if (result.error != null) {
+          _failSave(result.error!);
+          return;
+        }
+        parsed = parseMediaName(result.newName!);
+        lookupKey = parsed.lookupKey;
+        carriedPoster = result.carriedPosterFile;
       }
     }
     Value<String?> posterFile = const Value.absent();
     if (_newPosterBytes != null) {
-      posterFile = Value(await saveUserPoster(_lookupKey, _newPosterBytes!,
+      posterFile = Value(await saveUserPoster(lookupKey, _newPosterBytes!,
           postersDirProvider: widget.postersDirProvider));
     } else if (_removePoster) {
       posterFile = const Value(null);
+    } else if (carriedPoster != null) {
+      posterFile = Value(carriedPoster);
     }
     // Episode/season rows never take the typed text as the row title —
     // the row keeps its stored show title (falling back to the one on
@@ -320,7 +373,7 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     final keptTitle = _row?.title ?? _meta.title;
     final artistText = _artist.text.trim();
     await saveUserDetails(
-      lookupKey: _lookupKey,
+      lookupKey: lookupKey,
       title: _hasTitleField ? text : keptTitle,
       year: _hasTitleField ? int.tryParse(_year.text.trim()) : _row?.year,
       overview: _overview.text,
@@ -585,8 +638,11 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
             ),
             const SizedBox(height: 6),
             Text(
-              'The number is part of the file name and sets the track\'s '
-              'place in the album — changing it renames this entry.',
+              'Album, year, and the track number are part of the file '
+              'name and decide how tracks group into albums. Changing '
+              'the album or year renames every track of this album (so '
+              'tracks given the same album and year combine into one); '
+              'changing the number renames this entry.',
               style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
             ),
             const SizedBox(height: 12),
@@ -743,6 +799,177 @@ Future<RenumberResult> renumberTrackEntry(
     }
   }
   return (newName: newName, error: null);
+}
+
+/// An album-identity edit's outcome: the edited entry's renamed name,
+/// the album artwork file carried to the new album key (if any), or the
+/// message explaining why nothing was changed.
+typedef AlbumRenameResult = ({
+  String? newName,
+  String? error,
+  String? carriedPosterFile,
+});
+
+/// Rename the album / year of [entry]'s WHOLE album: every track the
+/// wall folds into it (the AlbumKeys fold, in each list holding
+/// [entry]) gets its name's album/year swapped for [album]/[year] —
+/// in every list that holds those exact entries (name + address), so a
+/// track never ends up under two names. Album and year live in the file
+/// name and drive the album fold, so the edit is a rename exactly like
+/// the track-number edit; `{mbid-...}` tags are dropped (the edit
+/// overrides the database match — [realbumedMusicFileName]). Per-track
+/// override rows migrate to their renamed keys, and the old album row's
+/// artwork is carried to the new album key when that key has none.
+/// Addresses are untouched: playback, downloads, and the upload ledger
+/// never notice.
+///
+/// Refuses (error, nothing written) when a renamed track would land on
+/// a (disc, track) number an existing target-album track already holds
+/// — the silent alternative is worse: the same-number-different-artist
+/// guard would quietly split the combined album back apart.
+Future<AlbumRenameResult> renameTrackAlbum(
+  MediaEntry entry, {
+  required String album,
+  int? year,
+  Future<Directory> Function()? postersDirProvider,
+}) async {
+  final parsed = parseMediaName(entry.name);
+  if (!parsed.isTrack) {
+    return (
+      newName: null,
+      error: 'Not a music track.',
+      carriedPosterFile: null
+    );
+  }
+  final lists = await LibraryStore.load();
+  bool isSelf(MediaEntry e) =>
+      e.address == entry.address && e.name == entry.name;
+  // What "this album" means = the fold the wall shows, per list holding
+  // the edited entry.
+  final moved = <(String, String)>{(entry.address, entry.name)};
+  for (final list in lists) {
+    if (!list.entries.any(isSelf)) continue;
+    final keys = AlbumKeys(list.entries);
+    final albumKey = keys.keyFor(parsed);
+    for (final other in list.entries) {
+      final op = parseMediaName(other.name);
+      if (op.isTrack && keys.keyFor(op) == albumKey) {
+        moved.add((other.address, other.name));
+      }
+    }
+  }
+  bool isMoved(MediaEntry e) => moved.contains((e.address, e.name));
+  final renames = <String, String>{}; // old name → new name
+  for (final m in moved) {
+    final oldName = m.$2;
+    if (renames.containsKey(oldName)) continue;
+    final newName =
+        realbumedMusicFileName(oldName, album: album, year: year);
+    if (newName == null) {
+      return (
+        newName: null,
+        error: '"$oldName" cannot be renamed — it does not follow the '
+            'track naming convention.',
+        carriedPosterFile: null,
+      );
+    }
+    renames[oldName] = newName;
+  }
+  final selfNewName = renames[entry.name]!;
+  // Collision check inside the target album, per list: a moved track
+  // must not land on a (disc, track) an unmoved track already holds.
+  for (final list in lists) {
+    final sim = [
+      for (final e in list.entries)
+        isMoved(e)
+            ? MediaEntry(name: renames[e.name]!, address: e.address)
+            : e,
+    ];
+    final keys = AlbumKeys(sim);
+    // Compare CLUSTERS, not fold keys: a number collision between two
+    // artists makes keyFor split the album per artist, which would hide
+    // exactly the collision this check exists to refuse.
+    final targetKey = keys.clusterFor(parseMediaName(selfNewName));
+    final movedMarkers = <String, ParsedName>{};
+    final takenMarkers = <String, String>{}; // disc-track → track title
+    for (var i = 0; i < sim.length; i++) {
+      final op = parseMediaName(sim[i].name);
+      if (!op.isTrack || keys.clusterFor(op) != targetKey) continue;
+      final marker = '${op.disc ?? 1}-${op.track}';
+      if (isMoved(list.entries[i])) {
+        movedMarkers[marker] = op;
+      } else {
+        takenMarkers[marker] = op.trackTitle!;
+      }
+    }
+    for (final e in movedMarkers.entries) {
+      final other = takenMarkers[e.key];
+      if (other != null) {
+        return (
+          newName: null,
+          error: 'Track ${e.value.trackMarker} is already taken in '
+              '"${e.value.title}" by "$other" — renumber that track '
+              'first.',
+          carriedPosterFile: null,
+        );
+      }
+    }
+  }
+  await LibraryStore.save([
+    for (final l in lists)
+      l.copyWith(entries: [
+        for (final e in l.entries)
+          isMoved(e)
+              ? MediaEntry(
+                  name: renames[e.name]!,
+                  address: e.address,
+                  addedAt: e.addedAt,
+                  sizeBytes: e.sizeBytes,
+                  videoInfo: e.videoInfo,
+                )
+              : e,
+      ]),
+  ]);
+  // Per-track override rows key on the album — move them along.
+  for (final r in renames.entries) {
+    final op = parseMediaName(r.key);
+    final np = parseMediaName(r.value);
+    final oldKey = trackLookupKey(op);
+    final newKey = trackLookupKey(np);
+    if (oldKey == null || newKey == null || oldKey == newKey) continue;
+    final row = await metadataRowFor(oldKey);
+    if (row == null) continue;
+    final customName = episodeNameFromLabel(row.episodeLabel);
+    await clearUserEdits(oldKey, postersDirProvider: postersDirProvider);
+    if (customName != null) {
+      await saveUserDetails(
+        lookupKey: newKey,
+        title: np.title,
+        episodeLabel: Value('${np.trackMarker} · $customName'),
+        postersDirProvider: postersDirProvider,
+      );
+    }
+  }
+  // Album artwork follows the rename when the target album has none —
+  // a fresh copy under the new key (never a shared file, so clearing
+  // one key's edits can't orphan the other's artwork).
+  String? carried;
+  final newParsed = parseMediaName(selfNewName);
+  if (newParsed.lookupKey != parsed.lookupKey) {
+    final oldRow = await metadataRowFor(parsed.lookupKey);
+    final newRow = await metadataRowFor(newParsed.lookupKey);
+    final oldPoster = oldRow?.posterFile;
+    if (oldPoster != null && newRow?.posterFile == null) {
+      final dir = await (postersDirProvider ?? defaultPostersDir)();
+      final f = File('${dir.path}/$oldPoster');
+      if (f.existsSync()) {
+        carried = await saveUserPoster(
+            newParsed.lookupKey, f.readAsBytesSync(),
+            postersDirProvider: postersDirProvider);
+      }
+    }
+  }
+  return (newName: selfNewName, error: null, carriedPosterFile: carried);
 }
 
 /// Grid of frames sampled evenly across the video — tap one to use it

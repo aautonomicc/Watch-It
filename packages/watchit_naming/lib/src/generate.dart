@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'parse.dart';
 import 'sanitize.dart';
 
@@ -78,6 +80,51 @@ String? renumberedMusicFileName(String name,
       check.year != parsed.year ||
       check.trackTitle != parsed.trackTitle ||
       check.releaseMbid != parsed.releaseMbid) {
+    return null;
+  }
+  return renamed;
+}
+
+/// [name] with its album / year swapped for [album] / [year] — the
+/// album-identity edit (like the track number, album and year come from
+/// the file name and drive the wall's album fold, so changing them means
+/// renaming the entry). The artist, track marker, and track title
+/// survive verbatim; any `{mbid-...}` tag is DROPPED — the tag pins the
+/// track to a database release, and an identity edit overrides that
+/// match. [year] null emits no year part.
+///
+/// Returns null when [name] is not a music-convention track name, the
+/// album sanitizes to nothing, the result would not fit a 255-byte file
+/// name, or the swap cannot be done losslessly (the renamed name must
+/// parse back to the same artist/marker/title with the new album and
+/// year and no release id).
+String? realbumedMusicFileName(String name,
+    {required String album, int? year}) {
+  final parsed = parseMediaName(name);
+  if (!parsed.isTrack) return null;
+  final cleanAlbum = sanitizeNamePart(album);
+  if (cleanAlbum.isEmpty) return null;
+  // The head as it sits in the raw name: `Artist - Album (Year)` before
+  // the ` - NN ` marker (canonical names carry their tags at the end, so
+  // the head matches the raw string; a split disagreeing with the
+  // parser's own is caught by the round-trip check below).
+  final m = RegExp(r'^(.+? - ).+?(?: \(\d{4}\))?( - (?:\d{1,2}-)?\d{2,3} )')
+      .firstMatch(name);
+  if (m == null) return null;
+  final yearPart = year != null ? ' ($year)' : '';
+  final rest = name.substring(m.end).replaceAll(
+      RegExp(r' ?[{\[]mbid[-=][^}\]]*[}\]]', caseSensitive: false), '');
+  final renamed = '${m.group(1)}$cleanAlbum$yearPart${m.group(2)}$rest';
+  if (utf8.encode(renamed).length > 255) return null;
+  final check = parseMediaName(renamed);
+  if (!check.isTrack ||
+      check.track != parsed.track ||
+      check.disc != parsed.disc ||
+      check.artist != parsed.artist ||
+      check.trackTitle != parsed.trackTitle ||
+      check.title != cleanAlbum ||
+      check.year != year ||
+      check.releaseMbid != null) {
     return null;
   }
   return renamed;

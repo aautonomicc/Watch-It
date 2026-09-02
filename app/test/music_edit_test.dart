@@ -13,6 +13,7 @@ import 'package:watchit/services/ffmpeg.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata.dart';
 import 'package:watchit/services/metadata_service.dart';
+import 'package:watchit/services/season_grouping.dart' show AlbumKeys;
 import 'package:watchit/services/user_metadata.dart';
 import 'package:watchit/theme/tokens.dart';
 
@@ -52,6 +53,9 @@ void main() {
       postersDir.deleteSync(recursive: true);
     } catch (_) {}
   });
+
+  Future<void> seedAlbum(List<MediaEntry> entries) => LibraryStore.save(
+      [MediaList(id: 'music', title: 'Music', entries: entries)]);
 
   test('parsed fallback carries the artist; keys derive per track', () {
     final parsed = parseMediaName(track(1, 'First Song').name);
@@ -109,6 +113,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final entry = track(1, 'First Song');
+    await seedAlbum([entry, track(2, 'Second Song')]);
     await tester.pumpWidget(MaterialApp(
       theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
       home: EditDetailsScreen(
@@ -136,7 +141,15 @@ void main() {
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
-    final parsed = parseMediaName(entry.name);
+    // The album name is identity (it drives the album fold), so the
+    // edit renamed BOTH tracks of the album; the row lands on the
+    // renamed key.
+    final lists = await LibraryStore.load();
+    expect([for (final e in lists.single.entries) e.name], [
+      'Misspelt Artist - Fixed Album (1999) - 01 First Song.mp3',
+      'Misspelt Artist - Fixed Album (1999) - 02 Second Song.mp3',
+    ]);
+    final parsed = parseMediaName(lists.single.entries.first.name);
     final albumRow = await metadataRowFor(parsed.lookupKey);
     expect(albumRow!.userEdited, isTrue);
     expect(albumRow.title, 'Fixed Album');
@@ -180,9 +193,6 @@ void main() {
   });
 
   // ── track-number edit (renames the entry: the number IS identity) ──
-
-  Future<void> seedAlbum(List<MediaEntry> entries) => LibraryStore.save(
-      [MediaList(id: 'music', title: 'Music', entries: entries)]);
 
   testWidgets('changing the track number renames the library entry',
       (tester) async {
@@ -286,5 +296,234 @@ void main() {
     final parsed = parseMediaName(result.newName!);
     expect(parsed.disc, 2);
     expect(parsed.track, 2);
+  });
+
+  // ── album/year edit (renames the whole album: they ARE the fold) ──
+
+  testWidgets('changing only the year renames every track of the album',
+      (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final t1 = track(1, 'First Song');
+    final other = MediaEntry(
+        name: 'Other Artist - Loose Single (2003) - 03 Road Song.mp3',
+        address: 'c' * 64);
+    await seedAlbum([t1, track(2, 'Second Song'), other]);
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: EditDetailsScreen(
+        entry: t1,
+        ffmpeg: _NoFfmpeg(),
+        postersDirProvider: () async => postersDir,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Year (optional)'), '2006');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final lists = await LibraryStore.load();
+    expect([for (final e in lists.single.entries) e.name], [
+      'Misspelt Artist - Misspelt Album (2006) - 01 First Song.mp3',
+      'Misspelt Artist - Misspelt Album (2006) - 02 Second Song.mp3',
+      other.name, // a different album never moves
+    ]);
+  });
+
+  test(
+      'renaming loose singles to one album/year combines them into a '
+      'single album fold', () async {
+    final a = MediaEntry(
+        name: 'Singer A - Single A (1999) - 01 Song A.mp3',
+        address: 'a' * 64);
+    final b = MediaEntry(
+        name: 'Singer B - Single B (2001) - 02 Song B.mp3',
+        address: 'b' * 64);
+    await seedAlbum([a, b]);
+    final r1 = await renameTrackAlbum(a,
+        album: 'My Album', year: 2006,
+        postersDirProvider: () async => postersDir);
+    expect(r1.error, isNull);
+    final r2 = await renameTrackAlbum(b,
+        album: 'My Album', year: 2006,
+        postersDirProvider: () async => postersDir);
+    expect(r2.error, isNull);
+    final entries = (await LibraryStore.load()).single.entries;
+    expect([for (final e in entries) e.name], [
+      'Singer A - My Album (2006) - 01 Song A.mp3',
+      'Singer B - My Album (2006) - 02 Song B.mp3',
+    ]);
+    // The wall's fold now sees ONE album (a Various Artists compilation).
+    final keys = AlbumKeys(entries);
+    expect(keys.keyFor(parseMediaName(entries.first.name)),
+        keys.keyFor(parseMediaName(entries.last.name)));
+  });
+
+  testWidgets(
+      'a taken track number in the target album is refused, nothing '
+      'renamed', (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final a = MediaEntry(
+        name: 'Singer A - One (2001) - 01 X.mp3', address: 'a' * 64);
+    final b = MediaEntry(
+        name: 'Singer B - Two (2002) - 01 Y.mp3', address: 'b' * 64);
+    await seedAlbum([a, b]);
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: EditDetailsScreen(
+        entry: a,
+        ffmpeg: _NoFfmpeg(),
+        postersDirProvider: () async => postersDir,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Album'), 'Two');
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Year (optional)'), '2002');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    // Refused with an explanation (the silent alternative: the
+    // same-number-different-artist guard splitting the album apart).
+    expect(find.textContaining('already taken'), findsOneWidget);
+    expect(find.text('Edit track details'), findsOneWidget);
+    expect([for (final e in (await LibraryStore.load()).single.entries) e.name],
+        [a.name, b.name]);
+  });
+
+  test(
+      'renameTrackAlbum drops the mbid tag, migrates the per-track row '
+      'and carries the album artwork', () async {
+    final entry = MediaEntry(
+        name: 'The Rolling Stones - Let It Bleed (1969) - '
+            '01 Gimme Shelter {mbid-xyz}.mp3',
+        address: 'd' * 64);
+    await seedAlbum([entry]);
+    final parsed = parseMediaName(entry.name);
+    expect(parsed.lookupKey, 'mbid:xyz');
+    // The matched album row with artwork + a custom track title.
+    File('${postersDir.path}/caa_test.jpg')
+        .writeAsBytesSync([1, 2, 3], flush: true);
+    await saveUserDetails(
+      lookupKey: parsed.lookupKey,
+      title: 'Let It Bleed',
+      year: 1969,
+      posterFile: const Value('caa_test.jpg'),
+      postersDirProvider: () async => postersDir,
+    );
+    await saveUserDetails(
+      lookupKey: trackLookupKey(parsed)!,
+      title: 'Let It Bleed',
+      episodeLabel: const Value('01 · My Name'),
+      postersDirProvider: () async => postersDir,
+    );
+
+    final result = await renameTrackAlbum(entry,
+        album: 'My Mix', year: 2006,
+        postersDirProvider: () async => postersDir);
+    expect(result.error, isNull);
+    expect(result.newName,
+        'The Rolling Stones - My Mix (2006) - 01 Gimme Shelter.mp3');
+    final np = parseMediaName(result.newName!);
+    expect(np.releaseMbid, isNull);
+    // Per-track override moved to the renamed key, marker label kept.
+    expect(await metadataRowFor(trackLookupKey(parsed)!), isNull);
+    final moved = await metadataRowFor(trackLookupKey(np)!);
+    expect(moved!.episodeLabel, '01 · My Name');
+    // Artwork carried as a fresh copy under the new album key.
+    expect(result.carriedPosterFile, isNotNull);
+    expect(
+        File('${postersDir.path}/${result.carriedPosterFile}')
+            .readAsBytesSync(),
+        [1, 2, 3]);
+  });
+
+  testWidgets(
+      'a database match\'s differing canonical title alone never '
+      'renames', (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final t1 = track(1, 'First Song');
+    await seedAlbum([t1]);
+    final parsed = parseMediaName(t1.name);
+    // A matched (NOT user-edited) row whose canonical title differs
+    // from the sanitized file name.
+    await applyRemoteTmdbDetails(
+        lookupKey: parsed.lookupKey,
+        updatedMs: 1,
+        title: 'Fancy: Album',
+        year: 1999);
+    // Warm the service so the editor prefills from the row. (Drive the
+    // scheduled resolve with pumps — whenIdle() awaits a timer-backed
+    // future and hangs in the fake-async zone.)
+    await tester.pumpWidget(const SizedBox());
+    MetadataService.instance.metadataFor(t1);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: EditDetailsScreen(
+        entry: t1,
+        ffmpeg: _NoFfmpeg(),
+        postersDirProvider: () async => postersDir,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Fancy: Album'), findsOneWidget); // prefilled
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Description (optional)'),
+        'Just a description edit.');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    // Untouched album/year fields → the file name stands.
+    expect((await LibraryStore.load()).single.entries.single.name, t1.name);
+    final row = await metadataRowFor(parsed.lookupKey);
+    expect(row!.overview, 'Just a description edit.');
+  });
+
+  testWidgets(
+      'a pre-existing album override (the old display-only edit) heals '
+      'into a rename on Save', (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final t1 = track(1, 'First Song');
+    await seedAlbum([t1, track(2, 'Second Song')]);
+    final parsed = parseMediaName(t1.name);
+    // What the pre-alpha.83 editor stored: a user row that only ever
+    // changed the display, never the grouping.
+    await saveUserDetails(
+      lookupKey: parsed.lookupKey,
+      title: 'My Album',
+      year: 2006,
+      postersDirProvider: () async => postersDir,
+    );
+    // Warm the service so the editor prefills 'My Album' (see the pump
+    // note in the previous test).
+    await tester.pumpWidget(const SizedBox());
+    MetadataService.instance.metadataFor(t1);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: EditDetailsScreen(
+        entry: t1,
+        ffmpeg: _NoFfmpeg(),
+        postersDirProvider: () async => postersDir,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('My Album'), findsOneWidget); // prefilled override
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    // The user's own edit finally lands in the file names.
+    expect([for (final e in (await LibraryStore.load()).single.entries) e.name], [
+      'Misspelt Artist - My Album (2006) - 01 First Song.mp3',
+      'Misspelt Artist - My Album (2006) - 02 Second Song.mp3',
+    ]);
   });
 }
