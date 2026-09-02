@@ -120,7 +120,12 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   dedup, unattended paid batch, .watch-list bundle). The old separate
   tier-encoding flow was deleted 2026-09-02 — quality versions live on
   the batch review page now. The Upload page also points at files
-  from earlier batches still needing attention.
+  from earlier uploads still needing attention. While a session is
+  running (or finished unseen) the doorway swaps the fresh-start
+  button for a live "Upload in progress" card + "Return to the
+  upload" (state-aware since 2026-09-02). The uploader itself is
+  titled plain "Upload" — the word "batch" is kept out of all
+  user-facing copy.
 - Batch setup: Add files / Add a folder, target-list choice as
   done-page-style buttons (`Add to "Music"` + "Choose another
   list…"; music-heavy picks default to Music), and a
@@ -131,7 +136,10 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   else queues into a "Review matches · N of M" carousel after the
   scan — back/forward arrows revisit any card, answering a decided
   card replaces the earlier answer, and review-page rows reopen their
-  card on tap. Music is reviewed one whole album at a time.
+  card on tap. Auto-accepts are never silent (2026-09-02): they get a
+  pre-decided card too, review rows show the matched artwork inline,
+  and reopening lets a wrong automatic answer be replaced. Music is
+  reviewed one whole album at a time.
 - Review page: per-output list, QUALITY checkboxes for video entries
   (Medium/Low/High offered per probe, H.264+AAC MP4, never upscaled;
   Original as-is; each tier uploads per video and folds into the

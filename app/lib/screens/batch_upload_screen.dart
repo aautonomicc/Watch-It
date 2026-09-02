@@ -237,7 +237,9 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
-        title: Text('Batch upload',
+        // "Batch" is pipeline jargon — to the user this is just the
+        // upload, whether it's one file or a folder.
+        title: Text('Upload',
             style: TextStyle(color: t.bone, fontSize: 18)),
       ),
       body: ListView(
@@ -261,7 +263,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
         'Upload a folder of media with automatic naming and metadata: '
         'each file is matched against MusicBrainz (music) or TMDB '
         '(movies and shows), renamed to its canonical W@tch name, and '
-        'uploaded in one unattended batch. Music is reviewed one whole '
+        'uploaded in one unattended pass. Music is reviewed one whole '
         'album at a time, not track by track. Files you already '
         'uploaded — here or with the CLI — are recognized by content '
         'and never paid for twice.',
@@ -350,7 +352,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
               Expanded(
                 child: Text(
                   '$total ${total == 1 ? 'file' : 'files'} from earlier '
-                  'batches still ${total == 1 ? 'needs' : 'need'} '
+                  'uploads still ${total == 1 ? 'needs' : 'need'} '
                   'attention',
                   style: TextStyle(
                       color: t.bone,
@@ -1383,8 +1385,9 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       if (_session.confirmables.isNotEmpty) ...[
         const SizedBox(height: 8),
         Text(
-          'Tap a reviewed file below to reopen its match card and '
-          'change the answer.',
+          'Every match has a card — automatically accepted ones too. '
+          'Tap a file below to see what it matched (title, artwork) '
+          'and change the answer if it\'s wrong.',
           style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
         ),
       ],
@@ -1397,8 +1400,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
         const SizedBox(height: 8),
         Text(
           'Files needing attention are left out of this upload — they '
-          'stay in the batch folder\'s manifest and can be fixed in '
-          'another pass.',
+          'stay in its manifest and can be fixed in another pass.',
           style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
         ),
       ],
@@ -1517,7 +1519,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       const SizedBox(height: 8),
       TextButton(
         onPressed: _session.clear,
-        child: Text('Discard batch', style: TextStyle(color: t.ash)),
+        child: Text('Discard upload', style: TextStyle(color: t.ash)),
       ),
     ];
   }
@@ -1704,6 +1706,17 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
                   _ => t.accent,
                 },
               ),
+              // Matched artwork (poster / album cover) right on the
+              // row — an auto-accepted match must be seen, not taken
+              // on faith.
+              if (e.art != null && File(e.art!).existsSync()) ...[
+                const SizedBox(width: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: Image.file(File(e.art!),
+                      height: 34, fit: BoxFit.contain),
+                ),
+              ],
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -1798,7 +1811,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Text('Batch finished',
+            child: Text('Upload finished',
                 style: TextStyle(
                     color: t.bone,
                     fontSize: 18,
@@ -1820,7 +1833,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       if (_session.bundlePath != null)
         Text(
           'Bundle: ${_session.bundlePath}\nShare this .watch-list file to '
-          'hand the whole batch to another device or person.',
+          'hand everything you uploaded to another device or person.',
           style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
         ),
       const SizedBox(height: 16),

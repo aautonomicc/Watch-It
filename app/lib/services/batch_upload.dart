@@ -352,7 +352,10 @@ class BatchUploadSession extends ChangeNotifier {
   /// card. Everything else — uncertain matches AND no-match-at-all
   /// files — waits for eyes, so a file in no database can get manual
   /// details/artwork or a music/video flip instead of silently landing
-  /// in needs-attention.
+  /// in needs-attention. An auto-accept still gets a card — already
+  /// decided, so the carousel never stops on it, but reopenable from
+  /// the summary so the match (title, art) is visible and a wrong
+  /// automatic answer stays fixable.
   Future<void> _matchOrDefer(String path, String sha, int size,
       MediaProbe? probe, Sidecar? sidecar, ManifestEntry? existing) async {
     final outcome = await _match(path, probe, sidecar: sidecar);
@@ -362,6 +365,10 @@ class BatchUploadSession extends ChangeNotifier {
         outcome.method != 'search';
     if (autoAccept || outcome.skip) {
       _recordOutcome(path, sha, size, outcome, existing);
+      if (autoAccept) {
+        confirmables.add(
+            BatchConfirm._(path, probe, outcome, sha, size)..decided = true);
+      }
     } else {
       confirmables.add(BatchConfirm._(path, probe, outcome, sha, size));
     }
@@ -462,25 +469,27 @@ class BatchUploadSession extends ChangeNotifier {
         _recordOutcome(tr.path, tr.sha, tr.size,
             outcomes[i]!, tr.existing);
       }
-    } else {
-      final first = tracks.first;
-      final guess = guessMusicName(p.basename(first.path));
-      confirmables.add(AlbumConfirm._(
-        [for (final t in tracks) t.path],
-        [for (final t in tracks) t.probe],
-        [for (final t in tracks) t.sha],
-        [for (final t in tracks) t.size],
-        outcomes,
-        album,
-        {
-          'artist': first.probe?.tag('album_artist') ??
-              first.probe?.tag('artist') ??
-              guess.artist,
-          'album': first.probe?.tag('album') ?? guess.album,
-          'year': first.probe?.year,
-        },
-      ));
     }
+    // Auto-accepted albums keep their card too — decided, never shown
+    // by the carousel, but reopenable from the summary so the release
+    // (cover art, track placement) is visible and replaceable.
+    final first = tracks.first;
+    final guess = guessMusicName(p.basename(first.path));
+    confirmables.add(AlbumConfirm._(
+      [for (final t in tracks) t.path],
+      [for (final t in tracks) t.probe],
+      [for (final t in tracks) t.sha],
+      [for (final t in tracks) t.size],
+      outcomes,
+      album,
+      {
+        'artist': first.probe?.tag('album_artist') ??
+            first.probe?.tag('artist') ??
+            guess.artist,
+        'album': first.probe?.tag('album') ?? guess.album,
+        'year': first.probe?.year,
+      },
+    )..decided = autoAccept);
     prepareDone += tracks.length;
     m.save();
     notifyListeners();
