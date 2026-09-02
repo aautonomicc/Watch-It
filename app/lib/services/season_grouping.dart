@@ -57,8 +57,9 @@ class HomeShow extends HomeItem {
 }
 
 /// An album folded into a single wall card: every track of one release
-/// (same parsed album lookup key — the `{mbid-...}` tag, or
-/// artist/album/year). Track `NN` plays the role `SxxEyy` does for TV.
+/// (same [AlbumKeys] fold key — the `{mbid-...}` tag, or album/year with
+/// the per-track artist deliberately left out so compilations fold).
+/// Track `NN` plays the role `SxxEyy` does for TV.
 class HomeAlbum extends HomeItem {
   const HomeAlbum({
     required this.artist,
@@ -173,15 +174,6 @@ class VersionKeys {
   final _byTitle = <String, String>{};
   final _byTitleYear = <String, String>{};
 
-  static void _claim(Map<String, String> map, String key, String value) {
-    final held = map[key];
-    if (held == null) {
-      map[key] = value;
-    } else if (held != value) {
-      map[key] = '';
-    }
-  }
-
   /// The fold key for [parsed]: its own lookupKey, or the unambiguous
   /// imdb-tagged sibling's.
   String keyFor(ParsedName parsed) {
@@ -192,6 +184,92 @@ class VersionKeys {
         : _byTitle[title];
     if (alias == null || alias.isEmpty) return parsed.lookupKey;
     return alias;
+  }
+}
+
+/// `''` marks a key claimed by two different values — never alias.
+void _claim(Map<String, String> map, String key, String value) {
+  final held = map[key];
+  if (held == null) {
+    map[key] = value;
+  } else if (held != value) {
+    map[key] = '';
+  }
+}
+
+/// Fold keys for album grouping. A track's parsed
+/// [ParsedName.lookupKey] embeds the per-track artist, so tracks of one
+/// album that credit different artists — a hand-renamed compilation, the
+/// natural way to organise loose tracks — would each get their own wall
+/// card that all claim the same album. Tracks therefore cluster WITHOUT
+/// the artist: by `{mbid-...}` tag when present, else by album title +
+/// year. Missing pieces adopt an unambiguous sibling's (a year-less
+/// track takes the only year its album name carries; an untagged track
+/// takes the only mbid claiming its album title/year, mirroring
+/// [VersionKeys] for movies). Safety guard: when a cluster holds the
+/// same track number credited to two different artists it is really two
+/// same-named albums (two "Greatest Hits"), and the cluster splits back
+/// out per artist — except mbid clusters, where the tag says one release
+/// by declaration.
+class AlbumKeys {
+  AlbumKeys(Iterable<MediaEntry> entries) {
+    final parsed = <ParsedName>[];
+    for (final e in entries) {
+      final p = parseMediaName(e.name);
+      if (!p.isTrack) continue;
+      parsed.add(p);
+      final album = p.title.trim().toLowerCase();
+      if (p.releaseMbid != null) {
+        _claim(_mbidByAlbum, album, 'mbid:${p.releaseMbid}');
+        if (p.year != null) {
+          _claim(_mbidByAlbumYear, '$album|${p.year}', 'mbid:${p.releaseMbid}');
+        }
+      }
+      if (p.year != null) _claim(_yearByAlbum, album, '${p.year}');
+    }
+    // A cluster whose track number is credited to two different artists
+    // is two distinct albums sharing a name — split it per artist.
+    final artistsByNumber = <String, Map<String, Set<String>>>{};
+    for (final p in parsed) {
+      artistsByNumber
+          .putIfAbsent(_clusterFor(p), () => {})
+          .putIfAbsent('${p.disc ?? 1}-${p.track}', () => {})
+          .add(p.artist!.trim().toLowerCase());
+    }
+    for (final e in artistsByNumber.entries) {
+      if (e.key.startsWith('mbid:')) continue;
+      if (e.value.values.any((artists) => artists.length > 1)) {
+        _split.add(e.key);
+      }
+    }
+  }
+
+  final _mbidByAlbum = <String, String>{};
+  final _mbidByAlbumYear = <String, String>{};
+  final _yearByAlbum = <String, String>{};
+  final _split = <String>{};
+
+  String _clusterFor(ParsedName p) {
+    if (p.releaseMbid != null) return 'mbid:${p.releaseMbid}';
+    final album = p.title.trim().toLowerCase();
+    final mbid = p.year != null
+        ? _mbidByAlbumYear['$album|${p.year}']
+        : _mbidByAlbum[album];
+    if (mbid != null && mbid.isNotEmpty) return mbid;
+    var year = '${p.year ?? ''}';
+    if (year.isEmpty) {
+      final adopted = _yearByAlbum[album];
+      if (adopted != null && adopted.isNotEmpty) year = adopted;
+    }
+    return 'music:$album:$year';
+  }
+
+  /// The fold key for track [parsed]: its cluster, plus the artist when
+  /// the cluster proved to be two same-named albums.
+  String keyFor(ParsedName parsed) {
+    final cluster = _clusterFor(parsed);
+    if (!_split.contains(cluster)) return cluster;
+    return '$cluster:${parsed.artist!.trim().toLowerCase()}';
   }
 }
 
@@ -209,10 +287,11 @@ List<HomeItem> groupSeasons(List<MediaEntry> entries) {
   final byTitle = <String, _VersionBuilder>{};
   final byAlbum = <String, _AlbumBuilder>{};
   final keys = VersionKeys(entries);
+  final albumKeys = AlbumKeys(entries);
   for (final entry in entries) {
     final parsed = parseMediaName(entry.name);
     if (parsed.isTrack) {
-      final key = parsed.lookupKey;
+      final key = albumKeys.keyFor(parsed);
       var builder = byAlbum[key];
       if (builder == null) {
         items.add(null); // reserve the slot; filled in below

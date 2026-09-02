@@ -99,6 +99,77 @@ void main() {
       expect((items[1] as HomeAlbum).album, 'Other Album');
     });
 
+    test('per-track artists fold into one Various Artists album '
+        'without an mbid tag', () {
+      // Loose tracks hand-renamed into one album, each keeping its own
+      // artist credit — must be ONE card, not one card per artist.
+      MediaEntry t(String artist, int n, String title) => MediaEntry(
+          name: '$artist - Road Mix (2002) - 0$n $title.mp3',
+          address: _addr(60 + n));
+      final items = groupShows([
+        t('Singer A', 1, 'Opener'),
+        t('Singer B', 2, 'Middle'),
+        t('Singer C', 3, 'Closer'),
+      ]);
+      final album = items.single as HomeAlbum;
+      expect(album.artist, 'Various Artists');
+      expect(album.album, 'Road Mix');
+      expect(album.isCompilation, isTrue);
+      expect(
+          [for (final e in album.tracks) parseMediaName(e.name).trackMarker],
+          ['01', '02', '03']);
+    });
+
+    test('a year-less track adopts its album\'s only year and folds', () {
+      final items = groupSeasons([
+        MediaEntry(
+            name: 'Some Artist - An Album (1969) - 01 First.mp3',
+            address: _addr(70)),
+        MediaEntry(
+            name: 'Some Artist - An Album - 02 Second.mp3',
+            address: _addr(71)),
+      ]);
+      final album = items.single as HomeAlbum;
+      expect(album.tracks, hasLength(2));
+      expect(album.year, 1969);
+      expect(album.isCompilation, isFalse);
+    });
+
+    test('an untagged track adopts its album\'s only mbid and folds', () {
+      final items = groupSeasons([
+        _track(1, 'Gimme Shelter'),
+        MediaEntry(
+            name: 'The Rolling Stones - Let It Bleed (1969) - '
+                '02 Love In Vain.mp3',
+            address: _addr(72)),
+      ]);
+      final album = items.single as HomeAlbum;
+      expect(album.tracks, hasLength(2));
+    });
+
+    test('two same-named albums by different artists with colliding '
+        'track numbers stay separate', () {
+      MediaEntry t(String artist, int n, String title, int addr) =>
+          MediaEntry(
+              name: '$artist - Greatest Hits - 0$n $title.mp3',
+              address: _addr(addr));
+      final items = groupSeasons([
+        t('Band X', 1, 'X One', 80),
+        t('Band X', 2, 'X Two', 81),
+        t('Band Y', 1, 'Y One', 82),
+        t('Band Y', 2, 'Y Two', 83),
+      ]);
+      expect(items, hasLength(2));
+      final x = items[0] as HomeAlbum;
+      final y = items[1] as HomeAlbum;
+      expect(x.artist, 'Band X');
+      expect(y.artist, 'Band Y');
+      expect(x.isCompilation, isFalse);
+      expect(y.isCompilation, isFalse);
+      expect(x.tracks, hasLength(2));
+      expect(y.tracks, hasLength(2));
+    });
+
     test('groupShows passes albums through untouched', () {
       final items = groupShows([_track(1, 'Gimme Shelter')]);
       expect(items.single, isA<HomeAlbum>());
@@ -295,6 +366,26 @@ void main() {
       // Square cover art frame (1:1, not the 2:3 poster shape).
       final box = tester.getSize(find.byType(ClipRRect));
       expect(box.width, box.height);
+    });
+
+    testWidgets('AlbumCard credits a compilation Various Artists, not '
+        'the first track\'s artist', (tester) async {
+      final comp = groupSeasons([
+        MediaEntry(
+            name: 'Singer A - Road Mix (2002) - 01 Opener.mp3',
+            address: _addr(410)),
+        MediaEntry(
+            name: 'Singer B - Road Mix (2002) - 02 Middle.mp3',
+            address: _addr(411)),
+      ]).single as HomeAlbum;
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: Scaffold(
+          body: AlbumCard(group: comp, tokens: WiTokens.dark, onTap: () {}),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('Various Artists · 2 tracks'), findsOneWidget);
     });
 
     HomeArtist artist() => groupShows([

@@ -361,7 +361,11 @@ class _AlbumScreenState extends State<AlbumScreen>
                 const SizedBox(height: 4),
                 Text(
                   [
-                    meta.artist ?? group.artist,
+                    // A compilation's group credit beats any single
+                    // track's row.
+                    group.isCompilation
+                        ? group.artist
+                        : meta.artist ?? group.artist,
                     if (meta.year != null) '${meta.year}',
                     '$count ${count == 1 ? 'track' : 'tracks'}',
                   ].join(' · '),

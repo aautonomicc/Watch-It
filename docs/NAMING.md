@@ -71,6 +71,13 @@ Artist - Album (Year) - NN Title {mbid-<release-mbid>}.flac
 - No mbid tag (case-B custom albums) still folds and displays — artist, album,
   year, and track names all come from the file name; there is just no cover
   fetch.
+- Folding ignores the artist part: tracks sharing an album name (and year, or
+  mbid tag) group into one card even when each track credits its own artist —
+  a hand-renamed compilation shows as a single **Various Artists** album. A
+  year-less track adopts the year (or mbid) its album name carries elsewhere
+  in the list. Guard: if the same track number is credited to two different
+  artists, they are really two same-named albums (two `Greatest Hits`) and
+  stay separate.
 - Audio files without a track marker (`BegBlag.mp3`) stay single entries, typed
   music.
 
