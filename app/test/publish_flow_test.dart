@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watchit/screens/batch_upload_screen.dart';
 import 'package:watchit/screens/publish_screen.dart';
+import 'package:watchit/services/batch_upload.dart';
 import 'package:watchit/theme/tokens.dart';
 
 import 'fake_embedded_http.dart';
@@ -19,12 +20,14 @@ void main() {
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    BatchUploadSession.resetForTesting();
     fake = FakeEmbeddedHttp();
     HttpOverrides.global = fake;
     tempDir = Directory.systemTemp.createTempSync('wi-publish-test');
   });
 
   tearDown(() {
+    BatchUploadSession.resetForTesting();
     HttpOverrides.global = null;
     tempDir.deleteSync(recursive: true);
   });
@@ -103,7 +106,29 @@ entries:
     await tester.pumpAndSettle();
     expect(
         find.textContaining(
-            '1 file from earlier batches still needs attention'),
+            '1 file from earlier uploads still needs attention'),
         findsOneWidget);
+  });
+
+  testWidgets(
+      'running session: doorway shows the in-progress card, not the '
+      'fresh-start button, and returns straight to the upload',
+      (tester) async {
+    final session = BatchUploadSession.instance;
+    session.stage = BatchStage.uploading;
+    session.uploadDone = 1;
+    session.uploadTotal = 3;
+    await openPublish(tester);
+    expect(find.text('Upload in progress'), findsOneWidget);
+    expect(find.text('Uploading · 2 of 3'), findsOneWidget);
+    expect(find.text('Upload files or folders'), findsNothing);
+    await tester.tap(find.text('Return to the upload'));
+    // Plain pumps — the uploading page's indeterminate progress bar
+    // never settles.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    // Lands on the uploader showing the running batch, not setup.
+    expect(find.byType(BatchUploadScreen), findsOneWidget);
+    expect(find.text('Add files'), findsNothing);
   });
 }

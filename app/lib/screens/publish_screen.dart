@@ -6,7 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/media_list.dart';
 import '../services/batch_upload.dart'
-    show AttentionBatch, scanAttentionBatches;
+    show AttentionBatch, BatchStage, BatchUploadSession, scanAttentionBatches;
 import '../services/ffmpeg.dart';
 import '../services/publish_api.dart';
 import '../theme/tokens.dart';
@@ -57,14 +57,28 @@ class _PublishScreenState extends State<PublishScreen> {
   late final PublishApi _api =
       PublishApi(base: widget.apiBase, token: widget.apiToken);
 
+  final BatchUploadSession _session = BatchUploadSession.instance;
   WalletStatus? _wallet;
   List<AttentionBatch> _attention = [];
 
   @override
   void initState() {
     super.initState();
+    // The doorway must not be state-blind: while a batch runs (or
+    // finished unseen) it shows where things stand, live.
+    _session.addListener(_onSession);
     _loadWallet();
     _loadAttention();
+  }
+
+  @override
+  void dispose() {
+    _session.removeListener(_onSession);
+    super.dispose();
+  }
+
+  void _onSession() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadWallet() async {
@@ -134,21 +148,25 @@ class _PublishScreenState extends State<PublishScreen> {
           const SizedBox(height: 16),
           _walletRow(t),
           const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: _openBatchUploader,
-            icon: const Icon(Icons.cloud_upload_outlined),
-            label: const Text('Upload files or folders'),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'One file or a whole folder: music and video are matched '
-            'against MusicBrainz/TMDB, renamed to canonical W@tch '
-            'names, and uploaded in one unattended batch — files you '
-            'already uploaded are recognized and never paid for twice. '
-            'Videos can be encoded into several quality versions on the '
-            'review page.',
-            style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
-          ),
+          if (!_session.idle)
+            _runningCard(t)
+          else ...[
+            FilledButton.icon(
+              onPressed: _openBatchUploader,
+              icon: const Icon(Icons.cloud_upload_outlined),
+              label: const Text('Upload files or folders'),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'One file or a whole folder: music and video are matched '
+              'against MusicBrainz/TMDB, renamed to canonical W@tch '
+              'names, and uploaded in one unattended pass — files you '
+              'already uploaded are recognized and never paid for twice. '
+              'Videos can be encoded into several quality versions on the '
+              'review page.',
+              style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+            ),
+          ],
           if (attentionTotal > 0) ...[
             const SizedBox(height: 16),
             Row(
@@ -160,7 +178,7 @@ class _PublishScreenState extends State<PublishScreen> {
                   child: Text(
                     '$attentionTotal '
                     '${attentionTotal == 1 ? 'file' : 'files'} from '
-                    'earlier batches still '
+                    'earlier uploads still '
                     '${attentionTotal == 1 ? 'needs' : 'need'} '
                     'attention — open the uploader to fix '
                     '${attentionTotal == 1 ? 'it' : 'them'}.',
@@ -171,6 +189,62 @@ class _PublishScreenState extends State<PublishScreen> {
               ],
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// An upload session is already running (or finished unseen) — say
+  /// so plainly, with where it stands and one tap straight back to it,
+  /// instead of the state-blind setup copy that made a running batch
+  /// look like a fresh start.
+  Widget _runningCard(WiTokens t) {
+    final s = _session;
+    final undecided = s.undecidedConfirmCount;
+    final status = switch (s.stage) {
+      BatchStage.preparing => s.reviewingMatches
+          ? 'Waiting for your review — $undecided '
+              '${undecided == 1 ? 'match' : 'matches'} to check'
+          : 'Matching files · ${s.prepareDone} of ${s.prepareTotal}',
+      BatchStage.review => 'Matched and ready — waiting for your go-ahead',
+      BatchStage.uploading => 'Uploading · '
+          '${(s.uploadDone + 1).clamp(1, s.uploadTotal == 0 ? 1 : s.uploadTotal)} '
+          'of ${s.uploadTotal}',
+      BatchStage.done => 'Finished — the results are waiting',
+      BatchStage.idle => '',
+    };
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: t.ink2,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: t.accent),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.cloud_upload_outlined, color: t.accent, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Upload in progress',
+                    style: TextStyle(
+                        color: t.bone,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(status,
+              style: TextStyle(color: t.boneDim, fontSize: 12.5)),
+          const SizedBox(height: 10),
+          FilledButton.icon(
+            onPressed: _openBatchUploader,
+            icon: const Icon(Icons.arrow_forward),
+            label: const Text('Return to the upload'),
+          ),
         ],
       ),
     );

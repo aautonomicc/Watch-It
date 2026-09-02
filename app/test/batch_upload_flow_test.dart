@@ -192,6 +192,10 @@ void main() {
     // the tags match auto-accepted. Accepting the unmatched outcome
     // lands it needs-attention.
     expect(confirmSeen, [confirmMe.path, noMatch.path]);
+    // The auto-accepted file never paused the flow, but its match is
+    // not silent either: a decided card, reopenable from the summary.
+    expect(session.confirmables.length, 3);
+    expect(session.canReopen(auto.path), isTrue);
     expect(session.readyCount, 2);
     expect(session.attentionCount, 1);
     expect(session.stage, BatchStage.review);
@@ -471,6 +475,12 @@ void main() {
         expect(e.ids['release_mbid'], 'r1');
         expect(e.type, 'music');
       }
+      // The silent auto-accept still left a visible trace: one decided
+      // album card, reopenable from the summary for any of its tracks.
+      expect(session.confirmables.length, 1);
+      final card = session.confirmables.single as AlbumConfirm;
+      expect(card.decided, isTrue);
+      expect(session.canReopen(card.tracks.first), isTrue);
     });
 
     test('search match raises ONE album card, not track by track',
@@ -853,6 +863,47 @@ void main() {
     expect(session.entries.length, 2);
   });
 
+  test('auto-accepted match gets a decided, reopenable card', () async {
+    final auto = mediaFile('quiet.mp4', 69);
+    final session = BatchUploadSession.instance;
+    session.probeOverride = (path) async => null;
+    session.matchOverride = scriptedMatcher({
+      'quiet.mp4': cli.MatchOutcome(
+          type: 'video',
+          name: 'Quiet Movie (1999).mp4',
+          method: 'tags',
+          confidence: 'high',
+          note: 'Quiet Movie (1999)'),
+    });
+    await session.startPrepare(
+      api: api(),
+      paths: [auto.path],
+      listName: 'Quiet',
+      workDir: dirIn('work-quiet'),
+      configDir: dirIn('config-quiet'),
+    );
+    while (session.stage == BatchStage.preparing) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    // Straight to the summary — the flow never paused…
+    expect(session.stage, BatchStage.review);
+    expect(session.readyCount, 1);
+    // …but the match is inspectable and replaceable, not silent.
+    final card = session.confirmables.single as BatchConfirm;
+    expect(card.decided, isTrue);
+    expect(session.canReopen(auto.path), isTrue);
+    session.reopenConfirmForSource(auto.path);
+    expect(session.pendingConfirm!.outcome.name, 'Quiet Movie (1999).mp4');
+    session.confirmSkip();
+    while (session.stage == BatchStage.preparing) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(session.stage, BatchStage.review);
+    expect(session.readyCount, 0);
+    expect(session.skippedCount, 1);
+    expect(session.entries.length, 1);
+  });
+
   test('done: batch auto-adds to the chosen list and seeds local '
       'metadata from its own bundle', () async {
     fake.wallet = {'configured': true, 'address': '0xabc', 'storage': 'file'};
@@ -1106,7 +1157,7 @@ entries:
     ));
     await tester.pumpAndSettle();
     expect(
-        find.text('1 file from earlier batches still needs attention'),
+        find.text('1 file from earlier uploads still needs attention'),
         findsOneWidget);
 
     // The Review flow re-runs prepare over the batch's own work dir;
@@ -1128,7 +1179,7 @@ entries:
     });
     await tester.pumpAndSettle();
     expect(
-        find.textContaining('from earlier batches still'), findsNothing);
+        find.textContaining('from earlier uploads still'), findsNothing);
   });
 
   testWidgets('carousel header: N of M with back/forward arrows',
