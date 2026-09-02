@@ -161,9 +161,10 @@ class AlbumCard extends StatelessWidget {
 }
 
 /// All of an artist's albums folded into one wall card (the music mirror
-/// of [ShowCard]): a 2×2 collage of album covers with the artist name
-/// and album/track counts underneath. Tap opens the artist page, which
-/// lists the albums.
+/// of [ShowCard]): an adaptive collage of album covers — each album
+/// shown once (halves for 2, a half plus two quarters for 3, a 2×2 grid
+/// for 4+) — with the artist name and album/track counts underneath.
+/// Tap opens the artist page, which lists the albums.
 class ArtistCard extends StatelessWidget {
   const ArtistCard({
     super.key,
@@ -187,11 +188,10 @@ class ArtistCard extends StatelessWidget {
     final tracks = group.trackCount;
     final badge =
         groupDownloadBadge(t, [for (final a in albums) ...a.tracks]);
-    // One collage quarter — fewer than four albums cycle their covers
-    // around the grid.
+    // One collage cell showing one album's cover — each album appears
+    // exactly once; the layout below adapts to how many there are.
     Widget cell(int i) {
-      final album = albums[i % albums.length];
-      final m = MetadataService.instance.metadataFor(album.tracks.first);
+      final m = MetadataService.instance.metadataFor(albums[i].tracks.first);
       return Expanded(
         child: posterImage(m, fit: BoxFit.cover) ??
             Container(
@@ -200,6 +200,43 @@ class ArtistCard extends StatelessWidget {
             ),
       );
     }
+
+    // Adaptive collage: 2 albums = side-by-side halves, 3 = one
+    // full-height half plus two stacked quarters, 4+ = a 2×2 grid of
+    // the first four.
+    final collage = switch (albums.length) {
+      1 => Row(children: [cell(0)]),
+      2 => Row(children: [
+          cell(0),
+          const SizedBox(width: 1),
+          cell(1),
+        ]),
+      3 => Row(children: [
+          cell(0),
+          const SizedBox(width: 1),
+          Expanded(
+              child: Column(children: [
+            cell(1),
+            const SizedBox(height: 1),
+            cell(2),
+          ])),
+        ]),
+      _ => Column(children: [
+          Expanded(
+              child: Row(children: [
+            cell(0),
+            const SizedBox(width: 1),
+            cell(1),
+          ])),
+          const SizedBox(height: 1),
+          Expanded(
+              child: Row(children: [
+            cell(2),
+            const SizedBox(width: 1),
+            cell(3),
+          ])),
+        ]),
+    };
 
     return InkWell(
       onTap: onTap,
@@ -217,21 +254,7 @@ class ArtistCard extends StatelessWidget {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    Column(children: [
-                      Expanded(
-                          child: Row(children: [
-                        cell(0),
-                        const SizedBox(width: 1),
-                        cell(1),
-                      ])),
-                      const SizedBox(height: 1),
-                      Expanded(
-                          child: Row(children: [
-                        cell(2),
-                        const SizedBox(width: 1),
-                        cell(3),
-                      ])),
-                    ]),
+                    collage,
                     ?badge,
                   ],
                 ),

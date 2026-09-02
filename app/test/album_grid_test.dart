@@ -414,6 +414,59 @@ void main() {
       expect(box.width, box.height);
     });
 
+    MediaEntry albumTrack(int year, int addr) => MediaEntry(
+        name: 'The Rolling Stones - Album $year ($year) - 01 Opener.mp3',
+        address: _addr(addr));
+
+    Future<void> pumpArtistCard(WidgetTester tester, int albums) async {
+      final group = groupShows([
+        for (var i = 0; i < albums; i++) albumTrack(1964 + i, 420 + i),
+      ]).single as HomeArtist;
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: Scaffold(
+          body: ArtistCard(group: group, tokens: WiTokens.dark, onTap: () {}),
+        ),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('ArtistCard collage shows each album once — halves for 2',
+        (tester) async {
+      await pumpArtistCard(tester, 2);
+      // One fallback cover per album, never cycled to fill a 2×2 grid.
+      final icons = find.byIcon(Icons.album_outlined);
+      expect(icons, findsNWidgets(2));
+      // Side-by-side full-height halves: same centre height, distinct x.
+      final a = tester.getCenter(icons.at(0));
+      final b = tester.getCenter(icons.at(1));
+      expect(a.dy, b.dy);
+      expect(a.dx, isNot(b.dx));
+    });
+
+    testWidgets('ArtistCard collage for 3 = one half plus two quarters',
+        (tester) async {
+      await pumpArtistCard(tester, 3);
+      final icons = find.byIcon(Icons.album_outlined);
+      expect(icons, findsNWidgets(3));
+      final first = tester.getCenter(icons.at(0));
+      final upper = tester.getCenter(icons.at(1));
+      final lower = tester.getCenter(icons.at(2));
+      // First album fills the left half (vertically centred between the
+      // two stacked right-hand quarters).
+      expect(first.dx, lessThan(upper.dx));
+      expect(upper.dx, lower.dx);
+      expect(upper.dy, lessThan(first.dy));
+      expect(lower.dy, greaterThan(first.dy));
+    });
+
+    testWidgets('ArtistCard collage for 4+ albums is the 2×2 grid',
+        (tester) async {
+      await pumpArtistCard(tester, 5);
+      // Only the first four albums shown, one cell each.
+      expect(find.byIcon(Icons.album_outlined), findsNWidgets(4));
+    });
+
     testWidgets('ArtistScreen lists the albums; tapping one opens its '
         'album page', (tester) async {
       await tester.pumpWidget(MaterialApp(
