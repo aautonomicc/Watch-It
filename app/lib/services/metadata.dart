@@ -3,7 +3,7 @@ import 'package:watchit_naming/watchit_naming.dart';
 import '../models/media_list.dart';
 
 export 'package:watchit_naming/watchit_naming.dart'
-    show ParsedName, parseMediaName;
+    show ParsedName, parseMediaName, renumberedMusicFileName;
 
 /// Display metadata for a media entry: artwork, description, year,
 /// category.

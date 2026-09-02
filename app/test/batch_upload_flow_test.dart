@@ -1219,4 +1219,129 @@ entries:
     await tester.pump();
     expect(find.text('Review matches · 1 of 2'), findsOneWidget);
   });
+
+  // ── previous-batch isolation and management ──────────────────────────
+
+  test('batchDirName: a fresh slugged dir per start time — new batches '
+      'never inherit an old manifest', () {
+    expect(batchDirName('Music', now: DateTime(2026, 9, 2, 15, 30)),
+        'Music-20260902-153000');
+    expect(batchDirName('My uploads', now: DateTime(2026, 9, 2, 15, 30)),
+        'My-uploads-20260902-153000');
+    expect(batchDirName('', now: DateTime(2026, 1, 1)),
+        'batch-20260101-000000');
+    expect(batchDirName('Music', now: DateTime(2026, 9, 2, 15, 30)),
+        isNot(batchDirName('Music', now: DateTime(2026, 9, 2, 15, 31))));
+  });
+
+  test('scanPreviousBatches: every batch with counts; dismiss flips '
+      'needs-attention to skipped; delete removes the dir', () async {
+    final lost = mediaFile('lost2.mp4', 70);
+    final root = dirIn('batch_uploads2');
+    final a = Directory('${root.path}/att-batch')..createSync();
+    File('${a.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "Attention Batch"
+created: "2026-09-02T10:00:00"
+entries:
+  - source: "${lost.path}"
+    status: "needs-attention"
+  - source: "/gone/missing.mp4"
+    status: "needs-attention"
+  - source: "${lost.path}"
+    status: "uploaded"
+''');
+    final b = Directory('${root.path}/done-batch')..createSync();
+    File('${b.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "Done Batch"
+created: "2026-09-01T10:00:00"
+entries:
+  - source: "${lost.path}"
+    status: "uploaded"
+''');
+
+    final batches = await scanPreviousBatches(root);
+    expect([for (final x in batches) x.listName],
+        ['Attention Batch', 'Done Batch']); // newest first
+    final att = batches.first;
+    expect(att.counts,
+        {'needs-attention': 2, 'uploaded': 1});
+    // Only files still on disk are reviewable.
+    expect(att.attentionSources, [lost.path]);
+    expect(batches.last.needsAttention, isFalse);
+
+    // Dismiss: the manifest's needs-attention rows flip to skipped, so
+    // the attention scan stops surfacing the batch.
+    dismissBatch(att);
+    expect(await scanAttentionBatches(root), isEmpty);
+    final rescanned = await scanPreviousBatches(root);
+    expect(rescanned.first.counts,
+        {'skipped': 2, 'uploaded': 1});
+
+    // Delete: the whole work dir goes.
+    deleteBatch(rescanned.first);
+    expect(a.existsSync(), isFalse);
+    expect([for (final x in await scanPreviousBatches(root)) x.listName],
+        ['Done Batch']);
+  });
+
+  testWidgets('previous-uploads card: Dismiss clears the attention '
+      'line, Delete (after confirm) removes the batch row',
+      (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final lost = mediaFile('lost3.mp4', 71);
+    final root = dirIn('batch_uploads3');
+    final a = Directory('${root.path}/att-batch')..createSync();
+    File('${a.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "Needs Eyes"
+created: "2026-09-02T10:00:00"
+entries:
+  - source: "${lost.path}"
+    status: "needs-attention"
+''');
+    final b = Directory('${root.path}/done-batch')..createSync();
+    File('${b.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "All Done"
+created: "2026-09-01T10:00:00"
+entries:
+  - source: "${lost.path}"
+    status: "uploaded"
+''');
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: BatchUploadScreen(
+          apiBase: FakeEmbeddedHttp.base,
+          batchRootProvider: () async => root),
+    ));
+    await tester.pumpAndSettle();
+    expect(
+        find.text('1 file from earlier uploads still needs attention'),
+        findsOneWidget);
+    expect(find.textContaining('Needs Eyes'), findsOneWidget);
+    expect(find.textContaining('All Done'), findsOneWidget);
+    expect(find.text('1 uploaded'), findsOneWidget);
+
+    await tester.tap(find.text('Dismiss'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('from earlier uploads still'),
+        findsNothing);
+    expect(find.text('Previous uploads'), findsOneWidget);
+    expect(find.text('1 skipped'), findsOneWidget);
+
+    // Delete the dismissed batch (rows sort newest first, so its
+    // delete button is the first one) — confirm dialog, then gone.
+    await tester.tap(find.byTooltip('Delete batch').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Delete this batch\'s records?'), findsOneWidget);
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    expect(a.existsSync(), isFalse);
+    expect(find.textContaining('Needs Eyes'), findsNothing);
+    expect(find.textContaining('All Done'), findsOneWidget);
+  });
 }

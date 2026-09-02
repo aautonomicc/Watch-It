@@ -1355,6 +1355,21 @@ class BatchUploadSession extends ChangeNotifier {
   /// Abort whatever is running and forget the session (the manifest and
   /// any uploads already paid for stay on disk / in the ledger).
   void clear() {
+    // A fully successful batch is closed for good when the user leaves
+    // the done page — reclaim its working artwork and any encode
+    // leftovers (encodes can be GBs). The manifest, datamaps, and
+    // bundle stay: they are the upload's record.
+    if (stage == BatchStage.done &&
+        failedCount == 0 &&
+        attentionCount == 0 &&
+        workDir != null) {
+      for (final sub in ['encodes', 'art']) {
+        try {
+          Directory(p.join(workDir!.path, sub))
+              .deleteSync(recursive: true);
+        } catch (_) {}
+      }
+    }
     _aborted = true;
     _mb?.close();
     _tmdb?.close();
@@ -1504,8 +1519,41 @@ class AttentionBatch {
 /// with unresolved needs-attention entries. Reviewing one re-runs
 /// prepare over just those files in the batch's own work dir, under its
 /// original list.
-Future<List<AttentionBatch>> scanAttentionBatches(Directory root) async {
-  final result = <AttentionBatch>[];
+Future<List<AttentionBatch>> scanAttentionBatches(Directory root) async => [
+      for (final b in await scanPreviousBatches(root))
+        if (b.needsAttention)
+          AttentionBatch(b.workDir, b.listName, b.attentionSources),
+    ];
+
+/// One earlier batch's work dir + manifest summary — the setup page's
+/// "Previous uploads" management list. Every batch with a readable
+/// manifest appears (finished ones too), so old runs can be reviewed,
+/// dismissed, or deleted instead of silently piling up on disk.
+class PreviousBatch {
+  PreviousBatch(
+      this.workDir, this.listName, this.created, this.counts,
+      this.attentionSources);
+
+  final Directory workDir;
+  final String listName;
+
+  /// The manifest's creation time, null when it never recorded one.
+  final DateTime? created;
+
+  /// Entry count per manifest status (`uploaded`, `needs-attention`…).
+  final Map<String, int> counts;
+
+  /// Source paths of the needs-attention entries, existing files only —
+  /// what the Review button re-runs prepare over.
+  final List<String> attentionSources;
+
+  bool get needsAttention => attentionSources.isNotEmpty;
+}
+
+/// Every batch work dir under [root] with a readable manifest, newest
+/// first.
+Future<List<PreviousBatch>> scanPreviousBatches(Directory root) async {
+  final result = <PreviousBatch>[];
   try {
     if (!root.existsSync()) return result;
     for (final dir in root.listSync()) {
@@ -1514,19 +1562,71 @@ Future<List<AttentionBatch>> scanAttentionBatches(Directory root) async {
       if (!file.existsSync()) continue;
       try {
         final m = Manifest.load(file);
-        final sources = [
-          for (final e in m.entries)
-            if (e.status == 'needs-attention' &&
-                File(e.source).existsSync())
-              e.source,
-        ];
-        if (sources.isNotEmpty) {
-          result.add(AttentionBatch(dir, m.listName, sources));
+        final counts = <String, int>{};
+        for (final e in m.entries) {
+          counts[e.status] = (counts[e.status] ?? 0) + 1;
         }
+        result.add(PreviousBatch(
+          dir,
+          m.listName,
+          DateTime.tryParse(m.created ?? ''),
+          counts,
+          [
+            for (final e in m.entries)
+              if (e.status == 'needs-attention' &&
+                  File(e.source).existsSync())
+                e.source,
+          ],
+        ));
       } catch (_) {
         // Unreadable manifest — skip the batch.
       }
     }
   } catch (_) {}
+  result.sort((a, b) => (b.created ?? DateTime(0))
+      .compareTo(a.created ?? DateTime(0)));
   return result;
+}
+
+/// Dismiss [batch]: its needs-attention entries are marked `skipped` in
+/// the manifest, so the attention scan stops surfacing it. Nothing else
+/// changes — uploads stay in the ledger, the bundle stays on disk, and
+/// the files can always go through a fresh batch later.
+void dismissBatch(PreviousBatch batch) {
+  final file =
+      File(p.join(batch.workDir.path, 'watchit-manifest.yaml'));
+  final m = Manifest.load(file);
+  for (final e in m.entries) {
+    if (e.status == 'needs-attention') e.status = 'skipped';
+  }
+  m.save();
+}
+
+/// Delete [batch]'s whole work dir — manifest, datamaps, bundle, art,
+/// and any encode leftovers. Uploaded files themselves live on the
+/// network (and in the shared ledger), so they are never re-paid even
+/// after their batch records are gone.
+void deleteBatch(PreviousBatch batch) {
+  try {
+    batch.workDir.deleteSync(recursive: true);
+  } catch (_) {}
+}
+
+/// Directory name for a new batch under `<support>/batch_uploads`: the
+/// list-name slug plus a start timestamp, so every batch gets a FRESH
+/// work dir. Reusing one dir per list made every later stage of a new
+/// batch walk the old batch's manifest too — stale counts, and
+/// abandoned `ready` files joining the estimate and the paid upload.
+/// Cross-batch dedup is the content-hash ledger's job, not the
+/// manifest's.
+String batchDirName(String listName, {DateTime? now}) {
+  final slug = listName
+      .replaceAll(RegExp(r'[^A-Za-z0-9._ -]'), '_')
+      .trim()
+      .replaceAll(' ', '-');
+  final t = now ?? DateTime.now();
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${slug.isEmpty ? 'batch' : slug}-'
+      '${t.year}${two(t.month)}${two(t.day)}-'
+      '${two(t.hour)}${two(t.minute)}${two(t.second)}';
 }
