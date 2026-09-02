@@ -72,6 +72,8 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
   late final TextEditingController _title;
   late final TextEditingController _year;
   late final TextEditingController _overview;
+  late final TextEditingController _artist;
+  late final TextEditingController _trackTitle;
 
   /// The entry's current metadata at open time — prefills the fields.
   late final MediaMetadata _meta;
@@ -99,6 +101,12 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
   bool get _episodeScope =>
       _scope == EditDetailsScope.entry && _parsed.isEpisode;
 
+  /// A music track: every field is editable — artist/album/year/
+  /// description/artwork write the album's shared row, the track title
+  /// its own per-track row (mistakes in any of them stay fixable).
+  bool get _trackScope =>
+      _scope == EditDetailsScope.entry && _parsed.isTrack;
+
   @override
   void initState() {
     super.initState();
@@ -115,6 +123,14 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
             ? episodeNameFromLabel(_meta.episodeLabel) ?? ''
             : _meta.title);
     _year = TextEditingController(text: _meta.year?.toString() ?? '');
+    _artist = TextEditingController(
+        text: _meta.artist ?? _parsed.artist ?? '');
+    _trackTitle = TextEditingController(
+        text: _trackScope
+            ? episodeNameFromLabel(_meta.episodeLabel) ??
+                _parsed.trackTitle ??
+                ''
+            : '');
     _overview = TextEditingController(
         text: switch (_scope) {
       EditDetailsScope.show => _meta.showOverview ?? '',
@@ -126,11 +142,15 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
 
   Future<void> _load() async {
     final row = await metadataRowFor(_lookupKey);
+    final trackKey = _trackScope ? trackLookupKey(_parsed) : null;
+    final trackRow =
+        trackKey == null ? null : await metadataRowFor(trackKey);
     final ffmpegAvailable = await _ffmpeg.available;
     if (!mounted) return;
     setState(() {
       _row = row;
-      _userEdited = row?.userEdited ?? false;
+      _userEdited =
+          (row?.userEdited ?? false) || (trackRow?.userEdited ?? false);
       _frameSourceAvailable = ffmpegAvailable && _frameSource() != null;
     });
   }
@@ -140,6 +160,8 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     _title.dispose();
     _year.dispose();
     _overview.dispose();
+    _artist.dispose();
+    _trackTitle.dispose();
     super.dispose();
   }
 
@@ -234,9 +256,10 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
 
   bool get _hasCurrentPoster => _currentPosterImage() != null;
 
-  /// A title is only typed (and required) for a movie or the show scope;
-  /// episode and season rows keep the show title already stored (or the
-  /// one currently displayed) so other readers of the row see it.
+  /// A title is only typed (and required) for a movie, a track's album,
+  /// or the show scope; episode and season rows keep the show title
+  /// already stored (or the one currently displayed) so other readers
+  /// of the row see it.
   bool get _hasTitleField => !_episodeScope && _scope != EditDetailsScope.season;
 
   /// `S01E02` marker for the episode being edited.
@@ -259,6 +282,7 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     // the row keeps its stored show title (falling back to the one on
     // display) so the fields stay scoped to what the page claims to edit.
     final keptTitle = _row?.title ?? _meta.title;
+    final artistText = _artist.text.trim();
     await saveUserDetails(
       lookupKey: _lookupKey,
       title: _hasTitleField ? text : keptTitle,
@@ -268,9 +292,34 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
           ? Value(text.isEmpty ? _episodeMarker : '$_episodeMarker · $text')
           : const Value.absent(),
       posterFile: posterFile,
+      artist: _trackScope
+          ? Value(artistText.isEmpty ? null : artistText)
+          : const Value.absent(),
       postersDirProvider: widget.postersDirProvider,
     );
+    if (_trackScope) await _saveTrackTitle(text);
     if (mounted) Navigator.of(context).pop(true);
+  }
+
+  /// The track's own title lives in a per-track row (`<albumKey>:tD-NN`)
+  /// overlaid onto the shared album row — typing the file name's title
+  /// back (or clearing the field) removes the override.
+  Future<void> _saveTrackTitle(String albumTitle) async {
+    final trackKey = trackLookupKey(_parsed);
+    if (trackKey == null) return;
+    final typed = _trackTitle.text.trim();
+    final original = _parsed.trackTitle ?? '';
+    if (typed.isEmpty || typed == original) {
+      await clearUserEdits(trackKey,
+          postersDirProvider: widget.postersDirProvider);
+      return;
+    }
+    await saveUserDetails(
+      lookupKey: trackKey,
+      title: albumTitle,
+      episodeLabel: Value('${_parsed.trackMarker} · $typed'),
+      postersDirProvider: widget.postersDirProvider,
+    );
   }
 
   Future<void> _clearEdits() async {
@@ -302,6 +351,11 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     if (confirmed != true || !mounted) return;
     await clearUserEdits(_lookupKey,
         postersDirProvider: widget.postersDirProvider);
+    final trackKey = _trackScope ? trackLookupKey(_parsed) : null;
+    if (trackKey != null) {
+      await clearUserEdits(trackKey,
+          postersDirProvider: widget.postersDirProvider);
+    }
     if (mounted) Navigator.of(context).pop(true);
   }
 
@@ -329,16 +383,23 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
         EditDetailsScope.show => 'Edit show details',
         EditDetailsScope.season =>
           'Edit season ${_parsed.season} details',
-        EditDetailsScope.entry =>
-          _episodeScope ? 'Edit episode details' : 'Edit details',
+        EditDetailsScope.entry => _episodeScope
+            ? 'Edit episode details'
+            : _trackScope
+                ? 'Edit track details'
+                : 'Edit details',
       };
 
   String get _explainer {
     final target = switch (_scope) {
       EditDetailsScope.show => 'the whole show, everywhere it appears',
       EditDetailsScope.season => 'this season only',
-      EditDetailsScope.entry =>
-        _episodeScope ? 'this episode only' : 'this title',
+      EditDetailsScope.entry => _episodeScope
+          ? 'this episode only'
+          : _trackScope
+              ? 'the whole album (artist, album, year, description, '
+                  'artwork) and this track\'s own title'
+              : 'this title',
     };
     return 'Details entered here are yours and apply to $target: they '
         'replace what TMDB matched (or fill in files it doesn\'t know) '
@@ -430,7 +491,34 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
             ],
           ),
           const SizedBox(height: 20),
-          if (_episodeScope) ...[
+          if (_trackScope) ...[
+            TextField(
+              controller: _artist,
+              style: TextStyle(color: t.bone, fontSize: 14),
+              decoration: _fieldDecoration(t, 'Artist'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _title,
+              style: TextStyle(color: t.bone, fontSize: 14),
+              decoration: _fieldDecoration(t, 'Album'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _year,
+              keyboardType: TextInputType.number,
+              style: TextStyle(color: t.bone, fontSize: 14),
+              decoration: _fieldDecoration(t, 'Year (optional)'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _trackTitle,
+              style: TextStyle(color: t.bone, fontSize: 14),
+              decoration: _fieldDecoration(
+                  t, 'Track title — ${_parsed.trackMarker}'),
+            ),
+            const SizedBox(height: 12),
+          ] else if (_episodeScope) ...[
             // The show's title is edited from the show page; here the
             // text is the episode's own name (the part after SxxEyy).
             TextField(

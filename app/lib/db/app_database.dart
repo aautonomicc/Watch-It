@@ -121,6 +121,11 @@ class MetadataCache extends Table {
   /// row already short-circuits the fetch) and survive key changes.
   BoolColumn get userEdited => boolean().withDefault(const Constant(false))();
 
+  /// Music rows: the album artist ([title] holds the album name).
+  /// User-editable; display falls back to the parsed file name when
+  /// null.
+  TextColumn get artist => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {lookupKey};
 }
@@ -175,7 +180,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 12;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -224,6 +229,11 @@ class AppDatabase extends _$AppDatabase {
             // lists (refreshed from each imported manifest).
             await m.addColumn(mediaLists, mediaLists.channelAuthor);
             await m.addColumn(mediaLists, mediaLists.channelAvatar);
+          }
+          if (from >= 4 && from < 12) {
+            // Music edits: album artist on music rows. (An older `from`
+            // created or recreated the table with the column in it.)
+            await m.addColumn(metadataCache, metadataCache.artist);
           }
           if (from >= 4 && from < 9) {
             // alpha.57: Edit details — user-authored metadata rows are

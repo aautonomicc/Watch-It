@@ -379,6 +379,14 @@ void main() {
           name TEXT NOT NULL, address TEXT NOT NULL,
           position INTEGER NOT NULL, added_at INTEGER NOT NULL DEFAULT 0,
           size_bytes INTEGER, video_info TEXT);
+        CREATE TABLE metadata_cache (
+          lookup_key TEXT NOT NULL PRIMARY KEY, found INTEGER NOT NULL,
+          title TEXT, year INTEGER, overview TEXT, category TEXT,
+          episode_label TEXT, poster_file TEXT, media_type TEXT,
+          tmdb_id INTEGER, fetched_at INTEGER NOT NULL, rating REAL,
+          show_overview TEXT, season_overview TEXT, air_date TEXT,
+          still_file TEXT, show_poster_file TEXT,
+          user_edited INTEGER NOT NULL DEFAULT 0);
         INSERT INTO media_lists (id, title, position, channel_pubkey)
           VALUES ('channel-x', 'Their channel', 0, '${'ab' * 32}');
         PRAGMA user_version = 10;

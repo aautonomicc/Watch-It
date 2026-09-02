@@ -223,7 +223,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
   final String? channelPubkey;
 
   /// Channel profile (channel lists only), refreshed from every imported
-  /// manifest: the optional "by <author>" display name/handle…
+  /// manifest: the optional "by `<author>`" display name/handle…
   final String? channelAuthor;
 
   /// …and the avatar's member file name in the posters dir
@@ -1220,6 +1220,15 @@ class $MetadataCacheTable extends MetadataCache
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _artistMeta = const VerificationMeta('artist');
+  @override
+  late final GeneratedColumn<String> artist = GeneratedColumn<String>(
+    'artist',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     lookupKey,
@@ -1240,6 +1249,7 @@ class $MetadataCacheTable extends MetadataCache
     stillFile,
     showPosterFile,
     userEdited,
+    artist,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1379,6 +1389,12 @@ class $MetadataCacheTable extends MetadataCache
         userEdited.isAcceptableOrUnknown(data['user_edited']!, _userEditedMeta),
       );
     }
+    if (data.containsKey('artist')) {
+      context.handle(
+        _artistMeta,
+        artist.isAcceptableOrUnknown(data['artist']!, _artistMeta),
+      );
+    }
     return context;
   }
 
@@ -1460,6 +1476,10 @@ class $MetadataCacheTable extends MetadataCache
         DriftSqlType.bool,
         data['${effectivePrefix}user_edited'],
       )!,
+      artist: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}artist'],
+      ),
     );
   }
 
@@ -1505,6 +1525,11 @@ class MetadataCacheRow extends DataClass
   /// from TMDB. User rows are never replaced by a TMDB match (a found
   /// row already short-circuits the fetch) and survive key changes.
   final bool userEdited;
+
+  /// Music rows: the album artist ([title] holds the album name).
+  /// User-editable; display falls back to the parsed file name when
+  /// null.
+  final String? artist;
   const MetadataCacheRow({
     required this.lookupKey,
     required this.found,
@@ -1524,6 +1549,7 @@ class MetadataCacheRow extends DataClass
     this.stillFile,
     this.showPosterFile,
     required this.userEdited,
+    this.artist,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1574,6 +1600,9 @@ class MetadataCacheRow extends DataClass
       map['show_poster_file'] = Variable<String>(showPosterFile);
     }
     map['user_edited'] = Variable<bool>(userEdited);
+    if (!nullToAbsent || artist != null) {
+      map['artist'] = Variable<String>(artist);
+    }
     return map;
   }
 
@@ -1623,6 +1652,9 @@ class MetadataCacheRow extends DataClass
           ? const Value.absent()
           : Value(showPosterFile),
       userEdited: Value(userEdited),
+      artist: artist == null && nullToAbsent
+          ? const Value.absent()
+          : Value(artist),
     );
   }
 
@@ -1650,6 +1682,7 @@ class MetadataCacheRow extends DataClass
       stillFile: serializer.fromJson<String?>(json['stillFile']),
       showPosterFile: serializer.fromJson<String?>(json['showPosterFile']),
       userEdited: serializer.fromJson<bool>(json['userEdited']),
+      artist: serializer.fromJson<String?>(json['artist']),
     );
   }
   @override
@@ -1674,6 +1707,7 @@ class MetadataCacheRow extends DataClass
       'stillFile': serializer.toJson<String?>(stillFile),
       'showPosterFile': serializer.toJson<String?>(showPosterFile),
       'userEdited': serializer.toJson<bool>(userEdited),
+      'artist': serializer.toJson<String?>(artist),
     };
   }
 
@@ -1696,6 +1730,7 @@ class MetadataCacheRow extends DataClass
     Value<String?> stillFile = const Value.absent(),
     Value<String?> showPosterFile = const Value.absent(),
     bool? userEdited,
+    Value<String?> artist = const Value.absent(),
   }) => MetadataCacheRow(
     lookupKey: lookupKey ?? this.lookupKey,
     found: found ?? this.found,
@@ -1719,6 +1754,7 @@ class MetadataCacheRow extends DataClass
         ? showPosterFile.value
         : this.showPosterFile,
     userEdited: userEdited ?? this.userEdited,
+    artist: artist.present ? artist.value : this.artist,
   );
   MetadataCacheRow copyWithCompanion(MetadataCacheCompanion data) {
     return MetadataCacheRow(
@@ -1752,6 +1788,7 @@ class MetadataCacheRow extends DataClass
       userEdited: data.userEdited.present
           ? data.userEdited.value
           : this.userEdited,
+      artist: data.artist.present ? data.artist.value : this.artist,
     );
   }
 
@@ -1775,7 +1812,8 @@ class MetadataCacheRow extends DataClass
           ..write('airDate: $airDate, ')
           ..write('stillFile: $stillFile, ')
           ..write('showPosterFile: $showPosterFile, ')
-          ..write('userEdited: $userEdited')
+          ..write('userEdited: $userEdited, ')
+          ..write('artist: $artist')
           ..write(')'))
         .toString();
   }
@@ -1800,6 +1838,7 @@ class MetadataCacheRow extends DataClass
     stillFile,
     showPosterFile,
     userEdited,
+    artist,
   );
   @override
   bool operator ==(Object other) =>
@@ -1822,7 +1861,8 @@ class MetadataCacheRow extends DataClass
           other.airDate == this.airDate &&
           other.stillFile == this.stillFile &&
           other.showPosterFile == this.showPosterFile &&
-          other.userEdited == this.userEdited);
+          other.userEdited == this.userEdited &&
+          other.artist == this.artist);
 }
 
 class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
@@ -1844,6 +1884,7 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
   final Value<String?> stillFile;
   final Value<String?> showPosterFile;
   final Value<bool> userEdited;
+  final Value<String?> artist;
   final Value<int> rowid;
   const MetadataCacheCompanion({
     this.lookupKey = const Value.absent(),
@@ -1864,6 +1905,7 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
     this.stillFile = const Value.absent(),
     this.showPosterFile = const Value.absent(),
     this.userEdited = const Value.absent(),
+    this.artist = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   MetadataCacheCompanion.insert({
@@ -1885,6 +1927,7 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
     this.stillFile = const Value.absent(),
     this.showPosterFile = const Value.absent(),
     this.userEdited = const Value.absent(),
+    this.artist = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : lookupKey = Value(lookupKey),
        found = Value(found),
@@ -1908,6 +1951,7 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
     Expression<String>? stillFile,
     Expression<String>? showPosterFile,
     Expression<bool>? userEdited,
+    Expression<String>? artist,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1929,6 +1973,7 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
       if (stillFile != null) 'still_file': stillFile,
       if (showPosterFile != null) 'show_poster_file': showPosterFile,
       if (userEdited != null) 'user_edited': userEdited,
+      if (artist != null) 'artist': artist,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1952,6 +1997,7 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
     Value<String?>? stillFile,
     Value<String?>? showPosterFile,
     Value<bool>? userEdited,
+    Value<String?>? artist,
     Value<int>? rowid,
   }) {
     return MetadataCacheCompanion(
@@ -1973,6 +2019,7 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
       stillFile: stillFile ?? this.stillFile,
       showPosterFile: showPosterFile ?? this.showPosterFile,
       userEdited: userEdited ?? this.userEdited,
+      artist: artist ?? this.artist,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2034,6 +2081,9 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
     if (userEdited.present) {
       map['user_edited'] = Variable<bool>(userEdited.value);
     }
+    if (artist.present) {
+      map['artist'] = Variable<String>(artist.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2061,6 +2111,7 @@ class MetadataCacheCompanion extends UpdateCompanion<MetadataCacheRow> {
           ..write('stillFile: $stillFile, ')
           ..write('showPosterFile: $showPosterFile, ')
           ..write('userEdited: $userEdited, ')
+          ..write('artist: $artist, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3840,6 +3891,7 @@ typedef $$MetadataCacheTableCreateCompanionBuilder =
       Value<String?> stillFile,
       Value<String?> showPosterFile,
       Value<bool> userEdited,
+      Value<String?> artist,
       Value<int> rowid,
     });
 typedef $$MetadataCacheTableUpdateCompanionBuilder =
@@ -3862,6 +3914,7 @@ typedef $$MetadataCacheTableUpdateCompanionBuilder =
       Value<String?> stillFile,
       Value<String?> showPosterFile,
       Value<bool> userEdited,
+      Value<String?> artist,
       Value<int> rowid,
     });
 
@@ -3961,6 +4014,11 @@ class $$MetadataCacheTableFilterComposer
 
   ColumnFilters<bool> get userEdited => $composableBuilder(
     column: $table.userEdited,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get artist => $composableBuilder(
+    column: $table.artist,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -4063,6 +4121,11 @@ class $$MetadataCacheTableOrderingComposer
     column: $table.userEdited,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get artist => $composableBuilder(
+    column: $table.artist,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$MetadataCacheTableAnnotationComposer
@@ -4139,6 +4202,9 @@ class $$MetadataCacheTableAnnotationComposer
     column: $table.userEdited,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get artist =>
+      $composableBuilder(column: $table.artist, builder: (column) => column);
 }
 
 class $$MetadataCacheTableTableManager
@@ -4194,6 +4260,7 @@ class $$MetadataCacheTableTableManager
                 Value<String?> stillFile = const Value.absent(),
                 Value<String?> showPosterFile = const Value.absent(),
                 Value<bool> userEdited = const Value.absent(),
+                Value<String?> artist = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MetadataCacheCompanion(
                 lookupKey: lookupKey,
@@ -4214,6 +4281,7 @@ class $$MetadataCacheTableTableManager
                 stillFile: stillFile,
                 showPosterFile: showPosterFile,
                 userEdited: userEdited,
+                artist: artist,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4236,6 +4304,7 @@ class $$MetadataCacheTableTableManager
                 Value<String?> stillFile = const Value.absent(),
                 Value<String?> showPosterFile = const Value.absent(),
                 Value<bool> userEdited = const Value.absent(),
+                Value<String?> artist = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MetadataCacheCompanion.insert(
                 lookupKey: lookupKey,
@@ -4256,6 +4325,7 @@ class $$MetadataCacheTableTableManager
                 stillFile: stillFile,
                 showPosterFile: showPosterFile,
                 userEdited: userEdited,
+                artist: artist,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

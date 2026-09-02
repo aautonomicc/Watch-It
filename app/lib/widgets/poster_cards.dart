@@ -146,7 +146,8 @@ class AlbumCard extends StatelessWidget {
               style: TextStyle(fontSize: 11.5, color: t.boneDim),
             ),
             Text(
-              '${group.artist} · $n ${n == 1 ? 'track' : 'tracks'}',
+              '${meta.artist ?? group.artist} · $n '
+              '${n == 1 ? 'track' : 'tracks'}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 10.5, color: t.ash),

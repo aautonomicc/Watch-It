@@ -340,6 +340,7 @@ Future<BundleBuildResult> buildBundle(
       'airDate': row.airDate,
       'stillFile': row.stillFile,
       'showPosterFile': row.showPosterFile,
+      'artist': row.artist,
       'userEdited': row.userEdited,
       // For userEdited rows this is the edit time — the My W@tch sync's
       // last-writer-wins stamp. Exporting it keeps an imported bundle
@@ -913,6 +914,7 @@ Future<(int, int)> seedMetadataGapFill(
                 airDate: Value(row['airDate'] as String?),
                 stillFile: Value(row['stillFile'] as String?),
                 showPosterFile: Value(row['showPosterFile'] as String?),
+                artist: Value(row['artist'] as String?),
                 userEdited: Value(row['userEdited'] as bool? ?? false),
               ),
               mode: InsertMode.insertOrIgnore,

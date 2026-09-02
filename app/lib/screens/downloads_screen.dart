@@ -410,7 +410,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                 subtitle: Text(
                   !_canPickFolder
                       ? 'App-private storage (no permissions needed)'
-                      : _downloadDir ?? 'App data folder (default)',
+                      : _downloadDir ?? 'System Downloads folder (default)',
                   style: TextStyle(color: t.ash, fontSize: 12),
                 ),
                 trailing: _canPickFolder

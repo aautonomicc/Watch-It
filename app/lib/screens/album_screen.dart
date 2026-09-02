@@ -361,7 +361,7 @@ class _AlbumScreenState extends State<AlbumScreen>
                 const SizedBox(height: 4),
                 Text(
                   [
-                    group.artist,
+                    meta.artist ?? group.artist,
                     if (meta.year != null) '${meta.year}',
                     '$count ${count == 1 ? 'track' : 'tracks'}',
                   ].join(' · '),
@@ -561,6 +561,11 @@ class _AlbumScreenState extends State<AlbumScreen>
   /// page. Tap plays the track right here.
   Widget _trackRow(BuildContext context, WiTokens t, MediaEntry entry) {
     final parsed = parseMediaName(entry.name);
+    // The label comes through the metadata service so a user-edited
+    // track title (Edit details on the track) shows here too.
+    final label =
+        MetadataService.instance.metadataFor(entry).episodeLabel;
+    final trackName = episodeNameFromLabel(label) ?? parsed.trackTitle;
     final downloaded =
         DownloadManager.instance.taskFor(entry.address)?.status ==
             DownloadStatus.done;
@@ -588,7 +593,7 @@ class _AlbumScreenState extends State<AlbumScreen>
             ),
             Expanded(
               child: Text(
-                parsed.trackTitle ?? entry.name,
+                trackName ?? entry.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(

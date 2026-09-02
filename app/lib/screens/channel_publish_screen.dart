@@ -15,8 +15,7 @@ import '../theme/tokens.dart';
 import '../widgets/channel_badge.dart';
 import 'channels_screen.dart' show ChannelAttestationDialog;
 import 'describe_item_screen.dart';
-import 'publish_screen.dart'
-    show addEntriesToLists, pickTargetLists;
+import 'publish_screen.dart' show pickTargetLists;
 import 'wallet_screen.dart';
 
 /// Publish an item to the channel, starting from a FILE — the Upload
