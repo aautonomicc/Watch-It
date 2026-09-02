@@ -719,7 +719,8 @@ void main() {
     }
   });
 
-  test('defaultBatchList: mostly-audio batches default to Music', () {
+  test('defaultBatchList: defaults follow the media type — Music, '
+      'TV Shows, Movies', () {
     final dir = dirIn('music-batch');
     File('${dir.path}/a.mp3').writeAsBytesSync([1]);
     File('${dir.path}/b.flac').writeAsBytesSync([1]);
@@ -729,7 +730,13 @@ void main() {
     final vids = dirIn('video-batch');
     File('${vids.path}/a.mp4').writeAsBytesSync([1]);
     File('${vids.path}/b.mkv').writeAsBytesSync([1]);
-    expect(defaultBatchList([vids.path]), 'My uploads');
+    expect(defaultBatchList([vids.path]), 'Movies');
+
+    final eps = dirIn('episode-batch');
+    File('${eps.path}/Show S01E01.mkv').writeAsBytesSync([1]);
+    File('${eps.path}/Show S01E02.mkv').writeAsBytesSync([1]);
+    File('${eps.path}/extra.mp4').writeAsBytesSync([1]);
+    expect(defaultBatchList([eps.path]), 'TV Shows');
 
     expect(defaultBatchList(const [], fallback: 'Kept'), 'Kept');
     expect(defaultBatchList(['/no/such/path'], fallback: 'Kept'), 'Kept');

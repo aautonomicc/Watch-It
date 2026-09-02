@@ -14,6 +14,7 @@ import '../services/ffmpeg.dart';
 import '../services/library_store.dart';
 import '../services/metadata_service.dart';
 import '../services/publish_api.dart';
+import '../services/season_grouping.dart';
 import '../services/x0x_cellular.dart';
 import '../theme/tokens.dart';
 import '../widgets/channel_avatar.dart';
@@ -2122,33 +2123,62 @@ class _ChannelQrDialog extends StatelessWidget {
 /// explicit pick at a time — the "separate doors" wall means there is
 /// deliberately no bulk selection and no channel toggle anywhere near
 /// the Upload flow.
-class _PickItemDialog extends StatelessWidget {
+///
+/// Two steps instead of one long flat list: pick the LIST first, then
+/// browse it as the same nested tree the list editor shows — artist →
+/// album → track, show → season → episode, same-title versions folded
+/// — so a big library stays navigable. Tapping a leaf row returns that
+/// entry.
+class _PickItemDialog extends StatefulWidget {
   const _PickItemDialog({required this.lists, required this.alreadyStaged});
 
   final List<MediaList> lists;
   final Set<String> alreadyStaged;
 
   @override
+  State<_PickItemDialog> createState() => _PickItemDialogState();
+}
+
+class _PickItemDialogState extends State<_PickItemDialog> {
+  /// The list being browsed; null = still on the pick-a-list step.
+  MediaList? _open;
+
+  List<MediaEntry> _pickable(MediaList list) => [
+        for (final e in list.entries)
+          if (!widget.alreadyStaged.contains(e.address.toLowerCase())) e,
+      ];
+
+  @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
-    final seen = <String>{};
-    final entries = <MediaEntry>[
-      for (final list in lists)
-        // Channel lists are other people's content — not pickable.
-        if (!list.isChannel)
-          for (final e in list.entries)
-            if (seen.add(e.address.toLowerCase()) &&
-                !alreadyStaged.contains(e.address.toLowerCase()))
-              e,
+    final open = _open;
+    // Channel lists are other people's content — not pickable.
+    final lists = [
+      for (final l in widget.lists)
+        if (!l.isChannel && _pickable(l).isNotEmpty) l,
     ];
     return AlertDialog(
       backgroundColor: t.ink2,
-      title: Text('Pick an item to publish',
-          style: TextStyle(color: t.bone, fontSize: 16)),
+      title: Row(
+        children: [
+          if (open != null)
+            IconButton(
+              tooltip: 'Back to lists',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => setState(() => _open = null),
+              icon: Icon(Icons.arrow_back, color: t.boneDim, size: 20),
+            ),
+          Expanded(
+            child: Text(open?.title ?? 'Pick an item to publish',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: t.bone, fontSize: 16)),
+          ),
+        ],
+      ),
       content: SizedBox(
         width: 480,
         height: 380,
-        child: entries.isEmpty
+        child: lists.isEmpty
             ? Center(
                 child: Text(
                   'Nothing to pick — upload your content first '
@@ -2157,26 +2187,9 @@ class _PickItemDialog extends StatelessWidget {
                   style: TextStyle(color: t.boneDim, fontSize: 13),
                 ),
               )
-            : ListView.builder(
-                itemCount: entries.length,
-                itemBuilder: (context, i) {
-                  final entry = entries[i];
-                  final meta =
-                      MetadataService.instance.metadataFor(entry);
-                  return ListTile(
-                    dense: true,
-                    leading: Icon(Icons.movie_outlined,
-                        color: t.boneDim, size: 20),
-                    title: Text(meta.title,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: t.bone, fontSize: 14)),
-                    subtitle: Text(entry.name,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: t.ash, fontSize: 11)),
-                    onTap: () => Navigator.of(context).pop(entry),
-                  );
-                },
-              ),
+            : open == null
+                ? _listStep(t, lists)
+                : _treeStep(t, open),
       ),
       actions: [
         TextButton(
@@ -2184,6 +2197,103 @@ class _PickItemDialog extends StatelessWidget {
           child: Text('Cancel', style: TextStyle(color: t.ash)),
         ),
       ],
+    );
+  }
+
+  Widget _listStep(WiTokens t, List<MediaList> lists) => ListView(
+        children: [
+          for (final list in lists)
+            ListTile(
+              dense: true,
+              leading: Icon(Icons.video_library_outlined,
+                  color: t.boneDim, size: 20),
+              title: Text(list.title,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: t.bone, fontSize: 14)),
+              subtitle: Text(
+                  '${_pickable(list).length} '
+                  '${_pickable(list).length == 1 ? 'item' : 'items'}',
+                  style: TextStyle(color: t.ash, fontSize: 11)),
+              trailing:
+                  Icon(Icons.chevron_right, color: t.ash, size: 18),
+              onTap: () => setState(() => _open = list),
+            ),
+        ],
+      );
+
+  Widget _treeStep(WiTokens t, MediaList list) {
+    final items = groupShows(_pickable(list));
+    return ListView(
+      children: [
+        for (final item in items)
+          switch (item) {
+            HomeArtist a => _group(t, a.artist,
+                '${a.albums.length} albums · ${a.trackCount} tracks', [
+                for (final album in a.albums)
+                  _albumTile(t, album, nested: true),
+              ]),
+            HomeAlbum a => _albumTile(t, a),
+            HomeShow s => _group(
+                t, s.show, '${s.episodeCount} episodes', [
+                for (final season in s.seasons)
+                  _group(
+                      t,
+                      'Season ${season.season}',
+                      '${season.episodes.length} episodes',
+                      [for (final e in season.episodes) _leaf(t, e)],
+                      nested: true),
+              ]),
+            HomeEntry e => e.allVersions.length > 1
+                ? _group(
+                    t,
+                    MetadataService.instance.metadataFor(e.entry).title,
+                    '${e.allVersions.length} versions',
+                    [for (final v in e.allVersions) _leaf(t, v)])
+                : _leaf(t, e.entry),
+            HomeSeason _ => const SizedBox.shrink(), // groupShows never
+          },
+      ],
+    );
+  }
+
+  Widget _albumTile(WiTokens t, HomeAlbum a, {bool nested = false}) =>
+      _group(
+          t,
+          a.year == null ? a.album : '${a.album} (${a.year})',
+          '${a.tracks.length} tracks',
+          [for (final e in a.tracks) _leaf(t, e)],
+          nested: nested);
+
+  Widget _group(WiTokens t, String title, String subtitle,
+          List<Widget> children, {bool nested = false}) =>
+      ExpansionTile(
+        dense: true,
+        shape: const Border(),
+        collapsedShape: const Border(),
+        tilePadding: EdgeInsets.only(left: nested ? 24 : 8, right: 8),
+        childrenPadding: EdgeInsets.only(left: nested ? 16 : 8),
+        iconColor: t.ash,
+        collapsedIconColor: t.ash,
+        title: Text(title,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: t.bone, fontSize: 14)),
+        subtitle: Text(subtitle,
+            style: TextStyle(color: t.ash, fontSize: 11)),
+        children: children,
+      );
+
+  Widget _leaf(WiTokens t, MediaEntry entry) {
+    final meta = MetadataService.instance.metadataFor(entry);
+    return ListTile(
+      dense: true,
+      leading: Icon(Icons.movie_outlined, color: t.boneDim, size: 20),
+      title: Text(meta.episodeLabel ?? meta.title,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: t.bone, fontSize: 14)),
+      subtitle: Text(entry.name,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: t.ash, fontSize: 11)),
+      onTap: () => Navigator.of(context).pop(entry),
     );
   }
 }

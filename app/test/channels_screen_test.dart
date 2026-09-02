@@ -469,7 +469,11 @@ void main() {
       await openMine(tester);
       await tester.tap(find.text('Add an item already in the library'));
       await tester.pumpAndSettle();
+      // Step 1: pick the list; step 2: the list's items as a tree.
       expect(find.text('Pick an item to publish'), findsOneWidget);
+      expect(find.text('Mine'), findsOneWidget);
+      await tester.tap(find.text('Mine'));
+      await tester.pumpAndSettle();
       expect(find.text('My Film (2026).mp4'), findsOneWidget);
       // (The describe page needs poster IO; the picker and attestation
       // are covered here, the describe page in its own test below.)

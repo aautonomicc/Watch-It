@@ -368,7 +368,8 @@ void main() {
         of: find.byType(AlertDialog), matching: find.text(text));
 
     testWidgets('empty library goes straight to the new-list prompt, '
-        'prefilled "Imported"', (tester) async {
+        'prefilled by media type ("Movies" for movie names)',
+        (tester) async {
       FileSelectorPlatform.instance = _FakeFileSelector(twoDatamaps());
       await openMediaLists(tester);
       await pickDatamaps(tester);
@@ -379,11 +380,11 @@ void main() {
       await tester.pumpAndSettle();
 
       // The auto-accepted review lands on the done page.
-      expect(find.textContaining('Added 2 entries to Imported'),
+      expect(find.textContaining('Added 2 entries to Movies'),
           findsOneWidget);
       await finishReview(tester);
       final list = (await LibraryStore.load())
-          .firstWhere((l) => l.title == 'Imported');
+          .firstWhere((l) => l.title == 'Movies');
       expect(list.entries.map((e) => e.name),
           ['First Movie (2024).mkv', 'Second Movie (1999).mp4']);
       expect(list.entries.map((e) => e.address), [
@@ -407,8 +408,8 @@ void main() {
 
       expect(find.text('Add to which lists?'), findsOneWidget);
       expect(inDialog('1 entry'), findsOneWidget);
-      await tester.tap(inDialog('Movies'));
-      await tester.pump();
+      // "Movies" matches the picked names' media type, so the picker
+      // already pre-checked it — Add works with no further taps.
       await tester.tap(find.text('Add'));
       await tester.pumpAndSettle();
 
@@ -432,8 +433,7 @@ void main() {
       await openMediaLists(tester);
       await pickDatamaps(tester);
 
-      await tester.tap(inDialog('Movies'));
-      await tester.pump();
+      // "Movies" is pre-checked by media type; add "Kids" beside it.
       await tester.tap(inDialog('Kids'));
       await tester.pump();
       await tester.tap(find.text('Add'));
@@ -461,6 +461,10 @@ void main() {
       await openMediaLists(tester);
       await pickDatamaps(tester);
 
+      // Untick the pre-checked type default so only the fresh list
+      // receives the entries.
+      await tester.tap(inDialog('Movies'));
+      await tester.pump();
       await tester.tap(find.text('Create new list'));
       await tester.pumpAndSettle();
       expect(find.text('New media list'), findsOneWidget);
@@ -507,7 +511,8 @@ void main() {
       ]);
       await openMediaLists(tester);
       await pickDatamaps(tester);
-      // Empty library → new-list prompt, prefilled "Imported".
+      // Empty library → new-list prompt, prefilled "Movies" (the good
+      // file's media type).
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
@@ -517,7 +522,7 @@ void main() {
       expect(find.textContaining('1 file skipped (not a data map)'),
           findsOneWidget);
       final list = (await LibraryStore.load())
-          .firstWhere((l) => l.title == 'Imported');
+          .firstWhere((l) => l.title == 'Movies');
       expect(list.entries.single.name, 'Good Movie (2024).mkv');
     });
   });
@@ -537,11 +542,8 @@ void main() {
       await importLocal(tester);
 
       // The bundle imported first; the loose datamap batch now asks for
-      // its target lists.
+      // its target lists, with "Movies" pre-checked by media type.
       expect(find.text('Add to which lists?'), findsOneWidget);
-      await tester.tap(find.descendant(
-          of: find.byType(AlertDialog), matching: find.text('Movies')));
-      await tester.pump();
       await tester.tap(find.text('Add'));
       await tester.pumpAndSettle();
       await finishReview(tester);
@@ -581,7 +583,7 @@ void main() {
       expect(find.textContaining('1 file skipped (not recognised)'),
           findsOneWidget);
       final list = (await LibraryStore.load())
-          .firstWhere((l) => l.title == 'Imported');
+          .firstWhere((l) => l.title == 'Movies');
       expect(list.entries.single.name, 'Good Movie (2024).mkv');
     });
 
@@ -873,7 +875,7 @@ void main() {
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Added 1 entry to Imported'),
+      expect(find.textContaining('Added 1 entry to Movies'),
           findsOneWidget);
       await finishReview(tester);
     });
