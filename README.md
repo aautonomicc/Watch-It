@@ -5,15 +5,21 @@
 
 A beautiful, cross-platform media player for the **Autonomi network** — one codebase,
 six platforms: **Android, Android TV, iPhone (iOS), Linux, Windows, and Mac.**
+Movies and TV shows — and, since alpha.76, **music**: albums render as a
+square cover-art wall (artwork and track data from MusicBrainz / Cover Art
+Archive, no key needed) and play right on the album page with shuffle,
+auto-advance, and a favourite heart.
 
 Think the Plex / Emby / [Silo](https://github.com/Silo-Server/) experience —
 poster-wall library, rich metadata, resume-watching — but **with no server to install**.
 W@tch is client-only: your media library is one or more lists of files stored
 privately on the decentralized [Autonomi](https://github.com/WithAutonomi/ant-client)
 network, streamed on demand or downloaded for offline watching. And since
-alpha.55 W@tch **uploads too**: the desktop app's Upload page encodes your
-files to universally playable quality tiers and uploads them to the network
-itself, paid from a built-in ANT wallet — no command line needed. And since
+alpha.55 W@tch **uploads too**: the desktop app's Upload page takes whole
+folders of files, matches them against MusicBrainz / TMDB automatically,
+encodes video to universally playable quality tiers, and uploads everything
+to the network itself, paid from a built-in ANT wallet — no command line
+needed. And since
 alpha.61 **your devices stay in sync**: link them with **My W@tch** (scan a
 QR code) and watch lists, viewing positions, and your own edits and artwork
 travel between them automatically — peer-to-peer and end-to-end encrypted,
@@ -43,14 +49,22 @@ dates and descriptions, plus a one-tap Download season.*
 1. **Upload from the app — or with the CLI.** On desktop, the
    **Upload** page (Settings → Upload; named *Publish* before 2026-08-27 — renamed
    because uploads are private; nothing is published) puts media on the
-   network straight from W@tch: pick one
-   file or a whole series, choose quality tiers (High 1080p / Medium 720p /
-   Low 480p, encoded to play-everywhere H.264/AAC MP4 by the bundled
-   ffmpeg — or keep the original as-is), see a live cost estimate, and pay
-   with the app's built-in ANT wallet (create or import it under
+   network straight from W@tch: pick files
+   or whole folders — a full series, a whole album collection — and the
+   app identifies each one against MusicBrainz (music, reviewed one whole
+   album at a time) or TMDB (video), renames it to the canonical
+   convention, and shows a review page where you confirm the matches,
+   choose video quality tiers (High 1080p / Medium 720p / Low 480p,
+   encoded to play-everywhere H.264/AAC MP4 by the bundled ffmpeg — or
+   keep the original as-is), see a live cost estimate, and pay with the
+   app's built-in ANT wallet (create or import it under
    Settings → Wallet; the key lives in the OS keychain — treat it as a
-   hot wallet and fund it small). The finished upload lands in your library
-   ready to play, and its `.datamap` file can be saved to share. Prefer the
+   hot wallet and fund it small). A content-hash ledger remembers every
+   finished upload, so re-running a folder never pays for the same file
+   twice. Finished uploads land in the library list of your choice ready
+   to play, and their `.datamap` files can be saved to share. The same
+   pipeline exists as a standalone command-line tool
+   ([docs/UPLOAD-CLI.md](docs/UPLOAD-CLI.md)) sharing the same ledger. Prefer the
    command line? `ant file upload <file>` does the same job (private is the
    default — **don't** use `-p`) and prints the `<file name>.datamap`.
    Either way, uploads are **private** and the datamap *is* the key to the
@@ -69,7 +83,10 @@ dates and descriptions, plus a one-tap Download season.*
    `Title (Year) {imdb-ttXXXXXXX} - [quality].ext` — **before uploading**; see
    [docs/NAMING.md](docs/NAMING.md) (the Upload flow keeps names in this
    convention automatically, re-tagging encoded tiers with their real output
-   resolution). For home movies and anything TMDB doesn't know, the detail
+   resolution). Audio files use the parallel music convention
+   (`Artist - Album (Year) - NN Track {mbid-…}.flac`) and get their album
+   covers and track data from MusicBrainz and the Cover Art Archive —
+   both free and keyless, so music metadata needs no setup at all. For home movies and anything TMDB doesn't know, the detail
    page's **Edit details** editor takes your own title, year, description,
    and artwork — from an image file, a picked video frame, or the player's
    "use this frame" button — and those edits travel inside shared bundles.
@@ -220,6 +237,45 @@ hardware). Alpha.62 completes the picture: your Edit-details changes
 (titles, years, descriptions, episode names) and custom artwork sync
 between linked devices as well — artwork travels at **full quality**,
 byte-identical, fetched directly from whichever linked device has it.
+Alpha.63 completes keyless sync: full TMDB metadata and posters travel
+to linked devices without their own key. Alpha.64 renames Publish to
+**Upload** (uploads are private; the word *publish* is reserved for the
+public act), and alpha.65 ships that public act: **Channels** (see How
+it works step 6) — public signed media lists with their own 12-word
+recovery phrase, shared as `wchn1-…` codes, amber-badged and gated
+behind a rights attestation. Alpha.66–.68 round channels and the
+library out: publish an item straight from a local file with a
+Check-TMDB helper, the creator's own channel on their home wall,
+channel subscriptions syncing over My W@tch, a list editor that curates
+entries in a show → season → episode tree with move/copy between lists,
+same-title versions folded into one expandable row, colour schemes
+(dark / light / system), and channel updates that download only what
+changed. Alpha.69 fixes an Android file-picker crash and adds a
+"Why did the app close?" diagnostic page; alpha.70 gives channels a
+face (circular avatar + author byline on an info card, mini avatars
+everywhere). Alpha.71/.72 move connection status into the library
+drawer, add independent on/off switches for the My W@tch and Channels
+background agents, and make upload batches survive navigating away —
+with Try again / Skip / Stop on errors. Alpha.73 surfaces sync problems
+honestly (pending data maps, real Sync-now buttons on both sync
+screens); alpha.74 consolidates every cellular consumer under one
+Settings → Mobile data screen; alpha.75 cuts idle network traffic by an
+order of magnitude (x0x 0.40.4 leaf mode, presence beacons stopped).
+Alpha.76 opens the **music** era: albums render as a square cover-art
+wall with metadata from MusicBrainz and the Cover Art Archive (keyless),
+named per the new music convention in [docs/NAMING.md](docs/NAMING.md).
+Alpha.77 ships **batch upload with auto-matching** — the upload
+pipeline (MusicBrainz/TMDB identification, canonical renames,
+content-hash dedup ledger, `.watch-list` bundle output) as a desktop
+screen, also available as a standalone CLI
+([docs/UPLOAD-CLI.md](docs/UPLOAD-CLI.md)). Alpha.78 reviews music one
+whole album at a time (never track by track) and adds the inline album
+player — tracks play right on the album page with shuffle,
+auto-advance, and a pulsing cover glow. Alpha.79 folds everything into
+**one upload flow**: quality tiers live on the batch review page, match
+confirmations run as a back/forward carousel, unfinished batches raise
+a needs-attention pointer, and finished uploads add themselves to the
+list you chose.
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users
@@ -228,6 +284,7 @@ Docs:
 - [docs/UI-DESIGN.md](docs/UI-DESIGN.md) — screens and look-and-feel
 - [docs/BUNDLE-FORMAT.md](docs/BUNDLE-FORMAT.md) — `.watch-list` bundle spec v2 (datamap-first)
 - [docs/SEED-CATALOG.md](docs/SEED-CATALOG.md) — the built-in public-domain seed catalog
+- [docs/UPLOAD-CLI.md](docs/UPLOAD-CLI.md) — the standalone upload CLI (same pipeline as the in-app batch uploader)
 - [docs/ROADMAP.md](docs/ROADMAP.md) — phased milestones
 
 ## License

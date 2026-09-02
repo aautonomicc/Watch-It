@@ -240,7 +240,7 @@ TV notes: larger base type scale (readable at 3 m), no hover-only affordances, t
 entry kept to add/import flows only (paste via network share or a shown-on-TV import
 address is preferred over typing addresses with a remote).
 
-## Built so far (alpha.64 + unreleased Channels)
+## Built so far (alpha.79)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,
@@ -302,6 +302,27 @@ first-launch Terms of Use accept gate (and its read-only page in
 Settings → About) plus the upload quality explainer dialog. Alpha.61
 adds the My W@tch drawer page described above (link/join with QR,
 device presence, Sync now) with camera QR scanning on Android;
-alpha.62 makes edits and full-quality artwork ride the same sync.
+alpha.62 makes edits and full-quality artwork ride the same sync,
+and alpha.63 extends it to TMDB metadata + posters for keyless
+devices. Alpha.64/.65 split the content spaces: the private flow is
+renamed Upload, and **Channels** arrive — amber-badged public signed
+lists with a create ceremony, rights attestation, and subscribe-by-code
+— rounded out in alpha.66–.70 with file-first publishing (Check TMDB
+included), channel profiles (circular avatar + author on an info card,
+mini avatars on cards/drawer/wall), and the own channel on the
+creator's wall. Alpha.67/.68 rebuild curation: the list editor is a
+show → season → episode tree with move/copy-to-list and version
+nesting, Media + Channels live under Settings → CONTENT, and Settings →
+Appearance adds dark/light/system colour schemes. Alpha.71 deletes the
+home status bar in favour of three dot-status rows at the top of the
+drawer (Autonomi / My W@tch / Channels, tap to navigate) plus a
+Built-in x0x client screen with independent agent switches; alpha.74
+consolidates cellular policy under Settings → Mobile data. Alpha.76–.79
+add the music surfaces: square album cards (and 2×2 artist collage
+cards with the next release) on the wall and list grids, the album page
+with inline player (transport row, seek bar, glow-pulsing cover), the
+artist page, and the one-flow batch Upload screen — match-review
+carousel, QUALITY on the review page, needs-attention resume, and a
+track-scope Edit details editor.
 Still to come from this document: filter/sort + fast-scroller on
 the grid, the full desktop keyboard map, mobile gestures, and the TV layout.

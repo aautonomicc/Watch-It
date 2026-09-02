@@ -1,31 +1,38 @@
 # Roadmap
 
-**Status (2026-08-27):** latest release is **v0.1.0-alpha.62**
+**Status (2026-09-02):** latest release is **v0.1.0-alpha.79**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
 and every release since alpha.55 ships a signed APK, a Linux AppImage,
-**and a Windows portable zip**. The headline of the newest releases is
-**My W@tch device sync** (see its section below): alpha.61 links a
-user's own devices by QR code/invite and syncs watch lists and viewing
-positions between them — with data maps travelling too, so synced
-entries arrive playable — and brings My W@tch to Android (verified on
-a real phone against the desktop AppImage); alpha.62 extends sync to
-Edit-details changes and custom artwork at full quality. Around them:
-alpha.58 gave Edit details proper TV scoping (show/season/episode each
-edit their own level); alpha.59 fixed Publish for files over ~12 MiB
-(the finalize step choked on the shrunk child map — the upload itself
-had succeeded, so re-publishing finishes it free) and added a poster
-crop/zoom step after picking a video frame; alpha.60 added the Terms
-of Use & Disclaimer first-launch gate + Settings → About page and the
-Publish "Why multiple versions?" explainer. Before that the headline
-was **Publish**: W@tch uploads files to Autonomi itself (see the
-Publish section below). Alpha.55 shipped the built-in ANT wallet and
-single-file private uploads with live cost estimates (paid upload
-verified end-to-end on mainnet); alpha.56 grew Publish to multi-file
-batches with quality tiers via bundled ffmpeg and added the desktop
-update check; alpha.57 added **Edit details** — user-entered
-title/year/description and artwork from an image file or a video frame
-for content TMDB doesn't know, carried along in `.watch-list` bundles.
-Before that: alpha.51 trimmed the built-in seed catalog to the two
+**and a Windows portable zip**. The headlines of the newest releases
+are **music** and **batch upload** (see their sections below):
+alpha.76 renders albums as a square cover-art wall with keyless
+MusicBrainz / Cover Art Archive metadata, alpha.77 ships the upload
+pipeline (auto-matching, canonical renames, content-hash dedup ledger)
+as a desktop screen — also available as a standalone CLI — alpha.78
+reviews music one whole album at a time and adds the inline album
+player, and alpha.79 merges everything into one upload flow (quality
+tiers on the review page, match carousel, needs-attention resume,
+auto-add to the chosen list). Before that, **Channels** (its own
+section below): alpha.64 renamed Publish → Upload to reserve the word
+*publish* for the public act, alpha.65 shipped public signed media
+lists (Ed25519 identity from a 12-word phrase, `wchn1-…` codes, amber
+badging + rights attestation), alpha.66–.68 rounded them out
+(file-first publishing with Check TMDB, own channel on the home wall,
+subscriptions syncing over My W@tch, delta-aware updates) alongside
+library curation (list-editor tree with move/copy, version nesting,
+colour schemes), and alpha.70 added channel profiles (avatar + author).
+Interleaved: alpha.63 completed keyless My W@tch sync (TMDB metadata +
+posters travel to keyless linked devices), alpha.69 fixed an Android
+file-picker crash and added the exit-reason diagnostic page,
+alpha.71/.72 moved status into the drawer, added x0x agent on/off
+switches, and made upload batches survive navigation with per-file
+retry, alpha.73 surfaced sync problems honestly, alpha.74 put every
+cellular consumer under one Mobile data screen, and alpha.75 cut idle
+network traffic by an order of magnitude (x0x leaf mode, presence
+beacons stopped). Earlier: alpha.61/.62 shipped **My W@tch device
+sync**, alpha.55–.60 shipped **Publish/Upload** (built-in ANT wallet,
+quality tiers, Edit details, Terms of Use gate) — details in their
+sections. Before that: alpha.51 trimmed the built-in seed catalog to the two
 Night of the Living Dead versions (fresh installs and factory resets
 only; existing installs keep what they seeded, and the dropped uploads
 stay playable on the network — see [SEED-CATALOG.md](SEED-CATALOG.md))
@@ -452,7 +459,12 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       their real resolution tag in the file name (alpha.60), and
       published entries are stamped with their "1080p H.264"
       resolution/codec label so the picker shows the full quality
-      line, matching imported entries (post-alpha.62, next release)
+      line, matching imported entries (alpha.63)
+- [x] Resilient batches (alpha.72): the running upload batch survives
+      navigating away (session singleton), and errors pause it with
+      Try again / Skip this file / Stop
+- [x] Batch upload with auto-matching (alpha.77–.79) — grew into its
+      own section below
 - [ ] Upload on Android/iOS (desktop-only today)
 - [ ] External signer / WalletConnect (the internal hot wallet is the
       only signing path today)
@@ -485,7 +497,7 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       carries a sha256 manifest and the bytes are pulled directly from
       any online linked device that has them, hash-verified, never
       downscaled; a device that synced a poster re-serves it
-- [x] TMDB metadata + posters for keyless devices (post-alpha.62):
+- [x] TMDB metadata + posters for keyless devices (alpha.63):
       full TMDB matches (descriptions, ratings, stills, show/season
       texts) and their poster files sync to linked devices without a
       TMDB key, need-driven via a compact per-doc `have` list so the
@@ -494,7 +506,7 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
 - [ ] Sync while apart: devices must currently be online together —
       no relay/mailbox in the middle (by design, for now)
 
-## Channels — public signed media lists (implemented 2026-08-27, unreleased)
+## Channels — public signed media lists (shipped 2026-08-27, v0.1.0-alpha.65; rounded out through alpha.70)
 
 Part 2+3 of [PLAN-personal-vs-channels.md](PLAN-personal-vs-channels.md);
 implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → Channels.
@@ -528,11 +540,89 @@ implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → Channels.
       on linked devices amber-badged and auto-updating — never as a
       copy of a personal list; the own channel is announced the same
       way and followed by the user's other devices
+- [x] Paid public publish verified end-to-end (2026-08-28, on alpha.66):
+      a real funded channel publish from the Linux AppImage was received
+      on an Android subscriber — no open channel verification gaps
+- [x] Delta-aware channel updates (alpha.68): a new head fetches only
+      the manifest members that changed (ranged zip reads; posters the
+      subscriber already holds are never re-downloaded)
+- [x] Channel profile (alpha.70): circular avatar (forced 1:1 crop) +
+      optional author byline; channel info card with the copyable
+      `wchn1-…` code above the poster grid, mini avatars on cards,
+      drawer rows, and the home wall; profile rides every publish so
+      edits reach subscribers with the next head
 - [ ] Channel directory (deliberately NOT in v1 — codes only; a curated
       directory would be a separate repo/site with its own vetting)
 - [ ] Mobile channel creation (subscribe works everywhere; publishing
       needs the desktop wallet)
-- [ ] Channel avatars, multi-owner channels, comments (parking lot)
+- [ ] ~~Channel avatars~~ (shipped alpha.70), multi-owner channels,
+      comments (parking lot)
+
+## Music (shipped 2026-09-01/02, v0.1.0-alpha.76/.78/.79)
+
+W@tch plays music, not just video. Albums are the music mirror of TV
+shows: album ≈ season, track ≈ episode, so the whole show/season UI
+plumbing carries over. Metadata comes from MusicBrainz + the Cover Art
+Archive — both free and **keyless**, so music needs no API key at all.
+File naming convention (the audio parallel of the Plex/Jellyfin one) in
+[NAMING.md](NAMING.md).
+
+- [x] Album wall (alpha.76): audio files named
+      `Artist - Album (Year) - NN Track {mbid-…}` fold into one album
+      per release, rendered as square cover-art cards (CAA front
+      covers) on the home wall and list grids; album page = big cover +
+      tracklist; search finds tracks by artist, album, and title
+- [x] Inline album player (alpha.78): tracks play right on the album
+      page — transport row (shuffle · previous · play/pause · next ·
+      favourite heart), seek bar, auto-advance (shuffle does a
+      no-repeat pass), and a subtle accent glow pulsing on the cover
+      while playing; per-track ⓘ keeps the detail page (download, file
+      info) reachable; streaming honours the same cellular and
+      pause-downloads gates as video
+- [x] Full music editing (alpha.79): Edit details for tracks covers
+      artist, album, year, per-track title, description, and artwork
+      (album-level fields shared across the album's tracks)
+- [x] Artist grouping (implemented 2026-09-02, ships with the next
+      release): an artist with 2+ albums in a list folds into one wall
+      card (2×2 cover collage) opening an artist page of albums sorted
+      by year; compilations become "Various Artists" and always stand
+      alone
+- [ ] Artist pages with bio/fanart (TheAudioDB was scoped in the
+      original plan; parked)
+- [ ] Top-level Video / Music home split (deferred by plan — lists
+      already separate the two in practice)
+
+## Batch upload with auto-matching (shipped 2026-09-01/02, v0.1.0-alpha.77/.78/.79)
+
+Getting a large library onto Autonomi correctly named used to mean doing
+the naming by hand. Now the app (desktop) and a standalone CLI share one
+pipeline that identifies files against the databases and produces
+canonical names automatically. CLI docs in [UPLOAD-CLI.md](UPLOAD-CLI.md).
+
+- [x] Upload CLI (in-repo since alpha.76, `cli/`): `prepare` (scan →
+      sha256 → dedup ledger → ffprobe classify → Picard-tag / AcoustID /
+      MusicBrainz / TMDB match → canonical rename → art fetch →
+      manifest + cost estimate), `upload` (zero-prompt, crash-resumable,
+      `.watch-list` bundle emit), `ledger` (offline bundle rebuild);
+      shared pure-Dart name parser/generator in `packages/watchit_naming`
+- [x] In-app batch upload (alpha.77): the same pipeline as a desktop
+      screen — Upload → pick files or folders, auto-matching with
+      on-screen confirm cards (accept / search / paste id / manual
+      details / music↔video toggle / skip), paid from the in-app wallet;
+      the content-hash ledger at `~/.watchit-upload/ledger.jsonl` is
+      **shared with the CLI**, so either tool's uploads dedup the other's
+- [x] Album-at-a-time review (alpha.78): audio files group into albums
+      during the scan, one release is discovered per album, and the
+      whole album confirms on a single card (per-track placement shown)
+      — matching can never split one album across releases
+- [x] One upload flow (alpha.79): the separate quality-tier flow merged
+      in — QUALITY checkboxes live on the batch review page and tiers
+      fold into the version picker; match confirmations run as a
+      back/forward carousel with re-decision; unfinished batches raise a
+      needs-attention pointer and can be resumed; manual details seed
+      the local metadata cache; finished uploads auto-add to the list
+      chosen at setup (defaults to Music for mostly-audio batches)
+- [ ] Batch upload on Android/iOS (desktop-only, like all uploading)
 
 ## Phase 3 — All desktop platforms
 - [x] Windows build + packaging → CI-built portable zip, shipped with
@@ -565,6 +655,7 @@ implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → Channels.
   (alpha.61/.62, via x0x rather than Autonomi — see the section above)
 - tvOS (Apple TV) layout — Android TV is now in Phase 4
 - Trakt scrobbling
-- Music & photos lists
+- ~~Music lists~~ — **shipped** (alpha.76–.79, see the Music section
+  above); photos lists still an idea
 - Chromecast / AirPlay output
 - Skip-intro detection
