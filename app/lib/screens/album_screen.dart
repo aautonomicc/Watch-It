@@ -17,6 +17,7 @@ import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
 import 'detail_screen.dart';
+import 'edit_details_screen.dart';
 
 /// One album: big square cover art with the artist and track count, then
 /// the tracklist ordered by disc/track number.
@@ -323,6 +324,11 @@ class _AlbumScreenState extends State<AlbumScreen>
     // Any track's match carries the album title, year, and cover art.
     final meta = MetadataService.instance.metadataFor(group.tracks.first);
     final title = meta.title.isEmpty ? group.album : meta.title;
+    // The album's displayed credit — a compilation's group credit beats
+    // any single track's row; track rows show their own artist beside
+    // the title when it differs from this.
+    final credit =
+        group.isCompilation ? group.artist : meta.artist ?? group.artist;
     final count = group.tracks.length;
     // Tracks not fully downloaded yet — what "download album" queues.
     final remaining = [
@@ -341,12 +347,37 @@ class _AlbumScreenState extends State<AlbumScreen>
         title: Text(title,
             style: TextStyle(color: t.bone, fontSize: 16),
             overflow: TextOverflow.ellipsis),
+        actions: [
+          IconButton(
+            tooltip: 'Edit album details',
+            icon: Icon(Icons.edit_outlined, color: t.boneDim, size: 20),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                // Any track reaches the shared album row; an album/year
+                // rename refolds on the wall when this page is
+                // re-entered.
+                builder: (_) => EditDetailsScreen(
+                    entry: group.tracks.first,
+                    scope: EditDetailsScope.album),
+              ),
+            ),
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           DetailHeader(
-            poster: _cover(t, posterImage(meta, fit: BoxFit.cover)),
+            // While a track with its own artwork plays, the cover shows
+            // that track's art (entryPosterImage falls back to the
+            // album cover for tracks without any).
+            poster: _cover(
+                t,
+                _current == null
+                    ? posterImage(meta, fit: BoxFit.cover)
+                    : entryPosterImage(
+                        MetadataService.instance.metadataFor(_current!),
+                        fit: BoxFit.cover)),
             info: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -361,11 +392,7 @@ class _AlbumScreenState extends State<AlbumScreen>
                 const SizedBox(height: 4),
                 Text(
                   [
-                    // A compilation's group credit beats any single
-                    // track's row.
-                    group.isCompilation
-                        ? group.artist
-                        : meta.artist ?? group.artist,
+                    credit,
                     if (meta.year != null) '${meta.year}',
                     '$count ${count == 1 ? 'track' : 'tracks'}',
                   ].join(' · '),
@@ -414,7 +441,7 @@ class _AlbumScreenState extends State<AlbumScreen>
           sectionLabel(t, 'TRACKS'),
           const SizedBox(height: 4),
           for (final entry in group.tracks)
-            _trackRow(context, t, entry),
+            _trackRow(context, t, entry, credit),
         ],
       ),
     );
@@ -470,18 +497,34 @@ class _AlbumScreenState extends State<AlbumScreen>
   Widget _nowPlaying(WiTokens t) {
     final current = _current!;
     final parsed = parseMediaName(current.name);
+    // The playing track's own credit (per-track edit or file-name
+    // artist), so compilation tracks and corrected credits show as
+    // they play.
+    final currentMeta = MetadataService.instance.metadataFor(current);
+    final artist = currentMeta.trackArtist;
     final fav = FavouritesStore.instance.isFavourite(current.address);
     final maxMs = _duration.inMilliseconds;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          parsed.trackTitle ?? current.name,
+          episodeNameFromLabel(currentMeta.episodeLabel) ??
+              parsed.trackTitle ??
+              current.name,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
               fontSize: 14, fontWeight: FontWeight.w600, color: t.bone),
         ),
+        if (artist != null) ...[
+          const SizedBox(height: 1),
+          Text(
+            artist,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: t.boneDim),
+          ),
+        ],
         const SizedBox(height: 2),
         Row(
           children: [
@@ -561,15 +604,19 @@ class _AlbumScreenState extends State<AlbumScreen>
   }
 
   /// Tracklist row: mono track number (a pulsing-eq mark when playing),
-  /// track title, download tick, and the ⓘ door to the track's detail
-  /// page. Tap plays the track right here.
-  Widget _trackRow(BuildContext context, WiTokens t, MediaEntry entry) {
+  /// track title — with the track's own artist beside it when that
+  /// differs from the album's credit — download tick, and the ⓘ door
+  /// to the track's detail page. Tap plays the track right here.
+  Widget _trackRow(BuildContext context, WiTokens t, MediaEntry entry,
+      String albumCredit) {
     final parsed = parseMediaName(entry.name);
     // The label comes through the metadata service so a user-edited
     // track title (Edit details on the track) shows here too.
-    final label =
-        MetadataService.instance.metadataFor(entry).episodeLabel;
-    final trackName = episodeNameFromLabel(label) ?? parsed.trackTitle;
+    final trackMeta = MetadataService.instance.metadataFor(entry);
+    final trackName =
+        episodeNameFromLabel(trackMeta.episodeLabel) ?? parsed.trackTitle;
+    final ownArtist = trackMeta.trackArtist;
+    final showArtist = ownArtist != null && ownArtist != albumCredit;
     final downloaded =
         DownloadManager.instance.taskFor(entry.address)?.status ==
             DownloadStatus.done;
@@ -596,8 +643,20 @@ class _AlbumScreenState extends State<AlbumScreen>
                     ),
             ),
             Expanded(
-              child: Text(
-                trackName ?? entry.name,
+              child: Text.rich(
+                TextSpan(
+                  text: trackName ?? entry.name,
+                  children: [
+                    if (showArtist)
+                      TextSpan(
+                        text: '  ·  $ownArtist',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: t.ash,
+                            fontWeight: FontWeight.w400),
+                      ),
+                  ],
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(

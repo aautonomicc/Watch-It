@@ -34,6 +34,7 @@ class MediaMetadata {
     this.episodePosterFilePath,
     this.mediaType,
     this.artist,
+    this.trackArtist,
   });
 
   final String title;
@@ -76,16 +77,24 @@ class MediaMetadata {
   /// then the season's artwork).
   final String? showPosterFilePath;
 
-  /// User-authored artwork for this episode entry only (Edit details on
-  /// the episode). Kept apart from [posterFilePath] — the season-art
-  /// slot — so season tiles and headers, which read the first episode's
-  /// metadata, never show one episode's artwork.
+  /// User-authored artwork for this entry only: an episode's own
+  /// artwork (Edit details on the episode), or a music track's own
+  /// artwork (Edit details on the track). Kept apart from
+  /// [posterFilePath] — the season/album-art slot — so season tiles,
+  /// album covers and headers, which read the first entry's metadata,
+  /// never show one entry's artwork.
   final String? episodePosterFilePath;
 
   /// Music entries: the album artist ([title] is then the album name).
-  /// From the cache row when set (user-editable), else the parsed file
-  /// name.
+  /// From the shared album row when set (user-editable via Edit album
+  /// details), else the parsed file name.
   final String? artist;
+
+  /// Music tracks: this track's own credit — the per-track row's user
+  /// override when set (Edit track details), else the artist parsed
+  /// from the track's file name. Never leaks onto album surfaces,
+  /// which keep reading [artist].
+  final String? trackArtist;
 }
 
 /// XOR address of the built-in default movie seeded on first run — the
