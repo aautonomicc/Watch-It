@@ -733,10 +733,28 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
         const SizedBox(height: 8),
         if (confirm == null &&
             albumConfirm == null &&
-            _session.currentFile != null)
+            _session.currentFile != null) ...[
           Text(_session.currentFile!,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(color: t.boneDim, fontSize: 13)),
+          // Per-file step: the fingerprint read of a big movie takes
+          // tens of seconds — without its own moving bar + explanation
+          // the screen looks hung on "1 of 1".
+          if (_session.prepareStep == PrepareStep.fingerprint &&
+              _session.hashFraction != null) ...[
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              value: _session.hashFraction,
+              backgroundColor: t.ink2,
+              minHeight: 2,
+            ),
+          ],
+          if (_session.prepareStep != null) ...[
+            const SizedBox(height: 6),
+            Text(_prepareStepLine(),
+                style: TextStyle(color: t.ash, fontSize: 12)),
+          ],
+        ],
       ],
       if (confirm != null) ...[
         const SizedBox(height: 12),
@@ -764,6 +782,29 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
         child: Text('Cancel', style: TextStyle(color: t.ash)),
       ),
     ];
+  }
+
+  /// What the scan is doing to the current file, with the why for the
+  /// slow leg — reading a whole movie for the fingerprint is what makes
+  /// "movie data take ~20s to come through".
+  String _prepareStepLine() {
+    switch (_session.prepareStep!) {
+      case PrepareStep.fingerprint:
+        final f = _session.hashFraction;
+        final pct = f == null ? '' : ' · ${(f * 100).round()}%';
+        return 'Fingerprinting$pct — reading the whole file once so '
+            'anything you already uploaded is recognised and never paid '
+            'for twice. Large files take a while.';
+      case PrepareStep.mediaInfo:
+        return 'Reading media info (format, resolution, tags)…';
+      case PrepareStep.match:
+        final file = _session.currentFile;
+        final audio = file != null &&
+            kAudioExtensions.contains(p.extension(file).toLowerCase());
+        return audio
+            ? 'Looking it up on MusicBrainz…'
+            : 'Looking it up on the movie database (TMDB)…';
+    }
   }
 
   Widget _countsLine(WiTokens t) {

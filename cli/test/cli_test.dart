@@ -12,6 +12,7 @@ import 'package:watchit_upload/src/config.dart';
 import 'package:watchit_upload/src/ledger.dart';
 import 'package:watchit_upload/src/manifest.dart';
 import 'package:watchit_upload/src/match.dart';
+import 'package:watchit_upload/src/prepare.dart' show sha256OfFile;
 import 'package:watchit_upload/src/probe.dart';
 import 'package:watchit_upload/src/sidecar.dart';
 import 'package:watchit_upload/src/tmdb.dart';
@@ -412,6 +413,24 @@ track: 5
           albumGroupKey('/x/a.mp3', probe({'artist': 'Band', 'album': 'A1'})),
           isNot(albumGroupKey(
               '/x/b.mp3', probe({'artist': 'Band', 'album': 'A2'}))));
+    });
+  });
+
+  group('sha256OfFile', () {
+    test('onBytes reports cumulative bytes without changing the digest',
+        () async {
+      final f = File(p.join(tmp.path, 'hashme.bin'))
+        ..writeAsBytesSync(List.generate(300000, (i) => i % 251));
+      final seen = <int>[];
+      final withProgress =
+          await sha256OfFile(f.path, onBytes: seen.add);
+      expect(await sha256OfFile(f.path), withProgress);
+      expect(seen, isNotEmpty);
+      expect(seen.last, 300000);
+      // Cumulative and monotonic.
+      for (var i = 1; i < seen.length; i++) {
+        expect(seen[i], greaterThan(seen[i - 1]));
+      }
     });
   });
 
