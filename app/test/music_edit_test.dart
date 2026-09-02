@@ -178,4 +178,113 @@ void main() {
     await tester.pumpAndSettle();
     expect(await metadataRowFor(trackLookupKey(parsed)!), isNull);
   });
+
+  // ── track-number edit (renames the entry: the number IS identity) ──
+
+  Future<void> seedAlbum(List<MediaEntry> entries) => LibraryStore.save(
+      [MediaList(id: 'music', title: 'Music', entries: entries)]);
+
+  testWidgets('changing the track number renames the library entry',
+      (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final t1 = track(1, 'First Song');
+    await seedAlbum([t1, track(2, 'Second Song')]);
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: EditDetailsScreen(
+        entry: t1,
+        ffmpeg: _NoFfmpeg(),
+        postersDirProvider: () async => postersDir,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'Track number'), findsOneWidget);
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Track number'), '7');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final lists = await LibraryStore.load();
+    final names = [for (final e in lists.single.entries) e.name];
+    expect(
+        names,
+        containsAll([
+          'Misspelt Artist - Misspelt Album (1999) - 07 First Song.mp3',
+          track(2, 'Second Song').name,
+        ]));
+    // Same address — playback/downloads never notice the rename.
+    expect(lists.single.entries
+        .singleWhere((e) => e.name.contains('07')).address, t1.address);
+  });
+
+  testWidgets('a taken (disc, track) number is refused, nothing renamed',
+      (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final t1 = track(1, 'First Song');
+    await seedAlbum([t1, track(2, 'Second Song')]);
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: EditDetailsScreen(
+        entry: t1,
+        ffmpeg: _NoFfmpeg(),
+        postersDirProvider: () async => postersDir,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Track number'), '2');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    // Refused with an explanation; the editor stays open.
+    expect(find.textContaining('already taken'), findsOneWidget);
+    expect(find.text('Edit track details'), findsOneWidget);
+    final lists = await LibraryStore.load();
+    expect([for (final e in lists.single.entries) e.name],
+        [t1.name, track(2, 'Second Song').name]);
+  });
+
+  test('renumberTrackEntry migrates the per-track override row', () async {
+    final t3 = track(3, 'Kept Song');
+    await seedAlbum([t3]);
+    final parsed = parseMediaName(t3.name);
+    await saveUserDetails(
+      lookupKey: trackLookupKey(parsed)!,
+      title: 'Misspelt Album',
+      episodeLabel: const Value('03 · My Fixed Name'),
+      postersDirProvider: () async => postersDir,
+    );
+
+    final result = await renumberTrackEntry(t3,
+        track: 5, postersDirProvider: () async => postersDir);
+    expect(result.error, isNull);
+    expect(result.newName,
+        'Misspelt Artist - Misspelt Album (1999) - 05 Kept Song.mp3');
+    // The row moved to the renamed key, marker updated in its label.
+    expect(await metadataRowFor(trackLookupKey(parsed)!), isNull);
+    final moved =
+        await metadataRowFor(trackLookupKey(parseMediaName(result.newName!))!);
+    expect(moved!.episodeLabel, '05 · My Fixed Name');
+    // And the list entry is renamed.
+    final lists = await LibraryStore.load();
+    expect(lists.single.entries.single.name, result.newName);
+  });
+
+  test('renumberTrackEntry moves a track to another disc', () async {
+    final t1 = track(1, 'First Song');
+    await seedAlbum([t1, track(2, 'Second Song')]);
+    // Same track number, different disc — no collision (disc 1 holds
+    // the plain-marker sibling).
+    final result = await renumberTrackEntry(t1,
+        track: 2, disc: 2, postersDirProvider: () async => postersDir);
+    expect(result.error, isNull);
+    expect(result.newName,
+        'Misspelt Artist - Misspelt Album (1999) - 2-02 First Song.mp3');
+    final parsed = parseMediaName(result.newName!);
+    expect(parsed.disc, 2);
+    expect(parsed.track, 2);
+  });
 }

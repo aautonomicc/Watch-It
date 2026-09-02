@@ -1,3 +1,4 @@
+import 'parse.dart';
 import 'sanitize.dart';
 
 /// Canonical W@tch music file name (docs/NAMING.md music convention,
@@ -41,6 +42,45 @@ String musicFileName({
   if (name.length >= head.length + suffix.length) return name;
   // Head itself did not fit: refit with head truncated and a minimal title.
   return fitFileName(head.trimRight(), suffix);
+}
+
+/// [name] with its track marker swapped for [track] / [disc] — the
+/// track-number edit (a number is identity: it comes from the file
+/// name, not a metadata row, so changing it means renaming the entry).
+/// Only the marker changes; every other character of the name — casing,
+/// id tags, the exact title — survives verbatim. [disc] null keeps a
+/// plain `NN` marker, a value emits `D-NN` (the multi-disc form).
+///
+/// Returns null when [name] is not a music-convention track name or the
+/// swap cannot be done losslessly (the renamed name must parse back to
+/// exactly the same artist/album/year/title with the new numbers).
+String? renumberedMusicFileName(String name,
+    {required int track, int? disc}) {
+  final parsed = parseMediaName(name);
+  if (!parsed.isTrack) return null;
+  final n = track.toString().padLeft(2, '0');
+  final marker = disc != null ? '$disc-$n' : n;
+  // The marker as it sits in the raw name: `Artist - Album (Year) - `
+  // then `NN `/`D-NN ` (the same shape the parser's music regex reads
+  // after tag stripping; canonical names carry their tags at the end,
+  // so the head matches the raw string too).
+  final m = RegExp(r'^(.+? - .+?(?: \(\d{4}\))? - )(?:\d{1,2}-)?\d{2,3} ')
+      .firstMatch(name);
+  if (m == null) return null;
+  final renamed =
+      '${m.group(1)}$marker ${name.substring(m.end)}';
+  final check = parseMediaName(renamed);
+  if (!check.isTrack ||
+      check.track != track ||
+      check.disc != disc ||
+      check.artist != parsed.artist ||
+      check.title != parsed.title ||
+      check.year != parsed.year ||
+      check.trackTitle != parsed.trackTitle ||
+      check.releaseMbid != parsed.releaseMbid) {
+    return null;
+  }
+  return renamed;
 }
 
 /// Canonical W@tch video file name (docs/NAMING.md):

@@ -306,4 +306,70 @@ void main() {
       expect(parseMediaName(n).title, 'Movie - The Sequel');
     });
   });
+
+  group('renumberedMusicFileName (track-number edit)', () {
+    test('swaps the NN marker, everything else verbatim', () {
+      final n = renumberedMusicFileName(
+          'The Artist - The Album (1999) - 05 A Song '
+          '{mbid-499485cb-8b7f-3b3a-99cd-ff67c445ea87}.mp3',
+          track: 7);
+      expect(
+          n,
+          'The Artist - The Album (1999) - 07 A Song '
+          '{mbid-499485cb-8b7f-3b3a-99cd-ff67c445ea87}.mp3');
+      final p = parseMediaName(n!);
+      expect(p.track, 7);
+      expect(p.disc, isNull);
+      expect(p.trackTitle, 'A Song');
+      expect(p.releaseMbid, '499485cb-8b7f-3b3a-99cd-ff67c445ea87');
+    });
+
+    test('plain to multi-disc marker and back', () {
+      final multi = renumberedMusicFileName(
+          'Artist - Album (2001) - 03 Song.flac',
+          track: 3,
+          disc: 2);
+      expect(multi, 'Artist - Album (2001) - 2-03 Song.flac');
+      expect(parseMediaName(multi!).disc, 2);
+      final plain =
+          renumberedMusicFileName(multi, track: 3);
+      expect(plain, 'Artist - Album (2001) - 03 Song.flac');
+      expect(parseMediaName(plain!).disc, isNull);
+    });
+
+    test('year-less name and generated names round-trip', () {
+      expect(renumberedMusicFileName('A - B - 01 C.mp3', track: 12),
+          'A - B - 12 C.mp3');
+      final generated = musicFileName(
+          artist: 'Artist',
+          album: 'Album',
+          year: 1970,
+          track: 1,
+          title: 'Opener',
+          releaseMbid: 'abc',
+          ext: 'flac');
+      final renamed = renumberedMusicFileName(generated, track: 9)!;
+      expect(parseMediaName(renamed).track, 9);
+      expect(parseMediaName(renamed).lookupKey,
+          parseMediaName(generated).lookupKey);
+    });
+
+    test('non-track names refuse', () {
+      expect(
+          renumberedMusicFileName('The.Movie.2024.1080p.mkv', track: 2),
+          isNull);
+      // Audio without a marker is a single, not an album track.
+      expect(renumberedMusicFileName('Loose Song.mp3', track: 2), isNull);
+    });
+
+    test('a title starting with digits stays intact', () {
+      // ` - 20 Century Boy` after the album dash could be misread as a
+      // marker swap point; the verification re-parse keeps it lossless.
+      final n = renumberedMusicFileName(
+          'T Rex - Hits (1973) - 01 20th Century Boy.mp3',
+          track: 4);
+      expect(n, 'T Rex - Hits (1973) - 04 20th Century Boy.mp3');
+      expect(parseMediaName(n!).trackTitle, '20th Century Boy');
+    });
+  });
 }

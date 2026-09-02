@@ -11,9 +11,11 @@ import '../models/media_list.dart';
 import '../services/download_manager.dart';
 import '../services/embedded_client.dart';
 import '../services/ffmpeg.dart';
+import '../services/library_store.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
-import '../services/season_grouping.dart' show episodeNameFromLabel;
+import '../services/season_grouping.dart'
+    show AlbumKeys, episodeNameFromLabel;
 import '../services/user_metadata.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
@@ -74,6 +76,8 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
   late final TextEditingController _overview;
   late final TextEditingController _artist;
   late final TextEditingController _trackTitle;
+  late final TextEditingController _track;
+  late final TextEditingController _disc;
 
   /// The entry's current metadata at open time — prefills the fields.
   late final MediaMetadata _meta;
@@ -131,6 +135,9 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
                 _parsed.trackTitle ??
                 ''
             : '');
+    _track = TextEditingController(
+        text: _trackScope ? '${_parsed.track}' : '');
+    _disc = TextEditingController(text: _parsed.disc?.toString() ?? '');
     _overview = TextEditingController(
         text: switch (_scope) {
       EditDetailsScope.show => _meta.showOverview ?? '',
@@ -162,6 +169,8 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     _overview.dispose();
     _artist.dispose();
     _trackTitle.dispose();
+    _track.dispose();
+    _disc.dispose();
     super.dispose();
   }
 
@@ -271,6 +280,33 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     final text = _title.text.trim();
     if (_saving || (_hasTitleField && text.isEmpty)) return;
     setState(() => _saving = true);
+    // Track/disc numbers are identity — they live in the file name, not
+    // a metadata row — so changing them renames the library entry (and
+    // migrates the per-track row to the renamed key) before the field
+    // saves below.
+    var parsed = _parsed;
+    if (_trackScope) {
+      final track = int.tryParse(_track.text.trim());
+      final disc = _disc.text.trim().isEmpty
+          ? null
+          : int.tryParse(_disc.text.trim());
+      if (track == null ||
+          (_disc.text.trim().isNotEmpty && disc == null)) {
+        _failSave('Track and disc must be numbers.');
+        return;
+      }
+      if (track != _parsed.track || disc != _parsed.disc) {
+        final result = await renumberTrackEntry(widget.entry,
+            track: track,
+            disc: disc,
+            postersDirProvider: widget.postersDirProvider);
+        if (result.error != null) {
+          _failSave(result.error!);
+          return;
+        }
+        parsed = parseMediaName(result.newName!);
+      }
+    }
     Value<String?> posterFile = const Value.absent();
     if (_newPosterBytes != null) {
       posterFile = Value(await saveUserPoster(_lookupKey, _newPosterBytes!,
@@ -297,18 +333,26 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
           : const Value.absent(),
       postersDirProvider: widget.postersDirProvider,
     );
-    if (_trackScope) await _saveTrackTitle(text);
+    if (_trackScope) await _saveTrackTitle(text, parsed);
     if (mounted) Navigator.of(context).pop(true);
+  }
+
+  void _failSave(String message) {
+    if (!mounted) return;
+    setState(() => _saving = false);
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   /// The track's own title lives in a per-track row (`<albumKey>:tD-NN`)
   /// overlaid onto the shared album row — typing the file name's title
-  /// back (or clearing the field) removes the override.
-  Future<void> _saveTrackTitle(String albumTitle) async {
-    final trackKey = trackLookupKey(_parsed);
+  /// back (or clearing the field) removes the override. [parsed] is the
+  /// entry as saved — the renumbered name when this save renamed it.
+  Future<void> _saveTrackTitle(String albumTitle, ParsedName parsed) async {
+    final trackKey = trackLookupKey(parsed);
     if (trackKey == null) return;
     final typed = _trackTitle.text.trim();
-    final original = _parsed.trackTitle ?? '';
+    final original = parsed.trackTitle ?? '';
     if (typed.isEmpty || typed == original) {
       await clearUserEdits(trackKey,
           postersDirProvider: widget.postersDirProvider);
@@ -317,7 +361,7 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     await saveUserDetails(
       lookupKey: trackKey,
       title: albumTitle,
-      episodeLabel: Value('${_parsed.trackMarker} · $typed'),
+      episodeLabel: Value('${parsed.trackMarker} · $typed'),
       postersDirProvider: widget.postersDirProvider,
     );
   }
@@ -398,7 +442,7 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
           ? 'this episode only'
           : _trackScope
               ? 'the whole album (artist, album, year, description, '
-                  'artwork) and this track\'s own title'
+                  'artwork) and this track\'s own title and number'
               : 'this title',
     };
     return 'Details entered here are yours and apply to $target: they '
@@ -518,6 +562,34 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
                   t, 'Track title — ${_parsed.trackMarker}'),
             ),
             const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _track,
+                    keyboardType: TextInputType.number,
+                    style: TextStyle(color: t.bone, fontSize: 14),
+                    decoration: _fieldDecoration(t, 'Track number'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _disc,
+                    keyboardType: TextInputType.number,
+                    style: TextStyle(color: t.bone, fontSize: 14),
+                    decoration: _fieldDecoration(t, 'Disc (optional)'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'The number is part of the file name and sets the track\'s '
+              'place in the album — changing it renames this entry.',
+              style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+            ),
+            const SizedBox(height: 12),
           ] else if (_episodeScope) ...[
             // The show's title is edited from the show page; here the
             // text is the episode's own name (the part after SxxEyy).
@@ -578,6 +650,99 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
         filled: true,
         fillColor: t.ink2.withValues(alpha: 0.4),
       );
+}
+
+/// A track renumber's outcome: the renamed entry name, or the message
+/// explaining why nothing was changed.
+typedef RenumberResult = ({String? newName, String? error});
+
+/// Rename [entry]'s track marker to ([disc], [track]) everywhere the
+/// library holds it (same file name + address in any list), migrating
+/// its per-track metadata row to the renamed key. Name-is-the-database:
+/// the new number re-parses into the album's sort order and metadata
+/// keys with no other state to update; the address is untouched, so
+/// playback, downloads, and the upload ledger never notice.
+///
+/// Refuses (error, nothing written) when the album already holds the
+/// requested (disc, track) on another entry — no silent swap.
+Future<RenumberResult> renumberTrackEntry(
+  MediaEntry entry, {
+  required int track,
+  int? disc,
+  Future<Directory> Function()? postersDirProvider,
+}) async {
+  final parsed = parseMediaName(entry.name);
+  if (!parsed.isTrack) {
+    return (newName: null, error: 'Not a music track.');
+  }
+  final newName =
+      renumberedMusicFileName(entry.name, track: track, disc: disc);
+  if (newName == null) {
+    return (
+      newName: null,
+      error: 'This file name cannot be renumbered — it does not follow '
+          'the track naming convention.'
+    );
+  }
+  final newParsed = parseMediaName(newName);
+  final marker = newParsed.trackMarker!;
+  final lists = await LibraryStore.load();
+  bool isSelf(MediaEntry e) =>
+      e.address == entry.address && e.name == entry.name;
+  for (final list in lists) {
+    if (!list.entries.any(isSelf)) continue;
+    // The same fold the home wall uses decides what "this album" means
+    // (mbid tag, else album+year, artist-agnostic).
+    final keys = AlbumKeys(list.entries);
+    final albumKey = keys.keyFor(parsed);
+    for (final other in list.entries) {
+      if (isSelf(other)) continue;
+      final op = parseMediaName(other.name);
+      if (!op.isTrack || keys.keyFor(op) != albumKey) continue;
+      if ((op.disc ?? 1) == (disc ?? 1) && op.track == track) {
+        return (
+          newName: null,
+          error: 'Track $marker is already taken in this album by '
+              '"${op.trackTitle}" — renumber that track first.'
+        );
+      }
+    }
+  }
+  await LibraryStore.save([
+    for (final l in lists)
+      l.copyWith(entries: [
+        for (final e in l.entries)
+          isSelf(e)
+              ? MediaEntry(
+                  name: newName,
+                  address: e.address,
+                  addedAt: e.addedAt,
+                  sizeBytes: e.sizeBytes,
+                  videoInfo: e.videoInfo,
+                )
+              : e,
+      ]),
+  ]);
+  // The per-track override row's key embeds the number — move it.
+  final oldKey = trackLookupKey(parsed)!;
+  final newKey = trackLookupKey(newParsed)!;
+  if (oldKey != newKey) {
+    final row = await metadataRowFor(oldKey);
+    if (row != null) {
+      final customName = episodeNameFromLabel(row.episodeLabel);
+      await clearUserEdits(oldKey,
+          postersDirProvider: postersDirProvider);
+      if (customName != null) {
+        await saveUserDetails(
+          lookupKey: newKey,
+          title: row.title ?? parsed.title,
+          episodeLabel: Value('$marker · $customName'),
+          postersDirProvider: postersDirProvider,
+        );
+      }
+    }
+  }
+  return (newName: newName, error: null);
 }
 
 /// Grid of frames sampled evenly across the video — tap one to use it

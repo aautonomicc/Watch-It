@@ -70,7 +70,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   bool _listChosen = false;
   List<String> _libraryLists = [];
   WalletStatus? _wallet;
-  List<AttentionBatch> _attention = [];
+  List<PreviousBatch> _previous = [];
   bool _rights = false;
   late BatchStage _lastStage = _session.stage;
 
@@ -107,16 +107,17 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     _list = defaultBatchList(_paths, fallback: _list);
   }
 
-  /// Earlier batches whose manifests still hold needs-attention files.
+  Future<Directory> _batchRoot() async => widget.batchRootProvider != null
+      ? widget.batchRootProvider!()
+      : Directory(p.join(
+          (await getApplicationSupportDirectory()).path, 'batch_uploads'));
+
+  /// Earlier batches — every work dir with a manifest, attention counts
+  /// included.
   Future<void> _loadAttention() async {
     try {
-      final root = widget.batchRootProvider != null
-          ? await widget.batchRootProvider!()
-          : Directory(p.join(
-              (await getApplicationSupportDirectory()).path,
-              'batch_uploads'));
-      final batches = await scanAttentionBatches(root);
-      if (mounted) setState(() => _attention = batches);
+      final batches = await scanPreviousBatches(await _batchRoot());
+      if (mounted) setState(() => _previous = batches);
     } catch (_) {
       // No support dir (tests) — nothing to surface.
     }
@@ -125,13 +126,13 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   /// Re-run prepare over one earlier batch's needs-attention files, in
   /// its own work dir under its original list — the files re-match and
   /// raise their confirm cards again.
-  Future<void> _reviewAttention(AttentionBatch batch) async {
+  Future<void> _reviewAttention(PreviousBatch batch) async {
     if (!_session.idle) return;
     final tmdbKey = await AppSettings.tmdbApiKey();
     if (!mounted) return;
     await _session.startPrepare(
       api: _api,
-      paths: batch.sources,
+      paths: batch.attentionSources,
       listName: batch.listName,
       workDir: batch.workDir,
       tmdbKey: tmdbKey,
@@ -139,6 +140,50 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       configDir: widget.configDir,
       ffmpeg: FfmpegService(),
     );
+  }
+
+  /// Dismiss: stop surfacing the batch's needs-attention files (they
+  /// flip to skipped in its manifest; ledger and bundle untouched).
+  void _dismissBatch(PreviousBatch batch) {
+    try {
+      dismissBatch(batch);
+    } catch (_) {}
+    _loadAttention();
+  }
+
+  /// Delete a batch's records after a confirm — manifest, datamaps,
+  /// bundle, artwork, encode leftovers. Uploaded files stay on the
+  /// network and in the shared ledger (never re-paid).
+  Future<void> _deleteBatch(PreviousBatch batch) async {
+    final t = WiTokens.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text('Delete this batch\'s records?',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        content: Text(
+          'Removes the batch\'s manifest, saved bundle, and working '
+          'files from this device, freeing their disk space. Files '
+          'already uploaded stay on the network and are still '
+          'recognized — they are never paid for twice.',
+          style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel', style: TextStyle(color: t.ash)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Delete', style: TextStyle(color: t.rust)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    deleteBatch(batch);
+    await _loadAttention();
   }
 
   void _onSession() {
@@ -193,17 +238,17 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     });
   }
 
+  /// A FRESH work dir per batch (list slug + start timestamp) — sharing
+  /// one dir per list made a new batch inherit the previous batch's
+  /// manifest: stale counts, and worse, its leftover `ready` files
+  /// joining this batch's estimate and paid upload.
   Future<Directory> _workDir(String listName) async {
     if (widget.workDirProvider != null) {
       return widget.workDirProvider!(listName);
     }
     final support = await getApplicationSupportDirectory();
-    final slug = listName
-        .replaceAll(RegExp(r'[^A-Za-z0-9._ -]'), '_')
-        .trim()
-        .replaceAll(' ', '-');
-    return Directory(p.join(support.path, 'batch_uploads',
-        slug.isEmpty ? 'batch' : slug));
+    return Directory(
+        p.join(support.path, 'batch_uploads', batchDirName(listName)));
   }
 
   Future<void> _start() async {
@@ -292,9 +337,9 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
           ),
         ],
       ),
-      if (_attention.isNotEmpty) ...[
+      if (_previous.isNotEmpty) ...[
         const SizedBox(height: 16),
-        _attentionCard(t),
+        _previousUploadsCard(t),
       ],
       if (_paths.isNotEmpty) ...[
         const SizedBox(height: 12),
@@ -330,11 +375,14 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     ];
   }
 
-  /// Files from earlier batches that keep showing up as needs-attention
-  /// in their manifests — a Review button reopens each batch's confirm
-  /// cards under its original list.
-  Widget _attentionCard(WiTokens t) {
-    final total = _attention.fold(0, (n, b) => n + b.sources.length);
+  /// Earlier batches as a management list: every batch's name, date,
+  /// and status counts, with Review (reopen the confirm cards) and
+  /// Dismiss for needs-attention batches, and Delete for any batch —
+  /// old runs stop haunting new uploads and their disk space is
+  /// reclaimable.
+  Widget _previousUploadsCard(WiTokens t) {
+    final total =
+        _previous.fold(0, (n, b) => n + b.attentionSources.length);
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -347,13 +395,16 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
         children: [
           Row(
             children: [
-              Icon(Icons.help_outline, color: t.rust, size: 20),
+              Icon(total > 0 ? Icons.help_outline : Icons.history,
+                  color: total > 0 ? t.rust : t.ash, size: 20),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '$total ${total == 1 ? 'file' : 'files'} from earlier '
-                  'uploads still ${total == 1 ? 'needs' : 'need'} '
-                  'attention',
+                  total > 0
+                      ? '$total ${total == 1 ? 'file' : 'files'} from '
+                          'earlier uploads still '
+                          '${total == 1 ? 'needs' : 'need'} attention'
+                      : 'Previous uploads',
                   style: TextStyle(
                       color: t.bone,
                       fontSize: 14,
@@ -363,23 +414,71 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          for (final batch in _attention)
-            Row(
+          for (final batch in _previous) _previousBatchRow(t, batch),
+        ],
+      ),
+    );
+  }
+
+  Widget _previousBatchRow(WiTokens t, PreviousBatch batch) {
+    final counts = [
+      for (final status in const [
+        'uploaded',
+        'already-uploaded',
+        'ready',
+        'needs-attention',
+        'failed',
+        'skipped',
+      ])
+        if ((batch.counts[status] ?? 0) > 0)
+          '${batch.counts[status]} ${switch (status) {
+            'already-uploaded' => 'already uploaded',
+            'needs-attention' => batch.counts[status] == 1
+                ? 'needs attention'
+                : 'need attention',
+            _ => status,
+          }}',
+    ].join(' · ');
+    final date = batch.created;
+    final when = date == null
+        ? null
+        : '${date.year}-${date.month.toString().padLeft(2, '0')}-'
+            '${date.day.toString().padLeft(2, '0')}';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text(
-                    '${batch.listName} · ${batch.sources.length} '
-                    '${batch.sources.length == 1 ? 'file' : 'files'}',
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: t.boneDim, fontSize: 13),
-                  ),
+                Text(
+                  '${batch.listName}${when != null ? ' · $when' : ''}',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: t.boneDim, fontSize: 13),
                 ),
-                OutlinedButton(
-                  onPressed: () => _reviewAttention(batch),
-                  child: const Text('Review'),
-                ),
+                if (counts.isNotEmpty)
+                  Text(counts,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: t.ash, fontSize: 12)),
               ],
             ),
+          ),
+          if (batch.needsAttention) ...[
+            OutlinedButton(
+              onPressed: () => _reviewAttention(batch),
+              child: const Text('Review'),
+            ),
+            TextButton(
+              onPressed: () => _dismissBatch(batch),
+              child: Text('Dismiss', style: TextStyle(color: t.ash)),
+            ),
+          ],
+          IconButton(
+            tooltip: 'Delete batch',
+            icon: Icon(Icons.delete_outline, color: t.ash, size: 18),
+            onPressed: () => _deleteBatch(batch),
+          ),
         ],
       ),
     );
