@@ -51,6 +51,9 @@ class FakeEmbeddedHttp extends HttpOverrides {
   /// Raw bodies of every `POST /mywatch/enabled` (the Settings switch).
   final List<String> myWatchEnabledPosts = [];
 
+  /// Raw bodies of every `POST /network/pause` (the pause toggle).
+  final List<String> networkPausePosts = [];
+
   /// Raw bodies of every `POST /channel/enabled` (the Settings switch).
   final List<String> channelEnabledPosts = [];
 
@@ -178,6 +181,16 @@ class FakeEmbeddedHttp extends HttpOverrides {
       return resolvedAddrs.contains(path.substring('/resolve/'.length))
           ? (200, utf8.encode(jsonEncode({'size': datamapSize, 'chunks': 1})))
           : (404, const <int>[]);
+    }
+    if (method == 'POST' && path == '/network/pause') {
+      networkPausePosts.add(utf8.decode(body));
+      final paused =
+          (jsonDecode(utf8.decode(body)) as Map)['paused'] == true;
+      return (
+        200,
+        utf8.encode(jsonEncode(
+            paused ? {'state': 'paused'} : {'state': 'connecting'}))
+      );
     }
     if (path == '/wallet' || path.startsWith('/wallet/')) {
       return _handleWallet(method, path, body);

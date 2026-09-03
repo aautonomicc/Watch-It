@@ -173,6 +173,22 @@ class AppSettings {
     await prefs.setBool(_channelsCellularKey, value);
   }
 
+  static const _networkPausedKey = 'network_paused_v1';
+
+  /// Whether the user has paused all of the app's network activity
+  /// (Settings → Network → Pause all network activity). Persisted so a
+  /// paused app stays quiet across restarts; [NetworkPause] applies it
+  /// to the embedded client at startup and on every flip.
+  static Future<bool> networkPaused() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_networkPausedKey) ?? false;
+  }
+
+  static Future<void> setNetworkPaused(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_networkPausedKey, value);
+  }
+
   static const _samsungTipDismissedKey = 'samsung_tip_dismissed_v1';
 
   /// One-time Samsung battery-management tip on Settings → Downloads.

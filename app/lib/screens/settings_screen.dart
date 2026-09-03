@@ -15,6 +15,7 @@ import '../services/embedded_client.dart';
 import '../services/exit_info.dart';
 import '../services/metadata_service.dart';
 import '../services/my_watch_api.dart';
+import '../services/network_pause.dart';
 import '../services/storage_usage.dart';
 import '../services/update_check.dart';
 import '../theme/tokens.dart';
@@ -90,6 +91,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final health = await EmbeddedClient.health();
     final bufferSizeMb = await AppSettings.bufferSizeMb();
     final tmdbKeySource = await AppSettings.tmdbKeySource();
+    await NetworkPause.instance.ensureLoaded();
     // The x0x switches, for the tile subtitle. Best-effort: an
     // unreachable embedded client just leaves the subtitle generic.
     bool? myWatchOn;
@@ -506,6 +508,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     'behind the play position for instant rewind). Takes '
                     'effect the next time you press Play.',
                     style: TextStyle(fontSize: 11.5, color: t.ash),
+                  ),
+                ),
+                // The all-network kill switch (2026-09-03, data-usage
+                // work): sits right above the two clients it silences.
+                ListenableBuilder(
+                  listenable: NetworkPause.instance,
+                  builder: (context, _) => SwitchListTile(
+                    secondary:
+                        Icon(Icons.pause_circle_outline, color: t.accent),
+                    title: Text('Pause all network activity',
+                        style: TextStyle(color: t.bone, fontSize: 15)),
+                    subtitle: Text(
+                      NetworkPause.instance.paused
+                          ? 'Paused — nothing is streamed or synced until '
+                              'you switch this off'
+                          : 'Disconnects from Autonomi and pauses Channels '
+                              'and My W@tch until switched back on',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                    value: NetworkPause.instance.paused,
+                    onChanged: (v) async {
+                      await NetworkPause.instance.setPaused(v);
+                      await _refreshHealth();
+                      await _reload(); // x0x subtitle follows the agents
+                    },
                   ),
                 ),
                 ListTile(

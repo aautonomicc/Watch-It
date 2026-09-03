@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use std::time::Duration;
 
@@ -66,11 +66,14 @@ pub static CACHE_HIT_CHUNKS: std::sync::atomic::AtomicU64 =
 const FETCH_CONCURRENCY: usize = 16;
 
 /// Chunks the prefetcher keeps fetched ahead of the last byte served to
-/// the player. Network chunks are ≤4 MiB, so 16 ≈ 64 MiB ≈ a minute of
-/// typical 1080p (7–8 Mbps) — enough runway to ride out multi-second
-/// chunk-fetch stalls without holding much RAM (the cache in `cache.rs`
-/// is sized to hold this window plus recently played history).
-const PREFETCH_AHEAD_CHUNKS: usize = 16;
+/// the player. Network chunks are ≤4 MiB, so 4 ≈ 16 MiB ≈ 15–18 s of
+/// typical 1080p (7–8 Mbps) — enough runway to ride out chunk-fetch
+/// stalls. Was 16 (~64 MiB) until 2026-09-03: traffic captures showed
+/// every track/episode start or seek pulling the whole window whether or
+/// not it was watched (~98% of the app's data usage), so the window is
+/// deliberately small; the player's own demuxer buffer (Settings →
+/// Buffer size) sits in front of it and provides further headroom.
+const PREFETCH_AHEAD_CHUNKS: usize = 4;
 
 /// Concurrent chunk fetches used by the prefetcher — kept below
 /// [`FETCH_CONCURRENCY`] so a foreground batch the player is blocked on
@@ -114,6 +117,12 @@ pub struct Engine {
     /// `POST /reconnect` pings this to cut short the supervisor's backoff
     /// sleep / next poll (cable replug and phone wake feel instant).
     kick: Notify,
+    /// User-facing network pause (`POST /network/pause`): while set, no
+    /// client is dialled, `client()` refuses, and in-flight range streams
+    /// stop at their next step — the app goes network-silent until the
+    /// user unpauses. `Arc` so streams/prefetchers spawned before a pause
+    /// observe it without holding `&'static self`.
+    paused: Arc<AtomicBool>,
     peers: Vec<SocketAddr>,
     root_maps: Mutex<HashMap<[u8; 32], DataMap>>,
     /// On-disk root-map cache; `None` when no data dir is available
@@ -161,6 +170,7 @@ impl Engine {
             client: RwLock::new(None),
             connect_gate: AsyncMutex::new(()),
             kick: Notify::new(),
+            paused: Arc::new(AtomicBool::new(false)),
             peers,
             root_maps: Mutex::new(HashMap::new()),
             map_store,
@@ -192,6 +202,25 @@ impl Engine {
         self.client.read().unwrap().is_some()
     }
 
+    /// Whether the user has paused all network use.
+    pub fn paused(&self) -> bool {
+        self.paused.load(Ordering::SeqCst)
+    }
+
+    /// Pause or resume all network use. Pausing evicts the installed
+    /// client (streams end at their next fetch step, the supervisor
+    /// parks instead of re-dialling); resuming kicks the supervisor so a
+    /// fresh dial starts immediately.
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::SeqCst);
+        if paused {
+            self.evict();
+        }
+        // Both directions: wake the supervisor so it re-checks the flag
+        // now (drop its client Arc and park, or start dialling).
+        self.kick_reconnect();
+    }
+
     /// The client currently installed, without connecting.
     fn current(&self) -> Option<Arc<Client>> {
         self.client.read().unwrap().clone()
@@ -209,6 +238,9 @@ impl Engine {
     /// for the rest; a failed attempt leaves the slot empty so the next
     /// request retries.
     pub async fn client(&self) -> Result<Arc<Client>, String> {
+        if self.paused() {
+            return Err("network is paused — resume it in Settings".to_string());
+        }
         if let Some(c) = self.current() {
             return Ok(c);
         }
@@ -238,6 +270,14 @@ impl Engine {
         };
         match result {
             Ok(c) => {
+                // A pause that landed while this dial was in flight must
+                // win — installing the client would leave it connected
+                // (and chattering) behind a "paused" health state.
+                if self.paused() {
+                    return Err(
+                        "network is paused — resume it in Settings".to_string()
+                    );
+                }
                 let c = Arc::new(self.attach_wallet(c));
                 *self.client.write().unwrap() = Some(c.clone());
                 *self.last_error.lock().unwrap() = None;
@@ -308,6 +348,13 @@ impl Engine {
     pub async fn supervise(&'static self) {
         let mut delay = Duration::from_secs(2);
         loop {
+            // Paused: park until the next kick (set_paused kicks on both
+            // edges), never dialling. Backoff restarts fresh on resume.
+            if self.paused() {
+                self.kick.notified().await;
+                delay = Duration::from_secs(2);
+                continue;
+            }
             let client = match self.client().await {
                 Ok(c) => c,
                 Err(e) => {
@@ -329,6 +376,16 @@ impl Engine {
                     _ = tokio::time::sleep(SUPERVISE_POLL) => false,
                     _ = self.kick.notified() => true,
                 };
+                // A pause must drop this loop's own client Arc too, or
+                // the evicted client would be kept alive (and its network
+                // chatter running) by the supervisor itself. Evict again
+                // here: a dial that was in flight when the pause landed
+                // could have installed a client after set_paused's evict.
+                if self.paused() {
+                    tracing::info!("network paused — disconnecting");
+                    self.evict();
+                    break;
+                }
                 let peers = client.network().connected_peers().await.len();
                 if peers > 0 {
                     zero_polls = 0;
@@ -453,11 +510,13 @@ impl Engine {
             // the prefetcher follows. Dropping the sender (loop returns for
             // any reason) shuts the prefetcher down.
             let (pos_tx, pos_rx) = watch::channel(start);
+            let paused = self.paused.clone();
             tokio::spawn(prefetch_ahead(
                 client.clone(),
                 chunk_offsets(&root),
                 pos_rx,
                 end,
+                paused.clone(),
             ));
             let handle = Handle::current();
             let blocking = tokio::task::spawn_blocking(move || {
@@ -474,6 +533,16 @@ impl Engine {
                 let mut pos = start;
                 let mut step = INITIAL_RANGE_STEP;
                 while pos <= end {
+                    // A pause ends the stream at the next step so this
+                    // task's client Arc drops instead of fetching on
+                    // against the user's wishes (the player surfaces the
+                    // error; already-buffered video keeps playing).
+                    if paused.load(Ordering::SeqCst) {
+                        let _ = tx.blocking_send(Err(
+                            "network is paused — resume it in Settings".to_string(),
+                        ));
+                        return;
+                    }
                     let want = std::cmp::min(step as u64, end - pos + 1) as usize;
                     step = (step * 2).min(RANGE_STEP);
                     match stream.get_range(pos as usize, want) {
@@ -658,12 +727,18 @@ async fn prefetch_ahead(
     chunks: Vec<(u64, XorName)>,
     mut pos: watch::Receiver<u64>,
     end: u64,
+    paused: Arc<AtomicBool>,
 ) {
     // Last chunk this request can ever need.
     let Some(last) = chunks.iter().rposition(|&(start, _)| start <= end) else {
         return;
     };
     loop {
+        // A network pause ends prefetch outright (dropping this task's
+        // client Arc); the serving loop is winding down the same way.
+        if paused.load(Ordering::SeqCst) {
+            return;
+        }
         let served = *pos.borrow_and_update();
         let current = chunks
             .partition_point(|&(start, _)| start <= served)

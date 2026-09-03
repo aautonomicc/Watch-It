@@ -28,6 +28,7 @@ import 'services/licenses.dart';
 import 'services/metadata.dart';
 import 'services/metadata_service.dart';
 import 'services/network_events.dart';
+import 'services/network_pause.dart';
 import 'services/metadata_seeder.dart';
 import 'services/my_watch_sync.dart';
 import 'services/rootmap_seeder.dart';
@@ -60,6 +61,9 @@ Future<void> main() async {
   // Awaited: it must receive the app data dir (ant-core's $HOME on
   // Android) before any other code path can lazily start it without one.
   await EmbeddedClient.start();
+  // Re-apply a persisted network pause before the first dial gets far:
+  // a user who paused the app expects it to stay quiet across restarts.
+  unawaited(NetworkPause.instance.start());
   // Background online/offline tracking for Play gating and the Up-next
   // chain (browsing itself is never gated).
   ConnectivityMonitor.instance.start();

@@ -12,6 +12,7 @@ import 'package:watchit/services/channels_api.dart';
 import 'package:watchit/services/embedded_client.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/my_watch_sync.dart';
+import 'package:watchit/services/network_pause.dart';
 import 'package:watchit/services/terms.dart';
 import 'package:watchit/services/x0x_cellular.dart';
 import 'package:watchit/theme/tokens.dart';
@@ -175,6 +176,40 @@ void main() {
       expect(
           find.text('My W@tch: paused on mobile data'), findsOneWidget);
       expect(find.text('Channels: paused on mobile data'), findsOneWidget);
+      expect(find.textContaining('switched off'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the peers row shows a paused network as its own state',
+        (tester) async {
+      await tester.pumpWidget(_status(state: 'paused', peers: 0));
+      await tester.pump();
+      expect(find.text('Network paused'), findsOneWidget);
+      expect(find.textContaining('Connecting'), findsNothing);
+      expect(find.textContaining('error'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an all-network pause reads paused with the network',
+        (tester) async {
+      // Both agents disabled by the network pause, not the user.
+      SharedPreferences.setMockInitialValues({
+        'terms_accepted_version_v1': kTermsVersion,
+        'network_pause_x0x_v1': ['myWatch', 'channels'],
+      });
+      NetworkPause.instance = NetworkPause();
+      await NetworkPause.instance.ensureLoaded();
+      addTearDown(() => NetworkPause.instance = NetworkPause());
+
+      MyWatchSync.status.value = const MyWatchSyncStatus(
+          supported: true, linked: true, enabled: false, agentState: 'off');
+      await tester.pumpWidget(_status(
+          state: 'paused', channelsState: 'off', channelsEnabled: false));
+      await tester.pump();
+      expect(
+          find.text('My W@tch: paused with the network'), findsOneWidget);
+      expect(
+          find.text('Channels: paused with the network'), findsOneWidget);
       expect(find.textContaining('switched off'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
