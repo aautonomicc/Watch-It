@@ -189,6 +189,20 @@ class AppSettings {
     await prefs.setBool(_networkPausedKey, value);
   }
 
+  static const _autoPauseMinutesKey = 'network_autopause_minutes_v1';
+
+  /// Minutes of idle time (nothing playing, downloading or uploading)
+  /// before [NetworkPause] pauses the network automatically; 0 = off.
+  static Future<int> networkAutoPauseMinutes() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_autoPauseMinutesKey) ?? 30;
+  }
+
+  static Future<void> setNetworkAutoPauseMinutes(int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_autoPauseMinutesKey, value);
+  }
+
   static const _samsungTipDismissedKey = 'samsung_tip_dismissed_v1';
 
   /// One-time Samsung battery-management tip on Settings → Downloads.

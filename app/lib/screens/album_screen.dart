@@ -11,6 +11,7 @@ import '../services/embedded_client.dart';
 import '../services/favourites.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
+import '../services/network_pause.dart';
 import '../services/network_policy.dart';
 import '../services/season_grouping.dart';
 import '../services/watch_state.dart';
@@ -125,6 +126,7 @@ class _AlbumScreenState extends State<AlbumScreen>
       s.cancel();
     }
     unawaited(_player?.dispose());
+    NetworkPause.instance.setStreamingActive(this, false);
     if (_pausedDownloads) {
       unawaited(DownloadManager.instance.resumeAfterPlayback());
     }
@@ -139,6 +141,9 @@ class _AlbumScreenState extends State<AlbumScreen>
     _player = player;
     _subs.addAll([
       player.playingStream.listen((playing) {
+        // Feeds the idle auto-pause (see NetworkPause): audio playing
+        // here counts as network activity like the video player's.
+        NetworkPause.instance.setStreamingActive(this, playing);
         if (!mounted) return;
         setState(() => _playing = playing);
         playing
@@ -203,6 +208,8 @@ class _AlbumScreenState extends State<AlbumScreen>
     if (_history.isEmpty || _history.last.address != entry.address) {
       _history.add(entry);
     }
+    // Lift an idle auto-pause before the stream request hits the core.
+    await NetworkPause.instance.noteActivity();
     await player.open(source.url);
   }
 
