@@ -64,6 +64,12 @@ fn protected_router(engine: &'static Engine) -> Router {
                 .delete(move || wallet_delete(engine)),
         )
         .route("/wallet/generate", post(wallet_generate))
+        // Pause/resume all network use. Protected: only the app should
+        // be able to silence (or wake) the user's network client.
+        .route(
+            "/network/pause",
+            post(move |body: Bytes| set_network_pause(engine, body)),
+        )
         .route("/wallet/balances", get(move || wallet_balances(engine)))
         .route(
             "/upload/estimate",
@@ -189,7 +195,11 @@ fn open_router(engine: &'static Engine) -> Router {
 
 async fn health(engine: &'static Engine) -> Response {
     use std::sync::atomic::Ordering;
-    let body = if engine.is_ready() {
+    let body = if engine.paused() {
+        // User-requested quiet: not an error, not "connecting" — the UI
+        // shows it as its own state with no spinner.
+        serde_json::json!({ "state": "paused" })
+    } else if engine.is_ready() {
         serde_json::json!({
             "state": "ready",
             "peers": engine.connected_peer_count().await,
@@ -218,6 +228,23 @@ async fn health(engine: &'static Engine) -> Response {
 /// Returns the current health JSON so the caller sees where things stand.
 async fn reconnect(engine: &'static Engine) -> Response {
     engine.kick_reconnect();
+    health(engine).await
+}
+
+/// `POST /network/pause` — `{"paused": bool}`: pause or resume all
+/// network use (the Settings toggle). Pausing evicts the client and
+/// parks the reconnect supervisor; resuming dials again immediately.
+/// Returns the resulting health JSON so the caller sees the new state.
+async fn set_network_pause(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    let Some(paused) = v["paused"].as_bool() else {
+        return (StatusCode::BAD_REQUEST, "\"paused\" must be a boolean")
+            .into_response();
+    };
+    engine.set_paused(paused);
+    tracing::info!("network pause set to {paused}");
     health(engine).await
 }
 
@@ -1532,6 +1559,45 @@ mod wallet_api_tests {
         // Open routes stay tokenless.
         let (status, _) = send_auth(&app, "GET", "/health", vec![], None).await;
         assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn network_pause_flips_health_and_is_guarded() {
+        let engine = test_engine("netpause");
+        let app = router_with_auth(engine, "sekrit");
+        let pause = |p: bool| format!("{{\"paused\":{p}}}").into_bytes();
+        // Tokenless → 401 (the route can silence the network).
+        let (status, _) =
+            send_auth(&app, "POST", "/network/pause", pause(true), None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        // Pause: the route returns the new health, and /health agrees.
+        let (status, body) = send_auth(
+            &app, "POST", "/network/pause", pause(true), Some("sekrit"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["state"], serde_json::json!("paused"));
+        let (_, body) = send_auth(&app, "GET", "/health", vec![], None).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["state"], serde_json::json!("paused"));
+        // client() refuses instantly while paused (no dial attempt).
+        let err = engine.client().await.err().unwrap();
+        assert!(err.contains("paused"), "{err}");
+        // Malformed body → 400, state unchanged.
+        let (status, _) = send_auth(
+            &app, "POST", "/network/pause", b"{}".to_vec(), Some("sekrit"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(engine.paused());
+        // Resume: health reports connecting again.
+        let (_, body) = send_auth(
+            &app, "POST", "/network/pause", pause(false), Some("sekrit"),
+        )
+        .await;
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["state"], serde_json::json!("connecting"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

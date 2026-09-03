@@ -160,7 +160,8 @@ class ClientHealth {
     this.fetchedBytes = 0,
   });
 
-  /// `connecting`, `ready`, `error`, or `unavailable` (no native library).
+  /// `connecting`, `ready`, `paused` (user switched all network use
+  /// off), `error`, or `unavailable` (no native library).
   final String state;
   final int peers;
 
@@ -178,6 +179,7 @@ class ClientHealth {
   String get label => switch (state) {
         'ready' =>
           'Connected ($peers ${peers == 1 ? 'peer' : 'peers'})',
+        'paused' => 'Paused — no network activity',
         'connecting' => message == null
             ? 'Connecting to the network…'
                 '${attempts > 1 ? ' (attempt $attempts)' : ''}'

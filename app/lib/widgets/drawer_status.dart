@@ -7,6 +7,7 @@ import '../screens/my_watch_screen.dart';
 import '../services/channels_api.dart';
 import '../services/embedded_client.dart';
 import '../services/my_watch_sync.dart';
+import '../services/network_pause.dart';
 import '../services/x0x_cellular.dart';
 import '../theme/tokens.dart';
 
@@ -45,13 +46,16 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
     _pollHealth();
     _pollChannels();
     // "Paused on mobile data" vs "switched off" wording can flip while
-    // the drawer is open (walking out of Wi-Fi range).
+    // the drawer is open (walking out of Wi-Fi range); same for the
+    // all-network pause.
     X0xCellularGate.instance.addListener(_onGateChanged);
+    NetworkPause.instance.addListener(_onGateChanged);
   }
 
   @override
   void dispose() {
     X0xCellularGate.instance.removeListener(_onGateChanged);
+    NetworkPause.instance.removeListener(_onGateChanged);
     _healthTimer?.cancel();
     _channelsTimer?.cancel();
     super.dispose();
@@ -152,6 +156,7 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
           'Connected · ${h.peers} ${h.peers == 1 ? 'peer' : 'peers'}',
         ),
       'connecting' => (t.accent, 'Connecting…'),
+      'paused' => (t.ash, 'Network paused'),
       _ => (const Color(0xffe57373), 'Connection error'),
     };
     return _row(t, color: color, text: text);
@@ -163,9 +168,11 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
       MyWatchSyncStatus(linked: false) => (t.ash, 'My W@tch: not linked'),
       MyWatchSyncStatus(enabled: false) => (
           t.ash,
-          X0xCellularGate.instance.isPaused(X0xAgent.myWatch)
-              ? 'My W@tch: paused on mobile data'
-              : 'My W@tch: switched off',
+          NetworkPause.instance.isAgentPaused(X0xAgent.myWatch)
+              ? 'My W@tch: paused with the network'
+              : X0xCellularGate.instance.isPaused(X0xAgent.myWatch)
+                  ? 'My W@tch: paused on mobile data'
+                  : 'My W@tch: switched off',
         ),
       MyWatchSyncStatus(agentState: != 'ready') => (
           t.accent,
@@ -194,9 +201,11 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
     final (color, text) = switch (c) {
       ChannelsStatus(enabled: false) => (
           t.ash,
-          X0xCellularGate.instance.isPaused(X0xAgent.channels)
-              ? 'Channels: paused on mobile data'
-              : 'Channels: switched off',
+          NetworkPause.instance.isAgentPaused(X0xAgent.channels)
+              ? 'Channels: paused with the network'
+              : X0xCellularGate.instance.isPaused(X0xAgent.channels)
+                  ? 'Channels: paused on mobile data'
+                  : 'Channels: switched off',
         ),
       ChannelsStatus(state: 'ready') => (
           const Color(0xff4caf50),

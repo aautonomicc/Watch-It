@@ -735,7 +735,11 @@ class DownloadManager extends ChangeNotifier {
       final map = jsonDecode(body) as Map<String, dynamic>;
       final state = map['state'] as String?;
       final peers = map['peers'] as int? ?? 0;
-      return state == 'connecting' || (state == 'ready' && peers == 0);
+      // 'paused' = the user's network pause: park the download like a
+      // lost connection (NetworkPause resumes system pauses on unpause).
+      return state == 'connecting' ||
+          state == 'paused' ||
+          (state == 'ready' && peers == 0);
     } catch (_) {
       // The health endpoint itself failing is not a network verdict.
       return false;
