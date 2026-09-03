@@ -65,15 +65,35 @@ pub static CACHE_HIT_CHUNKS: std::sync::atomic::AtomicU64 =
 /// adaptive controller and does not read this.)
 const FETCH_CONCURRENCY: usize = 16;
 
-/// Chunks the prefetcher keeps fetched ahead of the last byte served to
-/// the player. Network chunks are ≤4 MiB, so 4 ≈ 16 MiB ≈ 15–18 s of
-/// typical 1080p (7–8 Mbps) — enough runway to ride out chunk-fetch
-/// stalls. Was 16 (~64 MiB) until 2026-09-03: traffic captures showed
-/// every track/episode start or seek pulling the whole window whether or
-/// not it was watched (~98% of the app's data usage), so the window is
-/// deliberately small; the player's own demuxer buffer (Settings →
-/// Buffer size) sits in front of it and provides further headroom.
-const PREFETCH_AHEAD_CHUNKS: usize = 4;
+/// Smallest prefetch window: what a fresh range request starts with.
+/// Network chunks are ≤4 MiB, so this is ~4 MiB. Traffic captures
+/// (2026-09-03) showed every track/episode start or seek pulling the
+/// whole window whether or not it was watched (~98% of the app's data
+/// usage, back when the window was a fixed 16 chunks), so starts — and
+/// seeks, which open a new request — must be cheap.
+const PREFETCH_AHEAD_MIN_CHUNKS: usize = 1;
+
+/// Largest prefetch window a long-playing stream grows into (~32 MiB ≈
+/// 30–35 s of typical 1080p at 7–8 Mbps): a stream that has played for
+/// minutes is actually being watched and earns a bigger cushion against
+/// chunk-fetch stalls. The player's own demuxer buffer (Settings →
+/// Buffer size) sits in front of the window and provides further
+/// headroom.
+const PREFETCH_AHEAD_MAX_CHUNKS: usize = 8;
+
+/// The prefetch window grows by one chunk per this much serving time on
+/// one range request, [`PREFETCH_AHEAD_MIN_CHUNKS`] →
+/// [`PREFETCH_AHEAD_MAX_CHUNKS`] (reached after ~3.5 min of playback).
+const PREFETCH_GROW_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Chunks to keep warm ahead of the served position after `played` of
+/// serving on the current range request.
+fn adaptive_prefetch_ahead(played: Duration) -> usize {
+    let steps = (played.as_secs() / PREFETCH_GROW_INTERVAL.as_secs()) as usize;
+    PREFETCH_AHEAD_MIN_CHUNKS
+        .saturating_add(steps)
+        .min(PREFETCH_AHEAD_MAX_CHUNKS)
+}
 
 /// Concurrent chunk fetches used by the prefetcher — kept below
 /// [`FETCH_CONCURRENCY`] so a foreground batch the player is blocked on
@@ -488,9 +508,9 @@ impl Engine {
 
     /// Stream an inclusive byte range as decrypted bytes, fetched in
     /// [`RANGE_STEP`] slices so seeks start playing quickly and memory
-    /// stays bounded. A background prefetcher keeps
-    /// [`PREFETCH_AHEAD_CHUNKS`] chunks warm ahead of the served position
-    /// so one slow chunk batch stalls prefetch, not the player.
+    /// stays bounded. A background prefetcher keeps an adaptive window of
+    /// chunks ([`adaptive_prefetch_ahead`]) warm ahead of the served
+    /// position so one slow chunk batch stalls prefetch, not the player.
     pub fn stream_range(
         &'static self,
         root: DataMap,
@@ -717,11 +737,12 @@ fn chunk_offsets(root: &DataMap) -> Vec<(u64, XorName)> {
         .collect()
 }
 
-/// Keep [`PREFETCH_AHEAD_CHUNKS`] chunks warm ahead of the last byte the
-/// serving loop has handed to the player, so each serving step finds its
-/// chunks already in RAM instead of blocking the stream on the network.
-/// Exits when the serving side drops its position sender (stream done or
-/// player disconnected).
+/// Keep an adaptive window of chunks ([`adaptive_prefetch_ahead`] — small
+/// at request start, growing the longer the stream plays) warm ahead of
+/// the last byte the serving loop has handed to the player, so each
+/// serving step finds its chunks already in RAM instead of blocking the
+/// stream on the network. Exits when the serving side drops its position
+/// sender (stream done or player disconnected).
 async fn prefetch_ahead(
     client: Arc<Client>,
     chunks: Vec<(u64, XorName)>,
@@ -733,6 +754,7 @@ async fn prefetch_ahead(
     let Some(last) = chunks.iter().rposition(|&(start, _)| start <= end) else {
         return;
     };
+    let started = std::time::Instant::now();
     loop {
         // A network pause ends prefetch outright (dropping this task's
         // client Arc); the serving loop is winding down the same way.
@@ -743,7 +765,7 @@ async fn prefetch_ahead(
         let current = chunks
             .partition_point(|&(start, _)| start <= served)
             .saturating_sub(1);
-        let target = (current + PREFETCH_AHEAD_CHUNKS).min(last);
+        let target = (current + adaptive_prefetch_ahead(started.elapsed())).min(last);
         let wanted: Vec<XorName> = chunks[current..=target]
             .iter()
             .filter(|(_, name)| !CHUNK_CACHE.contains(&name.0))
@@ -772,5 +794,27 @@ async fn prefetch_ahead(
         if pos.has_changed().is_err() {
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefetch_window_starts_small_and_grows_to_the_cap() {
+        assert_eq!(adaptive_prefetch_ahead(Duration::ZERO), PREFETCH_AHEAD_MIN_CHUNKS);
+        assert_eq!(adaptive_prefetch_ahead(Duration::from_secs(29)), 1);
+        assert_eq!(adaptive_prefetch_ahead(Duration::from_secs(30)), 2);
+        assert_eq!(adaptive_prefetch_ahead(Duration::from_secs(95)), 4);
+        // Long playback caps out and stays there.
+        assert_eq!(
+            adaptive_prefetch_ahead(Duration::from_secs(210)),
+            PREFETCH_AHEAD_MAX_CHUNKS
+        );
+        assert_eq!(
+            adaptive_prefetch_ahead(Duration::from_secs(3600)),
+            PREFETCH_AHEAD_MAX_CHUNKS
+        );
     }
 }

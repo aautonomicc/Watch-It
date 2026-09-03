@@ -10,6 +10,7 @@ import '../db/app_database.dart';
 import '../models/media_list.dart';
 import 'app_settings.dart';
 import 'connectivity.dart';
+import 'network_pause.dart';
 import 'embedded_client.dart';
 import 'library_store.dart';
 import 'network_events.dart';
@@ -343,6 +344,9 @@ class DownloadManager extends ChangeNotifier {
   /// no-op when already queued, downloading, or done.
   Future<void> enqueue(MediaEntry entry) async {
     await ensureLoaded();
+    // A user-started download is activity: lifts an idle auto-pause and
+    // keeps the idle timer from firing mid-queue.
+    await NetworkPause.instance.noteActivity();
     final addr = normalize(entry.address);
     final existing = _tasks[addr];
     if (existing != null) {
@@ -393,6 +397,7 @@ class DownloadManager extends ChangeNotifier {
             task.status != DownloadStatus.error)) {
       return;
     }
+    await NetworkPause.instance.noteActivity();
     _pausedForPlayback.remove(addr);
     _update(task.copyWith(
         status: DownloadStatus.queued,
@@ -444,6 +449,7 @@ class DownloadManager extends ChangeNotifier {
   /// Resume every paused download.
   Future<void> resumeAll() async {
     await ensureLoaded();
+    await NetworkPause.instance.noteActivity();
     _pausedForPlayback.clear();
     var any = false;
     for (final task in _tasks.values.toList()) {

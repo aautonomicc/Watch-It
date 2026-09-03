@@ -31,6 +31,14 @@ import 'terms_screen.dart';
 import 'wallet_screen.dart';
 import 'x0x_client_screen.dart';
 
+/// Choices for Settings → Network → Auto-pause when idle (minutes of
+/// idle time before [NetworkPause] pauses the network; 0 = off).
+const kAutoPauseOptionsMinutes = [0, 10, 20, 30, 60];
+
+/// Human label for an auto-pause threshold: `30 minutes`, `1 hour`.
+String idleMinutesLabel(int minutes) =>
+    minutes >= 60 ? '1 hour' : '$minutes minutes';
+
 /// Settings: content, network, metadata, appearance, and about sections.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -148,6 +156,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _refreshHealth() async {
     final health = await EmbeddedClient.health();
     if (mounted) setState(() => _health = health);
+  }
+
+  Future<void> _pickAutoPause() async {
+    final t = WiTokens.of(context);
+    final picked = await showDialog<int>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        backgroundColor: t.ink2,
+        title: Text('Auto-pause when idle',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        children: [
+          RadioGroup<int>(
+            groupValue: NetworkPause.instance.idleMinutes,
+            onChanged: (v) => Navigator.of(context).pop(v),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final mins in kAutoPauseOptionsMinutes)
+                  RadioListTile<int>(
+                    value: mins,
+                    activeColor: t.accent,
+                    title: Text(
+                      mins <= 0
+                          ? 'Off'
+                          : 'After ${idleMinutesLabel(mins)}'
+                              '${mins == 30 ? '  ·  default' : ''}',
+                      style: TextStyle(color: t.bone, fontSize: 14),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    if (picked == null) return;
+    await NetworkPause.instance.setIdleMinutes(picked);
   }
 
   Future<void> _pickBufferSize() async {
@@ -521,8 +566,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         style: TextStyle(color: t.bone, fontSize: 15)),
                     subtitle: Text(
                       NetworkPause.instance.paused
-                          ? 'Paused — nothing is streamed or synced until '
-                              'you switch this off'
+                          ? (NetworkPause.instance.autoPaused
+                              ? 'Paused automatically after sitting idle — '
+                                  'playing something resumes it'
+                              : 'Paused — nothing is streamed or synced '
+                                  'until you switch this off')
                           : 'Disconnects from Autonomi and pauses Channels '
                               'and My W@tch until switched back on',
                       style: TextStyle(color: t.ash, fontSize: 12),
@@ -533,6 +581,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       await _refreshHealth();
                       await _reload(); // x0x subtitle follows the agents
                     },
+                  ),
+                ),
+                ListenableBuilder(
+                  listenable: NetworkPause.instance,
+                  builder: (context, _) => ListTile(
+                    leading: Icon(Icons.timer_outlined, color: t.accent),
+                    title: Text('Auto-pause when idle',
+                        style: TextStyle(color: t.bone, fontSize: 15)),
+                    subtitle: Text(
+                      NetworkPause.instance.idleMinutes <= 0
+                          ? 'Off — stays connected while the app is open'
+                          : 'After ${idleMinutesLabel(NetworkPause.instance.idleMinutes)} '
+                              'with nothing playing, downloading or '
+                              'uploading. Playing something resumes '
+                              'automatically.',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                    trailing: Icon(Icons.chevron_right, color: t.ash),
+                    onTap: _pickAutoPause,
                   ),
                 ),
                 ListTile(

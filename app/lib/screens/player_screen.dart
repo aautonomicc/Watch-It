@@ -12,6 +12,7 @@ import '../services/embedded_client.dart';
 import '../services/library_store.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
+import '../services/network_pause.dart';
 import '../services/screen_wake.dart';
 import '../services/user_metadata.dart';
 import '../services/watch_state.dart';
@@ -127,7 +128,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
     // Linux screensaver/lock inhibit while playback runs — the wakelock the
     // Video widget holds covers the other platforms (see ScreenWake docs).
-    _playingSub = _player.stream.playing.listen(ScreenWake.instance.setPlaying);
+    _playingSub = _player.stream.playing.listen((playing) {
+      ScreenWake.instance.setPlaying(playing);
+      // Feeds the idle auto-pause: while something plays the network
+      // never pauses itself, and pressing play lifts an automatic pause.
+      NetworkPause.instance.setStreamingActive(this, playing);
+    });
     // mpv reports error-level log lines that are not fatal — e.g. a
     // hardware decoder that fails to open ("could not open codec")
     // right before it falls back to software and plays fine. Only treat
@@ -147,10 +153,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final health = await EmbeddedClient.health();
       if (mounted) setState(() => _fetchedBytes = health.fetchedBytes);
     });
-    _player.open(Media(
-      widget.url,
-      start: widget.resumeFrom > Duration.zero ? widget.resumeFrom : null,
-    ));
+    unawaited(() async {
+      // An idle auto-pause lifts the moment the user plays something —
+      // cleared before mpv's first request can hit the local server.
+      await NetworkPause.instance.noteActivity();
+      await _player.open(Media(
+        widget.url,
+        start: widget.resumeFrom > Duration.zero ? widget.resumeFrom : null,
+      ));
+    }());
   }
 
   /// Addresses whose resolution was recorded this session (mpv re-emits
@@ -299,6 +310,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _bufferingSub?.cancel();
     _playingSub?.cancel();
     ScreenWake.instance.setPlaying(false);
+    NetworkPause.instance.setStreamingActive(this, false);
     _errorSub?.cancel();
     _positionSub?.cancel();
     _completedSub?.cancel();
