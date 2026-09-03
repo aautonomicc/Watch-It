@@ -77,24 +77,30 @@ class MetadataService extends ChangeNotifier {
     if (parsed.isTrack) {
       // All tracks of one album share the cached row (title/year/cover);
       // the track's own number and name only exist in its file name, so
-      // re-attach them to whatever the shared row resolved to. A
-      // user-authored track row (Edit details on the track) overrides
-      // the file-name label and carries the track's OWN artwork and
-      // artist credit — per-entry slots, so album covers and cards
-      // (which read the first track) never show one track's edits.
+      // re-attach them to whatever the shared row resolved to. TWO user
+      // overlays sit on top: the ALBUM row (Edit album details) under
+      // the artist-free album key — cache keys embed the per-track
+      // artist, so a compilation's album-wide cover/description/credit
+      // must live in one shared row to reach every track — and the
+      // per-track row (Edit details on the track), which overrides the
+      // file-name label and carries the track's OWN artwork and artist
+      // credit in per-entry slots, so album covers and cards (which
+      // read the first track) never show one track's edits.
+      final album = _overlayFor(albumLookupKey(parsed)!);
       final track = _overlayFor(trackLookupKey(parsed)!);
       return MediaMetadata(
-        title: meta.title,
-        year: meta.year,
-        overview: meta.overview,
+        title: album?.title ?? meta.title,
+        year: album?.year ?? meta.year,
+        overview: album?.overview ?? meta.overview,
         category: meta.category,
         episodeLabel: track?.episodeLabel ?? trackLabel(parsed),
         posterAsset: meta.posterAsset,
-        posterFilePath: meta.posterFilePath,
+        posterFilePath: album?.posterFilePath ?? meta.posterFilePath,
         episodePosterFilePath: track?.posterFilePath,
         rating: meta.rating,
         mediaType: meta.mediaType ?? 'music',
-        artist: meta.artist ?? parsed.artist,
+        artist: album?.artist ?? meta.artist ?? parsed.artist,
+        albumArtist: album?.artist,
         trackArtist: track?.artist ?? parsed.artist,
       );
     }

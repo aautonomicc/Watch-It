@@ -324,11 +324,12 @@ class _AlbumScreenState extends State<AlbumScreen>
     // Any track's match carries the album title, year, and cover art.
     final meta = MetadataService.instance.metadataFor(group.tracks.first);
     final title = meta.title.isEmpty ? group.album : meta.title;
-    // The album's displayed credit — a compilation's group credit beats
-    // any single track's row; track rows show their own artist beside
-    // the title when it differs from this.
-    final credit =
-        group.isCompilation ? group.artist : meta.artist ?? group.artist;
+    // The album's displayed credit — a user-set album credit (Edit
+    // album details) beats everything, else a compilation's group
+    // credit beats any single track's row; track rows show their own
+    // artist beside the title when it differs from this.
+    final credit = meta.albumArtist ??
+        (group.isCompilation ? group.artist : meta.artist ?? group.artist);
     final count = group.tracks.length;
     // Tracks not fully downloaded yet — what "download album" queues.
     final remaining = [
@@ -358,7 +359,8 @@ class _AlbumScreenState extends State<AlbumScreen>
                 // re-entered.
                 builder: (_) => EditDetailsScreen(
                     entry: group.tracks.first,
-                    scope: EditDetailsScope.album),
+                    scope: EditDetailsScope.album,
+                    albumIsCompilation: group.isCompilation),
               ),
             ),
           ),

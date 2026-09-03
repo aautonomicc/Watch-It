@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:drift/drift.dart' show driftRuntimeOptions;
+import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -386,6 +386,53 @@ void main() {
       ));
       await tester.pumpAndSettle();
       expect(find.text('Various Artists · 2 tracks'), findsOneWidget);
+    });
+
+    testWidgets('a user-set album credit beats Various Artists on the '
+        'card', (tester) async {
+      // Overlay resolves read the posters dir — the group default has
+      // no postersDirProvider (real path_provider throws in tests).
+      MetadataService.instance = MetadataService(
+        apiKeyProvider: () async => '',
+        postersDirProvider: () async => postersDir,
+      );
+      final tracks = [
+        MediaEntry(
+            name: 'Singer A - Road Mix (2002) - 01 Opener.mp3',
+            address: _addr(420)),
+        MediaEntry(
+            name: 'Singer B - Road Mix (2002) - 02 Middle.mp3',
+            address: _addr(421)),
+      ];
+      // The compiling-artist credit (Edit album details) under the
+      // artist-free album key.
+      final db = await LibraryStore.database();
+      await db.into(db.metadataCache).insertOnConflictUpdate(
+            MetadataCacheCompanion.insert(
+              lookupKey: albumLookupKey(parseMediaName(tracks.first.name))!,
+              found: true,
+              title: const Value('Road Mix'),
+              artist: const Value('DJ Ella'),
+              fetchedAt: 1,
+              userEdited: const Value(true),
+            ),
+          );
+      final comp = groupSeasons(tracks).single as HomeAlbum;
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: Scaffold(
+          // The real wall wraps cards in a ListenableBuilder — the
+          // overlay lands async, so the card must rebuild on notify.
+          body: ListenableBuilder(
+            listenable: MetadataService.instance,
+            builder: (context, _) => AlbumCard(
+                group: comp, tokens: WiTokens.dark, onTap: () {}),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('DJ Ella · 2 tracks'), findsOneWidget);
+      expect(find.textContaining('Various Artists'), findsNothing);
     });
 
     HomeArtist artist() => groupShows([

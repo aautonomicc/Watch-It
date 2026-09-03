@@ -55,6 +55,7 @@ class EditDetailsScreen extends StatefulWidget {
     super.key,
     required this.entry,
     this.scope = EditDetailsScope.entry,
+    this.albumIsCompilation = false,
     this.ffmpeg,
     this.postersDirProvider,
   });
@@ -64,6 +65,12 @@ class EditDetailsScreen extends StatefulWidget {
   final MediaEntry entry;
 
   final EditDetailsScope scope;
+
+  /// Album scope on a compilation (`Various Artists`): the Album artist
+  /// field starts empty — there is no single credit to prefill, and an
+  /// untouched save must keep the credit unset rather than silently
+  /// adopting the first track's artist.
+  final bool albumIsCompilation;
 
   /// Injectable for tests.
   final FfmpegService? ffmpeg;
@@ -144,7 +151,11 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     _parsed = parseMediaName(widget.entry.name);
     _lookupKey = switch (_scope) {
       EditDetailsScope.entry => _parsed.lookupKey,
-      EditDetailsScope.album => _parsed.lookupKey,
+      // The album's own artist-free key — a track's lookup key embeds
+      // its artist, so a row there would miss a compilation's
+      // other-artist tracks (and make the album row literally track
+      // 01's row).
+      EditDetailsScope.album => albumLookupKey(_parsed) ?? _parsed.lookupKey,
       EditDetailsScope.show => _parsed.showLookupKey,
       EditDetailsScope.season =>
         _parsed.seasonLookupKey ?? _parsed.lookupKey,
@@ -157,7 +168,9 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     _artist = TextEditingController(
         text: _trackScope
             ? _meta.trackArtist ?? _meta.artist ?? ''
-            : _meta.artist ?? _parsed.artist ?? '');
+            : _albumScope && widget.albumIsCompilation
+                ? _meta.albumArtist ?? ''
+                : _meta.artist ?? _parsed.artist ?? '');
     _trackTitle = TextEditingController(
         text: _trackScope
             ? episodeNameFromLabel(_meta.episodeLabel) ??
@@ -180,7 +193,14 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
   }
 
   Future<void> _load() async {
-    final row = await metadataRowFor(_lookupKey);
+    var row = await metadataRowFor(_lookupKey);
+    // Album scope: edits made before the album key existed (2026-09-03)
+    // live on the shared per-artist row — surface them so Remove-my-edits
+    // appears and the rename-heal rule still fires for them.
+    if (_albumScope && row == null) {
+      final legacy = await metadataRowFor(_parsed.lookupKey);
+      if (legacy?.userEdited ?? false) row = legacy;
+    }
     final trackKey = _trackScope ? trackLookupKey(_parsed) : null;
     final trackRow =
         trackKey == null ? null : await metadataRowFor(trackKey);
@@ -383,7 +403,10 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
           return;
         }
         parsed = parseMediaName(result.newName!);
-        lookupKey = parsed.lookupKey;
+        // The album editor keeps writing the (renamed) album's own key;
+        // the track editor's shared-field save follows the shared row.
+        lookupKey =
+            _albumScope ? albumLookupKey(parsed)! : parsed.lookupKey;
         carriedPoster = result.carriedPosterFile;
       }
     }
@@ -405,6 +428,23 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     }
     if (!rowPoster.present && carriedPoster != null) {
       rowPoster = Value(carriedPoster);
+    }
+    if (_albumScope && _removePoster) {
+      // The album row's null poster only overlays — the base row (the
+      // fold-first track's, whose cover this page displayed) keeps its
+      // slot, so blank that too or the removed cover comes right back
+      // through the fallback.
+      final base = await metadataRowFor(parsed.lookupKey);
+      if (base?.posterFile != null) {
+        await saveUserDetails(
+          lookupKey: parsed.lookupKey,
+          title: base!.title ?? parsed.title,
+          year: base.year,
+          overview: base.overview,
+          posterFile: const Value(null),
+          postersDirProvider: widget.postersDirProvider,
+        );
+      }
     }
     // Episode/season rows never take the typed text as the row title —
     // the row keeps its stored show title (falling back to the one on
@@ -511,11 +551,20 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     );
     if (confirmed != true || !mounted) return;
     // Each scope removes only what it writes: the track editor its
-    // per-track row (siblings and the album row untouched), everything
-    // else its shared row.
+    // per-track row (siblings and the album row untouched), the album
+    // editor the album row — plus any album edit this scope wrote to
+    // the shared row before the album key existed — everything else
+    // its shared row.
     await clearUserEdits(
         _trackScope ? trackLookupKey(_parsed)! : _lookupKey,
         postersDirProvider: widget.postersDirProvider);
+    if (_albumScope) {
+      final legacy = await metadataRowFor(_parsed.lookupKey);
+      if (legacy?.userEdited ?? false) {
+        await clearUserEdits(_parsed.lookupKey,
+            postersDirProvider: widget.postersDirProvider);
+      }
+    }
     if (mounted) Navigator.of(context).pop(true);
   }
 
@@ -650,6 +699,20 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
                             style: TextStyle(color: t.boneDim)),
                       ),
                     ],
+                    if (_trackScope &&
+                        _newPosterBytes == null &&
+                        !_removePoster &&
+                        !_hasCurrentPoster &&
+                        posterImage(_meta) != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'This track has no artwork of its own, so its '
+                        'pages show the album cover. Artwork picked '
+                        'here applies to this track only.',
+                        style: TextStyle(
+                            fontSize: 11.5, color: t.ash, height: 1.35),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -661,7 +724,14 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
               controller: _artist,
               style: TextStyle(color: t.bone, fontSize: 14),
               decoration: _fieldDecoration(
-                  t, _trackScope ? 'Artist — this track' : 'Artist'),
+                  t,
+                  _trackScope ? 'Artist — this track' : 'Album artist',
+                  helper: _albumScope
+                      ? 'The album\'s credited artist — each track '
+                          'keeps its own. On a compilation, leave this '
+                          'empty to show "Various Artists", or set it '
+                          'to credit whoever compiled the album.'
+                      : null),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -773,10 +843,14 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     );
   }
 
-  InputDecoration _fieldDecoration(WiTokens t, String label) =>
+  InputDecoration _fieldDecoration(WiTokens t, String label,
+          {String? helper}) =>
       InputDecoration(
         labelText: label,
         labelStyle: TextStyle(color: t.boneDim, fontSize: 13),
+        helperText: helper,
+        helperMaxLines: 4,
+        helperStyle: TextStyle(color: t.ash, fontSize: 11, height: 1.3),
         enabledBorder: OutlineInputBorder(
             borderSide: BorderSide(color: t.ink2)),
         focusedBorder: OutlineInputBorder(
@@ -1053,60 +1127,90 @@ Future<AlbumRenameResult> renameTrackAlbum(
         rowTitle: np.title,
         postersDirProvider: postersDirProvider);
   }
-  // Album artwork follows the rename when the merged album shows none —
-  // a fresh copy under the row album surfaces actually read (never a
-  // shared file, so clearing one key's edits can't orphan the other's
-  // artwork). When the merged album KEEPS its own cover, the old
-  // album's art follows each moved track as per-track artwork instead
-  // — merging albums never makes artwork that displayed before the
-  // merge disappear.
+  // The album's own user row (artwork/description/credit under the
+  // artist-free album key, plus any legacy album edit on the edited
+  // track's shared row) follows the rename. The old album's cover lands
+  // on the NEW album key when the merged album shows no cover of its
+  // own (a fresh copy — never a shared file, so clearing one key's
+  // edits can't orphan the other's artwork); when the merged album
+  // KEEPS its own cover, the old album's art follows each moved track
+  // as per-track artwork instead — merging albums never makes artwork
+  // that displayed before the merge disappear.
   String? carried;
   final newParsed = parseMediaName(selfNewName);
-  // The row album surfaces read: the album page and cards call
-  // metadataFor on the fold's FIRST track, and cache keys embed the
-  // artist — so under a mixed-artist fold that first track's key is
-  // the cover slot, not necessarily the edited track's.
-  final displayKey = await _albumDisplayKey(entry.address, selfNewName);
-  if (displayKey != null && newParsed.lookupKey != parsed.lookupKey) {
-    final oldRow = await metadataRowFor(parsed.lookupKey);
-    final displayRow = await metadataRowFor(displayKey);
-    final oldPoster = oldRow?.posterFile;
-    if (oldPoster != null && oldPoster != displayRow?.posterFile) {
+  final oldAlbumKey = albumLookupKey(parsed)!;
+  final newAlbumKey = albumLookupKey(newParsed)!;
+  if (oldAlbumKey != newAlbumKey) {
+    final oldAlbumRow = await metadataRowFor(oldAlbumKey);
+    final oldSharedRow = await metadataRowFor(parsed.lookupKey);
+    final newAlbumRow = await metadataRowFor(newAlbumKey);
+    // The row album surfaces fall back to without an album row: the
+    // fold-first track's shared row (cache keys embed the artist, so
+    // under a mixed-artist fold that is not necessarily the edited
+    // track's key).
+    final displayKey = await _albumDisplayKey(entry.address, selfNewName);
+    final displayRow =
+        displayKey == null ? null : await metadataRowFor(displayKey);
+    // What the merged album already shows as its cover, and what the
+    // old album showed (album row first, then the legacy shared slot).
+    final targetPoster = newAlbumRow?.posterFile ?? displayRow?.posterFile;
+    final sourcePoster =
+        oldAlbumRow?.posterFile ?? oldSharedRow?.posterFile;
+    Uint8List? sourceBytes;
+    if (sourcePoster != null && sourcePoster != targetPoster) {
       final dir = await (postersDirProvider ?? defaultPostersDir)();
-      final f = File('${dir.path}/$oldPoster');
-      if (f.existsSync()) {
-        final bytes = f.readAsBytesSync();
-        if (displayRow?.posterFile == null) {
-          final name = await saveUserPoster(displayKey, bytes,
-              postersDirProvider: postersDirProvider);
-          await saveUserDetails(
-            lookupKey: displayKey,
-            title: displayRow?.title ?? newParsed.title,
-            year: displayRow?.year ?? newParsed.year,
-            overview: displayRow?.overview,
-            posterFile: Value(name),
-            postersDirProvider: postersDirProvider,
-          );
-          if (displayKey == newParsed.lookupKey) carried = name;
-        } else {
-          for (final r in renames.entries) {
-            final np = parseMediaName(r.value);
-            final trackKey = trackLookupKey(np);
-            if (trackKey == null) continue;
-            if ((await metadataRowFor(trackKey))?.posterFile != null) {
-              continue; // the track's own art wins
-            }
-            final name = await saveUserPoster(trackKey, bytes,
-                postersDirProvider: postersDirProvider);
-            await saveUserDetails(
-              lookupKey: trackKey,
-              title: np.title,
-              posterFile: Value(name),
-              postersDirProvider: postersDirProvider,
-            );
-          }
-        }
+      final f = File('${dir.path}/$sourcePoster');
+      if (f.existsSync()) sourceBytes = f.readAsBytesSync();
+    }
+    if (newAlbumRow == null &&
+        ((oldAlbumRow?.userEdited ?? false) ||
+            (sourceBytes != null && targetPoster == null))) {
+      // Migrate the old album row — description/credit, and the cover
+      // when the merged album shows none of its own — to the new key.
+      Value<String?> poster = const Value.absent();
+      if (sourceBytes != null && targetPoster == null) {
+        final name = await saveUserPoster(newAlbumKey, sourceBytes,
+            postersDirProvider: postersDirProvider);
+        poster = Value(name);
+        carried = name;
+        sourceBytes = null; // placed — nothing left to carry per track
       }
+      await saveUserDetails(
+        lookupKey: newAlbumKey,
+        title: newParsed.title,
+        year: newParsed.year,
+        overview: oldAlbumRow?.overview,
+        posterFile: poster,
+        artist: Value(oldAlbumRow?.artist),
+        postersDirProvider: postersDirProvider,
+      );
+    }
+    if (sourceBytes != null) {
+      // The merged album keeps its own cover: the old album's art
+      // follows each moved track as its per-track artwork (a track's
+      // own art wins).
+      for (final r in renames.entries) {
+        final np = parseMediaName(r.value);
+        final trackKey = trackLookupKey(np);
+        if (trackKey == null) continue;
+        if ((await metadataRowFor(trackKey))?.posterFile != null) {
+          continue;
+        }
+        final name = await saveUserPoster(trackKey, sourceBytes,
+            postersDirProvider: postersDirProvider);
+        await saveUserDetails(
+          lookupKey: trackKey,
+          title: np.title,
+          posterFile: Value(name),
+          postersDirProvider: postersDirProvider,
+        );
+      }
+    }
+    // Every track moved out, so the old album key holds no album any
+    // more — its row (bytes already carried above) goes with it.
+    if (oldAlbumRow?.userEdited ?? false) {
+      await clearUserEdits(oldAlbumKey,
+          postersDirProvider: postersDirProvider);
     }
   }
   return (newName: selfNewName, error: null, carriedPosterFile: carried);
