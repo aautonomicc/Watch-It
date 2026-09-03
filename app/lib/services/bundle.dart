@@ -314,6 +314,13 @@ Future<BundleBuildResult> buildBundle(
       keys.add(parsed.showLookupKey);
       keys.add(parsed.seasonLookupKey!);
     }
+    if (parsed.isTrack) {
+      // User-authored album-level (cover/description/credit) and
+      // per-track (title/artist/artwork) rows — no entry resolves under
+      // these keys, same as the show/season ones above.
+      keys.add(albumLookupKey(parsed)!);
+      keys.add(trackLookupKey(parsed)!);
+    }
   }
   final db = await LibraryStore.database();
   final rows = keys.isEmpty

@@ -34,6 +34,7 @@ class MediaMetadata {
     this.episodePosterFilePath,
     this.mediaType,
     this.artist,
+    this.albumArtist,
     this.trackArtist,
   });
 
@@ -89,6 +90,14 @@ class MediaMetadata {
   /// From the shared album row when set (user-editable via Edit album
   /// details), else the parsed file name.
   final String? artist;
+
+  /// Music tracks: the user-set album credit (Edit album details) — the
+  /// "Album artist" every music player distinguishes from per-track
+  /// artists (ID3's TPE2). Null when the user never set one. [artist]
+  /// already prefers it; this field exists so compilation surfaces can
+  /// tell a real credit from the first track's parsed-artist fallback
+  /// (no credit → they show `Various Artists`).
+  final String? albumArtist;
 
   /// Music tracks: this track's own credit — the per-track row's user
   /// override when set (Edit track details), else the artist parsed
@@ -182,6 +191,21 @@ String? trackLabel(ParsedName parsed) =>
 /// non-tracks.
 String? trackLookupKey(ParsedName parsed) => parsed.isTrack
     ? '${parsed.lookupKey}:t${parsed.disc ?? 1}-${parsed.track}'
+    : null;
+
+/// Cache key for user-authored ALBUM-level details (Edit album details):
+/// cover artwork, description, and the album-artist credit. ARTIST-FREE
+/// (`album:mbid:<id>` for tagged releases, else `album:<album>:<year>`,
+/// matching the wall's AlbumKeys fold) — a track's own lookup key embeds
+/// its per-track artist, so a row written there only reaches tracks
+/// sharing that artist and a compilation's album edit would miss the
+/// rest. One artist-free row overlays every track of the album instead,
+/// mirroring the show/season overlay keys; no fetch ever resolves here —
+/// the rows are user-only. Null for non-tracks.
+String? albumLookupKey(ParsedName parsed) => parsed.isTrack
+    ? (parsed.releaseMbid != null
+        ? 'album:mbid:${parsed.releaseMbid}'
+        : 'album:${parsed.title.toLowerCase()}:${parsed.year ?? ''}')
     : null;
 
 /// `2008-01-20` → `20 Jan 2008` for display; anything that is not an

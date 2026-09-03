@@ -88,6 +88,13 @@ Artist - Album (Year) - NN Title {mbid-<release-mbid>}.flac
   and year (with distinct track numbers) and they fold into a single card.
   Editing artist, description, track title, or artwork never renames — those
   are metadata overrides.
+- Album-level overrides (Edit album details: cover, description, and the
+  **Album artist** credit — the compiling artist, ID3's `TPE2`) live in the
+  metadata cache under an artist-free album key, never in file names, so on a
+  compilation one edit reaches every track no matter which artist each file
+  credits. A set Album artist replaces the `Various Artists` label on the
+  album card and header; each track still shows its own credit. The credit is
+  display-only: file names, folding, and search are unaffected.
 
 ## Uploading from the app
 

@@ -648,8 +648,24 @@ void main() {
         [9]);
   });
 
-  testWidgets('album editor writes the shared row without touching '
-      'track fields or names', (tester) async {
+  // ── the album's own row (artist-free key, 2026-09-03) ──
+
+  test('albumLookupKey is artist-free: mbid, plain, non-track', () {
+    expect(
+        albumLookupKey(parseMediaName(
+            'A - Album (1999) - 01 Song {mbid-xyz}.mp3')),
+        'album:mbid:xyz');
+    expect(albumLookupKey(parseMediaName('A - Album (1999) - 01 Song.mp3')),
+        'album:album:1999');
+    // Two artists' same-named albums share it — deliberately: the key
+    // must be derivable from one file name alone.
+    expect(albumLookupKey(parseMediaName('B - Album (1999) - 02 Two.mp3')),
+        'album:album:1999');
+    expect(albumLookupKey(parseMediaName('Movie (1999).mp4')), isNull);
+  });
+
+  testWidgets('album editor writes the artist-free album row without '
+      'touching track fields or names', (tester) async {
     tester.view.physicalSize = const Size(900, 1800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -667,19 +683,186 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Edit album details'), findsOneWidget);
     // Album-level fields only — no per-track fields here.
-    expect(find.widgetWithText(TextField, 'Artist'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Album artist'), findsOneWidget);
     expect(find.widgetWithText(TextField, 'Track number'), findsNothing);
     expect(find.textContaining('Track title'), findsNothing);
     await tester.enterText(
-        find.widgetWithText(TextField, 'Artist'), 'Corrected Band');
+        find.widgetWithText(TextField, 'Album artist'), 'Corrected Band');
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     final parsed = parseMediaName(entry.name);
-    final row = await metadataRowFor(parsed.lookupKey);
+    // The edit lands under the ALBUM key — artist-free, so on a
+    // compilation it reaches every track — not on track 01's row.
+    final row = await metadataRowFor(albumLookupKey(parsed)!);
     expect(row!.userEdited, isTrue);
     expect(row.artist, 'Corrected Band');
+    expect(await metadataRowFor(parsed.lookupKey), isNull);
     // Untouched album/year fields never rename.
     expect((await LibraryStore.load()).single.entries.first.name,
         entry.name);
+  });
+
+  test('the album row reaches every track of a compilation, whatever '
+      'its per-track artist', () async {
+    // The reported defect: cache keys embed the artist, so an album
+    // edit written to track 01's row missed the other artists' tracks.
+    final a = MediaEntry(
+        name: 'Singer A - Road Mix (2002) - 01 One.mp3', address: 'a' * 64);
+    final b = MediaEntry(
+        name: 'Singer B - Road Mix (2002) - 02 Two.mp3', address: 'b' * 64);
+    await seedAlbum([a, b]);
+    File('${postersDir.path}/mix.jpg').writeAsBytesSync([5]);
+    await saveUserDetails(
+      lookupKey: albumLookupKey(parseMediaName(a.name))!,
+      title: 'Road Mix',
+      year: 2002,
+      overview: 'Songs for the road.',
+      artist: const Value('DJ Ella'),
+      posterFile: const Value('mix.jpg'),
+      postersDirProvider: () async => postersDir,
+    );
+    final service = MetadataService.instance;
+    service.metadataFor(a);
+    service.metadataFor(b);
+    await service.whenIdle();
+    for (final entry in [a, b]) {
+      final m = service.metadataFor(entry);
+      expect(m.posterFilePath, endsWith('mix.jpg'));
+      expect(m.overview, 'Songs for the road.');
+      expect(m.artist, 'DJ Ella');
+      // The compiling credit is visible AS a user credit — surfaces
+      // let it beat the Various Artists fallback.
+      expect(m.albumArtist, 'DJ Ella');
+    }
+    // Per-track credits stay the file names' own.
+    expect(service.metadataFor(a).trackArtist, 'Singer A');
+    expect(service.metadataFor(b).trackArtist, 'Singer B');
+  });
+
+  testWidgets('album editor on a compilation: empty Album artist field, '
+      'an untouched save adopts no credit', (tester) async {
+    tester.view.physicalSize = const Size(900, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final a = MediaEntry(
+        name: 'Singer A - Road Mix (2002) - 01 One.mp3', address: 'a' * 64);
+    final b = MediaEntry(
+        name: 'Singer B - Road Mix (2002) - 02 Two.mp3', address: 'b' * 64);
+    await seedAlbum([a, b]);
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: EditDetailsScreen(
+        entry: a,
+        scope: EditDetailsScope.album,
+        albumIsCompilation: true,
+        ffmpeg: _NoFfmpeg(),
+        postersDirProvider: () async => postersDir,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // No single credit to prefill — the field must NOT show Singer A
+    // (saving would silently crown track 01's artist).
+    final field = tester.widget<TextField>(
+        find.widgetWithText(TextField, 'Album artist'));
+    expect(field.controller!.text, isEmpty);
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Description (optional)'),
+        'A mixtape.');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    final row =
+        await metadataRowFor(albumLookupKey(parseMediaName(a.name))!);
+    expect(row!.overview, 'A mixtape.');
+    expect(row.artist, isNull); // credit stays Various Artists
+  });
+
+  test('renameTrackAlbum migrates the album row to the new album key',
+      () async {
+    final entry = MediaEntry(
+        name: 'Singer A - Old Mix (2002) - 01 One.mp3', address: 'a' * 64);
+    await seedAlbum([entry]);
+    final oldKey = albumLookupKey(parseMediaName(entry.name))!;
+    File('${postersDir.path}/cover.jpg').writeAsBytesSync([6]);
+    await saveUserDetails(
+      lookupKey: oldKey,
+      title: 'Old Mix',
+      year: 2002,
+      overview: 'Kept words.',
+      artist: const Value('DJ Ella'),
+      posterFile: const Value('cover.jpg'),
+      postersDirProvider: () async => postersDir,
+    );
+    final result = await renameTrackAlbum(entry,
+        album: 'New Mix', year: 2006,
+        postersDirProvider: () async => postersDir);
+    expect(result.error, isNull);
+    // The whole row — cover, description, credit — lives on under the
+    // renamed album's key; the orphaned old key is gone.
+    final moved = await metadataRowFor(
+        albumLookupKey(parseMediaName(result.newName!))!);
+    expect(moved!.overview, 'Kept words.');
+    expect(moved.artist, 'DJ Ella');
+    expect(result.carriedPosterFile, isNotNull);
+    expect(moved.posterFile, result.carriedPosterFile);
+    expect(
+        File('${postersDir.path}/${moved.posterFile}').readAsBytesSync(),
+        [6]);
+    expect(await metadataRowFor(oldKey), isNull);
+  });
+
+  testWidgets('track editor hints that the album cover is standing in '
+      'when the track has no art of its own', (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final entry = track(1, 'First Song');
+    await seedAlbum([entry]);
+    final parsed = parseMediaName(entry.name);
+    File('${postersDir.path}/album.jpg').writeAsBytesSync([1]);
+    await saveUserDetails(
+      lookupKey: parsed.lookupKey,
+      title: 'Misspelt Album',
+      posterFile: const Value('album.jpg'),
+      postersDirProvider: () async => postersDir,
+    );
+    // Warm the service so _meta carries the album cover (see the pump
+    // note in the canonical-title test).
+    await tester.pumpWidget(const SizedBox());
+    MetadataService.instance.metadataFor(entry);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: EditDetailsScreen(
+        entry: entry,
+        ffmpeg: _NoFfmpeg(),
+        postersDirProvider: () async => postersDir,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('pages show the album cover'),
+        findsOneWidget);
+    // Give the track its own art → the hint goes away.
+    await saveUserDetails(
+      lookupKey: trackLookupKey(parsed)!,
+      title: 'Misspelt Album',
+      posterFile: const Value('album.jpg'),
+      postersDirProvider: () async => postersDir,
+    );
+    await tester.pumpWidget(const SizedBox());
+    MetadataService.instance.metadataFor(entry);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: EditDetailsScreen(
+        entry: entry,
+        ffmpeg: _NoFfmpeg(),
+        postersDirProvider: () async => postersDir,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('pages show the album cover'),
+        findsNothing);
   });
 }
