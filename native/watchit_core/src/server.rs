@@ -71,6 +71,13 @@ fn protected_router(engine: &'static Engine) -> Router {
             post(move |body: Bytes| set_network_pause(engine, body)),
         )
         .route("/wallet/balances", get(move || wallet_balances(engine)))
+        // Data-usage period counters. Protected like the pause switch:
+        // usage patterns are the user's own business, and reset mutates
+        // state. Always fully populated — even while the network is
+        // paused (/health collapses to {"state":"paused"} then, which is
+        // why the Data usage screen gets its own route).
+        .route("/stats", get(stats))
+        .route("/stats/reset", post(stats_reset))
         .route(
             "/upload/estimate",
             post(move |body: Bytes| upload_estimate(engine, body)),
@@ -220,6 +227,21 @@ async fn health(engine: &'static Engine) -> Response {
         })
     };
     ([(header::CONTENT_TYPE, "application/json")], body.to_string()).into_response()
+}
+
+/// `GET /stats` — the Data usage screen's period counters (per-component
+/// up/down bytes since the last reset; see datausage.rs).
+async fn stats() -> Response {
+    let body = crate::datausage::usage().stats_json();
+    ([(header::CONTENT_TYPE, "application/json")], body.to_string()).into_response()
+}
+
+/// `POST /stats/reset` — zero every component, stamp a fresh period
+/// start, persist; returns the fresh `/stats` body.
+async fn stats_reset() -> Response {
+    crate::datausage::usage().reset();
+    tracing::info!("data-usage period reset");
+    stats().await
 }
 
 /// Kick the reconnect supervisor: cancel its current backoff sleep (or
@@ -1598,6 +1620,45 @@ mod wallet_api_tests {
         .await;
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["state"], serde_json::json!("connecting"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stats_guarded_populated_while_paused_and_resettable() {
+        let engine = test_engine("stats");
+        let app = router_with_auth(engine, "sekrit");
+        // Tokenless → 401 (usage is the user's own business, reset mutates).
+        let (status, _) = send_auth(&app, "GET", "/stats", vec![], None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) =
+            send_auth(&app, "POST", "/stats/reset", vec![], None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        // Seed the global accumulators (this is the one server test that
+        // touches them, so the values are deterministic here).
+        crate::datausage::usage().add_x0x(crate::datausage::Component::MyWatch, 7, 9);
+        // /stats stays fully populated even while the network is paused —
+        // the reason the screen doesn't read /health.
+        engine.set_paused(true);
+        let (status, body) =
+            send_auth(&app, "GET", "/stats", vec![], Some("sekrit")).await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["mywatch"]["tx"].as_u64().unwrap() >= 7);
+        assert!(json["mywatch"]["rx"].as_u64().unwrap() >= 9);
+        assert!(json["total"]["tx"].as_u64().unwrap() >= 7);
+        assert!(json["period_start_ms"].as_u64().unwrap() > 0);
+        assert!(json["ant"].get("stale_secs").is_some());
+        assert!(json["ant"].get("media_rx").is_some());
+        assert!(json["channels"].is_object());
+        // Reset returns the fresh zeroed body and a new period start.
+        let (status, body) =
+            send_auth(&app, "POST", "/stats/reset", vec![], Some("sekrit")).await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["mywatch"]["tx"].as_u64(), Some(0));
+        assert_eq!(json["mywatch"]["rx"].as_u64(), Some(0));
+        assert_eq!(json["ant"]["rx"].as_u64(), Some(0));
+        assert_eq!(json["total"]["rx"].as_u64(), Some(0));
+        engine.set_paused(false);
     }
 
     #[tokio::test(flavor = "multi_thread")]

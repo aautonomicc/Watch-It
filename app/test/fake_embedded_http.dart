@@ -141,6 +141,18 @@ class FakeEmbeddedHttp extends HttpOverrides {
   /// Addresses `GET /resolve/<addr>` answers 200 for (map held locally).
   final Set<String> resolvedAddrs = {};
 
+  /// The `GET /stats` body (data-usage period counters). `POST
+  /// /stats/reset` zeroes it and stamps a fresh period start; reset
+  /// count in [statsResets].
+  Map<String, dynamic> stats = {
+    'period_start_ms': DateTime(2026, 9, 1).millisecondsSinceEpoch,
+    'total': {'rx': 0, 'tx': 0},
+    'ant': {'rx': 0, 'tx': 0, 'media_rx': 0, 'stale_secs': null},
+    'mywatch': {'rx': 0, 'tx': 0},
+    'channels': {'rx': 0, 'tx': 0},
+  };
+  int statsResets = 0;
+
   /// Any base URL works — routing only looks at the path.
   static const String base = 'http://127.0.0.1:9';
 
@@ -181,6 +193,27 @@ class FakeEmbeddedHttp extends HttpOverrides {
       return resolvedAddrs.contains(path.substring('/resolve/'.length))
           ? (200, utf8.encode(jsonEncode({'size': datamapSize, 'chunks': 1})))
           : (404, const <int>[]);
+    }
+    if (method == 'GET' && path == '/stats') {
+      return (200, utf8.encode(jsonEncode(stats)));
+    }
+    if (method == 'POST' && path == '/stats/reset') {
+      statsResets++;
+      stats = {
+        'period_start_ms': DateTime.now().millisecondsSinceEpoch,
+        'total': {'rx': 0, 'tx': 0},
+        'ant': {
+          'rx': 0,
+          'tx': 0,
+          'media_rx': 0,
+          'stale_secs': stats['ant'] is Map
+              ? (stats['ant'] as Map)['stale_secs']
+              : null,
+        },
+        'mywatch': {'rx': 0, 'tx': 0},
+        'channels': {'rx': 0, 'tx': 0},
+      };
+      return (200, utf8.encode(jsonEncode(stats)));
     }
     if (method == 'POST' && path == '/network/pause') {
       networkPausePosts.add(utf8.decode(body));

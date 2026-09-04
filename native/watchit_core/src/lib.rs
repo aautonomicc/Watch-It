@@ -8,6 +8,7 @@
 pub mod cache;
 pub mod channel;
 pub mod channels;
+pub mod datausage;
 pub mod engine;
 pub mod mapstore;
 pub mod mywatch;
@@ -47,22 +48,35 @@ fn init_panic_hook() {
 }
 
 fn init_tracing() {
+    // Both paths carry datausage's AntTrafficLayer: it captures
+    // saorsa-core's 300s wire-traffic summary into the Data usage
+    // accumulators. Its callsite interest is scoped to that one target,
+    // so it never widens what the log layers would enable anyway.
     #[cfg(target_os = "android")]
     {
         use tracing_subscriber::layer::SubscriberExt;
         if let Ok(layer) = tracing_android::layer("watchit_core") {
             let _ = tracing::subscriber::set_global_default(
-                tracing_subscriber::registry().with(layer),
+                tracing_subscriber::registry()
+                    .with(layer)
+                    .with(crate::datausage::ant_traffic_layer()),
             );
         }
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-            )
+        use tracing_subscriber::layer::{Layer as _, SubscriberExt};
+        use tracing_subscriber::util::SubscriberInitExt;
+        // The env filter moves from the whole subscriber to the fmt
+        // layer only: RUST_LOG must keep steering the log output without
+        // being able to silence the traffic capture.
+        let fmt_layer = tracing_subscriber::fmt::layer().with_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        );
+        let _ = tracing_subscriber::registry()
+            .with(fmt_layer)
+            .with(crate::datausage::ant_traffic_layer())
             .try_init();
     }
 }
@@ -214,6 +228,8 @@ pub fn start(peers_override: Option<&str>, data_dir: Option<&str>) -> Result<i32
         // Resume channel topics (own channel + subscriptions; no-op when
         // this device has neither).
         tokio::spawn(engine.channels.autostart());
+        // Persist the Data usage period accumulators (60s dirty-save).
+        tokio::spawn(crate::datausage::save_task());
         if let Err(e) = axum::serve(listener, app).await {
             tracing::error!("http server exited: {e}");
         }

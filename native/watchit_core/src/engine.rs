@@ -171,6 +171,12 @@ impl Engine {
             _ => DEFAULT_PEERS.iter().map(|s| s.to_string()).collect(),
         };
         let peers = sources.iter().filter_map(|s| s.parse().ok()).collect();
+        // Data-usage period accumulators live beside the other app state
+        // (survive restarts; "since <date>" needs a period that outlives
+        // the process). No data dir (devserver/tests) = process-only.
+        if let Some(dir) = data_dir.filter(|d| !d.trim().is_empty()) {
+            crate::datausage::usage().init_storage(std::path::Path::new(dir));
+        }
         let map_store = data_dir
             .filter(|d| !d.trim().is_empty())
             .and_then(|d| match MapStore::open_in_dir(std::path::Path::new(d)) {

@@ -21,6 +21,7 @@ import '../services/update_check.dart';
 import '../theme/tokens.dart';
 import '../widgets/brand_mark.dart';
 import 'channels_screen.dart';
+import 'data_usage_screen.dart';
 import 'downloads_screen.dart';
 import 'exit_info_screen.dart';
 import 'media_lists_screen.dart';
@@ -62,6 +63,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// (null until the statuses have answered).
   bool? _myWatchOn;
   bool? _channelsOn;
+
+  /// Formatted period total for the Data usage tile's subtitle (null
+  /// while unknown / client unavailable).
+  String? _dataUsageTotal;
 
   @override
   void initState() {
@@ -110,6 +115,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       channelsOn = (await ChannelsApi().status()).enabled;
     } catch (_) {}
+    // Data usage tile subtitle: the running period total (also
+    // best-effort — null keeps the generic wording).
+    final usage = await EmbeddedClient.stats();
     if (mounted) {
       setState(() {
         _lists = lists;
@@ -118,6 +126,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _tmdbKeySource = tmdbKeySource;
         _myWatchOn = myWatchOn;
         _channelsOn = channelsOn;
+        _dataUsageTotal =
+            usage == null ? null : formatBytes(usage.total.total);
       });
     }
   }
@@ -529,10 +539,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
-                // Buffer size leads the section (2026-08-30, moved in
-                // from the former STREAMING section), then the two
-                // embedded network clients: Autonomi streams/downloads
-                // media, x0x carries My W@tch and Channels gossip.
+                // Data usage first (2026-09-04): what the app has moved
+                // this period, total and per component — the in-app
+                // answer to the wi-netmon capture sessions.
+                ListTile(
+                  leading: Icon(Icons.data_usage, color: t.accent),
+                  title: Text('Data usage',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    _dataUsageTotal == null
+                        ? 'Per-component up/down totals'
+                        : '$_dataUsageTotal this period',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  trailing: Icon(Icons.chevron_right, color: t.ash),
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                          builder: (_) => const DataUsageScreen()),
+                    );
+                    await _reload(); // subtitle follows a reset
+                  },
+                ),
+                // Then Buffer size (2026-08-30, moved in from the former
+                // STREAMING section), then the two embedded network
+                // clients: Autonomi streams/downloads media, x0x carries
+                // My W@tch and Channels gossip.
                 ListTile(
                   leading: Icon(Icons.memory_outlined, color: t.accent),
                   title: Text('Buffer size',

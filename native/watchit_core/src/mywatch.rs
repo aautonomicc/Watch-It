@@ -765,6 +765,13 @@ mod imp {
                 .await
                 .map_err(|e| format!("network join failed: {e}"))?;
             crate::x0x_tune::quiet_agent(&agent, "mywatch").await;
+            let agent = Arc::new(agent);
+            // Meter this agent's UDP wire bytes for the Data usage
+            // screen; the sampler exits when the agent is dropped.
+            crate::datausage::spawn_x0x_sampler(
+                crate::datausage::Component::MyWatch,
+                Arc::downgrade(&agent),
+            );
             let restored_from_snapshot = std::fs::read_dir(&dir)
                 .map(|entries| {
                     entries.flatten().any(|e| {
@@ -777,7 +784,7 @@ mod imp {
                 .await
                 .map_err(|e| format!("sync store join failed: {e}"))?;
             Ok(Running {
-                agent: Arc::new(agent),
+                agent,
                 store,
                 config: cfg.clone(),
                 cancel: tokio_util::sync::CancellationToken::new(),

@@ -149,6 +149,96 @@ class EmbeddedClient {
       client.close();
     }
   }
+
+  /// Data-usage period counters (auth-guarded `GET /stats` — unlike
+  /// `/health` it stays fully populated while the network is paused).
+  /// Null when the embedded client is unavailable or the call fails.
+  static Future<DataUsageStats?> stats(
+          {String? baseOverride, String? tokenOverride}) =>
+      _statsCall('GET', '/stats',
+          baseOverride: baseOverride, tokenOverride: tokenOverride);
+
+  /// Zero all data-usage counters and start a fresh period
+  /// (`POST /stats/reset`); returns the fresh counters.
+  static Future<DataUsageStats?> resetStats(
+          {String? baseOverride, String? tokenOverride}) =>
+      _statsCall('POST', '/stats/reset',
+          baseOverride: baseOverride, tokenOverride: tokenOverride);
+
+  static Future<DataUsageStats?> _statsCall(String method, String path,
+      {String? baseOverride, String? tokenOverride}) async {
+    final base = baseOverride ?? baseUrl();
+    if (base == null) return null;
+    final token = tokenOverride ?? authToken();
+    final client = HttpClient();
+    try {
+      final uri =
+          Uri.parse('${base.replaceFirst(RegExp(r'/+$'), '')}$path');
+      final req = method == 'POST'
+          ? await client.postUrl(uri)
+          : await client.getUrl(uri);
+      if (token != null) req.headers.set('x-watchit-auth', token);
+      final res = await req.close();
+      final body = await res.transform(utf8.decoder).join();
+      if (res.statusCode != 200) return null;
+      return DataUsageStats.fromJson(jsonDecode(body) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    } finally {
+      client.close();
+    }
+  }
+}
+
+/// Up/down byte pair of one `GET /stats` component.
+class UsageBytes {
+  const UsageBytes({this.rx = 0, this.tx = 0});
+  final int rx;
+  final int tx;
+  int get total => rx + tx;
+
+  factory UsageBytes.fromJson(dynamic json) => json is Map
+      ? UsageBytes(rx: json['rx'] as int? ?? 0, tx: json['tx'] as int? ?? 0)
+      : const UsageBytes();
+}
+
+/// The `GET /stats` body: period data-usage totals per component (see
+/// native datausage.rs). All values are bytes since the period start.
+class DataUsageStats {
+  const DataUsageStats({
+    required this.periodStart,
+    required this.total,
+    required this.ant,
+    required this.myWatch,
+    required this.channels,
+    this.antMediaRx = 0,
+    this.antStaleSecs,
+  });
+
+  final DateTime periodStart;
+  final UsageBytes total;
+  final UsageBytes ant;
+  final UsageBytes myWatch;
+  final UsageBytes channels;
+
+  /// Of the ant bytes: media chunk payload (live counter, no staleness).
+  final int antMediaRx;
+
+  /// Age of the Autonomi row's numbers — they come from a 5-minute
+  /// summary. Null before the first summary of this app run.
+  final int? antStaleSecs;
+
+  factory DataUsageStats.fromJson(Map<String, dynamic> json) =>
+      DataUsageStats(
+        periodStart: DateTime.fromMillisecondsSinceEpoch(
+            json['period_start_ms'] as int? ?? 0),
+        total: UsageBytes.fromJson(json['total']),
+        ant: UsageBytes.fromJson(json['ant']),
+        myWatch: UsageBytes.fromJson(json['mywatch']),
+        channels: UsageBytes.fromJson(json['channels']),
+        antMediaRx: (json['ant'] as Map?)?['media_rx'] as int? ?? 0,
+        antStaleSecs: (json['ant'] as Map?)?['stale_secs'] as int?,
+      );
 }
 
 class ClientHealth {

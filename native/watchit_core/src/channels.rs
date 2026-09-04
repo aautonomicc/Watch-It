@@ -374,6 +374,12 @@ mod imp {
                 .map_err(|e| format!("network join failed: {e}"))?;
             crate::x0x_tune::quiet_agent(&agent, "channels").await;
             let agent = Arc::new(agent);
+            // Meter this agent's UDP wire bytes for the Data usage
+            // screen; the sampler exits when the agent is dropped.
+            crate::datausage::spawn_x0x_sampler(
+                crate::datausage::Component::Channels,
+                Arc::downgrade(&agent),
+            );
             let mut stores = HashMap::new();
             for pubkey in self.wanted_pubkeys() {
                 match self.join_channel_store(&agent, &pubkey).await {
