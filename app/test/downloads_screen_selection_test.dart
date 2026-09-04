@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -15,19 +17,32 @@ String _addr(int i) => i.toRadixString(16).padLeft(64, '0');
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
+  late Directory dir;
+
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
-    DownloadManager.instance = DownloadManager();
+    dir = Directory.systemTemp.createTempSync('wi-dl-select');
+    DownloadManager.instance = DownloadManager(directory: dir);
+  });
+
+  tearDown(() {
+    try {
+      dir.deleteSync(recursive: true);
+    } catch (_) {}
   });
 
   /// Seed one downloads row (non-done rows use `paused` so loading the
-  /// queue never starts a transfer inside the test).
+  /// queue never starts a transfer inside the test; done rows get a real
+  /// file on disk so the load-time deletion sweep keeps them).
   Future<void> seed(int i, String status, {int done = 0}) async {
+    if (status == 'done') {
+      File('${dir.path}/Movie$i.mkv').writeAsBytesSync(List.filled(done, 0));
+    }
     final db = await LibraryStore.database();
     await db.into(db.downloads).insert(DownloadsCompanion.insert(
           address: _addr(i),
           name: 'Movie$i.mkv',
-          filePath: '/nonexistent/Movie$i.mkv',
+          filePath: '${dir.path}/Movie$i.mkv',
           totalBytes: const Value(100),
           downloadedBytes: Value(done),
           status: status,

@@ -56,13 +56,18 @@ void main() {
   }
 
   /// Seed one downloads row (non-done rows use `paused` so loading the
-  /// queue never starts a transfer inside the test).
+  /// queue never starts a transfer inside the test; done rows get a real
+  /// file on disk so the load-time deletion sweep keeps them).
   Future<void> seed(int i, String status, {int done = 0}) async {
+    if (status == 'done') {
+      File('${dir.path}/${_episodes[i - 1].name}')
+          .writeAsBytesSync(List.filled(done, 0));
+    }
     final db = await LibraryStore.database();
     await db.into(db.downloads).insert(DownloadsCompanion.insert(
           address: _addr(i),
           name: _episodes[i - 1].name,
-          filePath: '/nonexistent/${_episodes[i - 1].name}',
+          filePath: '${dir.path}/${_episodes[i - 1].name}',
           totalBytes: const Value(100),
           downloadedBytes: Value(done),
           status: status,

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -23,13 +25,22 @@ MediaEntry get _movie =>
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
+  late Directory dlDir;
+
   setUp(() async {
     SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
     await LibraryStore.useForTesting(
         AppDatabase.forTesting(NativeDatabase.memory()));
     MetadataService.instance = MetadataService(apiKeyProvider: () async => '');
     WatchStateStore.instance = WatchStateStore();
-    DownloadManager.instance = DownloadManager();
+    dlDir = Directory.systemTemp.createTempSync('wi-offline');
+    DownloadManager.instance = DownloadManager(directory: dlDir);
+  });
+
+  tearDown(() {
+    try {
+      dlDir.deleteSync(recursive: true);
+    } catch (_) {}
   });
 
   Future<void> setConnectivity({required bool online}) async {
@@ -44,11 +55,14 @@ void main() {
       ]);
 
   Future<void> seedDone() async {
+    // A real file, or the load-time deletion sweep drops the row.
+    File('${dlDir.path}/Movie.2020.mkv')
+        .writeAsBytesSync(List.filled(100, 0));
     final db = await LibraryStore.database();
     await db.into(db.downloads).insert(DownloadsCompanion.insert(
           address: _addr(1),
           name: 'Movie.2020.mkv',
-          filePath: '/nonexistent/Movie.2020.mkv',
+          filePath: '${dlDir.path}/Movie.2020.mkv',
           totalBytes: const Value(100),
           downloadedBytes: const Value(100),
           status: 'done',

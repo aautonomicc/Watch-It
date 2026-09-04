@@ -410,7 +410,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                 subtitle: Text(
                   !_canPickFolder
                       ? 'App-private storage (no permissions needed)'
-                      : _downloadDir ?? 'System Downloads folder (default)',
+                      : _downloadDir ??
+                          'W@tch folder in system Downloads (default)',
                   style: TextStyle(color: t.ash, fontSize: 12),
                 ),
                 trailing: _canPickFolder
@@ -435,7 +436,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                   child: Text(
-                    'New downloads are saved here; files already '
+                    'New downloads are saved here, in folders named '
+                    'after the list they come from; files already '
                     'downloaded stay where they are.',
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
