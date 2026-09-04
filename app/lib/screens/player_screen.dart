@@ -32,6 +32,13 @@ import '../theme/tokens.dart';
 /// on leaving); reaching the end marks the file watched and, for series
 /// with a known next episode, offers "Up next" with a short auto-play
 /// countdown.
+///
+/// Music files (audio extension in the name) get an AUDIO layout instead
+/// of the video surface — artwork, track title, and simple transport via
+/// [AudioPlayerView] — because rendering a Video widget for a music
+/// track is a black screen. Same player, resume points, and watch-state
+/// recording underneath, so every entry path (Continue Watching, search
+/// → detail, album ⓘ → Play) is covered by the one seam.
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({
     super.key,
@@ -81,6 +88,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription<bool>? _playingSub;
   StreamSubscription<String>? _errorSub;
   StreamSubscription<Duration>? _positionSub;
+  StreamSubscription<Duration>? _durationSub;
   StreamSubscription<bool>? _completedSub;
   StreamSubscription<VideoParams>? _videoParamsSub;
   Timer? _healthTimer;
@@ -99,6 +107,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Duration _position = Duration.zero;
   DateTime _lastSave = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Mirrored player state for the audio layout (the video layout's
+  /// stock controls track these themselves).
+  Duration _duration = Duration.zero;
+  bool _playing = false;
+
+  /// The playing file is music — swaps the video surface for the audio
+  /// layout and skips the screensaver inhibit (music with the screen
+  /// off is the point).
+  bool get _isAudio => parseMediaName(_entry.name).isAudio;
 
   /// End reached for [_entry] (watched state already recorded).
   bool _completed = false;
@@ -131,7 +149,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // Linux screensaver/lock inhibit while playback runs — the wakelock the
     // Video widget holds covers the other platforms (see ScreenWake docs).
     _playingSub = _player.stream.playing.listen((playing) {
-      ScreenWake.instance.setPlaying(playing);
+      if (!_isAudio) ScreenWake.instance.setPlaying(playing);
+      if (mounted) setState(() => _playing = playing);
       // Feeds the idle auto-pause: while something plays the network
       // never pauses itself, and pressing play lifts an automatic pause.
       NetworkPause.instance.setStreamingActive(this, playing);
@@ -147,6 +166,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (mounted && !_playbackStarted) setState(() => _error = e);
     });
     _positionSub = _player.stream.position.listen(_onPosition);
+    _durationSub = _player.stream.duration.listen((d) {
+      if (mounted) setState(() => _duration = d);
+    });
     _completedSub = _player.stream.completed.listen((done) {
       if (done) _onCompleted();
     });
@@ -217,6 +239,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _onPosition(Duration pos) {
     if (pos <= Duration.zero) return;
     _position = pos;
+    // The audio layout draws its own seek bar off _position.
+    if (_isAudio && mounted) setState(() {});
     NowPlaying.instance.updatePlayback(this,
         position: pos, duration: _player.state.duration);
     if (!_playbackStarted) {
@@ -299,6 +323,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _buffering = true;
       _error = null;
       _position = Duration.zero;
+      _duration = Duration.zero;
     });
     _feedNowPlaying();
     _player.open(Media(source.url));
@@ -350,6 +375,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     NowPlaying.instance.clear(this);
     _errorSub?.cancel();
     _positionSub?.cancel();
+    _durationSub?.cancel();
     _completedSub?.cancel();
     _videoParamsSub?.cancel();
     _player.dispose();
@@ -506,6 +532,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
         child: Stack(
           fit: StackFit.expand,
           children: [
+            // Music: artwork + transport instead of a black video surface
+            // (no frame-capture button — there are no frames).
+            if (_isAudio)
+              AudioPlayerView(
+                entry: _entry,
+                position: _position,
+                duration: _duration,
+                playing: _playing,
+                onPlayPause: () => unawaited(_player.playOrPause()),
+                onSeek: (pos) => unawaited(_player.seek(pos)),
+              )
+            else
             // The stock controls draw their own grey buffering spinner in
             // the centre of the video; our branded overlay already covers
             // buffering, so blank out the built-in one on all platforms.
@@ -583,6 +621,172 @@ class _PlayerScreenState extends State<PlayerScreen> {
 String playerTitle(MediaMetadata meta) => meta.episodeLabel == null
     ? meta.title
     : '${meta.title} · ${meta.episodeLabel}';
+
+/// The audio layout [PlayerScreen] shows for music: square artwork
+/// (the track's own art beats the album cover), track title and credit,
+/// a seek bar, and play/pause with ±10s/30s skips. The heavy lifting —
+/// mpv, resume points, watch states, the media notification — stays in
+/// [PlayerScreen]; this widget only renders and forwards taps.
+class AudioPlayerView extends StatelessWidget {
+  const AudioPlayerView({
+    super.key,
+    required this.entry,
+    required this.position,
+    required this.duration,
+    required this.playing,
+    required this.onPlayPause,
+    required this.onSeek,
+  });
+
+  final MediaEntry entry;
+  final Duration position;
+  final Duration duration;
+  final bool playing;
+  final VoidCallback onPlayPause;
+  final ValueChanged<Duration> onSeek;
+
+  static String _clock(Duration d) {
+    final m = d.inMinutes;
+    final s = d.inSeconds % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
+  }
+
+  void _seekBy(Duration delta) {
+    var target = position + delta;
+    if (target < Duration.zero) target = Duration.zero;
+    if (duration > Duration.zero && target > duration) target = duration;
+    onSeek(target);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = WiTokens.of(context);
+    // Rebuild as the artwork lands in the metadata cache.
+    return ListenableBuilder(
+      listenable: MetadataService.instance,
+      builder: (context, _) {
+        final meta = MetadataService.instance.metadataFor(entry);
+        final parsed = parseMediaName(entry.name);
+        final trackTitle = episodeNameFromLabel(meta.episodeLabel) ??
+            parsed.trackTitle ??
+            meta.title;
+        final artist = meta.trackArtist ?? meta.artist;
+        // For music meta.title is the album — show it under the credit
+        // when this is a numbered album track.
+        final album = parsed.trackMarker == null ? null : meta.title;
+        final maxMs = duration.inMilliseconds;
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          child: Column(
+            children: [
+              Expanded(
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints:
+                        const BoxConstraints(maxWidth: 320, maxHeight: 320),
+                    child: AspectRatio(
+                      aspectRatio: 1,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: entryPosterImage(meta, fit: BoxFit.cover) ??
+                            Container(
+                              color: t.ink2,
+                              child: Icon(Icons.music_note,
+                                  color: t.ash, size: 96),
+                            ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                trackTitle,
+                maxLines: 2,
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: t.bone),
+              ),
+              if (artist != null || album != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  [artist, album].nonNulls.join(' · '),
+                  maxLines: 1,
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13, color: t.boneDim),
+                ),
+              ],
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Text(_clock(position),
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: t.ash,
+                          fontFamily: wiMonoFamily,
+                          fontFamilyFallback: wiMonoFallback)),
+                  Expanded(
+                    child: Slider(
+                      value: maxMs == 0
+                          ? 0
+                          : position.inMilliseconds
+                              .clamp(0, maxMs)
+                              .toDouble(),
+                      max: maxMs == 0 ? 1 : maxMs.toDouble(),
+                      activeColor: t.accent,
+                      inactiveColor: t.ink2,
+                      onChanged: maxMs == 0
+                          ? null
+                          : (v) =>
+                              onSeek(Duration(milliseconds: v.round())),
+                    ),
+                  ),
+                  Text(_clock(duration),
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: t.ash,
+                          fontFamily: wiMonoFamily,
+                          fontFamilyFallback: wiMonoFallback)),
+                ],
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    tooltip: 'Back 10 seconds',
+                    onPressed: () => _seekBy(const Duration(seconds: -10)),
+                    icon: Icon(Icons.replay_10, size: 28, color: t.bone),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton.filled(
+                    tooltip: playing ? 'Pause' : 'Play',
+                    style: IconButton.styleFrom(
+                      backgroundColor: t.accent,
+                      foregroundColor: t.ink,
+                    ),
+                    onPressed: onPlayPause,
+                    icon: Icon(playing ? Icons.pause : Icons.play_arrow,
+                        size: 32),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    tooltip: 'Forward 30 seconds',
+                    onPressed: () => _seekBy(const Duration(seconds: 30)),
+                    icon: Icon(Icons.forward_30, size: 28, color: t.bone),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
 
 /// Desktop controls theme tweaks: the branded overlay replaces the stock
 /// buffering spinner, and the mouse cursor fades out with the controls

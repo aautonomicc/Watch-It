@@ -21,6 +21,7 @@ import 'package:watchit/services/metadata_service.dart';
 import 'package:watchit/services/now_playing.dart';
 import 'package:watchit/services/season_grouping.dart';
 import 'package:watchit/services/user_metadata.dart';
+import 'package:watchit/services/watch_state.dart';
 import 'package:watchit/theme/tokens.dart';
 
 /// The album page's inline player: tap-to-play, transport controls,
@@ -63,6 +64,8 @@ class _FakePlayer implements AlbumAudioPlayer {
 
   void completeTrack() => _completed.add(true);
 
+  void emitPosition(Duration pos) => _position.add(pos);
+
   @override
   Stream<bool> get playingStream => _playing.stream;
   @override
@@ -98,6 +101,7 @@ void main() {
     ConnectivityMonitor.instance = ConnectivityMonitor(
         probe: () async => ClientHealth(state: 'ready', peers: 5));
     FavouritesStore.instance = FavouritesStore();
+    WatchStateStore.instance = WatchStateStore();
     player = _FakePlayer();
     album = groupShows([
       _track(1, 'Gimme Shelter'),
@@ -252,6 +256,39 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(FavouritesStore.instance.isFavourite(_addr(3)), isTrue);
     expect(find.byIcon(Icons.favorite), findsOneWidget);
+  });
+
+  testWidgets('a partial listen records a resumable watch point',
+      (tester) async {
+    await pumpAlbum(tester);
+    await tester.tap(find.text('Gimme Shelter'));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // Well past the minResume floor, a third of the way through.
+    player.emitPosition(const Duration(seconds: 90));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final state = await WatchStateStore.instance.stateFor(_track(1, ''));
+    expect(state, isNotNull);
+    expect(state!.resumable, isTrue);
+    expect(state.completed, isFalse);
+    expect(state.positionMs, const Duration(seconds: 90).inMilliseconds);
+  });
+
+  testWidgets('finishing a track marks it completed, not resumable',
+      (tester) async {
+    await pumpAlbum(tester);
+    await tester.tap(find.text('Gimme Shelter'));
+    await tester.pump(const Duration(milliseconds: 100));
+    player.emitPosition(const Duration(seconds: 90));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    player.completeTrack();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final state = await WatchStateStore.instance.stateFor(_track(1, ''));
+    expect(state!.completed, isTrue);
+    expect(state.resumable, isFalse);
   });
 
   testWidgets('the ⓘ button opens the track detail page', (tester) async {

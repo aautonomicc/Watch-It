@@ -667,12 +667,31 @@ class _ContinueCard extends StatelessWidget {
                           child: Icon(
                               marker != null
                                   ? Icons.live_tv_outlined
-                                  : Icons.movie_outlined,
+                                  : parsed.isAudio
+                                      ? Icons.music_note
+                                      : Icons.movie_outlined,
                               color: t.ash,
                               size: 40),
                         ),
                     if (progress != null && progress > 0)
                       watchProgressBar(t, progress),
+                    // Music badge: a track resumed here is "continue
+                    // listening" — tell it from video at a glance.
+                    if (parsed.isAudio)
+                      Positioned(
+                        top: 5,
+                        left: 5,
+                        child: Container(
+                          width: 20,
+                          height: 20,
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.65),
+                            shape: BoxShape.circle,
+                          ),
+                          child:
+                              Icon(Icons.music_note, size: 13, color: t.accent),
+                        ),
+                      ),
                     // Aggregated across the title's quality tiers — a
                     // downloaded 1080p copy badges the card even when
                     // the resume point is on the 480p upload.
