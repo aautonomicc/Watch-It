@@ -6,6 +6,7 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:watchit/widgets/wi_qr.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:watchit/db/app_database.dart';
@@ -79,6 +80,7 @@ void main() {
       await tester.pumpAndSettle();
       // Invite dialog: QR code + copyable code string.
       expect(fake.requests, contains('POST /mywatch/link'));
+      expect(find.byType(WiQr), findsOneWidget);
       expect(find.byType(QrImageView), findsOneWidget);
       expect(find.textContaining('wtch1-'), findsWidgets);
       await tester.tap(find.text('Done'));
