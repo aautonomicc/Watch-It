@@ -1,6 +1,11 @@
 # Plan: tidy download folders, deletion-aware startup scan, background music on mobile
 
-Status: **PLAN ONLY — nothing implemented.** Drafted 2026-09-04 from three user asks:
+Status: **IMPLEMENTED 2026-09-04** — all three parts, in one pass. Open
+questions resolved per their recommendations (custom folder = the root
+itself; automatic one-time tidy; no video notification in v1; hand-rolled
+Kotlin service, not `audio_service`). The Android service (Part 3) builds
+but needs a user APK test on a real device — no Android hardware on the
+build machine. Drafted 2026-09-04 from three user asks:
 
 1. Desktop downloads currently pile up flat in the system Downloads folder — put them
    in a `W@tch` folder, in subfolders named after the list they came from.

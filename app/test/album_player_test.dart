@@ -18,6 +18,7 @@ import 'package:watchit/services/favourites.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata.dart';
 import 'package:watchit/services/metadata_service.dart';
+import 'package:watchit/services/now_playing.dart';
 import 'package:watchit/services/season_grouping.dart';
 import 'package:watchit/services/user_metadata.dart';
 import 'package:watchit/theme/tokens.dart';
@@ -260,5 +261,37 @@ void main() {
     expect(find.byType(DetailScreen), findsOneWidget);
     // Nothing started playing.
     expect(player.opened, isEmpty);
+  });
+
+  testWidgets('playing a track drives the NowPlaying media session',
+      (tester) async {
+    NowPlaying.instance = NowPlaying();
+    final np = NowPlaying.instance;
+    await pumpAlbum(tester);
+    await tester.tap(find.text('Gimme Shelter'));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(np.track?.title, 'Gimme Shelter');
+    expect(np.track?.album, contains('Let It Bleed'));
+    expect(np.playing, isTrue); // fake player reports playing on open
+    expect(np.canNext, isTrue);
+
+    // A notification "next" press advances the album like the on-page
+    // button.
+    np.remoteNext();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(np.track?.title, 'Love In Vain');
+    expect(player.opened.last, 'fake://${_addr(2)}');
+
+    // A notification pause reaches the player.
+    np.remotePause();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(player.playing, isFalse);
+    expect(np.playing, isFalse);
+
+    // Leaving the page ends the session (media notification goes away).
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(np.track, isNull);
   });
 }

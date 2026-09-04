@@ -17,6 +17,8 @@ import 'screens/terms_screen.dart';
 import 'services/app_settings.dart';
 import 'services/connectivity.dart';
 import 'services/download_foreground.dart';
+import 'services/media_session.dart';
+import 'services/now_playing.dart';
 import 'services/download_manager.dart';
 import 'services/embedded_client.dart';
 import 'services/channel_service.dart';
@@ -75,6 +77,10 @@ Future<void> main() async {
   // Android: keep transfers alive while backgrounded via the dataSync
   // foreground service + progress notification (no-op elsewhere).
   DownloadForegroundBridge.instance.bind(DownloadManager.instance);
+  // Android: music keeps playing with the screen off via the
+  // mediaPlayback foreground service, with controls + track info in the
+  // notification shade and on the lock screen (no-op elsewhere).
+  MediaSessionBridge.instance.bind(NowPlaying.instance);
   // Reconnect fast-paths: phone wake and OS network changes (cable
   // replug on Linux via NetworkManager) re-probe immediately and kick
   // the embedded client's reconnect supervisor instead of waiting for

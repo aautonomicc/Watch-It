@@ -23,6 +23,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private var channel: MethodChannel? = null
+    private var mediaChannel: MethodChannel? = null
 
     // In-flight "watchit/export" saveFile call: the dialog's outcome
     // arrives via onActivityResult, so the MethodChannel.Result waits here.
@@ -105,6 +106,116 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "manufacturer" -> result.success(Build.MANUFACTURER ?: "")
+                else -> result.notImplemented()
+            }
+        }
+        // Media playback: the Dart NowPlaying singleton mirrors track
+        // info + play state into MediaPlaybackService (mediaPlayback
+        // foreground service + MediaSession = lock-screen/notification
+        // controls, screen-off playback); button and audio-focus events
+        // flow back the other way.
+        val mch = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger, "watchit/media_session"
+        )
+        mediaChannel = mch
+        MediaPlaybackService.onEvent = { event, positionMs ->
+            Handler(Looper.getMainLooper()).post {
+                when (event) {
+                    "play" -> mediaChannel?.invokeMethod("onPlay", null)
+                    "pause" -> mediaChannel?.invokeMethod("onPause", null)
+                    "next" -> mediaChannel?.invokeMethod("onNext", null)
+                    "previous" ->
+                        mediaChannel?.invokeMethod("onPrevious", null)
+                    "seek" -> mediaChannel?.invokeMethod(
+                        "onSeek", mapOf("positionMs" to positionMs)
+                    )
+                    "stop" -> mediaChannel?.invokeMethod("onStop", null)
+                }
+            }
+        }
+        mch.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start", "update" -> {
+                    val intent = Intent(this, MediaPlaybackService::class.java)
+                        .setAction(
+                            if (call.method == "start") {
+                                MediaPlaybackService.ACTION_START
+                            } else {
+                                MediaPlaybackService.ACTION_UPDATE
+                            }
+                        )
+                        .putExtra(
+                            MediaPlaybackService.EXTRA_TITLE,
+                            call.argument<String>("title") ?: ""
+                        )
+                        .putExtra(
+                            MediaPlaybackService.EXTRA_ARTIST,
+                            call.argument<String>("artist") ?: ""
+                        )
+                        .putExtra(
+                            MediaPlaybackService.EXTRA_ALBUM,
+                            call.argument<String>("album") ?: ""
+                        )
+                        .putExtra(
+                            MediaPlaybackService.EXTRA_ART,
+                            call.argument<String>("artworkPath") ?: ""
+                        )
+                        .putExtra(
+                            MediaPlaybackService.EXTRA_PLAYING,
+                            call.argument<Boolean>("playing") ?: false
+                        )
+                        .putExtra(
+                            MediaPlaybackService.EXTRA_POSITION,
+                            (call.argument<Number>("positionMs") ?: 0).toLong()
+                        )
+                        .putExtra(
+                            MediaPlaybackService.EXTRA_DURATION,
+                            (call.argument<Number>("durationMs") ?: 0).toLong()
+                        )
+                        .putExtra(
+                            MediaPlaybackService.EXTRA_CAN_NEXT,
+                            call.argument<Boolean>("canNext") ?: false
+                        )
+                        .putExtra(
+                            MediaPlaybackService.EXTRA_CAN_PREV,
+                            call.argument<Boolean>("canPrev") ?: false
+                        )
+                    try {
+                        if (call.method == "start") {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
+                        result.success(true)
+                    } catch (e: Exception) {
+                        // Background-start restrictions etc. — playback
+                        // still runs while the app is up; just no service.
+                        result.success(false)
+                    }
+                }
+                "stop" -> {
+                    try {
+                        startService(
+                            Intent(this, MediaPlaybackService::class.java)
+                                .setAction(MediaPlaybackService.ACTION_STOP)
+                        )
+                    } catch (_: Exception) {
+                    }
+                    result.success(true)
+                }
+                "requestNotifications" -> {
+                    if (Build.VERSION.SDK_INT >= 33 &&
+                        checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                        PackageManager.PERMISSION_GRANTED
+                    ) {
+                        requestPermissions(
+                            arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7001
+                        )
+                        result.success(true)
+                    } else {
+                        result.success(false)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
@@ -323,7 +434,9 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         DownloadForegroundService.onTimeoutCallback = null
+        MediaPlaybackService.onEvent = null
         channel = null
+        mediaChannel = null
         super.onDestroy()
     }
 }
