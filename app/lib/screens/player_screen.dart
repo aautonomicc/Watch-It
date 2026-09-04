@@ -13,7 +13,9 @@ import '../services/library_store.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/network_pause.dart';
+import '../services/now_playing.dart';
 import '../services/screen_wake.dart';
+import '../services/season_grouping.dart' show episodeNameFromLabel;
 import '../services/user_metadata.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
@@ -133,6 +135,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // Feeds the idle auto-pause: while something plays the network
       // never pauses itself, and pressing play lifts an automatic pause.
       NetworkPause.instance.setStreamingActive(this, playing);
+      NowPlaying.instance.updatePlayback(this, playing: playing);
     });
     // mpv reports error-level log lines that are not fatal — e.g. a
     // hardware decoder that fails to open ("could not open codec")
@@ -153,6 +156,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final health = await EmbeddedClient.health();
       if (mounted) setState(() => _fetchedBytes = health.fetchedBytes);
     });
+    _feedNowPlaying();
     unawaited(() async {
       // An idle auto-pause lifts the moment the user plays something —
       // cleared before mpv's first request can hit the local server.
@@ -162,6 +166,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
         start: widget.resumeFrom > Duration.zero ? widget.resumeFrom : null,
       ));
     }());
+  }
+
+  /// Music files opened via the detail page get the media notification
+  /// (screen-off playback + lock-screen controls). Video stays out on
+  /// purpose: it holds a screen wakelock while watched and stops
+  /// mattering when backgrounded.
+  void _feedNowPlaying() {
+    if (!parseMediaName(_entry.name).isAudio) return;
+    final meta = MetadataService.instance.metadataFor(_entry);
+    final parsed = parseMediaName(_entry.name);
+    NowPlaying.instance.setTrack(
+      this,
+      NowPlayingTrack(
+        // For music, meta.title is the album; the track's own name comes
+        // from its edited label or the parsed file name.
+        title: episodeNameFromLabel(meta.episodeLabel) ??
+            parsed.trackTitle ??
+            meta.title,
+        artist: meta.trackArtist ?? meta.artist,
+        album: parsed.trackMarker == null ? null : meta.title,
+        artworkPath: meta.episodePosterFilePath ?? meta.posterFilePath,
+      ),
+      handlers: NowPlayingHandlers(
+        onPlay: () => unawaited(_player.play()),
+        onPause: () => unawaited(_player.pause()),
+        onSeek: (pos) => unawaited(_player.seek(pos)),
+        onStop: () => unawaited(_player.pause()),
+      ),
+    );
   }
 
   /// Addresses whose resolution was recorded this session (mpv re-emits
@@ -184,6 +217,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _onPosition(Duration pos) {
     if (pos <= Duration.zero) return;
     _position = pos;
+    NowPlaying.instance.updatePlayback(this,
+        position: pos, duration: _player.state.duration);
     if (!_playbackStarted) {
       _playbackStarted = true;
       // Playback is demonstrably working — drop any earlier error
@@ -265,6 +300,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _error = null;
       _position = Duration.zero;
     });
+    _feedNowPlaying();
     _player.open(Media(source.url));
   }
 
@@ -311,6 +347,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _playingSub?.cancel();
     ScreenWake.instance.setPlaying(false);
     NetworkPause.instance.setStreamingActive(this, false);
+    NowPlaying.instance.clear(this);
     _errorSub?.cancel();
     _positionSub?.cancel();
     _completedSub?.cancel();

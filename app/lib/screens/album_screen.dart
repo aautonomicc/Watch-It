@@ -13,6 +13,7 @@ import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/network_pause.dart';
 import '../services/network_policy.dart';
+import '../services/now_playing.dart';
 import '../services/season_grouping.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
@@ -126,6 +127,7 @@ class _AlbumScreenState extends State<AlbumScreen>
       s.cancel();
     }
     unawaited(_player?.dispose());
+    NowPlaying.instance.clear(this);
     NetworkPause.instance.setStreamingActive(this, false);
     if (_pausedDownloads) {
       unawaited(DownloadManager.instance.resumeAfterPlayback());
@@ -144,6 +146,8 @@ class _AlbumScreenState extends State<AlbumScreen>
         // Feeds the idle auto-pause (see NetworkPause): audio playing
         // here counts as network activity like the video player's.
         NetworkPause.instance.setStreamingActive(this, playing);
+        // …and the media notification's play/pause state.
+        NowPlaying.instance.updatePlayback(this, playing: playing);
         if (!mounted) return;
         setState(() => _playing = playing);
         playing
@@ -151,9 +155,11 @@ class _AlbumScreenState extends State<AlbumScreen>
             : _glow.animateBack(0, duration: const Duration(milliseconds: 400));
       }),
       player.positionStream.listen((pos) {
+        NowPlaying.instance.updatePlayback(this, position: pos);
         if (mounted) setState(() => _position = pos);
       }),
       player.durationStream.listen((dur) {
+        NowPlaying.instance.updatePlayback(this, duration: dur);
         if (mounted) setState(() => _duration = dur);
       }),
       player.completedStream.listen((done) {
@@ -208,9 +214,52 @@ class _AlbumScreenState extends State<AlbumScreen>
     if (_history.isEmpty || _history.last.address != entry.address) {
       _history.add(entry);
     }
+    _feedNowPlaying(entry);
     // Lift an idle auto-pause before the stream request hits the core.
     await NetworkPause.instance.noteActivity();
     await player.open(source.url);
+  }
+
+  /// Hand the media notification (lock-screen controls, headset buttons)
+  /// this track's info and this page's transport as its handlers.
+  void _feedNowPlaying(MediaEntry entry) {
+    final meta = MetadataService.instance.metadataFor(entry);
+    final parsed = parseMediaName(entry.name);
+    final albumMeta =
+        MetadataService.instance.metadataFor(widget.group.tracks.first);
+    final credit = albumMeta.albumArtist ??
+        (widget.group.isCompilation
+            ? widget.group.artist
+            : albumMeta.artist ?? widget.group.artist);
+    NowPlaying.instance.setTrack(
+      this,
+      NowPlayingTrack(
+        title: episodeNameFromLabel(meta.episodeLabel) ??
+            parsed.trackTitle ??
+            entry.name,
+        artist: meta.trackArtist ?? credit,
+        album: albumMeta.title.isEmpty ? widget.group.album : albumMeta.title,
+        // The playing track's own art beats the album cover, like the
+        // page's header.
+        artworkPath: meta.episodePosterFilePath ?? meta.posterFilePath,
+      ),
+      handlers: NowPlayingHandlers(
+        onPlay: () {
+          if (!_playing) unawaited(_player?.playOrPause());
+        },
+        onPause: () {
+          if (_playing) unawaited(_player?.playOrPause());
+        },
+        onNext: _skipNext,
+        onPrevious: _skipPrevious,
+        onSeek: (pos) => unawaited(_player?.seek(pos)),
+        onStop: () {
+          if (_playing) unawaited(_player?.playOrPause());
+        },
+      ),
+      canNext: true,
+      canPrev: true,
+    );
   }
 
   /// The track after [entry] in album order, or an unplayed random one
