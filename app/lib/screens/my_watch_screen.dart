@@ -3,7 +3,7 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:qr_flutter/qr_flutter.dart';
+import '../widgets/wi_qr.dart';
 
 import '../services/library_store.dart';
 import '../services/my_watch_api.dart';
@@ -290,11 +290,7 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
               Container(
                 color: Colors.white,
                 padding: const EdgeInsets.all(8),
-                child: QrImageView(
-                  data: invite,
-                  version: QrVersions.auto,
-                  size: 200,
-                ),
+                child: WiQr(data: invite, size: 200),
               ),
               const SizedBox(height: 12),
               SelectableText(

@@ -5,7 +5,7 @@ import 'dart:math';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:qr_flutter/qr_flutter.dart';
+import '../widgets/wi_qr.dart';
 
 import '../models/media_list.dart';
 import '../services/channel_service.dart';
@@ -2085,7 +2085,7 @@ class _ChannelQrDialog extends StatelessWidget {
             Container(
               color: Colors.white,
               padding: const EdgeInsets.all(8),
-              child: QrImageView(data: own.code, size: 220),
+              child: WiQr(data: own.code, size: 220),
             ),
             const SizedBox(height: 12),
             SelectableText(
