@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../db/app_database.dart';
 import '../models/media_list.dart';
@@ -17,6 +18,44 @@ import 'network_events.dart';
 
 /// Lifecycle of one managed download.
 enum DownloadStatus { queued, downloading, paused, done, error }
+
+/// Folder for a download whose entry is in no enabled list (shouldn't
+/// happen — every download starts from a library surface).
+const kOtherDownloadsFolder = 'Other';
+
+/// Wrapper directory created inside the system Downloads folder so app
+/// downloads don't pile up loose among the user's other files. A
+/// user-chosen custom folder is the root itself (no extra wrapper).
+const kDownloadsWrapperFolder = 'W@tch';
+
+/// A list title (or file name) made filesystem-safe: reserved characters
+/// become `_`, and trailing dots/spaces go (Windows rejects both).
+String sanitizeDownloadName(String name) {
+  var safe = name.replaceAll(RegExp(r'[/\\:*?"<>|]'), '_').trim();
+  while (safe.isNotEmpty &&
+      (safe.endsWith('.') || safe.endsWith(' '))) {
+    safe = safe.substring(0, safe.length - 1);
+  }
+  return safe;
+}
+
+/// Folder name a download of [entry] belongs in: the first enabled list
+/// in library position order holding the entry's address (an entry in
+/// several lists lands with the first, matching how the home wall
+/// attributes entries). Channel lists count like any list.
+String downloadListFolderFor(MediaEntry entry, List<MediaList> lists) {
+  final addr = DownloadManager.normalize(entry.address);
+  for (final list in lists) {
+    if (!list.enabled) continue;
+    for (final e in list.entries) {
+      if (DownloadManager.normalize(e.address) == addr) {
+        final safe = sanitizeDownloadName(list.title);
+        return safe.isEmpty ? kOtherDownloadsFolder : safe;
+      }
+    }
+  }
+  return kOtherDownloadsFolder;
+}
 
 /// One download in the queue, keyed by the file's normalized XOR address.
 class DownloadTask {
@@ -63,6 +102,7 @@ class DownloadTask {
       status == DownloadStatus.queued || status == DownloadStatus.downloading;
 
   DownloadTask copyWith({
+    String? filePath,
     int? totalBytes,
     int? downloadedBytes,
     DownloadStatus? status,
@@ -73,7 +113,7 @@ class DownloadTask {
       DownloadTask(
         address: address,
         name: name,
-        filePath: filePath,
+        filePath: filePath ?? this.filePath,
         totalBytes: totalBytes ?? this.totalBytes,
         downloadedBytes: downloadedBytes ?? this.downloadedBytes,
         status: status ?? this.status,
@@ -89,19 +129,37 @@ class DownloadTask {
 /// endpoint serves deterministic decrypted bytes, so `Range: bytes=N-`
 /// picks up exactly where the file on disk stops).
 ///
-/// Files land in the app-private `<support>/downloads/` directory by
-/// default; on desktop a custom folder can be set in Settings →
-/// Downloads (applies to new downloads only).
+/// Files land in a folder per source list under the downloads root —
+/// `W@tch/` inside the system Downloads folder on desktop (a custom
+/// folder from Settings → Downloads is the root itself), the app-private
+/// `<support>/downloads/` directory on Android/iOS. The list is resolved
+/// at enqueue time; renaming a list later only affects new downloads
+/// (moving files would break byte-offset resume and local playback).
 class DownloadManager extends ChangeNotifier {
-  DownloadManager({String? base, Directory? directory})
-      : _baseOverride = base,
-        _directoryOverride = directory;
+  DownloadManager({
+    String? base,
+    Directory? directory,
+    Future<List<MediaList>> Function()? lists,
+  })  : _baseOverride = base,
+        _directoryOverride = directory,
+        _listsOverride = lists;
 
   /// Replaceable for tests (fresh instance per test).
   static DownloadManager instance = DownloadManager();
 
   final String? _baseOverride;
   final Directory? _directoryOverride;
+  final Future<List<MediaList>> Function()? _listsOverride;
+
+  /// The library's lists, for resolving which folder a download lands
+  /// in. Never throws — folder resolution falls back to [kOtherDownloadsFolder].
+  Future<List<MediaList>> _libraryLists() async {
+    try {
+      return await (_listsOverride ?? LibraryStore.load)();
+    } catch (_) {
+      return const [];
+    }
+  }
 
   String? get _base => _baseOverride ?? EmbeddedClient.baseUrl();
 
@@ -172,10 +230,15 @@ class DownloadManager extends ChangeNotifier {
     if (any) _activeClient?.close(force: true);
   }
 
-  /// App came back to the foreground: restart anything the app itself
-  /// paused (6h background timeout, connection loss that never flipped
-  /// the monitor while frozen), policy permitting.
-  Future<void> onAppResumed() => _resumeSystemPausedIfAllowed();
+  /// App came back to the foreground: notice files the user deleted by
+  /// hand while we weren't looking (desktop windows stay open for days,
+  /// so the startup sweep alone would lag), then restart anything the
+  /// app itself paused (6h background timeout, connection loss that
+  /// never flipped the monitor while frozen), policy permitting.
+  Future<void> onAppResumed() async {
+    if (await _sweepMissingDone()) notifyListeners();
+    await _resumeSystemPausedIfAllowed();
+  }
 
   /// Whether the downloads policy permits transfers on the current
   /// transport. No [NetworkEvents] bound (desktop before main wiring,
@@ -327,6 +390,12 @@ class DownloadManager extends ChangeNotifier {
         pausedBySystem: row.pausedBySystem,
       );
     }
+    // Finished downloads whose file was deleted by hand are dropped so
+    // the title can be re-downloaded (enqueue no-ops on done rows) and
+    // stops showing as downloaded; then a one-time tidy moves finished
+    // flat files into the new per-list folder layout.
+    await _sweepMissingDone();
+    await _tidyFlatDownloads();
     _trackBatch();
     notifyListeners();
     _pump();
@@ -337,6 +406,109 @@ class DownloadManager extends ChangeNotifier {
         _tasks.values.any(
             (t) => t.status == DownloadStatus.paused && t.pausedBySystem)) {
       if (!await monitor.refresh()) await _resumeSystemPausedIfAllowed();
+    }
+  }
+
+  /// Drop finished tasks whose file no longer exists on disk (deleted by
+  /// hand — a deleted folder is just N missing files). Queued, paused
+  /// and error tasks are left alone: they already self-heal on resume,
+  /// and dropping a paused row would lose the user's queue intent.
+  /// True when anything was dropped (in memory and in the database).
+  ///
+  /// Unmounted-drive guard: when a custom download folder is set and its
+  /// root directory itself is missing (USB drive/network mount not
+  /// present), the sweep is skipped entirely — the files are probably
+  /// not gone, just unreachable.
+  Future<bool> _sweepMissingDone() async {
+    if (!_tasks.values.any((t) => t.status == DownloadStatus.done)) {
+      return false;
+    }
+    if (_directoryOverride == null) {
+      final custom = await AppSettings.downloadDirPath();
+      if (custom != null &&
+          custom.isNotEmpty &&
+          !Directory(custom).existsSync()) {
+        return false;
+      }
+    }
+    final gone = <String>[];
+    for (final task in _tasks.values) {
+      if (task.status == DownloadStatus.done &&
+          !File(task.filePath).existsSync()) {
+        gone.add(task.address);
+      }
+    }
+    if (gone.isEmpty) return false;
+    final db = await LibraryStore.database();
+    for (final addr in gone) {
+      _tasks.remove(addr);
+      _batch.remove(addr);
+      await (db.delete(db.downloads)..where((t) => t.address.equals(addr)))
+          .go();
+    }
+    return true;
+  }
+
+  /// One-time pref flag: the tidy migration below already ran.
+  static const _tidiedKey = 'downloads_tidy_v1';
+
+  /// One-time tidy (desktop only): finished downloads sitting FLAT in
+  /// the downloads root — or, for the default `W@tch` wrapper, flat in
+  /// the system Downloads folder where the old layout put them — move
+  /// into the new `<root>/<List name>/` layout, with the row's file path
+  /// updated. Skip-on-any-error: a locked/missing file just stays where
+  /// it is (its row keeps the old absolute path and keeps working).
+  /// Mid-flight/paused tasks are left alone — resume reads the file at
+  /// its recorded path.
+  Future<void> _tidyFlatDownloads() async {
+    if (Platform.isAndroid || Platform.isIOS) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_tidiedKey) ?? false) return;
+    await prefs.setBool(_tidiedKey, true);
+    final done = [
+      for (final t in _tasks.values)
+        if (t.status == DownloadStatus.done) t,
+    ];
+    if (done.isEmpty) return;
+    List<MediaList>? lists;
+    final sep = Platform.pathSeparator;
+    for (final task in done) {
+      try {
+        final file = File(task.filePath);
+        if (!file.existsSync()) continue;
+        final root = await _downloadsRoot(create: false);
+        // Flat = directly in the root, or (default layout only) directly
+        // in the system Downloads folder the pre-folder versions used.
+        final flatIn = file.parent.path;
+        if (flatIn != root.dir.path &&
+            !(root.wrapper && flatIn == root.dir.parent.path)) {
+          continue;
+        }
+        lists ??= await _libraryLists();
+        final folder = downloadListFolderFor(
+            MediaEntry(name: task.name, address: task.address), lists);
+        final targetDir = '${root.dir.path}$sep$folder';
+        if (file.parent.path == targetDir) continue;
+        final base = task.filePath
+            .substring(task.filePath.lastIndexOf(sep) + 1);
+        var target = '$targetDir$sep$base';
+        if (File(target).existsSync() ||
+            _tasks.values.any((t) => t.filePath == target)) {
+          target = '$targetDir$sep${task.address.substring(0, 8)}-$base';
+          if (File(target).existsSync()) continue;
+        }
+        Directory(targetDir).createSync(recursive: true);
+        try {
+          file.renameSync(target);
+        } catch (_) {
+          // Cross-device move: copy, then delete the original.
+          file.copySync(target);
+          file.deleteSync();
+        }
+        _update(task.copyWith(filePath: target));
+      } catch (_) {
+        // This file stays where it is; its row keeps working.
+      }
     }
   }
 
@@ -353,7 +525,10 @@ class DownloadManager extends ChangeNotifier {
       if (existing.status == DownloadStatus.done) return;
       return resume(addr);
     }
-    final dir = await _downloadsDir();
+    final root = await _downloadsRoot();
+    final folder = downloadListFolderFor(entry, await _libraryLists());
+    final dir =
+        Directory('${root.dir.path}${Platform.pathSeparator}$folder');
     final path = _pathFor(dir, entry.name, addr);
     // A leftover file at the target path (from outside the queue) would
     // corrupt the byte-offset resume — start clean.
@@ -418,9 +593,38 @@ class DownloadManager extends ChangeNotifier {
     try {
       await File(task.filePath).delete();
     } catch (_) {}
+    await _cleanupEmptyFolders(task.filePath);
     final db = await LibraryStore.database();
     await (db.delete(db.downloads)..where((t) => t.address.equals(addr))).go();
     notifyListeners();
+  }
+
+  /// After deleting a file: remove its list folder when that left it
+  /// empty, and the auto-created `W@tch` wrapper when IT is left empty.
+  /// Only ever rmdir-if-empty (never recursive), and only for folders
+  /// under the current downloads root — a legacy flat file's parent (the
+  /// user's own Downloads folder) is never touched.
+  Future<void> _cleanupEmptyFolders(String filePath) async {
+    try {
+      final root = await _downloadsRoot(create: false);
+      final rootPath = root.dir.path;
+      final sep = Platform.pathSeparator;
+      final parent = File(filePath).parent;
+      if (parent.path == rootPath ||
+          !parent.path.startsWith('$rootPath$sep')) {
+        return;
+      }
+      try {
+        parent.deleteSync(); // fails on non-empty — that's the guard
+      } catch (_) {
+        return;
+      }
+      if (root.wrapper) {
+        try {
+          root.dir.deleteSync();
+        } catch (_) {}
+      }
+    } catch (_) {}
   }
 
   /// Remove several downloads at once — the queue rows and their files
@@ -499,35 +703,52 @@ class DownloadManager extends ChangeNotifier {
     return any;
   }
 
-  /// Directory new downloads land in: the test override, then the
-  /// user-chosen folder (desktop), then the system Downloads folder
-  /// (desktop default — where users look for downloaded files), then
-  /// app-private `downloads/` (Android/iOS, or no Downloads dir).
-  Future<Directory> _downloadsDir() async {
+  /// The downloads ROOT (list folders live inside it): the test
+  /// override, then the user-chosen folder (desktop — that folder IS the
+  /// root, no extra wrapper), then `W@tch/` inside the system Downloads
+  /// folder (desktop default — where users look for downloaded files,
+  /// kept tidy in one place), then app-private `downloads/` (Android/iOS,
+  /// or no Downloads dir). [wrapper] marks the auto-created `W@tch`
+  /// wrapper — the only root that is itself cleaned up when it empties.
+  Future<({Directory dir, bool wrapper})> _downloadsRoot(
+      {bool create = true}) async {
+    // Sync IO on purpose: this runs inside widget tests' fake-async
+    // zone, where real async dart:io futures never complete.
+    Directory made(Directory d) {
+      if (create) d.createSync(recursive: true);
+      return d;
+    }
     final override = _directoryOverride;
-    if (override != null) return override.create(recursive: true);
+    if (override != null) return (dir: made(override), wrapper: false);
     final custom = await AppSettings.downloadDirPath();
     if (custom != null && custom.isNotEmpty) {
-      return Directory(custom).create(recursive: true);
+      return (dir: made(Directory(custom)), wrapper: false);
     }
     if (!Platform.isAndroid && !Platform.isIOS) {
       try {
         final downloads = await getDownloadsDirectory();
         if (downloads != null) {
-          return Directory(downloads.path).create(recursive: true);
+          final root = Directory('${downloads.path}'
+              '${Platform.pathSeparator}$kDownloadsWrapperFolder');
+          return (dir: made(root), wrapper: true);
         }
       } catch (_) {
         // Fall through to app-private storage.
       }
     }
     final support = await getApplicationSupportDirectory();
-    return Directory('${support.path}/downloads').create(recursive: true);
+    return (
+      dir: made(Directory('${support.path}/downloads')),
+      wrapper: false,
+    );
   }
 
-  /// Target path for a new download: the sanitized file name, prefixed
-  /// with the address when another task already claims that name.
+  /// Target path for a new download inside [dir] (the entry's list
+  /// folder): the sanitized file name, prefixed with the address when
+  /// another task already claims that path — per-folder, so two lists
+  /// can hold the same file name without the prefix.
   String _pathFor(Directory dir, String name, String addr) {
-    var safe = name.replaceAll(RegExp(r'[/\\:*?"<>|]'), '_').trim();
+    var safe = sanitizeDownloadName(name);
     if (safe.isEmpty) safe = addr;
     final plain = '${dir.path}${Platform.pathSeparator}$safe';
     final taken = _tasks.values.any((t) => t.filePath == plain);

@@ -147,7 +147,8 @@ void main() {
     expect(task.totalBytes, payload.length);
     expect(task.downloadedBytes, payload.length);
     expect(File(task.filePath).readAsBytesSync(), payload);
-    expect(task.filePath, '${dir.path}/Movie.mkv');
+    // Not in any library list — lands in the Other folder.
+    expect(task.filePath, '${dir.path}/Other/Movie.mkv');
     expect(manager.localPathIfDone(entry('Movie.mkv', _addrA)),
         task.filePath);
   });
@@ -547,6 +548,228 @@ void main() {
     expect(manager.batchProgress, isNotNull);
     await manager.remove(_addrA);
     expect(manager.batchProgress, isNull);
+  });
+
+  test('downloadListFolderFor: first enabled list wins, sanitized', () {
+    final e = entry('Movie.mkv', _addrA);
+    final lists = [
+      MediaList(id: 'a', title: 'Hidden', enabled: false, entries: [e]),
+      MediaList(id: 'b', title: 'My: Films...', entries: [e]),
+      MediaList(id: 'c', title: 'Also Here', entries: [e]),
+    ];
+    expect(downloadListFolderFor(e, lists), 'My_ Films');
+    expect(downloadListFolderFor(entry('X.mkv', _addrB), lists), 'Other');
+    expect(downloadListFolderFor(e, const []), 'Other');
+  });
+
+  test('downloads land in a folder named after the entry\'s list',
+      () async {
+    final e = entry('Movie.mkv', _addrA);
+    final manager = DownloadManager(
+        base: base,
+        directory: dir,
+        lists: () async => [
+              MediaList(id: 'l', title: 'Movies', entries: [e]),
+            ]);
+    await manager.enqueue(e);
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.done);
+    expect(manager.taskFor(_addrA)!.filePath,
+        '${dir.path}/Movies/Movie.mkv');
+    expect(File('${dir.path}/Movies/Movie.mkv').readAsBytesSync(),
+        payload);
+  });
+
+  test('same file name in two lists needs no address prefix', () async {
+    final a = entry('Same.mkv', _addrA);
+    final b = entry('Same.mkv', _addrB);
+    final manager = DownloadManager(
+        base: base,
+        directory: dir,
+        lists: () async => [
+              MediaList(id: 'l1', title: 'Movies', entries: [a]),
+              MediaList(id: 'l2', title: 'Music', entries: [b]),
+            ]);
+    await manager.enqueue(a);
+    await manager.enqueue(b);
+    await waitFor(() =>
+        manager.taskFor(_addrA)?.status == DownloadStatus.done &&
+        manager.taskFor(_addrB)?.status == DownloadStatus.done);
+    expect(manager.taskFor(_addrA)!.filePath,
+        '${dir.path}/Movies/Same.mkv');
+    expect(manager.taskFor(_addrB)!.filePath,
+        '${dir.path}/Music/Same.mkv');
+  });
+
+  test('remove deletes an emptied list folder but never the root',
+      () async {
+    final e = entry('Movie.mkv', _addrA);
+    final manager = DownloadManager(
+        base: base,
+        directory: dir,
+        lists: () async => [
+              MediaList(id: 'l', title: 'Movies', entries: [e]),
+            ]);
+    await manager.enqueue(e);
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.done);
+    await manager.remove(_addrA);
+    expect(Directory('${dir.path}/Movies').existsSync(), isFalse);
+    expect(dir.existsSync(), isTrue);
+  });
+
+  test('a non-empty list folder survives removing one of its files',
+      () async {
+    final a = entry('A.mkv', _addrA);
+    final b = entry('B.mkv', _addrB);
+    final manager = DownloadManager(
+        base: base,
+        directory: dir,
+        lists: () async => [
+              MediaList(id: 'l', title: 'Movies', entries: [a, b]),
+            ]);
+    await manager.enqueue(a);
+    await manager.enqueue(b);
+    await waitFor(() =>
+        manager.taskFor(_addrA)?.status == DownloadStatus.done &&
+        manager.taskFor(_addrB)?.status == DownloadStatus.done);
+    await manager.remove(_addrA);
+    expect(File('${dir.path}/Movies/B.mkv').existsSync(), isTrue);
+    expect(Directory('${dir.path}/Movies').existsSync(), isTrue);
+  });
+
+  test('a hand-deleted finished file drops its row on the next load '
+      'and the title can be downloaded again', () async {
+    final manager = DownloadManager(base: base, directory: dir);
+    await manager.enqueue(entry('Movie.mkv', _addrA));
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.done);
+    File(manager.taskFor(_addrA)!.filePath).deleteSync();
+
+    final reloaded = DownloadManager(base: base, directory: dir);
+    await reloaded.ensureLoaded();
+    expect(reloaded.taskFor(_addrA), isNull);
+    expect(await db.select(db.downloads).get(), isEmpty);
+    // enqueue no longer no-ops — a fresh transfer starts.
+    await reloaded.enqueue(entry('Movie.mkv', _addrA));
+    await waitFor(
+        () => reloaded.taskFor(_addrA)?.status == DownloadStatus.done);
+  });
+
+  test('onAppResumed sweeps hand-deleted finished files too', () async {
+    final manager = DownloadManager(base: base, directory: dir);
+    await manager.enqueue(entry('Movie.mkv', _addrA));
+    await waitFor(
+        () => manager.taskFor(_addrA)?.status == DownloadStatus.done);
+    File(manager.taskFor(_addrA)!.filePath).deleteSync();
+    await manager.onAppResumed();
+    expect(manager.taskFor(_addrA), isNull);
+  });
+
+  test('paused rows with missing files are kept (self-heal on resume)',
+      () async {
+    await db.into(db.downloads).insert(DownloadsCompanion.insert(
+          address: _addrA,
+          name: 'Movie.mkv',
+          filePath: '${dir.path}/gone/Movie.mkv',
+          totalBytes: Value(payload.length),
+          downloadedBytes: const Value(1000),
+          status: 'paused',
+          createdAt: 1,
+          updatedAt: 1,
+        ));
+    final manager = DownloadManager(base: base, directory: dir);
+    await manager.ensureLoaded();
+    expect(manager.taskFor(_addrA)?.status, DownloadStatus.paused);
+  });
+
+  test('sweep is skipped while the custom download root is unmounted',
+      () async {
+    final missingRoot = '${dir.path}/usb-stick';
+    SharedPreferences.setMockInitialValues({
+      'download_dir_v1': missingRoot,
+    });
+    await db.into(db.downloads).insert(DownloadsCompanion.insert(
+          address: _addrA,
+          name: 'Movie.mkv',
+          filePath: '$missingRoot/Movies/Movie.mkv',
+          totalBytes: Value(payload.length),
+          downloadedBytes: Value(payload.length),
+          status: 'done',
+          createdAt: 1,
+          updatedAt: 1,
+        ));
+    final manager = DownloadManager(base: base);
+    await manager.ensureLoaded();
+    // The drive is probably not gone, just unreachable — row kept.
+    expect(manager.taskFor(_addrA)?.status, DownloadStatus.done);
+  });
+
+  test('one-time tidy moves finished flat files into list folders and '
+      'leaves unfinished or erroring ones alone', () async {
+    final donePath = '${dir.path}/Movie.mkv';
+    File(donePath).writeAsBytesSync(payload);
+    await db.into(db.downloads).insert(DownloadsCompanion.insert(
+          address: _addrA,
+          name: 'Movie.mkv',
+          filePath: donePath,
+          totalBytes: Value(payload.length),
+          downloadedBytes: Value(payload.length),
+          status: 'done',
+          createdAt: 1,
+          updatedAt: 1,
+        ));
+    // A paused flat file must stay where it is (resume reads it there).
+    final pausedPath = '${dir.path}/Partial.mkv';
+    File(pausedPath).writeAsBytesSync(payload.sublist(0, 1000));
+    await db.into(db.downloads).insert(DownloadsCompanion.insert(
+          address: _addrB,
+          name: 'Partial.mkv',
+          filePath: pausedPath,
+          totalBytes: Value(payload.length),
+          downloadedBytes: const Value(1000),
+          status: 'paused',
+          createdAt: 2,
+          updatedAt: 2,
+        ));
+    final movie = entry('Movie.mkv', _addrA);
+    final manager = DownloadManager(
+        base: base,
+        directory: dir,
+        lists: () async => [
+              MediaList(id: 'l', title: 'Movies', entries: [movie]),
+            ]);
+    await manager.ensureLoaded();
+    final task = manager.taskFor(_addrA)!;
+    expect(task.filePath, '${dir.path}/Movies/Movie.mkv');
+    expect(File(task.filePath).readAsBytesSync(), payload);
+    expect(File(donePath).existsSync(), isFalse);
+    expect(manager.taskFor(_addrB)!.filePath, pausedPath);
+    expect(File(pausedPath).existsSync(), isTrue);
+    expect(manager.localPathIfDone(movie), task.filePath);
+
+    // One-time: a later load never moves files again.
+    final late = '${dir.path}/Late.mkv';
+    File(late).writeAsBytesSync(payload);
+    await db.into(db.downloads).insert(DownloadsCompanion.insert(
+          address:
+              'c5b3e1f29d8a7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2',
+          name: 'Late.mkv',
+          filePath: late,
+          totalBytes: Value(payload.length),
+          downloadedBytes: Value(payload.length),
+          status: 'done',
+          createdAt: 3,
+          updatedAt: 3,
+        ));
+    final second = DownloadManager(
+        base: base,
+        directory: dir,
+        lists: () async => [
+              MediaList(id: 'l', title: 'Movies', entries: [movie]),
+            ]);
+    await second.ensureLoaded();
+    expect(File(late).existsSync(), isTrue);
   });
 
   test('size labels', () {
