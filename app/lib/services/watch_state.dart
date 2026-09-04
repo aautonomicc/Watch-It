@@ -177,6 +177,36 @@ class WatchStateStore extends ChangeNotifier {
     });
   }
 
+  /// Sync aggregate for card builders: the NEWEST state across every
+  /// upload of one title (quality tiers are separate addresses but one
+  /// piece of content — the watch point follows whichever copy was
+  /// played last). Null when none was ever played, or while the mirror
+  /// is still loading.
+  WatchState? cachedNewestFor(Iterable<MediaEntry> versions) {
+    WatchState? newest;
+    for (final v in versions) {
+      final s = cachedStateFor(v);
+      if (s != null && (newest == null || s.updatedAt > newest.updatedAt)) {
+        newest = s;
+      }
+    }
+    return newest;
+  }
+
+  /// The NEWEST stored state across every upload of one title (see
+  /// [cachedNewestFor]); null when none was ever played. Writes stay
+  /// per-address — the sync happens purely at read time.
+  Future<WatchState?> newestFor(Iterable<MediaEntry> versions) async {
+    WatchState? newest;
+    for (final v in versions) {
+      final s = await stateFor(v);
+      if (s != null && (newest == null || s.updatedAt > newest.updatedAt)) {
+        newest = s;
+      }
+    }
+    return newest;
+  }
+
   /// The stored state for [entry]'s address, or null when never played.
   Future<WatchState?> stateFor(MediaEntry entry) async {
     final db = await LibraryStore.database();

@@ -260,8 +260,11 @@ class _SearchScreenState extends State<SearchScreen> {
         t,
         showPosterImage(meta, fit: BoxFit.cover),
         Icons.live_tv_outlined,
-        badge: groupDownloadBadge(
-            t, [for (final s in show.seasons) ...s.episodes]),
+        // An episode counts as downloaded when ANY of its tiers is.
+        badge: versionGroupDownloadBadge(t, [
+          for (final s in show.seasons)
+            for (final e in s.episodes) s.versionsOf(e)
+        ]),
       ),
       title: Text(meta.title,
           maxLines: 1,
@@ -286,8 +289,8 @@ class _SearchScreenState extends State<SearchScreen> {
         t,
         posterImage(meta, fit: BoxFit.cover),
         Icons.movie_outlined,
-        badge: entryDownloadBadge(t, entry),
-        bar: entryWatchBar(t, entry),
+        badge: versionsDownloadBadge(t, r.allVersions),
+        bar: versionsWatchBar(t, r.allVersions),
       ),
       title: Text(
         meta.year != null ? '${meta.title} (${meta.year})' : meta.title,
@@ -295,7 +298,7 @@ class _SearchScreenState extends State<SearchScreen> {
         overflow: TextOverflow.ellipsis,
         style: TextStyle(fontSize: 13.5, color: t.bone),
       ),
-      trailing: _watchedCheck(t, entry),
+      trailing: _watchedCheck(t, r),
       onTap: () => _openEntry(entry),
     );
   }
@@ -309,8 +312,8 @@ class _SearchScreenState extends State<SearchScreen> {
         stillImage(meta, fit: BoxFit.cover) ??
             entryPosterImage(meta, fit: BoxFit.cover),
         Icons.live_tv_outlined,
-        badge: entryDownloadBadge(t, entry),
-        bar: entryWatchBar(t, entry),
+        badge: versionsDownloadBadge(t, r.allVersions),
+        bar: versionsWatchBar(t, r.allVersions),
       ),
       // The match's title is the show name; episodeLabel is the bare
       // marker until TMDB supplies `S01E02 · Name`.
@@ -324,15 +327,16 @@ class _SearchScreenState extends State<SearchScreen> {
         overflow: TextOverflow.ellipsis,
         style: TextStyle(fontSize: 11.5, color: t.ash),
       ),
-      trailing: _watchedCheck(t, entry),
+      trailing: _watchedCheck(t, r),
       onTap: () => _openEntry(entry),
     );
   }
 
   /// Accent check for a fully watched movie/episode (the cards' watch
-  /// bar covers only partial progress).
-  Widget? _watchedCheck(WiTokens t, MediaEntry entry) {
-    final state = WatchStateStore.instance.cachedStateFor(entry);
+  /// bar covers only partial progress). Watching ANY quality tier of a
+  /// folded title to the end counts.
+  Widget? _watchedCheck(WiTokens t, EntryResult r) {
+    final state = WatchStateStore.instance.cachedNewestFor(r.allVersions);
     if (state == null || !state.completed) return null;
     return Icon(Icons.check_circle_outline, size: 18, color: t.accent);
   }

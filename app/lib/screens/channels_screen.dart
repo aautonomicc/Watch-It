@@ -2240,7 +2240,18 @@ class _PickItemDialogState extends State<_PickItemDialog> {
                       t,
                       'Season ${season.season}',
                       '${season.episodes.length} episodes',
-                      [for (final e in season.episodes) _leaf(t, e)],
+                      [
+                        // An episode's tier uploads each stay pickable —
+                        // folded under a versions group like movies.
+                        for (final e in season.episodes)
+                          if (season.versionsOf(e) case final v
+                              when v.length > 1)
+                            _group(t, e.name, '${v.length} versions',
+                                [for (final f in v) _leaf(t, f)],
+                                nested: true)
+                          else
+                            _leaf(t, e)
+                      ],
                       nested: true),
               ]),
             HomeEntry e => e.allVersions.length > 1

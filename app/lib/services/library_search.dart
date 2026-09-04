@@ -21,13 +21,22 @@ class ShowResult extends SearchResult {
 }
 
 class EntryResult extends SearchResult {
-  const EntryResult(this.entry, {required this.isEpisode});
+  const EntryResult(this.entry,
+      {required this.isEpisode, this.versions = const []});
 
   final MediaEntry entry;
 
   /// True for an episode of a show (file name carries an SxxEyy/1x02
   /// marker); false for movies and other single files.
   final bool isEpisode;
+
+  /// Every upload of this title/episode when quality tiers folded into
+  /// this one result (like the wall); empty for the single-upload case.
+  /// Download badges and watch marks aggregate across them.
+  final List<MediaEntry> versions;
+
+  /// [versions], or just [entry] for the single-upload case.
+  List<MediaEntry> get allVersions => versions.isEmpty ? [entry] : versions;
 }
 
 /// Common Latin diacritics folded to their base letter so "Amelie" finds
@@ -155,10 +164,10 @@ class SearchIndex {
 
     for (final item in groupShows(entries)) {
       switch (item) {
-        case HomeEntry(:final entry):
+        case HomeEntry(:final entry, :final versions):
           final parsed = parseMediaName(entry.name);
           records.add(_Record(
-            EntryResult(entry, isEpisode: false),
+            EntryResult(entry, isEpisode: false, versions: versions),
             title: normalizeSearchText(parsed.title),
             extraWords: [if (parsed.year != null) '${parsed.year}'],
             year: parsed.year,
@@ -172,8 +181,11 @@ class SearchIndex {
               final marker = 's${'${parsed.season}'.padLeft(2, '0')}'
                   'e${'${parsed.episode}'.padLeft(2, '0')}';
               final name = episodeName?.call(ep);
+              final versions = season.versionsOf(ep);
               records.add(_Record(
-                EntryResult(ep, isEpisode: true),
+                EntryResult(ep,
+                    isEpisode: true,
+                    versions: versions.length > 1 ? versions : const []),
                 title: title,
                 extraWords: [
                   marker,

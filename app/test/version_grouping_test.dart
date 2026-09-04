@@ -169,7 +169,7 @@ void main() {
       await tester.pumpWidget(page(Scaffold(
         body: PosterCard(
           entry: _v480,
-          versionCount: 2,
+          versions: [_v480, _v1080],
           tokens: WiTokens.dark,
           onTap: () {},
         ),

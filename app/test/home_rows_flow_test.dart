@@ -8,6 +8,7 @@ import 'package:watchit/db/app_database.dart';
 import 'package:watchit/main.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/screens/detail_screen.dart';
+import 'package:watchit/services/download_manager.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata_service.dart';
 import 'package:watchit/services/watch_state.dart';
@@ -36,6 +37,10 @@ void main() {
     // Offline: no API key, so screens render from parsed file names.
     MetadataService.instance = MetadataService(apiKeyProvider: () async => '');
     WatchStateStore.instance = WatchStateStore();
+    // The detail page awaits the download queue (default-version pick) —
+    // a fresh manager per test keeps its load future in this test's DB
+    // and zone (a cached cross-zone drift future deadlocks).
+    DownloadManager.instance = DownloadManager();
   });
 
   // Seeds the library INSIDE the test body: the drift DB must see its

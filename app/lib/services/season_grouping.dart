@@ -27,6 +27,7 @@ class HomeSeason extends HomeItem {
     required this.show,
     required this.season,
     required this.episodes,
+    this.versions = const {},
   });
 
   /// Show name parsed from the file names — display fallback until the
@@ -35,8 +36,23 @@ class HomeSeason extends HomeItem {
 
   final int season;
 
-  /// The season's entries, sorted by episode number.
+  /// One entry per episode, sorted by episode number. Multiple uploads
+  /// of one episode (same parsed lookup key — e.g. a 480p and a 1080p
+  /// copy) fold into a single slot here, exactly like movie versions;
+  /// the first upload is the representative and the rest live in
+  /// [versions].
   final List<MediaEntry> episodes;
+
+  /// Every upload of an episode held in the library, keyed by the
+  /// representative entry's normalized address — only episodes with more
+  /// than one upload have a key. See [versionsOf].
+  final Map<String, List<MediaEntry>> versions;
+
+  /// All uploads of [episode] (an element of [episodes]) in library
+  /// order; just `[episode]` for the common single-upload case.
+  List<MediaEntry> versionsOf(MediaEntry episode) =>
+      versions[episode.address.toLowerCase().replaceFirst('0x', '')] ??
+      [episode];
 }
 
 /// All of one show's seasons folded into a single wall card (the home
@@ -136,7 +152,9 @@ class _SeasonBuilder {
   /// of its first episode).
   final int slot;
 
-  final episodes = <(int, MediaEntry)>[];
+  /// One builder per episode (keyed by the episode's parsed lookup key),
+  /// so multiple uploads of one episode fold like movie versions.
+  final byEpisode = <String, (int, _VersionBuilder)>{};
 }
 
 class _VersionBuilder {
@@ -284,9 +302,10 @@ class AlbumKeys {
 /// tracks group per album ([HomeAlbum]); other entries get one card per
 /// title, with multiple uploads of the same title (same parsed lookup
 /// key — e.g. a 480p and a 1080p copy) folded into a single [HomeEntry]
-/// carrying all versions. A group sits where its first entry appeared;
-/// episodes/tracks inside a group sort by their number, versions keep
-/// library order.
+/// carrying all versions; multiple uploads of one EPISODE fold the same
+/// way inside their season ([HomeSeason.versions]). A group sits where
+/// its first entry appeared; episodes/tracks inside a group sort by
+/// their number, versions keep library order.
 List<HomeItem> groupSeasons(List<MediaEntry> entries) {
   final items = <HomeItem?>[];
   final bySeason = <String, _SeasonBuilder>{};
@@ -327,7 +346,12 @@ List<HomeItem> groupSeasons(List<MediaEntry> entries) {
       builder =
           bySeason[key] = _SeasonBuilder(parsed.title, parsed.season!, items.length - 1);
     }
-    builder.episodes.add((parsed.episode!, entry));
+    // Same-episode uploads (same parsed lookup key — e.g. a 480p and a
+    // 1080p copy) fold into one episode slot, like movie versions.
+    final episode = builder.byEpisode.putIfAbsent(
+        parsed.lookupKey, () => (parsed.episode!, _VersionBuilder(0)));
+    final addr = entry.address.toLowerCase().replaceFirst('0x', '');
+    if (episode.$2.addresses.add(addr)) episode.$2.entries.add(entry);
   }
   for (final b in byTitle.values) {
     items[b.slot] = HomeEntry(
@@ -353,11 +377,18 @@ List<HomeItem> groupSeasons(List<MediaEntry> entries) {
     );
   }
   for (final b in bySeason.values) {
-    b.episodes.sort((x, y) => x.$1.compareTo(y.$1));
+    final episodes = b.byEpisode.values.toList()
+      ..sort((x, y) => x.$1.compareTo(y.$1));
     items[b.slot] = HomeSeason(
       show: b.show,
       season: b.season,
-      episodes: [for (final (_, e) in b.episodes) e],
+      episodes: [for (final (_, v) in episodes) v.entries.first],
+      versions: {
+        for (final (_, v) in episodes)
+          if (v.entries.length > 1)
+            v.entries.first.address.toLowerCase().replaceFirst('0x', ''):
+                v.entries,
+      },
     );
   }
   return items.cast<HomeItem>();

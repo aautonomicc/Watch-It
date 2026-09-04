@@ -348,8 +348,36 @@ class _ListEditScreenState extends State<ListEditScreen> {
     );
   }
 
+  /// An episode with several uploads (quality tiers) folds under its own
+  /// nested tile inside the season, mirroring [_versionsTile] for
+  /// movies; single-upload episodes stay plain rows.
+  Widget _episodeRow(WiTokens t, HomeSeason season, MediaEntry e) {
+    final versions = season.versionsOf(e);
+    if (versions.length < 2) return _entryRow(t, e, indent: 56);
+    return ExpansionTile(
+      controlAffinity: ListTileControlAffinity.leading,
+      iconColor: t.ash,
+      collapsedIconColor: t.ash,
+      shape: const Border(),
+      collapsedShape: const Border(),
+      tilePadding: const EdgeInsets.only(left: 40, right: 4),
+      childrenPadding: EdgeInsets.zero,
+      title: Text(e.name, style: TextStyle(color: t.bone, fontSize: 14)),
+      subtitle: Text('${versions.length} versions',
+          style: TextStyle(color: t.ash, fontSize: 12)),
+      trailing: _entryMenu(
+          t, versions, 'all ${versions.length} versions of "${e.name}"'),
+      children: [for (final v in versions) _entryRow(t, v, indent: 72)],
+    );
+  }
+
   Widget _seasonTile(WiTokens t, HomeSeason season) {
     final n = season.episodes.length;
+    // The group menu curates every file, hidden tier uploads included —
+    // a move must never strand an episode's other versions behind.
+    final files = [
+      for (final e in season.episodes) ...season.versionsOf(e),
+    ];
     return ExpansionTile(
       controlAffinity: ListTileControlAffinity.leading,
       iconColor: t.ash,
@@ -362,10 +390,10 @@ class _ListEditScreenState extends State<ListEditScreen> {
           style: TextStyle(color: t.bone, fontSize: 14)),
       subtitle: Text('$n ${n == 1 ? 'episode' : 'episodes'}',
           style: TextStyle(color: t.ash, fontSize: 12)),
-      trailing: _entryMenu(t, season.episodes,
+      trailing: _entryMenu(t, files,
           'season ${season.season} of "${season.show}"'),
       children: [
-        for (final e in season.episodes) _entryRow(t, e, indent: 56),
+        for (final e in season.episodes) _episodeRow(t, season, e),
       ],
     );
   }
@@ -425,7 +453,11 @@ class _ListEditScreenState extends State<ListEditScreen> {
   Widget _showTile(WiTokens t, HomeShow group) {
     final seasons = group.seasons.length;
     final episodes = group.episodeCount;
-    final all = [for (final s in group.seasons) ...s.episodes];
+    // Every file, tier uploads included (see _seasonTile).
+    final all = [
+      for (final s in group.seasons)
+        for (final e in s.episodes) ...s.versionsOf(e),
+    ];
     return ExpansionTile(
       controlAffinity: ListTileControlAffinity.leading,
       iconColor: t.ash,

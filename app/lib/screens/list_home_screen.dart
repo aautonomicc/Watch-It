@@ -289,7 +289,7 @@ class _ListHomeScreenState extends State<ListHomeScreen> {
       itemBuilder: (context, i) => switch (items[i]) {
         HomeEntry() && final item => PosterCard(
             entry: item.entry,
-            versionCount: item.allVersions.length,
+            versions: item.allVersions,
             tokens: t,
             onTap: () => _openEntry(item.entry),
           ),

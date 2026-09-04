@@ -6,6 +6,7 @@ import '../services/download_manager.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/season_grouping.dart';
+import '../services/version_choice.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
@@ -60,12 +61,11 @@ class SeasonScreen extends StatelessWidget {
     final meta = MetadataService.instance.metadataFor(group.episodes.first);
     final overview = meta.seasonOverview ?? meta.showOverview;
     final count = group.episodes.length;
-    // Episodes not fully downloaded yet — what "download season" queues.
+    // Episodes not fully downloaded yet (no quality tier on disk) —
+    // what "download season" queues.
     final remaining = [
       for (final e in group.episodes)
-        if (DownloadManager.instance.taskFor(e.address)?.status !=
-            DownloadStatus.done)
-          e,
+        if (!anyVersionDownloaded(group.versionsOf(e))) e,
     ];
     // Starting a download needs the network (same gating as DetailScreen);
     // browsing the season stays open.
@@ -174,7 +174,10 @@ class SeasonScreen extends StatelessWidget {
             runSpacing: 18,
             children: [
               for (final entry in group.episodes)
-                _EpisodeTile(entry: entry, tokens: t),
+                _EpisodeTile(
+                    entry: entry,
+                    versions: group.versionsOf(entry),
+                    tokens: t),
             ],
           ),
         ],
@@ -186,12 +189,20 @@ class SeasonScreen extends StatelessWidget {
 /// Episode tile: 16:9 TMDB screenshot, then the `SxxEyy` marker with the
 /// episode name, the air date, and the episode synopsis.
 class _EpisodeTile extends StatelessWidget {
-  const _EpisodeTile({required this.entry, required this.tokens});
+  const _EpisodeTile({
+    required this.entry,
+    required this.tokens,
+    this.versions = const [],
+  });
 
   static const double width = 200;
 
   final MediaEntry entry;
   final WiTokens tokens;
+
+  /// Every upload of this episode (quality tiers) — badge and watch bar
+  /// aggregate across all of them, like a movie's wall card.
+  final List<MediaEntry> versions;
 
   @override
   Widget build(BuildContext context) {
@@ -201,7 +212,8 @@ class _EpisodeTile extends StatelessWidget {
     final marker = 'S${parsed.season.toString().padLeft(2, '0')}'
         'E${parsed.episode.toString().padLeft(2, '0')}';
     final name = episodeNameFromLabel(meta.episodeLabel);
-    final badge = entryDownloadBadge(t, entry);
+    final allVersions = versions.isEmpty ? [entry] : versions;
+    final badge = versionsDownloadBadge(t, allVersions);
     return InkWell(
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => DetailScreen(entry: entry)),
@@ -226,7 +238,7 @@ class _EpisodeTile extends StatelessWidget {
                           child: Icon(Icons.play_circle_outline,
                               color: t.ash, size: 36),
                         ),
-                    ?entryWatchBar(t, entry),
+                    ?versionsWatchBar(t, allVersions),
                     ?badge,
                   ],
                 ),
