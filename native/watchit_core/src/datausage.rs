@@ -38,7 +38,7 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use tracing::field::{Field, Visit};
-use tracing::{Event, Metadata, Subscriber};
+use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::{Context, Layer};
 
 /// How often a dirty accumulator set is persisted.
@@ -313,8 +313,21 @@ pub struct AntTrafficLayer {
 }
 
 /// The layer wired to the global accumulators, for `init_tracing`.
-pub fn ant_traffic_layer() -> AntTrafficLayer {
-    AntTrafficLayer { usage: usage() }
+///
+/// Wrapped in a per-layer filter scoped to the one traffic target: a
+/// raw `Layer::enabled` override would be ANDed across the WHOLE
+/// subscriber stack and silence every other layer's events (it did —
+/// the first live run logged nothing), while a `Filter` applies to this
+/// layer alone and keeps unrelated callsites disabled for it.
+pub fn ant_traffic_layer<S>() -> impl Layer<S>
+where
+    S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    AntTrafficLayer { usage: usage() }.with_filter(
+        tracing_subscriber::filter::filter_fn(|meta| {
+            meta.is_event() && meta.target() == TRAFFIC_TARGET
+        }),
+    )
 }
 
 impl AntTrafficLayer {
@@ -349,24 +362,11 @@ impl Visit for TrafficVisitor {
 }
 
 impl<S: Subscriber> Layer<S> for AntTrafficLayer {
-    // Interest is scoped to the one target so every other event keeps
-    // its callsite disabled — this layer must not widen the global
-    // max-level and drag debug/trace dispatch into hot paths.
-    fn register_callsite(
-        &self,
-        meta: &'static Metadata<'static>,
-    ) -> tracing::subscriber::Interest {
-        if meta.is_event() && meta.target() == TRAFFIC_TARGET {
-            tracing::subscriber::Interest::always()
-        } else {
-            tracing::subscriber::Interest::never()
-        }
-    }
-
-    fn enabled(&self, meta: &Metadata<'_>, _ctx: Context<'_, S>) -> bool {
-        meta.is_event() && meta.target() == TRAFFIC_TARGET
-    }
-
+    // NOTE: no `enabled`/`register_callsite` overrides — those are
+    // ANDed across the whole subscriber stack and would silence the log
+    // layers. Target scoping lives in [`ant_traffic_layer`]'s per-layer
+    // filter (and defensively in the check below, for tests that mount
+    // the layer bare).
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
         if event.metadata().target() != TRAFFIC_TARGET {
             return;
