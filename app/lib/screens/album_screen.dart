@@ -111,6 +111,13 @@ class _AlbumScreenState extends State<AlbumScreen>
   /// the page closes or playback stops at the album's end.
   bool _pausedDownloads = false;
 
+  /// Throttle for the resume-point save, like PlayerScreen's.
+  DateTime _lastStateSave = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// The playing track already recorded as completed — the final
+  /// position save must not reopen it.
+  bool _trackCompleted = false;
+
   late final AnimationController _glow = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 2200));
 
@@ -122,6 +129,7 @@ class _AlbumScreenState extends State<AlbumScreen>
 
   @override
   void dispose() {
+    _saveProgress();
     _glow.dispose();
     for (final s in _subs) {
       s.cancel();
@@ -157,6 +165,15 @@ class _AlbumScreenState extends State<AlbumScreen>
       player.positionStream.listen((pos) {
         NowPlaying.instance.updatePlayback(this, position: pos);
         if (mounted) setState(() => _position = pos);
+        // Throttled resume-point save — tracks played here reach
+        // Continue Watching like anything played in PlayerScreen; the
+        // final position is saved in dispose.
+        final now = DateTime.now();
+        if (pos > Duration.zero &&
+            now.difference(_lastStateSave) >= const Duration(seconds: 5)) {
+          _lastStateSave = now;
+          _saveProgress();
+        }
       }),
       player.durationStream.listen((dur) {
         NowPlaying.instance.updatePlayback(this, duration: dur);
@@ -167,6 +184,18 @@ class _AlbumScreenState extends State<AlbumScreen>
       }),
     ]);
     return player;
+  }
+
+  /// Record the playing track's resume point (skipped once its end was
+  /// recorded, and before any real progress — a tap-and-close must not
+  /// wipe an existing resume point).
+  void _saveProgress() {
+    final current = _current;
+    if (current == null || _trackCompleted || _position <= Duration.zero) {
+      return;
+    }
+    unawaited(WatchStateStore.instance
+        .record(current, position: _position, duration: _duration));
   }
 
   ({String url, bool local})? _sourceFor(MediaEntry e) {
@@ -210,6 +239,7 @@ class _AlbumScreenState extends State<AlbumScreen>
       _position = Duration.zero;
       _duration = Duration.zero;
     });
+    _trackCompleted = false;
     _shuffled.add(entry.address);
     if (_history.isEmpty || _history.last.address != entry.address) {
       _history.add(entry);
@@ -282,6 +312,14 @@ class _AlbumScreenState extends State<AlbumScreen>
   }
 
   void _onTrackCompleted() {
+    // Reaching the end marks the track watched (completed music never
+    // clutters Continue Watching — only partial listens resume there).
+    final finished = _current;
+    if (finished != null && !_trackCompleted) {
+      _trackCompleted = true;
+      unawaited(WatchStateStore.instance
+          .markCompleted(finished, duration: _duration));
+    }
     final next = _nextTrack();
     if (next != null) {
       unawaited(_playTrack(next));

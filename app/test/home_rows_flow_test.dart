@@ -79,6 +79,25 @@ void main() {
     expect(find.text('Next up · S01E02'), findsOneWidget);
   });
 
+  testWidgets('a resumed music track gets a music-note Continue badge',
+      (tester) async {
+    final track = MediaEntry(
+        name: 'Singer - Album (2001) - 01 Song.mp3', address: _addr(9));
+    await LibraryStore.save([
+      MediaList(id: 'l1', title: 'Music', entries: [track]),
+    ]);
+    await WatchStateStore.instance.record(track,
+        position: const Duration(minutes: 2),
+        duration: const Duration(minutes: 5));
+    await tester.pumpWidget(const WatchItApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Continue Watching'), findsOneWidget);
+    // The music-note badge marks the card as a track, not a video.
+    expect(find.byIcon(Icons.music_note), findsWidgets);
+    expect(find.byIcon(Icons.movie_outlined), findsNothing);
+  });
+
   testWidgets('no watch activity hides the Continue Watching row',
       (tester) async {
     await seedLibrary();
