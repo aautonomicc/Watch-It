@@ -154,17 +154,18 @@ Deliberately deferred:
   tuning reopens.
 - **Per-peer / per-list attribution**: not meaningful at chunk level (self-encryption).
 
-## Open questions (recommendations inline)
+## Decisions (2026-09-04 — user accepted all four recommendations)
 
-1. **Autonomi row fidelity**: accept the 5-minute tracing-summary cadence for v1
-   (*recommended* — `stale_secs` keeps it honest, media bytes stay live), or vendor-patch
-   saorsa-core now for live wire counters? Either way, file the upstream accessor request.
-2. **Reset semantics**: Reset clears all components at once (*recommended* — one period,
-   simple mental model) vs per-component resets.
-3. **Settings tile subtitle**: show the running period total (*recommended*, one extra
-   fetch on settings open) or a static "Since 4 Sep" label.
-4. **Poll cadence on-screen**: 5 s (*recommended*) vs 2 s — 5 s is enough for a rate row
-   and matches the x0x screen's active cadence.
+1. **Autonomi row fidelity**: v1 uses the 5-minute tracing-summary capture (Option A);
+   `stale_secs` keeps it honest, media bytes stay live. The upstream accessor request to
+   saorsa-labs gets filed either way — if accepted, the capture (and any vendored patch)
+   becomes deletable.
+2. **Reset semantics**: Reset clears all components at once — one period, simple mental
+   model.
+3. **Settings tile subtitle**: shows the running period total (one extra fetch on
+   settings open).
+4. **Poll cadence on-screen**: 5 s — enough for a rate row, matches the x0x screen's
+   active cadence.
 
 ## Build order
 
