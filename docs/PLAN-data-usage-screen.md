@@ -159,7 +159,12 @@ Deliberately deferred:
 1. **Autonomi row fidelity**: v1 uses the 5-minute tracing-summary capture (Option A);
    `stale_secs` keeps it honest, media bytes stay live. The upstream accessor request to
    saorsa-labs gets filed either way — if accepted, the capture (and any vendored patch)
-   becomes deletable.
+   becomes deletable. **FILED 2026-09-04**:
+   [WithAutonomi/saorsa-core#160](https://github.com/WithAutonomi/saorsa-core/pull/160)
+   (repo moved from saorsa-labs to WithAutonomi) adds
+   `TransportHandle::traffic_snapshot()` → public `TrafficSnapshot`, exactly the Option B
+   accessor. If merged+released, Option B needs no vendored crate — just an ant-core bump
+   past that saorsa-core version.
 2. **Reset semantics**: Reset clears all components at once — one period, simple mental
    model.
 3. **Settings tile subtitle**: shows the running period total (one extra fetch on
@@ -172,4 +177,4 @@ Deliberately deferred:
 1. Rust `datausage.rs` (accumulators + persistence) + x0x samplers + `/stats`,`/stats/reset`.
 2. Ant tracing-layer capture + `media_rx` wiring.
 3. Dart `EmbeddedClient.stats()` + screen + settings tile + tests.
-4. Live verify, then (separately, not gating) the saorsa-labs upstream ask.
+4. Live verify. (Upstream ask already filed: WithAutonomi/saorsa-core#160.)
