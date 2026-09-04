@@ -388,25 +388,39 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
             }),
           ],
         ),
-        trailing: PopupMenuButton<String>(
-          tooltip: 'Channel options',
-          icon: Icon(Icons.more_vert, color: t.ash),
-          color: t.ink2,
-          onSelected: (v) => switch (v) {
-            'copy' => _copyCode(sub?.code ?? ''),
-            'unsubscribe' => _unsubscribe(record, title),
-            _ => null,
-          },
-          itemBuilder: (context) => [
-            PopupMenuItem(
-              value: 'copy',
-              child: Text('Copy channel code',
-                  style: TextStyle(color: t.bone, fontSize: 14)),
-            ),
-            PopupMenuItem(
-              value: 'unsubscribe',
-              child: Text('Unsubscribe',
-                  style: TextStyle(color: t.rust, fontSize: 14)),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (sub != null && sub.code.isNotEmpty)
+              IconButton(
+                tooltip: 'Show QR code',
+                icon: Icon(Icons.qr_code_2, color: t.ash, size: 20),
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (_) => _ChannelQrDialog(code: sub.code),
+                ),
+              ),
+            PopupMenuButton<String>(
+              tooltip: 'Channel options',
+              icon: Icon(Icons.more_vert, color: t.ash),
+              color: t.ink2,
+              onSelected: (v) => switch (v) {
+                'copy' => _copyCode(sub?.code ?? ''),
+                'unsubscribe' => _unsubscribe(record, title),
+                _ => null,
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'copy',
+                  child: Text('Copy channel code',
+                      style: TextStyle(color: t.bone, fontSize: 14)),
+                ),
+                PopupMenuItem(
+                  value: 'unsubscribe',
+                  child: Text('Unsubscribe',
+                      style: TextStyle(color: t.rust, fontSize: 14)),
+                ),
+              ],
             ),
           ],
         ),
@@ -655,7 +669,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
               icon: Icon(Icons.qr_code_2, color: t.ash, size: 20),
               onPressed: () => showDialog<void>(
                 context: context,
-                builder: (_) => _ChannelQrDialog(own: own),
+                builder: (_) => _ChannelQrDialog(code: own.code),
               ),
             ),
           ],
@@ -2067,8 +2081,8 @@ class _RestoreChannelDialogState extends State<_RestoreChannelDialog> {
 }
 
 class _ChannelQrDialog extends StatelessWidget {
-  const _ChannelQrDialog({required this.own});
-  final OwnChannel own;
+  const _ChannelQrDialog({required this.code});
+  final String code;
 
   @override
   Widget build(BuildContext context) {
@@ -2085,11 +2099,11 @@ class _ChannelQrDialog extends StatelessWidget {
             Container(
               color: Colors.white,
               padding: const EdgeInsets.all(8),
-              child: WiQr(data: own.code, size: 220),
+              child: WiQr(data: code, size: 220),
             ),
             const SizedBox(height: 12),
             SelectableText(
-              own.code,
+              code,
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontFamily: wiMonoFamily,
@@ -2104,7 +2118,7 @@ class _ChannelQrDialog extends StatelessWidget {
       actions: [
         TextButton(
           onPressed: () {
-            Clipboard.setData(ClipboardData(text: own.code));
+            Clipboard.setData(ClipboardData(text: code));
             Navigator.of(context).pop();
           },
           child: Text('Copy & close', style: TextStyle(color: t.ash)),
