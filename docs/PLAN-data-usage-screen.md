@@ -1,6 +1,18 @@
 # Plan: Data usage screen (Settings → Network)
 
-Status: **PLAN ONLY — not implemented.** (2026-09-04)
+Status: **IMPLEMENTED** (2026-09-04, same day as planned — v1 with the
+Option A tracing capture; the capture becomes deletable when upstream PR
+[WithAutonomi/saorsa-core#160](https://github.com/WithAutonomi/saorsa-core/pull/160)
+is merged, released, and reaches us through an ant-core bump). The
+implementation session also bumped ant-core 0.5.1 → 0.8.1 (saorsa-core
+0.26.4 → 0.27.3 — the exact version #160 targets; the traffic-summary
+field contract re-verified against it and pinned by a unit test), x0x
+0.40.4 → 0.41.1, and dropped the vendored ant-quic (0.27.48 relaxed its
+unicode-width pin upstream).
+
+One deviation from the text below: `/stats` reports `period_start_ms`
+(epoch millis) rather than an ISO `period_start` string — no chrono
+dependency needed, Dart formats the date.
 
 ## Goal
 
