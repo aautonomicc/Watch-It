@@ -878,13 +878,17 @@ void main() {
       // Downloads and Streaming-on-mobile-data policy tiles).
       await tester.scrollUntilVisible(find.text('Mobile data'), 100);
       expect(find.text('STREAMING'), findsNothing);
+      expect(find.text('Data usage'), findsOneWidget);
       expect(find.text('Buffer size'), findsOneWidget);
       expect(find.text('32 MB'), findsOneWidget);
       expect(find.text('Built-in Autonomi client'), findsOneWidget);
       expect(find.text('Built-in x0x client'), findsOneWidget);
       expect(find.text('Streaming on mobile data'), findsNothing);
       expect(find.text('Wi-Fi only'), findsNothing);
+      // Data usage leads NETWORK, above Buffer size (2026-09-04).
+      final dataUsageY = tester.getTopLeft(find.text('Data usage')).dy;
       final bufferY = tester.getTopLeft(find.text('Buffer size')).dy;
+      expect(dataUsageY, lessThan(bufferY));
       final autonomiY =
           tester.getTopLeft(find.text('Built-in Autonomi client')).dy;
       final x0xY = tester.getTopLeft(find.text('Built-in x0x client')).dy;
