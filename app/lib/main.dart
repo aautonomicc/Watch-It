@@ -474,7 +474,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
         itemBuilder: (context, i) => switch (items[i]) {
           HomeEntry() && final item => PosterCard(
               entry: item.entry,
-              versionCount: item.allVersions.length,
+              versions: item.allVersions,
               tokens: t,
               onTap: () => _openEntry(item.entry),
             ),
@@ -673,7 +673,10 @@ class _ContinueCard extends StatelessWidget {
                         ),
                     if (progress != null && progress > 0)
                       watchProgressBar(t, progress),
-                    ?entryDownloadBadge(t, entry),
+                    // Aggregated across the title's quality tiers — a
+                    // downloaded 1080p copy badges the card even when
+                    // the resume point is on the 480p upload.
+                    ?versionsDownloadBadge(t, item.allVersions),
                   ],
                 ),
               ),

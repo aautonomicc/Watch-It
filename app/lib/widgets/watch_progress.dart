@@ -28,8 +28,14 @@ Widget watchProgressBar(WiTokens t, double progress) => Align(
 
 /// Bar for a movie/episode card from the entry's stored watch state;
 /// null when the file is unplayed, finished, or barely started.
-Widget? entryWatchBar(WiTokens t, MediaEntry entry) {
-  final state = WatchStateStore.instance.cachedStateFor(entry);
+Widget? entryWatchBar(WiTokens t, MediaEntry entry) =>
+    versionsWatchBar(t, [entry]);
+
+/// Bar for a card folding several uploads of ONE title (quality tiers):
+/// the newest watch state across all versions drives it, so progress
+/// made on any tier shows on the shared card.
+Widget? versionsWatchBar(WiTokens t, List<MediaEntry> versions) {
+  final state = WatchStateStore.instance.cachedNewestFor(versions);
   if (state == null || !state.resumable || state.progress <= 0) return null;
   return watchProgressBar(t, state.progress);
 }

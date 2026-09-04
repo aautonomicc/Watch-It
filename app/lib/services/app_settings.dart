@@ -25,6 +25,23 @@ class AppSettings {
     await prefs.setInt(_bufferSizeKey, mb);
   }
 
+  static const _lastStreamedHeightKey = 'last_streamed_height_v1';
+
+  /// Resolution (height in pixels, e.g. 1080) of the version the user
+  /// last STREAMED — the default tier for the next multi-version title
+  /// opened without a downloaded copy. Null until a version with a known
+  /// resolution is streamed. Downloads and local playback never touch it.
+  static Future<int?> lastStreamedHeight() async {
+    final prefs = await SharedPreferences.getInstance();
+    final h = prefs.getInt(_lastStreamedHeightKey) ?? 0;
+    return h > 0 ? h : null;
+  }
+
+  static Future<void> setLastStreamedHeight(int height) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_lastStreamedHeightKey, height);
+  }
+
   static const _tmdbKeyKey = 'tmdb_api_key_v1';
 
   /// The user's TMDB credential, entered in Settings → Metadata (either a

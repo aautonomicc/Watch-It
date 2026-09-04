@@ -16,24 +16,27 @@ class PosterCard extends StatelessWidget {
     required this.entry,
     required this.tokens,
     required this.onTap,
-    this.versionCount = 1,
+    this.versions = const [],
   });
 
   final MediaEntry entry;
   final WiTokens tokens;
   final VoidCallback onTap;
 
-  /// Number of uploads of this title folded into the card (see
-  /// [HomeEntry.versions]); above 1 the info line reads `2 versions`
-  /// instead of one upload's format — the detail page's version picker
-  /// tells them apart.
-  final int versionCount;
+  /// Every upload of this title folded into the card (see
+  /// [HomeEntry.allVersions]); with more than one the info line reads
+  /// `2 versions` instead of one upload's format — the detail page's
+  /// version picker tells them apart — and the download badge and watch
+  /// bar aggregate across all of them (a downloaded or partly watched
+  /// 1080p copy shows on the card even when the 480p upload is primary).
+  final List<MediaEntry> versions;
 
   @override
   Widget build(BuildContext context) {
     final t = tokens;
     final meta = MetadataService.instance.metadataFor(entry);
-    final badge = entryDownloadBadge(t, entry);
+    final allVersions = versions.isEmpty ? [entry] : versions;
+    final badge = versionsDownloadBadge(t, allVersions);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(6),
@@ -56,7 +59,7 @@ class PosterCard extends StatelessWidget {
                           child: Icon(Icons.movie_outlined,
                               color: t.ash, size: 40),
                         ),
-                    ?entryWatchBar(t, entry),
+                    ?versionsWatchBar(t, allVersions),
                     ?badge,
                   ],
                 ),
@@ -71,8 +74,8 @@ class PosterCard extends StatelessWidget {
             ),
             // Format/size of this upload — or, when several uploads of
             // the title are folded into this one card, the version count.
-            if (versionCount > 1
-                    ? '$versionCount versions'
+            if (allVersions.length > 1
+                    ? '${allVersions.length} versions'
                     : formatInfoLine(entry)
                 case final line?)
               Text(
@@ -305,8 +308,11 @@ class ShowCard extends StatelessWidget {
         .metadataFor(group.seasons.first.episodes.first);
     final seasons = group.seasons.length;
     final count = group.episodeCount;
-    final badge = groupDownloadBadge(
-        t, [for (final s in group.seasons) ...s.episodes]);
+    // An episode counts as downloaded when ANY of its quality tiers is.
+    final badge = versionGroupDownloadBadge(t, [
+      for (final s in group.seasons)
+        for (final e in s.episodes) s.versionsOf(e)
+    ]);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(6),

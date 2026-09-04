@@ -16,24 +16,46 @@ import '../theme/tokens.dart';
 
 /// Badge for a single movie/episode card, from the entry's download
 /// task; null when the entry has never been queued.
-Widget? entryDownloadBadge(WiTokens t, MediaEntry entry) {
-  final task = DownloadManager.instance.taskFor(entry.address);
-  if (task == null) return null;
-  if (task.status == DownloadStatus.done) return _check(t);
+Widget? entryDownloadBadge(WiTokens t, MediaEntry entry) =>
+    versionsDownloadBadge(t, [entry]);
+
+/// Badge for a card folding several uploads of ONE title (quality
+/// tiers): the check the moment ANY version is fully downloaded — the
+/// title is watchable offline whichever copy landed — else the ring of
+/// the first version with a task under way; null when none was queued.
+Widget? versionsDownloadBadge(WiTokens t, List<MediaEntry> versions) {
+  DownloadTask? active;
+  for (final v in versions) {
+    final task = DownloadManager.instance.taskFor(v.address);
+    if (task == null) continue;
+    if (task.status == DownloadStatus.done) return _check(t);
+    active ??= task;
+  }
+  if (active == null) return null;
   // Determinate even while the size is unknown (a forever-spinning ring
   // on a wall card is noise, and never settles in widget tests).
-  return _ring(t, task.progress ?? 0.0);
+  return _ring(t, active.progress ?? 0.0);
 }
 
 /// Badge for a show/season card covering [episodes]: `done/total` once
 /// any episode is fully downloaded, the plain check when every one is;
 /// null while none are.
-Widget? groupDownloadBadge(WiTokens t, Iterable<MediaEntry> episodes) {
+Widget? groupDownloadBadge(WiTokens t, Iterable<MediaEntry> episodes) =>
+    versionGroupDownloadBadge(t, [
+      for (final e in episodes) [e]
+    ]);
+
+/// [groupDownloadBadge] for episodes that each carry version folds
+/// ([HomeSeason.versions]): an episode counts as downloaded the moment
+/// ANY of its uploads is complete on disk.
+Widget? versionGroupDownloadBadge(
+    WiTokens t, Iterable<List<MediaEntry>> groups) {
   var done = 0, total = 0;
-  for (final e in episodes) {
+  for (final versions in groups) {
     total++;
-    if (DownloadManager.instance.taskFor(e.address)?.status ==
-        DownloadStatus.done) {
+    if (versions.any((e) =>
+        DownloadManager.instance.taskFor(e.address)?.status ==
+        DownloadStatus.done)) {
       done++;
     }
   }

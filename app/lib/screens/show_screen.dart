@@ -5,6 +5,7 @@ import '../services/connectivity.dart';
 import '../services/download_manager.dart';
 import '../services/metadata_service.dart';
 import '../services/season_grouping.dart';
+import '../services/version_choice.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
 import '../widgets/download_badge.dart';
@@ -61,10 +62,10 @@ class ShowScreen extends StatelessWidget {
     // memory on this screen).
     final episodes = [for (final s in seasons) ...s.episodes];
     final remaining = [
-      for (final e in episodes)
-        if (DownloadManager.instance.taskFor(e.address)?.status !=
-            DownloadStatus.done)
-          e,
+      for (final s in seasons)
+        for (final e in s.episodes)
+          // No quality tier of the episode on disk yet.
+          if (!anyVersionDownloaded(s.versionsOf(e))) e,
     ];
     // Starting a download needs the network (same gating as SeasonScreen);
     // browsing the show stays open.
@@ -195,7 +196,9 @@ class _SeasonTile extends StatelessWidget {
     // The episode match carries the season's artwork.
     final meta = MetadataService.instance.metadataFor(group.episodes.first);
     final count = group.episodes.length;
-    final badge = groupDownloadBadge(t, group.episodes);
+    // An episode counts as downloaded when ANY of its quality tiers is.
+    final badge = versionGroupDownloadBadge(
+        t, [for (final e in group.episodes) group.versionsOf(e)]);
     return InkWell(
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => SeasonScreen(group: group)),

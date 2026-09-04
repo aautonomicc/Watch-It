@@ -15,7 +15,7 @@ import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/embedded_client.dart';
 import '../services/network_policy.dart';
-import '../services/season_grouping.dart' show VersionKeys;
+import '../services/version_choice.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
@@ -46,10 +46,16 @@ class _DetailScreenState extends State<DetailScreen> {
 
   /// Every upload of this title held in the library (same parsed lookup
   /// key, different addresses), in library order — the version picker's
-  /// options. Length < 2 hides the picker. Discovered from the loaded
-  /// library so every navigation path (wall card, search, Continue
-  /// Watching) gets the picker without passing versions around.
+  /// options. Episodes fold exactly like movies. Length < 2 hides the
+  /// picker. Discovered from the loaded library so every navigation path
+  /// (wall card, search, Continue Watching) gets the picker without
+  /// passing versions around.
   List<MediaEntry> _versions = const [];
+
+  /// The default-version pick ran (once per page): the best downloaded
+  /// copy, else the last-streamed tier. Never re-run — a change under a
+  /// built page (a download finishing) must not yank the selection.
+  bool _autoSelected = false;
 
   WatchState? _state;
   MediaEntry? _next;
@@ -74,44 +80,44 @@ class _DetailScreenState extends State<DetailScreen> {
   static String _normalize(String address) =>
       address.toLowerCase().replaceFirst('0x', '');
 
-  /// All uploads of [entry]'s title across the enabled lists (same
-  /// parsed lookup key, duplicate addresses dropped), in library order.
-  /// [entry] itself is prepended when the library no longer holds it.
-  /// Empty for episodes — shows fold by season, not by version.
-  List<MediaEntry> _versionsFor(List<MediaList> lists) {
-    final parsed = parseMediaName(entry.name);
-    if (parsed.isEpisode) return const [];
-    final keys = VersionKeys([
-      entry,
-      for (final l in lists)
-        if (l.enabled) ...l.entries,
-    ]);
-    final key = keys.keyFor(parsed);
-    final seen = <String>{};
-    final found = <MediaEntry>[];
-    for (final l in lists) {
-      if (!l.enabled) continue;
-      for (final e in l.entries) {
-        final p = parseMediaName(e.name);
-        if (p.isEpisode || keys.keyFor(p) != key) continue;
-        if (seen.add(_normalize(e.address))) found.add(e);
-      }
-    }
-    if (!seen.contains(_normalize(entry.address))) found.insert(0, entry);
-    return found;
-  }
-
   /// Load the entry's resume point and, for episodes, the show's next
-  /// episode (needs the library to know the sibling files).
+  /// episode (needs the library to know the sibling files). On the first
+  /// pass this also picks the page's default version — the best
+  /// downloaded copy, else the tier the user streamed last.
   Future<void> _loadState() async {
     final lists = await LibraryStore.load();
-    final state = await WatchStateStore.instance.stateFor(entry);
+    // The download queue drives the default-version choice below (and
+    // the picker's Downloaded marks) — have it in before deciding.
+    await DownloadManager.instance.ensureLoaded();
+    var versions = versionsInLibrary(lists, entry);
+    if (!_autoSelected) {
+      // Default the page to the version worth opening: the
+      // highest-resolution DOWNLOADED copy beats everything (fixes
+      // offline playback when a non-primary tier is the one on disk),
+      // else the tier the user last streamed. Only ever applied once —
+      // a manual picker choice is never overridden.
+      _autoSelected = true;
+      final preferred = preferredVersion(versions,
+          preferredHeight: await AppSettings.lastStreamedHeight(),
+          opened: entry);
+      if (_selected == null &&
+          _normalize(preferred.address) != _normalize(entry.address)) {
+        _selected = preferred;
+        _sizeBytes = preferred.sizeBytes;
+        _videoInfo = preferred.videoInfo;
+        versions = versionsInLibrary(lists, preferred);
+      }
+    }
+    // Watch points sync across quality tiers at read time: the newest
+    // state of ANY version is this page's resume point / Watched badge.
+    // Writes stay per-address (the player records the copy it played).
+    final state = await WatchStateStore.instance.newestFor(versions);
     if (!mounted) return;
     setState(() {
       _lists = lists;
       _state = state;
       _next = nextEpisode(lists, entry);
-      _versions = _versionsFor(lists);
+      _versions = versions;
       // The library's copy of this entry may know more than the object
       // the navigation passed in (size backfilled earlier, format
       // learned on a previous playback).
@@ -174,9 +180,12 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   /// The picker option label for a version: its format/size line, else a
-  /// positional fallback for entries nothing is known about yet.
-  String _versionLabel(MediaEntry version, int index) =>
-      formatInfoLine(version) ?? 'Version ${index + 1}';
+  /// positional fallback for entries nothing is known about yet — with a
+  /// Downloaded mark on versions that are complete on disk.
+  String _versionLabel(MediaEntry version, int index) {
+    final line = formatInfoLine(version) ?? 'Version ${index + 1}';
+    return isEntryDownloaded(version) ? '$line · Downloaded' : line;
+  }
 
   /// Playback source for [e]: the downloaded file when one is complete
   /// on disk, else the embedded client's stream URL. Also used for
@@ -240,6 +249,15 @@ class _DetailScreenState extends State<DetailScreen> {
     if (!source.local && DownloadManager.instance.hasActive) {
       pausedForPlayback = await maybePauseDownloadsForStreaming(context);
     }
+    // Remember the tier being streamed — the next multi-version title
+    // opened without a downloaded copy defaults to it. Local playback
+    // never touches the preference (downloads pick by resolution).
+    if (!source.local) {
+      final height = videoInfoHeight(_videoInfo ?? entry.videoInfo);
+      if (height != null) {
+        unawaited(AppSettings.setLastStreamedHeight(height));
+      }
+    }
     final meta = MetadataService.instance.metadataFor(entry);
     final bufferSizeMb = await AppSettings.bufferSizeMb();
     final state = _state;
@@ -247,6 +265,7 @@ class _DetailScreenState extends State<DetailScreen> {
         ? Duration(milliseconds: state.positionMs)
         : Duration.zero;
     final lists = _lists;
+    final lastStreamedHeight = await AppSettings.lastStreamedHeight();
     if (!context.mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -256,7 +275,15 @@ class _DetailScreenState extends State<DetailScreen> {
           entry: entry,
           isLocal: source.local,
           resumeFrom: resumeFrom,
-          nextFor: (e) => nextEpisode(lists, e),
+          // Up-next chains through each next episode's preferred version
+          // (best downloaded copy, else the last-streamed tier), not
+          // blindly its first upload.
+          nextFor: (e) {
+            final next = nextEpisode(lists, e);
+            if (next == null) return null;
+            return preferredVersion(versionsInLibrary(lists, next),
+                preferredHeight: lastStreamedHeight);
+          },
           sourceFor: _sourceFor,
           bufferSizeMb: bufferSizeMb,
         ),

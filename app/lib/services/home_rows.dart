@@ -6,16 +6,30 @@ import 'watch_state.dart';
 
 /// One card in the home screen's Continue Watching row.
 class ContinueItem {
-  const ContinueItem({required this.entry, this.state, this.isNextUp = false});
+  const ContinueItem({
+    required this.entry,
+    this.state,
+    this.isNextUp = false,
+    this.versions = const [],
+  });
 
   final MediaEntry entry;
 
-  /// The entry's own watch state; null for a next-up episode never played.
+  /// The newest watch state across the title's versions; null for a
+  /// next-up episode never played.
   final WatchState? state;
 
   /// True when [entry] is the next unwatched episode after a finished one
   /// (rather than a partially watched file being resumed).
   final bool isNextUp;
+
+  /// Every upload of this title in the library when there is more than
+  /// one (quality tiers fold into one card, like the wall); empty for
+  /// the common single-upload case.
+  final List<MediaEntry> versions;
+
+  /// [versions], or just [entry] for the single-upload case.
+  List<MediaEntry> get allVersions => versions.isEmpty ? [entry] : versions;
 }
 
 String _normalize(String address) =>
@@ -54,49 +68,77 @@ Future<List<ContinueItem>> continueWatching(
   int limit = 10,
 }) async {
   final states = await (store ?? WatchStateStore.instance).all();
-  final byAddress = <String, WatchState>{
-    for (final s in states) s.address: s,
-  };
   final entries = _visibleEntries(lists);
   final entryByAddress = <String, MediaEntry>{};
   for (final e in entries) {
     entryByAddress.putIfAbsent(_normalize(e.address), () => e);
   }
+  // Version folding: quality tiers of one title share a fold key (same
+  // rule as the wall), so a title never shows two Continue cards, and
+  // completing/resuming ANY tier counts for the whole title.
+  final keys = VersionKeys(entries);
+  final versionsByKey = <String, List<MediaEntry>>{};
+  final keyByAddress = <String, String>{};
+  for (final e in entryByAddress.values) {
+    final key = keys.keyFor(parseMediaName(e.name));
+    versionsByKey.putIfAbsent(key, () => []).add(e);
+    keyByAddress[_normalize(e.address)] = key;
+  }
+  // Newest state per fold key ([states] is sorted newest first, so the
+  // first one seen wins) — the read-time watch-point sync across tiers.
+  final stateByKey = <String, WatchState>{};
+  for (final s in states) {
+    final key = keyByAddress[s.address];
+    if (key != null) stateByKey.putIfAbsent(key, () => s);
+  }
 
   final items = <ContinueItem>[];
   final seenShows = <String>{};
-  final seenAddresses = <String>{};
+  final seenKeys = <String>{};
   for (final state in states) {
     if (items.length >= limit) break;
     final entry = entryByAddress[state.address];
     if (entry == null) continue; // removed from the library
+    final key = keyByAddress[state.address]!;
+    // Only the newest state of a title's versions makes its card.
+    if (stateByKey[key] != state) continue;
     final parsed = parseMediaName(entry.name);
     final showKey =
         parsed.isEpisode ? 'show:${parsed.title.toLowerCase()}' : null;
     if (showKey != null && seenShows.contains(showKey)) continue;
 
+    WatchState? stateOf(MediaEntry e) =>
+        stateByKey[keyByAddress[_normalize(e.address)]];
+    List<MediaEntry> versionsOf(MediaEntry e) {
+      final versions = versionsByKey[keyByAddress[_normalize(e.address)]];
+      return (versions?.length ?? 0) > 1 ? versions! : const [];
+    }
+
     ContinueItem? item;
     if (state.resumable) {
-      item = ContinueItem(entry: entry, state: state);
+      item = ContinueItem(
+          entry: entry, state: state, versions: versionsOf(entry));
     } else if (state.completed && parsed.isEpisode) {
       // Finished an episode — surface the show's next unwatched one,
-      // skipping over episodes already completed on an earlier pass.
+      // skipping over episodes already completed (on any tier) on an
+      // earlier pass.
       var next = nextEpisode(lists, entry);
-      while (next != null &&
-          (byAddress[_normalize(next.address)]?.completed ?? false)) {
+      while (next != null && (stateOf(next)?.completed ?? false)) {
         next = nextEpisode(lists, next);
       }
       if (next != null) {
-        final nextState = byAddress[_normalize(next.address)];
+        final nextState = stateOf(next);
         item = ContinueItem(
           entry: next,
           state: nextState,
           isNextUp: !(nextState?.resumable ?? false),
+          versions: versionsOf(next),
         );
       }
     }
     if (item == null) continue;
-    if (!seenAddresses.add(_normalize(item.entry.address))) continue;
+    final itemKey = keyByAddress[_normalize(item.entry.address)]!;
+    if (!seenKeys.add(itemKey)) continue;
     if (showKey != null) seenShows.add(showKey);
     items.add(item);
   }
