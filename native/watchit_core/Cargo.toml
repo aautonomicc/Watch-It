@@ -17,9 +17,11 @@ path = "src/bin/devserver.rs"
 cc = "1"
 
 [dependencies]
-# Pinned to ant-core 0.5.1 (rc-2026.7.4). Still exposes
-# Client::file_download_to_sender + self_encryption 0.36 get_range seek.
-ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "81a0a2470ea74fa8608ed60c8ff214ff1fe2fc3d" }
+# Pinned to ant-core 0.8.1 (tag ant-core-v0.8.1). Still exposes
+# Client::file_download_to_sender + self_encryption 0.36 get_range seek;
+# pulls saorsa-core 0.27.3 (starved-routing-table runtime recovery, and
+# the version upstream PR WithAutonomi/saorsa-core#160 targets).
+ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "dbc01ce8fdbdfe9ac4d064d35f36b4684bf6a616" }
 self_encryption = "0.36"
 # Upload-wallet key derivation: pinned to the alloy minor evmlib 0.9
 # already resolves to (no second alloy tree); the mnemonic feature adds
@@ -72,10 +74,11 @@ tracing-android = "0.2"
 # ant-quic, post-quantum, mDNS LAN discovery) syncs lists/viewpoints
 # through a self-keyed CRDT KV store on a secret invite topic. Android
 # included since the NDK cross-build of the x0x tree was proven.
-# 0.40.4 for the issue-#380 idle-bandwidth campaign (leaf mode enforced,
-# V3 slim announces, replay-storm validators via saorsa-gossip 0.5.75);
-# pin a release, never git main (mixed-fleet regressions live there).
-x0x = "0.40.4"
+# 0.41.x carries the issue-#380 idle-bandwidth campaign (leaf mode
+# enforced, V3 slim announces, replay-storm validators via saorsa-gossip
+# 0.5.75) plus the ADR-0036–43 Home wave with its mixed-fleet regressions
+# (#448/#450/#451) fixed in-release; pin a release, never git main.
+x0x = "0.41.1"
 # CancellationToken for the mywatch heartbeat/watch task (already in the
 # x0x tree, so free on desktop).
 tokio-util = "0.7"
@@ -94,13 +97,11 @@ keyring = { version = "3", default-features = false, features = [
     "async-io",
 ] }
 
-# ant-quic (x0x's transport) pins unicode-width =0.2.0 while ant-core's
-# saorsa-transport pins =0.2.2 — two exact pins in one semver range is an
-# unresolvable graph. Vendored copy at ../third_party/ant-quic is the
-# published 0.27.47 tarball with ONLY that pin bumped to =0.2.2 (pure-Rust
-# width tables; no API change between the two).
-[patch.crates-io]
-ant-quic = { path = "../third_party/ant-quic" }
+# NOTE: ant-quic was vendored at ../third_party/ant-quic from 0.27.44
+# through 0.27.47 purely to bump its exact unicode-width =0.2.0 pin
+# (conflicting with saorsa-transport's =0.2.2). ant-quic 0.27.48 relaxed
+# the pin to ^0.2.2 upstream, so the vendored copy and its
+# [patch.crates-io] entry were removed 2026-09-04.
 
 [profile.release]
 lto = "thin"
