@@ -17,6 +17,7 @@ import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/terms.dart';
 import 'package:watchit/theme/tokens.dart';
 import 'package:watchit/widgets/channel_avatar.dart';
+import 'package:watchit/widgets/wi_qr.dart';
 
 import 'fake_embedded_http.dart';
 
@@ -146,6 +147,41 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Unsubscribe'), findsOneWidget);
       expect(find.text('Rename'), findsNothing);
+    });
+
+    testWidgets(
+        'subscribed card QR icon opens the code dialog with QR + link',
+        (tester) async {
+      final pubkey = 'ab' * 32;
+      final code = 'wchn1-${'d' * 52}';
+      SharedPreferences.setMockInitialValues({
+        'channel_subs_v1': jsonEncode({
+          pubkey: {'name': 'Nature Films', 'importedSeq': 2}
+        }),
+      });
+      fake.channelsStatus = {
+        'supported': true,
+        'state': 'ready',
+        'own': null,
+        'subs': [
+          {
+            'pubkey': pubkey,
+            'code': code,
+            'head': {'seq': 2, 'manifest': 'ee' * 32},
+          },
+        ],
+      };
+      await openChannels(tester);
+      final qrIcon = find.byIcon(Icons.qr_code_2);
+      expect(qrIcon, findsOneWidget);
+      await tester.tap(qrIcon);
+      await tester.pumpAndSettle();
+      // The dialog shows the scannable code AND the sharable text code.
+      expect(find.text('Share this code'), findsOneWidget);
+      expect(find.byType(WiQr), findsOneWidget);
+      expect(tester.widget<WiQr>(find.byType(WiQr)).data, code);
+      expect(find.text(code), findsOneWidget);
+      expect(find.text('Copy & close'), findsOneWidget);
     });
 
     testWidgets(
