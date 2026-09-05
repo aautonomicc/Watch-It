@@ -397,7 +397,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
                 icon: Icon(Icons.qr_code_2, color: t.ash, size: 20),
                 onPressed: () => showDialog<void>(
                   context: context,
-                  builder: (_) => _ChannelQrDialog(code: sub.code),
+                  builder: (_) => ChannelQrDialog(code: sub.code),
                 ),
               ),
             PopupMenuButton<String>(
@@ -669,7 +669,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
               icon: Icon(Icons.qr_code_2, color: t.ash, size: 20),
               onPressed: () => showDialog<void>(
                 context: context,
-                builder: (_) => _ChannelQrDialog(code: own.code),
+                builder: (_) => ChannelQrDialog(code: own.code),
               ),
             ),
           ],
@@ -2080,8 +2080,11 @@ class _RestoreChannelDialogState extends State<_RestoreChannelDialog> {
   }
 }
 
-class _ChannelQrDialog extends StatelessWidget {
-  const _ChannelQrDialog({required this.code});
+/// "Share this code" dialog: branded QR + selectable channel code with a
+/// Copy & close action. Public so the channel list page's [ChannelInfoCard]
+/// shares the exact dialog the channel cards here open.
+class ChannelQrDialog extends StatelessWidget {
+  const ChannelQrDialog({super.key, required this.code});
   final String code;
 
   @override
