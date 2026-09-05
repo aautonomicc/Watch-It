@@ -193,7 +193,7 @@ class AppSettings {
   static const _networkPausedKey = 'network_paused_v1';
 
   /// Whether the user has paused all of the app's network activity
-  /// (Settings → Network → Pause all network activity). Persisted so a
+  /// (Settings → Network → Offline mode). Persisted so a
   /// paused app stays quiet across restarts; [NetworkPause] applies it
   /// to the embedded client at startup and on every flip.
   static Future<bool> networkPaused() async {

@@ -78,7 +78,9 @@ tracing-android = "0.2"
 # enforced, V3 slim announces, replay-storm validators via saorsa-gossip
 # 0.5.75) plus the ADR-0036–43 Home wave with its mixed-fleet regressions
 # (#448/#450/#451) fixed in-release; pin a release, never git main.
-x0x = "0.41.1"
+# 0.41.3 = the blank-GUI fix on the 0.41 Home Suite wave (0.41.2 added
+# the NetworkConfig.mdns_enabled embedder knob; no bandwidth work).
+x0x = "0.41.3"
 # CancellationToken for the mywatch heartbeat/watch task (already in the
 # x0x tree, so free on desktop).
 tokio-util = "0.7"

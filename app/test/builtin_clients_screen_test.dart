@@ -2,10 +2,12 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemChannels;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:watchit/screens/x0x_client_screen.dart';
+import 'package:watchit/screens/builtin_clients_screen.dart';
+import 'package:watchit/services/embedded_client.dart';
 import 'package:watchit/services/channels_api.dart';
 import 'package:watchit/services/my_watch_api.dart';
 import 'package:watchit/services/x0x_cellular.dart';
@@ -26,12 +28,19 @@ void main() {
     HttpOverrides.global = null;
   });
 
-  Future<void> open(WidgetTester tester) async {
+  Future<void> open(
+    WidgetTester tester, {
+    Future<ClientHealth> Function()? health,
+    Future<ClientVersions?> Function()? versions,
+  }) async {
     await tester.pumpWidget(MaterialApp(
       theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
-      home: X0xClientScreen(
+      home: BuiltInClientsScreen(
         myWatchApi: MyWatchApi(base: FakeEmbeddedHttp.base),
         channelsApi: ChannelsApi(base: FakeEmbeddedHttp.base),
+        healthProvider: health,
+        versionsProvider: versions ??
+            () => EmbeddedClient.versions(baseOverride: FakeEmbeddedHttp.base),
       ),
     ));
     await tester.pump();
@@ -154,7 +163,7 @@ void main() {
     };
     await tester.pumpWidget(MaterialApp(
       theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
-      home: X0xClientScreen(
+      home: BuiltInClientsScreen(
         myWatchApi: MyWatchApi(base: FakeEmbeddedHttp.base),
         channelsApi: ChannelsApi(base: FakeEmbeddedHttp.base),
         gate: gate,
@@ -204,6 +213,82 @@ void main() {
       tester.getTopLeft(find.text('Channels')).dy,
       lessThan(tester.getTopLeft(find.text('My W@tch')).dy),
     );
+    await close(tester);
+  });
+
+  testWidgets('shows the Autonomi connection status from /health',
+      (tester) async {
+    await open(tester,
+        health: () async =>
+            const ClientHealth(state: 'ready', peers: 5));
+    expect(find.text('Connection'), findsOneWidget);
+    expect(find.text('Connected (5 peers)'), findsOneWidget);
+    await close(tester);
+  });
+
+  testWidgets(
+      'per-client version lines come from GET /versions, and the '
+      'Details expansion lists the whole stack', (tester) async {
+    await open(tester);
+    // The fake server's deliberately fake numbers — the UI must render
+    // whatever the route says, never hardcoded versions.
+    expect(find.text('ant-core 8.8.8 (git abcd1234)'), findsOneWidget);
+    expect(find.text('x0x 9.9.9'), findsOneWidget);
+
+    expect(find.text('saorsa-core'), findsNothing); // collapsed
+    await tester.scrollUntilVisible(find.text('Version details'), 100);
+    await tester.tap(find.text('Version details'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('saorsa-core'), findsOneWidget);
+    expect(find.text('7.7.7'), findsOneWidget);
+    expect(find.text('saorsa-gossip'), findsOneWidget);
+    expect(find.text('6.6.6'), findsOneWidget);
+    expect(find.text('ant-quic'), findsOneWidget);
+    expect(find.text('5.5.5'), findsOneWidget);
+    expect(find.text('App'), findsOneWidget);
+    await close(tester);
+  });
+
+  testWidgets('Copy versions puts the whole stack on the clipboard',
+      (tester) async {
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        copied = (call.arguments as Map)['text'] as String;
+      }
+      return null;
+    });
+    await open(tester);
+    await tester.scrollUntilVisible(find.text('Version details'), 100);
+    await tester.tap(find.text('Version details'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    // ensureVisible needs a pump for the scroll to take effect before
+    // the tap resolves its hit-test position.
+    await tester.ensureVisible(find.text('Copy versions'));
+    await tester.pump();
+    await tester.tap(find.text('Copy versions'));
+    await tester.pump();
+    expect(copied, isNotNull);
+    expect(copied, contains('W@tch '));
+    expect(copied, contains('ant-core 8.8.8 (git abcd1234)'));
+    expect(copied, contains('x0x 9.9.9'));
+    expect(copied, contains('saorsa-gossip 6.6.6'));
+    tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null);
+    await close(tester);
+  });
+
+  testWidgets('an old core without /versions hides the version rows',
+      (tester) async {
+    await open(tester, versions: () async => null);
+    expect(find.text('Version details'), findsNothing);
+    expect(find.textContaining('ant-core'), findsNothing);
+    // The switches still work without version data.
+    expect(find.text('Channels'), findsOneWidget);
+    expect(find.text('My W@tch'), findsOneWidget);
     await close(tester);
   });
 }

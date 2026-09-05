@@ -153,6 +153,17 @@ class FakeEmbeddedHttp extends HttpOverrides {
   };
   int statsResets = 0;
 
+  /// The `GET /versions` body (network-stack versions baked into the
+  /// native library). Deliberately fake numbers — nothing may hardcode
+  /// the real ones, the route is the single source of truth.
+  Map<String, dynamic> versions = {
+    'x0x': '9.9.9',
+    'ant_core': '8.8.8 (git abcd1234)',
+    'saorsa_core': '7.7.7',
+    'saorsa_gossip': '6.6.6',
+    'ant_quic': '5.5.5',
+  };
+
   /// Any base URL works — routing only looks at the path.
   static const String base = 'http://127.0.0.1:9';
 
@@ -196,6 +207,9 @@ class FakeEmbeddedHttp extends HttpOverrides {
     }
     if (method == 'GET' && path == '/stats') {
       return (200, utf8.encode(jsonEncode(stats)));
+    }
+    if (method == 'GET' && path == '/versions') {
+      return (200, utf8.encode(jsonEncode(versions)));
     }
     if (method == 'POST' && path == '/stats/reset') {
       statsResets++;

@@ -12,7 +12,7 @@ import 'package:watchit/services/x0x_cellular.dart' show X0xAgent;
 
 import 'fake_embedded_http.dart';
 
-/// The Settings → Network "Pause all network activity" switch: pauses
+/// The Settings → Network "Offline mode" switch: pauses
 /// the embedded Autonomi client and switches off both x0x agents,
 /// remembering which so resume re-enables exactly those.
 void main() {

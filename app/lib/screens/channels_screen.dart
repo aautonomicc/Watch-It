@@ -212,7 +212,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
           X0xCellularGate.instance.isPaused(X0xAgent.channels)
               ? 'Paused on mobile data — updates resume on Wi-Fi'
               : 'Switched off — turn Channels on in Settings → '
-                  'Built-in x0x client',
+                  'Built-in clients',
         ),
       'off' => (
           t.ash,
@@ -730,7 +730,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
             child: Text(
               'The latest update is on the network but not announced yet '
               '— subscribers are told automatically when Channels is '
-              'switched back on (Settings → Built-in x0x client).',
+              'switched back on (Settings → Built-in clients).',
               style: TextStyle(
                   color: WiTokens.channelAmber, fontSize: 12, height: 1.4),
             ),

@@ -170,6 +170,7 @@ fn protected_router(engine: &'static Engine) -> Router {
 fn open_router(engine: &'static Engine) -> Router {
     Router::new()
         .route("/health", get(move || health(engine)))
+        .route("/versions", get(versions))
         .route("/reconnect", post(move || reconnect(engine)))
         .route(
             "/resolve/{addr}",
@@ -226,6 +227,21 @@ async fn health(engine: &'static Engine) -> Response {
             "message": engine.last_error(),
         })
     };
+    ([(header::CONTENT_TYPE, "application/json")], body.to_string()).into_response()
+}
+
+/// `GET /versions` — the network-stack versions compiled into this
+/// binary, parsed out of Cargo.lock at build time (build.rs) so they
+/// can never drift from what actually shipped. Open route: it spends
+/// nothing and the Built-in clients page reads it without the token.
+async fn versions() -> Response {
+    let body = serde_json::json!({
+        "x0x": env!("WATCHIT_DEP_X0X"),
+        "ant_core": env!("WATCHIT_DEP_ANT_CORE"),
+        "saorsa_core": env!("WATCHIT_DEP_SAORSA_CORE"),
+        "saorsa_gossip": env!("WATCHIT_DEP_SAORSA_GOSSIP"),
+        "ant_quic": env!("WATCHIT_DEP_ANT_QUIC"),
+    });
     ([(header::CONTENT_TYPE, "application/json")], body.to_string()).into_response()
 }
 
@@ -1243,6 +1259,27 @@ mod rootmap_tests {
             send(&app, "GET", &format!("/rootmap/{hexaddr}"), vec![]).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(DataMap::from_bytes(&body).unwrap(), root);
+    }
+
+    #[tokio::test]
+    async fn versions_route_serves_lockfile_pins() {
+        let app = test_router("versions");
+        let (status, body) = send(&app, "GET", "/versions", vec![]).await;
+        assert_eq!(status, StatusCode::OK);
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        // Values come from build.rs parsing Cargo.lock; pin the shape and
+        // that every field is a non-empty dotted version, not the exact
+        // numbers (they move with every bump by design).
+        for key in ["x0x", "ant_core", "saorsa_core", "saorsa_gossip", "ant_quic"] {
+            let val = v[key].as_str().unwrap_or_else(|| panic!("{key} missing"));
+            assert!(
+                val.split(' ').next().unwrap().split('.').count() == 3,
+                "{key} not a version: {val}"
+            );
+        }
+        assert_eq!(v["x0x"], env!("WATCHIT_DEP_X0X"));
+        // The git-pinned ant-core carries its short rev.
+        assert!(v["ant_core"].as_str().unwrap().contains("git "));
     }
 
     #[tokio::test]
