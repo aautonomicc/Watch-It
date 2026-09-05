@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../models/media_list.dart';
 import '../screens/channels_screen.dart';
@@ -12,14 +11,16 @@ import 'channel_avatar.dart';
 
 /// The channel's face — the full-width profile header above a channel
 /// list's poster grid: 72px circular avatar, name, "by author · N
-/// entries", description (2 lines, tap to expand), and the channel's
-/// `wchn1-` code with tap-to-copy.
+/// entries", description (2 lines, tap to expand), and a small QR
+/// button below the channel badge opening the same "Share this code"
+/// dialog the Channels screen uses (branded QR + the `wchn1-` code with
+/// copy) — one sharing surface everywhere.
 ///
-/// The code line is deliberate anti-impersonation UI: there is no handle
-/// registry and no uniqueness — anyone can type any author name — so the
-/// code stays the only real identity and is always in sight, styled
-/// exactly like the QR dialog shows it. On the owner's own channel the
-/// card gains an edit pencil (the profile edits ride the next publish).
+/// The code inside that dialog stays the anti-impersonation identity:
+/// there is no handle registry and no uniqueness — anyone can type any
+/// author name — so the code remains the only real identity. On the
+/// owner's own channel the card gains an edit pencil (the profile edits
+/// ride the next publish).
 class ChannelInfoCard extends StatefulWidget {
   const ChannelInfoCard({super.key, required this.list, this.onEdited});
 
@@ -81,12 +82,6 @@ class _ChannelInfoCardState extends State<ChannelInfoCard> {
     }
   }
 
-  void _copyCode(String code) {
-    Clipboard.setData(ClipboardData(text: code));
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Channel code copied')));
-  }
-
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
@@ -138,8 +133,30 @@ class _ChannelInfoCardState extends State<ChannelInfoCard> {
                     const ChannelBadge(),
                   ],
                 ),
-                Text(infoLine,
-                    style: TextStyle(color: t.ash, fontSize: 12.5)),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(infoLine,
+                          style:
+                              TextStyle(color: t.ash, fontSize: 12.5)),
+                    ),
+                    if (code.isNotEmpty)
+                      IconButton(
+                        tooltip: 'Show QR code',
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                            minWidth: 28, minHeight: 28),
+                        icon: Icon(Icons.qr_code_2,
+                            color: t.ash, size: 20),
+                        onPressed: () => showDialog<void>(
+                          context: context,
+                          builder: (_) => ChannelQrDialog(code: code),
+                        ),
+                      ),
+                  ],
+                ),
                 if (_description.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
@@ -155,31 +172,6 @@ class _ChannelInfoCardState extends State<ChannelInfoCard> {
                             color: t.boneDim,
                             fontSize: 12.5,
                             height: 1.35),
-                      ),
-                    ),
-                  ),
-                if (code.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: InkWell(
-                      onTap: () => _copyCode(code),
-                      child: Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              code,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontFamily: wiMonoFamily,
-                                fontFamilyFallback: wiMonoFallback,
-                                fontSize: 11,
-                                color: WiTokens.channelAmber,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Icon(Icons.copy, color: t.ash, size: 13),
-                        ],
                       ),
                     ),
                   ),

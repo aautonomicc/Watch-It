@@ -14,6 +14,7 @@ import 'package:watchit/services/library_store.dart';
 import 'package:watchit/theme/tokens.dart';
 import 'package:watchit/widgets/channel_avatar.dart';
 import 'package:watchit/widgets/channel_info_card.dart';
+import 'package:watchit/widgets/wi_qr.dart';
 
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
@@ -56,7 +57,7 @@ void main() {
 
   testWidgets(
       'channel list page shows the profile card: avatar, by-author line, '
-      'code; the app bar drops the entry count', (tester) async {
+      'QR button; the app bar drops the entry count', (tester) async {
     SharedPreferences.setMockInitialValues({
       'channel_subs_v1': jsonEncode({
         pubkey: {
@@ -85,8 +86,19 @@ void main() {
     expect(find.text('by @neil · 1 entry'), findsOneWidget);
     expect(find.text('My own footage of the local wetlands.'),
         findsOneWidget);
-    // The anti-impersonation code line, derived from the pubkey alone.
+    // The code line is gone — sharing goes through the QR button below
+    // the badge, which opens the same dialog the Channels screen uses.
+    expect(find.text(code), findsNothing);
+    expect(find.byIcon(Icons.qr_code_2), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.qr_code_2));
+    await tester.pumpAndSettle();
+    expect(find.text('Share this code'), findsOneWidget);
+    final qr = tester.widget<WiQr>(find.byType(WiQr));
+    expect(qr.data, code);
     expect(find.text(code), findsOneWidget);
+    await tester.tap(find.text('Copy & close'));
+    await tester.pumpAndSettle();
+    expect(find.text('Share this code'), findsNothing);
     // The card owns the count — the app bar shows only the title.
     expect(find.text('1 entry'), findsNothing);
     expect(find.text('CHANNEL'), findsOneWidget);
