@@ -127,6 +127,35 @@ void main() {
       expect(await continueWatching(lists), isEmpty);
     });
 
+    test('audio shorter than 15 min is excluded, longer audio stays',
+        () async {
+      final song = _e('Singer - Album (2001) - 01 Song.mp3', 1);
+      final mix = _e('DJ - Sets (2002) - 01 Long Mix.mp3', 2);
+      final lists = _library([song, mix]);
+      await store.record(song,
+          position: const Duration(minutes: 2),
+          duration: const Duration(minutes: 4));
+      await store.record(mix,
+          position: const Duration(minutes: 20),
+          duration: const Duration(minutes: 60));
+      final row = await continueWatching(lists);
+      expect(row.map((i) => i.entry.address), [_addr(2)]);
+    });
+
+    test('short-audio filter never touches video or unknown durations',
+        () async {
+      final clip = _e('Clip.2020.mkv', 1);
+      final unknown = _e('Singer - Album (2001) - 02 Mystery.mp3', 2);
+      final lists = _library([clip, unknown]);
+      await store.record(clip,
+          position: const Duration(minutes: 2),
+          duration: const Duration(minutes: 10));
+      await store.record(unknown,
+          position: const Duration(minutes: 2), duration: Duration.zero);
+      final row = await continueWatching(lists);
+      expect(row.map((i) => i.entry.address).toSet(), {_addr(1), _addr(2)});
+    });
+
     test('states for removed or hidden entries are skipped', () async {
       final visible = _e('Movie.2020.mkv', 1);
       final gone = _e('Gone.2019.mkv', 2);

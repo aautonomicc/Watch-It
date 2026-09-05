@@ -32,6 +32,13 @@ class ContinueItem {
   List<MediaEntry> get allVersions => versions.isEmpty ? [entry] : versions;
 }
 
+/// Audio tracks with a known duration under this stay out of the Continue
+/// Watching row: a half-played song is noise there, while an audiobook,
+/// DJ mix or long podcast is genuinely worth resuming. Read-time filter
+/// only — the watch state is still recorded, so the detail page and album
+/// player resume the track as before.
+const kContinueMinAudioDurationMs = 15 * 60 * 1000;
+
 String _normalize(String address) =>
     address.toLowerCase().replaceFirst('0x', '');
 
@@ -61,7 +68,9 @@ MediaEntry? nextEpisode(List<MediaList> lists, MediaEntry entry) {
 /// The home screen's Continue Watching row: partially watched files to
 /// resume plus, for each show whose latest activity finished an episode,
 /// the next unwatched episode ("next up"). One card per show, most
-/// recent activity first, capped at [limit].
+/// recent activity first, capped at [limit]. Audio tracks shorter than
+/// [kContinueMinAudioDurationMs] are left out (their resume point still
+/// works from the detail and album pages).
 Future<List<ContinueItem>> continueWatching(
   List<MediaList> lists, {
   WatchStateStore? store,
@@ -116,8 +125,13 @@ Future<List<ContinueItem>> continueWatching(
 
     ContinueItem? item;
     if (state.resumable) {
-      item = ContinueItem(
-          entry: entry, state: state, versions: versionsOf(entry));
+      final shortAudio = parsed.isAudio &&
+          state.durationMs > 0 &&
+          state.durationMs < kContinueMinAudioDurationMs;
+      if (!shortAudio) {
+        item = ContinueItem(
+            entry: entry, state: state, versions: versionsOf(entry));
+      }
     } else if (state.completed && parsed.isEpisode) {
       // Finished an episode — surface the show's next unwatched one,
       // skipping over episodes already completed (on any tier) on an

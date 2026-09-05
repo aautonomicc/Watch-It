@@ -86,9 +86,10 @@ void main() {
     await LibraryStore.save([
       MediaList(id: 'l1', title: 'Music', entries: [track]),
     ]);
+    // Long enough to clear the short-audio Continue filter (15 min).
     await WatchStateStore.instance.record(track,
-        position: const Duration(minutes: 2),
-        duration: const Duration(minutes: 5));
+        position: const Duration(minutes: 20),
+        duration: const Duration(minutes: 60));
     await tester.pumpWidget(const WatchItApp());
     await tester.pumpAndSettle();
 
