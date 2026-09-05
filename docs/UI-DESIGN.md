@@ -81,25 +81,32 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   Channels, "switched off" when disabled); the home screen has no
   status bar anymore
 - Lists (manage, import/export)
-- Network (2026-08-30 order: **Buffer size** on top — moved in from
-  the former STREAMING section, which is gone — then **Built-in
-  Autonomi client** status tile, then **Built-in x0x client** (opens a
-  page with two independent switches — Channels above My W@tch since
-  2026-08-30, matching the CONTENT section's order — that stop the
-  Channels or My W@tch x0x agent and all its background traffic; links,
-  keys and subscriptions are kept, and joining/creating/subscribing
-  flips the matching switch back on automatically; publishing a channel
-  update while Channels is off still works — the signed head waits and
-  is announced when the switch is back on), then the consolidated
-  **Mobile data** page (2026-08-30, replacing the separate Downloads
-  and Streaming-on-mobile-data policy tiles): one place for everything
-  that may use mobile data — Streaming (Ask first / Allowed / Wi-Fi
-  only), Downloads (Wi-Fi only / Wi-Fi + mobile data), and per-feature
-  Channels / My W@tch switches (default ON so existing installs keep
-  behaving the same); set to Wi-Fi only, an x0x agent is paused on
-  cellular by the X0xCellularGate and resumed the moment Wi-Fi
-  returns — status lines then read "paused on mobile data" rather than
-  "switched off", and a user's own x0x switch is never overridden)
+- Network (2026-09-05 reorg — the section was getting busy): **Offline
+  mode** on top (the all-network pause switch, renamed from "Pause all
+  network activity"), then **Data usage**, **Buffer size**, the **Data
+  saving** sub-page (absorbed the section-level Auto-pause-when-idle
+  tile and the consolidated Mobile data page — one place for the
+  automatic quiet-time rules: Streaming Ask first / Allowed / Wi-Fi
+  only, Downloads Wi-Fi only / Wi-Fi + mobile data, per-feature
+  Channels / My W@tch cellular switches driven by the X0xCellularGate),
+  and the merged **Built-in clients** page (replacing the separate
+  Built-in Autonomi client + Built-in x0x client tiles): Autonomi
+  connection status with refresh, the two independent x0x feature
+  switches (Channels above My W@tch, matching the CONTENT section's
+  order; links, keys and subscriptions are kept while off, and
+  joining/creating/subscribing flips the matching switch back on
+  automatically; a channel update published while Channels is off
+  waits and is announced when the switch is back on), plus live
+  versions of the compiled-in network stack — per-client version lines
+  (ant-core, x0x) with the full stack (saorsa-core, saorsa-gossip,
+  ant-quic, app version) behind a "Version details" expansion and a
+  Copy-versions button for bug reports; the numbers come from the
+  core's open `GET /versions` route, baked out of Cargo.lock at build
+  time so they can never drift from what actually shipped. An x0x
+  feature set to Wi-Fi only is paused on cellular by the
+  X0xCellularGate and resumed the moment Wi-Fi returns — status lines
+  then read "paused on mobile data" rather than "switched off", and a
+  user's own x0x switch is never overridden
 - Wallet (renamed from Publishing 2026-08-27: create with 12-word
   ceremony + retype confirm, import key/phrase, live ANT/ETH balances,
   remove; one wallet will fund both private uploads and the planned
@@ -318,7 +325,7 @@ nesting, Media + Channels live under Settings → CONTENT, and Settings →
 Appearance adds dark/light/system colour schemes. Alpha.71 deletes the
 home status bar in favour of three dot-status rows at the top of the
 drawer (Autonomi / My W@tch / Channels, tap to navigate) plus a
-Built-in x0x client screen with independent agent switches; alpha.74
+Built-in x0x client screen with independent agent switches (merged into the Built-in clients page 2026-09-05); alpha.74
 consolidates cellular policy under Settings → Mobile data. Alpha.76–.79
 add the music surfaces: square album cards (and 2×2 artist collage
 cards with the next release) on the wall and list grids, the album page

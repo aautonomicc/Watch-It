@@ -150,6 +150,29 @@ class EmbeddedClient {
     }
   }
 
+  /// Network-stack versions compiled into the native library (open
+  /// `GET /versions`; the values are baked out of Cargo.lock at build
+  /// time, so they can never drift from what actually shipped). Null
+  /// when the embedded client is unavailable or the call fails.
+  static Future<ClientVersions?> versions({String? baseOverride}) async {
+    final base = baseOverride ?? baseUrl();
+    if (base == null) return null;
+    final client = HttpClient();
+    try {
+      final req = await client.getUrl(Uri.parse(
+          '${base.replaceFirst(RegExp(r'/+$'), '')}/versions'));
+      final res = await req.close();
+      final body = await res.transform(utf8.decoder).join();
+      if (res.statusCode != 200) return null;
+      return ClientVersions.fromJson(
+          jsonDecode(body) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    } finally {
+      client.close();
+    }
+  }
+
   /// Data-usage period counters (auth-guarded `GET /stats` — unlike
   /// `/health` it stays fully populated while the network is paused).
   /// Null when the embedded client is unavailable or the call fails.
@@ -188,6 +211,34 @@ class EmbeddedClient {
       client.close();
     }
   }
+}
+
+/// The `GET /versions` body: versions of the network stack compiled
+/// into the native library (see watchit_core's build.rs). An old core
+/// without the route just yields null from [EmbeddedClient.versions].
+class ClientVersions {
+  const ClientVersions({
+    required this.x0x,
+    required this.antCore,
+    required this.saorsaCore,
+    required this.saorsaGossip,
+    required this.antQuic,
+  });
+
+  final String x0x;
+  final String antCore;
+  final String saorsaCore;
+  final String saorsaGossip;
+  final String antQuic;
+
+  factory ClientVersions.fromJson(Map<String, dynamic> json) =>
+      ClientVersions(
+        x0x: json['x0x'] as String? ?? '',
+        antCore: json['ant_core'] as String? ?? '',
+        saorsaCore: json['saorsa_core'] as String? ?? '',
+        saorsaGossip: json['saorsa_gossip'] as String? ?? '',
+        antQuic: json['ant_quic'] as String? ?? '',
+      );
 }
 
 /// Up/down byte pair of one `GET /stats` component.

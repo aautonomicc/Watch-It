@@ -419,7 +419,7 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                             'Settings → Network → Mobile data).'
                         : 'My W@tch is switched off — nothing syncs '
                             'until you turn it back on in Settings → '
-                            'Built-in x0x client.',
+                            'Built-in clients.',
                     style: TextStyle(fontSize: 13, color: t.boneDim),
                   ),
                 ),

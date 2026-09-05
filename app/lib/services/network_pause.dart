@@ -13,7 +13,8 @@ import 'embedded_client.dart';
 import 'my_watch_api.dart';
 import 'x0x_cellular.dart' show X0xAgent;
 
-/// The Settings → Network "Pause all network activity" switch.
+/// The Settings → Network "Offline mode" switch (named "Pause all
+/// network activity" before the 2026-09-05 reorg).
 ///
 /// Pausing disconnects the embedded Autonomi client (POST /network/pause
 /// — streaming stops, the reconnect supervisor parks, the DHT/keepalive

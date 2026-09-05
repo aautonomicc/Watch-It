@@ -10,8 +10,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/main.dart';
+import 'package:watchit/screens/builtin_clients_screen.dart';
+import 'package:watchit/screens/data_saving_screen.dart';
 import 'package:watchit/screens/mobile_data_screen.dart';
-import 'package:watchit/screens/x0x_client_screen.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/services/app_settings.dart';
 import 'package:watchit/services/library_store.dart';
@@ -871,31 +872,36 @@ void main() {
       expect(myMediaY, lessThan(uploadY));
       expect(uploadY, lessThan(downloadsY));
 
-      // Network section leads with Buffer size (2026-08-30, the
-      // STREAMING section is gone), then the two embedded clients:
-      // Autonomi above the x0x tile, both above the consolidated
-      // Mobile data tile (2026-08-30 — it replaced the separate
-      // Downloads and Streaming-on-mobile-data policy tiles).
-      await tester.scrollUntilVisible(find.text('Mobile data'), 100);
+      // Network section (2026-09-05 reorg): Offline mode leads (the
+      // renamed pause-all switch), then Data usage, Buffer size, the
+      // Data saving sub-page (which absorbed Auto-pause when idle +
+      // Mobile data) and the merged Built-in clients tile. The old
+      // per-client tiles and the section-level Auto-pause / Mobile
+      // data tiles are gone.
+      await tester.scrollUntilVisible(find.text('Built-in clients'), 100);
       expect(find.text('STREAMING'), findsNothing);
+      expect(find.text('Offline mode'), findsOneWidget);
+      expect(find.text('Pause all network activity'), findsNothing);
       expect(find.text('Data usage'), findsOneWidget);
       expect(find.text('Buffer size'), findsOneWidget);
       expect(find.text('32 MB'), findsOneWidget);
-      expect(find.text('Built-in Autonomi client'), findsOneWidget);
-      expect(find.text('Built-in x0x client'), findsOneWidget);
+      expect(find.text('Data saving'), findsOneWidget);
+      expect(find.text('Built-in clients'), findsOneWidget);
+      expect(find.text('Built-in Autonomi client'), findsNothing);
+      expect(find.text('Built-in x0x client'), findsNothing);
+      expect(find.text('Auto-pause when idle'), findsNothing);
+      expect(find.text('Mobile data'), findsNothing);
       expect(find.text('Streaming on mobile data'), findsNothing);
       expect(find.text('Wi-Fi only'), findsNothing);
-      // Data usage leads NETWORK, above Buffer size (2026-09-04).
+      final offlineY = tester.getTopLeft(find.text('Offline mode')).dy;
       final dataUsageY = tester.getTopLeft(find.text('Data usage')).dy;
       final bufferY = tester.getTopLeft(find.text('Buffer size')).dy;
+      final dataSavingY = tester.getTopLeft(find.text('Data saving')).dy;
+      final clientsY = tester.getTopLeft(find.text('Built-in clients')).dy;
+      expect(offlineY, lessThan(dataUsageY));
       expect(dataUsageY, lessThan(bufferY));
-      final autonomiY =
-          tester.getTopLeft(find.text('Built-in Autonomi client')).dy;
-      final x0xY = tester.getTopLeft(find.text('Built-in x0x client')).dy;
-      final mobileDataY = tester.getTopLeft(find.text('Mobile data')).dy;
-      expect(bufferY, lessThan(autonomiY));
-      expect(autonomiY, lessThan(x0xY));
-      expect(x0xY, lessThan(mobileDataY));
+      expect(bufferY, lessThan(dataSavingY));
+      expect(dataSavingY, lessThan(clientsY));
 
       // Appearance sits below Metadata (2026-08-30).
       await tester.scrollUntilVisible(find.text('Colour scheme'), 100);
@@ -910,7 +916,7 @@ void main() {
       expect(find.text('Version'), findsOneWidget);
     });
 
-    testWidgets('Built-in x0x client tile opens the switches page',
+    testWidgets('Built-in clients tile opens the merged clients page',
         (tester) async {
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
@@ -920,21 +926,23 @@ void main() {
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
 
-      await tester.scrollUntilVisible(find.text('Built-in x0x client'), 100);
-      await tester.ensureVisible(find.text('Built-in x0x client'));
+      await tester.scrollUntilVisible(find.text('Built-in clients'), 100);
+      await tester.ensureVisible(find.text('Built-in clients'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Built-in x0x client'));
+      await tester.tap(find.text('Built-in clients'));
       await tester.pumpAndSettle();
 
-      expect(find.byType(X0xClientScreen), findsOneWidget);
+      // Autonomi status and the two x0x switches on one page.
+      expect(find.byType(BuiltInClientsScreen), findsOneWidget);
+      expect(find.text('Connection'), findsOneWidget);
       expect(find.text('My W@tch'), findsOneWidget);
       expect(find.text('Channels'), findsOneWidget);
       // Dispose the screen so its status poll timer is cancelled.
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('Mobile data tile opens the consolidated screen',
-        (tester) async {
+    testWidgets('Data saving groups Auto-pause and Mobile data, and its '
+        'Mobile data tile opens the consolidated screen', (tester) async {
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
 
@@ -943,9 +951,17 @@ void main() {
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
 
-      await tester.scrollUntilVisible(find.text('Mobile data'), 100);
-      await tester.ensureVisible(find.text('Mobile data'));
+      await tester.scrollUntilVisible(find.text('Data saving'), 100);
+      await tester.ensureVisible(find.text('Data saving'));
       await tester.pumpAndSettle();
+      await tester.tap(find.text('Data saving'));
+      await tester.pumpAndSettle();
+
+      // The sub-page holds both moved tiles (2026-09-05 reorg).
+      expect(find.byType(DataSavingScreen), findsOneWidget);
+      expect(find.text('Auto-pause when idle'), findsOneWidget);
+      expect(find.text('Mobile data'), findsOneWidget);
+
       await tester.tap(find.text('Mobile data'));
       await tester.pumpAndSettle();
 
