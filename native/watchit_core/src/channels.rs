@@ -277,18 +277,28 @@ mod imp {
             if on {
                 tokio::spawn(self.autostart());
             } else {
-                let mut phase = self.phase.lock().await;
-                // Only Ready holds an agent to stop; a Starting loop
-                // notices the flag on its next pass and bows out itself.
-                if matches!(*phase, Phase::Ready(_)) {
-                    if let Phase::Ready(running) =
-                        std::mem::replace(&mut *phase, Phase::Off)
-                    {
-                        for (_, store) in running.stores {
-                            store.cancel_sync();
+                // Take a Ready agent out under the lock, but never await
+                // its shutdown while holding it: status() (GET /channels)
+                // blocks on this mutex, and a hung x0x shutdown would
+                // wedge it forever. Only Ready holds an agent to stop; a
+                // Starting loop notices the flag on its next pass and
+                // bows out itself.
+                let taken = {
+                    let mut phase = self.phase.lock().await;
+                    if matches!(*phase, Phase::Ready(_)) {
+                        match std::mem::replace(&mut *phase, Phase::Off) {
+                            Phase::Ready(running) => Some(running),
+                            _ => None,
                         }
-                        running.agent.shutdown().await;
+                    } else {
+                        None
                     }
+                };
+                if let Some(running) = taken {
+                    for (_, store) in running.stores {
+                        store.cancel_sync();
+                    }
+                    crate::x0x_tune::shutdown_agent(&running.agent, "channels").await;
                 }
                 self.set_message(None);
             }
@@ -326,7 +336,11 @@ mod imp {
                                 for (_, store) in running.stores {
                                     store.cancel_sync();
                                 }
-                                running.agent.shutdown().await;
+                                crate::x0x_tune::shutdown_agent(
+                                    &running.agent,
+                                    "channels",
+                                )
+                                .await;
                                 let mut phase = self.phase.lock().await;
                                 if matches!(*phase, Phase::Starting) {
                                     *phase = Phase::Off;
