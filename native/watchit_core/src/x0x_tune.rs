@@ -56,3 +56,25 @@ pub(crate) fn gossip_mode(agent: &x0x::Agent) -> Option<String> {
         .gossip_participation()
         .map(|p| p.mode.to_string())
 }
+
+/// Bounded agent shutdown for the pause/switch-off/unlink paths.
+/// x0x's `Agent::shutdown` can hang indefinitely once an agent gets
+/// stuck "disconnecting" (seen live in the 2026-09-05 idle test) —
+/// callers must NEVER await it while holding the phase mutex, or every
+/// status route wedges with it. This gives the graceful path a bounded
+/// window, then abandons the future and lets the caller drop the agent
+/// Arc: a leaked background task beats a wedged app.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
+pub(crate) async fn shutdown_agent(agent: &x0x::Agent, label: &str) {
+    const GRACE: std::time::Duration = std::time::Duration::from_secs(10);
+    if tokio::time::timeout(GRACE, agent.shutdown()).await.is_err() {
+        tracing::warn!(
+            "{label}: agent shutdown still hanging after {GRACE:?} — dropping it"
+        );
+    }
+}

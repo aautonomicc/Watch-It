@@ -299,15 +299,26 @@ mod imp {
             if on {
                 tokio::spawn(self.autostart());
             } else {
-                let mut phase = self.phase.lock().await;
-                if let Phase::Ready(running) = &*phase {
+                // Take a Ready agent out under the lock, but never await
+                // its shutdown while holding it: status() (GET /mywatch)
+                // blocks on this mutex, and a hung x0x shutdown would
+                // wedge it forever. A Starting loop notices the flag on
+                // its next pass.
+                let taken = {
+                    let mut phase = self.phase.lock().await;
+                    if matches!(*phase, Phase::Ready(_)) {
+                        match std::mem::replace(&mut *phase, Phase::Off) {
+                            Phase::Ready(running) => Some(running),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                };
+                if let Some(running) = taken {
                     running.cancel.cancel();
                     running.store.cancel_sync();
-                    running.agent.shutdown().await;
-                }
-                // A Starting loop notices the flag on its next pass.
-                if matches!(*phase, Phase::Ready(_)) {
-                    *phase = Phase::Off;
+                    crate::x0x_tune::shutdown_agent(&running.agent, "mywatch").await;
                 }
                 self.set_message(None);
             }
@@ -668,14 +679,21 @@ mod imp {
         /// devices keep the link; this device's stale record ages out on
         /// their screens.
         pub async fn unlink(&self) -> Result<Value, String> {
-            let mut phase = self.phase.lock().await;
-            if let Phase::Ready(running) = &*phase {
+            // Same rule as set_enabled: take the agent out under the
+            // lock, shut it down after — a hung shutdown must not wedge
+            // the status routes on this mutex.
+            let taken = {
+                let mut phase = self.phase.lock().await;
+                match std::mem::replace(&mut *phase, Phase::Off) {
+                    Phase::Ready(running) => Some(running),
+                    _ => None,
+                }
+            };
+            if let Some(running) = taken {
                 running.cancel.cancel();
                 running.store.cancel_sync();
-                running.agent.shutdown().await;
+                crate::x0x_tune::shutdown_agent(&running.agent, "mywatch").await;
             }
-            *phase = Phase::Off;
-            drop(phase);
             if let Some(dir) = &self.dir {
                 let _ = std::fs::remove_dir_all(dir);
             }
@@ -720,7 +738,8 @@ mod imp {
                             // Switched off while the agent was coming up.
                             running.cancel.cancel();
                             running.store.cancel_sync();
-                            running.agent.shutdown().await;
+                            crate::x0x_tune::shutdown_agent(&running.agent, "mywatch")
+                                .await;
                             *self.phase.lock().await = Phase::Off;
                             return;
                         }
