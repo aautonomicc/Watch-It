@@ -81,32 +81,30 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   Channels, "switched off" when disabled); the home screen has no
   status bar anymore
 - Lists (manage, import/export)
-- Network (2026-09-05 reorg — the section was getting busy): **Offline
-  mode** on top (the all-network pause switch, renamed from "Pause all
-  network activity"), then **Data usage**, **Buffer size**, the **Data
-  saving** sub-page (absorbed the section-level Auto-pause-when-idle
-  tile and the consolidated Mobile data page — one place for the
-  automatic quiet-time rules: Streaming Ask first / Allowed / Wi-Fi
-  only, Downloads Wi-Fi only / Wi-Fi + mobile data, per-feature
-  Channels / My W@tch cellular switches driven by the X0xCellularGate),
-  and the merged **Built-in clients** page (replacing the separate
-  Built-in Autonomi client + Built-in x0x client tiles): Autonomi
-  connection status with refresh, the two independent x0x feature
-  switches (Channels above My W@tch, matching the CONTENT section's
-  order; links, keys and subscriptions are kept while off, and
-  joining/creating/subscribing flips the matching switch back on
-  automatically; a channel update published while Channels is off
-  waits and is announced when the switch is back on), plus live
-  versions of the compiled-in network stack — per-client version lines
-  (ant-core, x0x) with the full stack (saorsa-core, saorsa-gossip,
-  ant-quic, app version) behind a "Version details" expansion and a
+- Network (slimmed to three tiles in the 2026-09-06 Data-page merge,
+  which absorbed the 2026-09-05 reorg's four sub-pages): **Offline
+  mode** on top (the all-network pause switch), then **Data**, then
+  **Buffer size**. The Data sub-page is the one place for everything
+  data, top to bottom: the live usage counters (total card,
+  per-component rows with Off tags, current-rate row, Since <date> +
+  Reset), the Auto-pause-when-idle tile, a BUILT-IN CLIENTS section —
+  Autonomi connection row with refresh, then Channels and My W@tch
+  each on a compact 3-segment pill **Off | Wi-Fi | Wi-Fi + mobile**
+  (replacing the old on/off switch + separate cellular toggle; links,
+  keys and subscriptions are kept while Off, joining / creating /
+  subscribing flips the matching switch back on automatically, and a
+  channel update published while Channels is off waits and is
+  announced on re-enable) — and a MOBILE DATA section (Streaming Ask
+  first / Allowed / Wi-Fi only + Downloads pickers). A feature set to
+  Wi-Fi is paused on cellular by the X0xCellularGate and resumed the
+  moment Wi-Fi returns — its pill then reads Wi-Fi with a "Paused on
+  mobile data" line, never Off, and an explicit Off is never
+  overridden by the gate. The live network-stack versions moved to
+  Settings → About (2026-09-06): the Version tile expands to App +
+  ant-core / x0x / saorsa-core / saorsa-gossip / ant-quic with a
   Copy-versions button for bug reports; the numbers come from the
   core's open `GET /versions` route, baked out of Cargo.lock at build
-  time so they can never drift from what actually shipped. An x0x
-  feature set to Wi-Fi only is paused on cellular by the
-  X0xCellularGate and resumed the moment Wi-Fi returns — status lines
-  then read "paused on mobile data" rather than "switched off", and a
-  user's own x0x switch is never overridden
+  time so they can never drift from what actually shipped
 - Wallet (renamed from Publishing 2026-08-27: create with 12-word
   ceremony + retype confirm, import key/phrase, live ANT/ETH balances,
   remove; one wallet will fund both private uploads and the planned
@@ -115,7 +113,9 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - Appearance (Colour scheme; sits below Metadata since 2026-08-30)
 - About / licenses (incl. TMDB attribution notice + logo; the Terms of
   Use & Disclaimer page — also gated on first launch; update-check
-  toggle + "Update available" row on desktop)
+  toggle + "Update available" row on desktop; since 2026-09-06 the
+  Version tile expands to the full network-stack versions with a
+  Copy-versions button)
 
 ### 7. Upload (desktop, alpha.55+; renamed from Publish 2026-08-27;
 ###    one flow since 2026-09-02)
@@ -163,9 +163,9 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 ### 8. My W@tch (alpha.61/.62)
 - Lives under Settings → CONTENT, directly below Channels, since
   2026-08-29 (was Settings → Network since alpha.63; desktop +
-  Android). When switched off in Settings → Network → Built-in x0x
-  client, the linked view shows a "switched off" card instead of the
-  connecting spinner.
+  Android). When its pill is set to Off in Settings → Network → Data
+  (the Built-in x0x client switch until 2026-09-06), the linked view
+  shows a "switched off" card instead of the connecting spinner.
 - Unlinked: **Link this device** (names the device, shows the invite as
   a QR code + copyable `wtch1-…` code) or **Join** (paste the code, or
   scan the QR with the camera on Android/iOS)
@@ -249,7 +249,7 @@ TV notes: larger base type scale (readable at 3 m), no hover-only affordances, t
 entry kept to add/import flows only (paste via network share or a shown-on-TV import
 address is preferred over typing addresses with a remote).
 
-## Built so far (alpha.79)
+## Built so far (alpha.92)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,
@@ -325,10 +325,10 @@ nesting, Media + Channels live under Settings → CONTENT, and Settings →
 Appearance adds dark/light/system colour schemes. Alpha.71 deletes the
 home status bar in favour of three dot-status rows at the top of the
 drawer (Autonomi / My W@tch / Channels, tap to navigate) plus a
-Built-in x0x client screen with independent agent switches (merged into the Built-in clients page 2026-09-05); alpha.74
+Built-in x0x client screen with independent agent switches (merged into the Built-in clients page 2026-09-05, then into the Data page's 3-way pills 2026-09-06); alpha.74
 consolidates cellular policy under Settings → Mobile data. Alpha.76–.79
-add the music surfaces: square album cards (and 2×2 artist collage
-cards with the next release) on the wall and list grids, the album page
+add the music surfaces: square album cards (and artist collage cards
+since alpha.80, adaptive to the album count) on the wall and list grids, the album page
 with inline player (transport row, seek bar, glow-pulsing cover), the
 artist page, and the one-flow batch Upload screen — match-review
 carousel, QUALITY on the review page, needs-attention resume, and a
@@ -337,6 +337,17 @@ the album page's pencil edits the album (artist, name, year,
 description, cover), the track editor edits that track only (title,
 number, artist, artwork — shown on its rows, its detail page, and as
 the cover while it plays), and upload/import list defaults follow the
-media type (Music / TV Shows / Movies).
+media type (Music / TV Shows / Movies). Alpha.85–.92 are the
+data-control and audio wave: adaptive streaming readahead, Offline
+mode + auto-pause when idle, the per-component data usage counters,
+`W@tch/<List>` download folders with a deletion-aware sweep, Android
+background music with lock-screen controls, quality tiers aggregating
+on every surface (one card, best downloaded version auto-selected,
+watch position following across tiers), branded QR codes on every
+share surface, a real audio player screen (artwork + transport instead
+of a black video surface), short audio kept out of Continue Watching,
+live network-stack versions under About, and the single Settings →
+Network → Data page with 3-way Off | Wi-Fi | Wi-Fi + mobile pills for
+the built-in clients.
 Still to come from this document: filter/sort + fast-scroller on
 the grid, the full desktop keyboard map, mobile gestures, and the TV layout.

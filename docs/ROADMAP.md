@@ -1,10 +1,35 @@
 # Roadmap
 
-**Status (2026-09-02):** latest release is **v0.1.0-alpha.79**
+**Status (2026-09-06):** latest release is **v0.1.0-alpha.92**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
 and every release since alpha.55 ships a signed APK, a Linux AppImage,
-**and a Windows portable zip**. The headlines of the newest releases
-are **music** and **batch upload** (see their sections below):
+**and a Windows portable zip**. The headline of the newest wave is
+**network & data control** (its own section below): alpha.85 "Data
+Saver" cuts the streaming readahead to an adaptive window and adds
+Offline mode plus auto-pause-when-idle, alpha.86 ships the
+per-component data usage screen (also `W@tch/<List>` download folders
+and Android background music with lock-screen controls), alpha.90
+reorganizes Settings → Network and surfaces live network-stack
+versions, alpha.91 makes pausing never wedge the app, and alpha.92
+merges everything data-related into one Settings → Network → **Data**
+page with 3-way Off | Wi-Fi | Wi-Fi + mobile pills for the built-in
+clients. Interleaved: alpha.87 makes quality tiers aggregate on every
+surface (one card/tick/watch-bar across versions, best downloaded
+version auto-selected, watch position follows across tiers, episodes
+fold like movies) and brands the QR codes; alpha.88 gives music a
+real player screen (artwork + transport instead of a black video
+surface); alpha.89 keeps short audio out of Continue Watching.
+Before that, the upload/music polish wave (alpha.80–.84, sections
+below): artist collage cards + artist pages, editable track
+numbers/discs, album & year edits that merge loose tracks into one
+album, per-track artwork/artist rows + a dedicated album editor,
+resumable interrupted batches with a crash-recovery launch prompt,
+per-batch isolation + a Previous-uploads manager (with an optional
+forget-uploads), a live fingerprint/lookup step line, and datamap
+imports routed through the same match/review carousel with
+type-driven default lists (Music / TV Shows / Movies). Earlier
+headlines were **music** and **batch upload** themselves (see their
+sections below):
 alpha.76 renders albums as a square cover-art wall with keyless
 MusicBrainz / Cover Art Archive metadata, alpha.77 ships the upload
 pipeline (auto-matching, canonical renames, content-hash dedup ledger)
@@ -239,7 +264,10 @@ streams from the network → resume works after app restart. v0.1 release.
 **Exit criteria: all met** as of alpha.31; Phase 2 is feature-complete.
 Auto-resume of connection-loss pauses shipped in alpha.38 (system pauses
 auto-resume on reconnect/Wi-Fi/app-resume/next-launch; user pauses stay
-manual). Still deferred: per-direction bandwidth/concurrency settings.
+manual). Since alpha.86 desktop downloads land in `W@tch/<List name>/`
+folders under the system Downloads folder, and a startup/on-resume sweep
+notices hand-deleted files so they can be re-downloaded. Still
+deferred: per-direction bandwidth/concurrency settings.
 The old total-network-loss blind spot (ant-core reporting ready with stale
 peers) is handled since alpha.38: the reconnect supervisor evicts the
 client when peers stay at 0 and re-dials automatically.
@@ -403,6 +431,12 @@ upgrade-flag rules, and the regeneration procedure live in
 - [x] Home app bar relayout (alpha.50): search far left, library-drawer
       hamburger far right, top-right settings icon removed; home
       reloads after any pushed page pops (route-observer fix)
+- [x] Quality tiers aggregate everywhere (alpha.87): the watched tick,
+      watch bar, and download badge on every card reflect ANY version;
+      the detail page auto-selects the best downloaded version; the
+      watch position follows across tiers at read time; episodes fold
+      same-episode uploads exactly like movies; streaming defaults to
+      the last-streamed tier
 
 ## Upload — in-app uploads (shipped 2026-08-25 as "Publish", v0.1.0-alpha.55/.56/.57; renamed Upload 2026-08-27)
 
@@ -551,6 +585,12 @@ implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → Channels.
       `wchn1-…` code above the poster grid, mini avatars on cards,
       drawer rows, and the home wall; profile rides every publish so
       edits reach subscribers with the next head
+- [x] QR sharing everywhere (alpha.87–.90): QR codes are branded
+      (blue modules + centred W@tch logo, verified scannable), and a
+      QR share button sits on the My W@tch invite, the own-channel
+      dialog, subscribed channel cards (alpha.88), and the channel
+      page's info card (alpha.90, replacing the raw code line — the
+      code stays copyable inside the dialog)
 - [ ] Channel directory (deliberately NOT in v1 — codes only; a curated
       directory would be a separate repo/site with its own vetting)
 - [ ] Mobile channel creation (subscribe works everywhere; publishing
@@ -558,7 +598,7 @@ implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → Channels.
 - [ ] ~~Channel avatars~~ (shipped alpha.70), multi-owner channels,
       comments (parking lot)
 
-## Music (shipped 2026-09-01/02, v0.1.0-alpha.76/.78/.79)
+## Music (shipped from 2026-09-01, v0.1.0-alpha.76 onward)
 
 W@tch plays music, not just video. Albums are the music mirror of TV
 shows: album ≈ season, track ≈ episode, so the whole show/season UI
@@ -582,11 +622,29 @@ File naming convention (the audio parallel of the Plex/Jellyfin one) in
 - [x] Full music editing (alpha.79): Edit details for tracks covers
       artist, album, year, per-track title, description, and artwork
       (album-level fields shared across the album's tracks)
-- [x] Artist grouping (implemented 2026-09-02, ships with the next
-      release): an artist with 2+ albums in a list folds into one wall
-      card (2×2 cover collage) opening an artist page of albums sorted
+- [x] Artist grouping (alpha.80): an artist with 2+ albums in a list
+      folds into one wall card (a cover collage, adaptive to the album
+      count since alpha.82) opening an artist page of albums sorted
       by year; compilations become "Various Artists" and always stand
-      alone
+      alone; album folding ignores the per-track artist (alpha.81) so
+      hand-renamed compilations share one card
+- [x] Music editing, all the way down (alpha.81–.85): track numbers
+      and discs are editable (Save renames the file-name identity and
+      re-sorts the album), album + year edits merge loose singles into
+      one album card, a track's artwork/artist edits live in their own
+      per-track row (one track's edit never touches the album cover or
+      its siblings), and the album page gets its own editor (artist,
+      name, year, description, cover — with an Album-artist credit
+      that can replace "Various Artists")
+- [x] A real audio player screen (alpha.88): music from Continue
+      Watching or a detail page shows artwork + track title/credit +
+      seek + skips instead of a black video surface; the album player
+      records watch states so tracks reach Continue Watching (with a
+      music-note badge), and short tracks (< 15 min, known duration)
+      stay out of the row (alpha.89)
+- [x] Background music on Android (alpha.86): playback keeps running
+      with the screen off — media notification with prev/play/next,
+      lock-screen controls, audio focus + unplugged-headphones pause
 - [ ] Artist pages with bio/fanart (TheAudioDB was scoped in the
       original plan; parked)
 - [ ] Top-level Video / Music home split (deferred by plan — lists
@@ -622,7 +680,69 @@ canonical names automatically. CLI docs in [UPLOAD-CLI.md](UPLOAD-CLI.md).
       needs-attention pointer and can be resumed; manual details seed
       the local metadata cache; finished uploads auto-add to the list
       chosen at setup (defaults to Music for mostly-audio batches)
+- [x] Upload polish wave (alpha.80–.83): auto-accepted matches show
+      their cards (never silent), the Upload doorway is state-aware
+      (returns straight to a running batch), every batch gets its own
+      work dir so a new batch can never inherit an old one's files, a
+      Previous-uploads manager lists earlier batches with
+      Review / Dismiss / Delete (Delete optionally *forgets* the
+      uploads from the dedup ledger — re-uploading then pays again),
+      interrupted batches resume — including a "Finish an interrupted
+      upload?" prompt at launch after a crash — fully successful
+      batches sweep themselves away, deduped files can re-join the
+      library for free, and the preparing page shows a live
+      fingerprint-progress / media-info / database-lookup step line
+- [x] Datamap imports go through the same match/review flow
+      (alpha.84): imported `.datamap` files are name-matched against
+      MusicBrainz/TMDB with auto-accept for clean/id matches, the
+      review carousel for the rest, and manual details for no-matches;
+      target lists default by media type (Music / TV Shows / Movies)
+      in both upload and import
 - [ ] Batch upload on Android/iOS (desktop-only, like all uploading)
+
+## Network & data control (shipped 2026-09-03→06, v0.1.0-alpha.85–.92)
+
+A measured idle-traffic campaign turned into a full set of data
+controls. Background: the x0x gossip agents (Channels / My W@tch) have
+a substantial idle baseline that is upstream behaviour — W@tch's own
+levers (below) are all shipped, and the remaining idle cost is tracked
+against the x0x project.
+
+- [x] Adaptive streaming readahead (alpha.85): the fixed ~64 MiB
+      prefetch window (which was pulled whole on every start/seek —
+      ~98% of measured app data usage) became adaptive: ~4 MiB per
+      play/seek, growing with committed viewing to a ~32 MiB cap
+- [x] Offline mode (alpha.85): one switch pauses ALL network activity
+      — core disconnect + both x0x agents — and persists across
+      restart; buffered video keeps playing
+- [x] Auto-pause when idle (alpha.85): after N minutes (default 30,
+      Off/10/20/30/60) with nothing playing, downloading, or
+      uploading, the full pause engages; pressing Play lifts it —
+      a manual pause is never auto-resumed
+- [x] Data usage screen (alpha.86): per-component up/down counters
+      (Autonomi client with an "of which media" line, My W@tch,
+      Channels), live rate, Since-date period + Reset — persisted
+      across restarts
+- [x] Live network-stack versions (alpha.90): ant-core / x0x /
+      saorsa-core / saorsa-gossip / ant-quic versions baked out of
+      Cargo.lock at build time, served by an open `GET /versions`
+      route; shown under Settings → About's Version expansion with a
+      Copy-versions button for bug reports (moved there in alpha.92)
+- [x] Pausing never wedges (alpha.91): x0x agent shutdown is bounded
+      at 10 s and no longer blocks the status routes — switching
+      Channels/My W@tch off (including via auto-pause) stays
+      responsive even when the agent hangs disconnecting
+- [x] One **Data** page (alpha.92): Settings → Network is just
+      Offline mode · Data · Buffer size; the Data page merges the
+      usage counters, Auto-pause when idle, the built-in clients —
+      Autonomi connection row plus Channels and My W@tch each on a
+      3-way **Off | Wi-Fi | Wi-Fi + mobile** pill — and the mobile
+      data policies (Streaming / Downloads pickers)
+- [ ] Idle x0x gossip baseline: still high while an agent is active —
+      an upstream x0x issue (leaf-mode relay opt-out); watched
+      upstream, no further in-app lever planned
+- [ ] Daily buckets/graph, Wi-Fi vs cellular tagging, budget alerts
+      (deferred from the data-usage plan)
 
 ## Phase 3 — All desktop platforms
 - [x] Windows build + packaging → CI-built portable zip, shipped with

@@ -275,7 +275,23 @@ auto-advance, and a pulsing cover glow. Alpha.79 folds everything into
 **one upload flow**: quality tiers live on the batch review page, match
 confirmations run as a back/forward carousel, unfinished batches raise
 a needs-attention pointer, and finished uploads add themselves to the
-list you chose.
+list you chose. Alpha.80–.84 polish music and uploading: artist
+collage cards and artist pages, editable track numbers, album/year
+edits that merge loose tracks into one album, per-track artwork with a
+dedicated album editor, resumable interrupted batches (with a
+crash-recovery prompt at launch), a Previous-uploads manager, and
+`.datamap` imports routed through the same match/review flow.
+Alpha.85–.92 put the app on a data diet and finish the audio
+experience: adaptive streaming readahead, an Offline mode switch,
+auto-pause when idle, a per-component data usage screen, downloads
+landing in `W@tch/<List>` folders, Android background music with
+lock-screen controls, quality tiers aggregating across every surface
+(one card, best downloaded version auto-selected, watch position
+following across tiers), branded QR codes on every share surface, a
+real audio player screen (artwork + transport instead of a black video
+surface), live network-stack versions under Settings → About, and — as
+of alpha.92 — a single Settings → Network → **Data** page with 3-way
+Off | Wi-Fi | Wi-Fi + mobile pills for the built-in clients.
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users
