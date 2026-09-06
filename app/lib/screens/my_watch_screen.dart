@@ -416,10 +416,10 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                     X0xCellularGate.instance.isPaused(X0xAgent.myWatch)
                         ? 'My W@tch is paused while on mobile data — '
                             'sync resumes on Wi-Fi (change this under '
-                            'Settings → Network → Mobile data).'
+                            'Settings → Network → Data).'
                         : 'My W@tch is switched off — nothing syncs '
                             'until you turn it back on in Settings → '
-                            'Built-in clients.',
+                            'Network → Data.',
                     style: TextStyle(fontSize: 13, color: t.boneDim),
                   ),
                 ),

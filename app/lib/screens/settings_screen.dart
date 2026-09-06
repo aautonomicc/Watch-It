@@ -2,28 +2,26 @@ import 'dart:async';
 import 'dart:io' show exit;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
 import '../services/bundle.dart' show kTmdbAttributionNotice;
-import '../services/channels_api.dart';
 import '../services/download_manager.dart';
 import '../services/library_store.dart';
 import '../services/embedded_client.dart';
 import '../services/exit_info.dart';
 import '../services/metadata_service.dart';
-import '../services/my_watch_api.dart';
 import '../services/network_pause.dart';
 import '../services/storage_usage.dart';
 import '../services/update_check.dart';
 import '../theme/tokens.dart';
 import '../widgets/brand_mark.dart';
-import 'builtin_clients_screen.dart';
+import '../widgets/messenger.dart';
 import 'channels_screen.dart';
-import 'data_saving_screen.dart';
-import 'data_usage_screen.dart';
+import 'data_screen.dart';
 import 'downloads_screen.dart';
 import 'exit_info_screen.dart';
 import 'media_lists_screen.dart';
@@ -42,104 +40,55 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   List<MediaList>? _lists;
-  ClientHealth? _health;
   String? _version;
-  Timer? _healthTimer;
   int _bufferSizeMb = AppSettings.defaultBufferSizeMb;
   TmdbKeySource _tmdbKeySource = TmdbKeySource.none;
   int? _dataSizeBytes;
   bool _dataSizeKnown = false;
   bool _updateCheckEnabled = true;
 
-  /// The two x0x switches, for the Built-in x0x client tile's subtitle
-  /// (null until the statuses have answered).
-  bool? _myWatchOn;
-  bool? _channelsOn;
-
-  /// Formatted period total for the Data usage tile's subtitle (null
-  /// while unknown / client unavailable).
+  /// Formatted period total for the Data tile's subtitle (null while
+  /// unknown / client unavailable).
   String? _dataUsageTotal;
+
+  /// Network-stack versions for the About section's Version details
+  /// (null on an old core / while the client is unavailable — then the
+  /// Version tile stays a plain row).
+  ClientVersions? _stackVersions;
 
   @override
   void initState() {
     super.initState();
     _reload();
     _loadVersion();
+    // Versions never change while the process runs — fetch once.
+    EmbeddedClient.versions().then((v) {
+      if (mounted) setState(() => _stackVersions = v);
+    });
     UpdateCheck.enabled().then((v) {
       if (mounted) setState(() => _updateCheckEnabled = v);
     });
     _loadDataSize();
-    _scheduleHealthPoll();
     DownloadManager.instance.ensureLoaded();
-  }
-
-  @override
-  void dispose() {
-    _healthTimer?.cancel();
-    super.dispose();
-  }
-
-  /// Keep the status tile live: fast poll while connecting, relaxed once
-  /// ready (localhost call, so polling is cheap).
-  void _scheduleHealthPoll() {
-    _healthTimer = Timer(
-      Duration(seconds: _health?.state == 'ready' ? 15 : 3),
-      () async {
-        await _refreshHealth();
-        if (mounted && _health?.state != 'unavailable') _scheduleHealthPoll();
-      },
-    );
   }
 
   Future<void> _reload() async {
     final lists = await LibraryStore.load();
-    final health = await EmbeddedClient.health();
     final bufferSizeMb = await AppSettings.bufferSizeMb();
     final tmdbKeySource = await AppSettings.tmdbKeySource();
     await NetworkPause.instance.ensureLoaded();
-    // The x0x switches, for the tile subtitle. Best-effort: an
-    // unreachable embedded client just leaves the subtitle generic.
-    bool? myWatchOn;
-    bool? channelsOn;
-    try {
-      myWatchOn = (await MyWatchApi().status()).enabled;
-    } catch (_) {}
-    try {
-      channelsOn = (await ChannelsApi().status()).enabled;
-    } catch (_) {}
-    // Data usage tile subtitle: the running period total (also
-    // best-effort — null keeps the generic wording).
+    // Data tile subtitle: the running period total (best-effort —
+    // null keeps the generic wording).
     final usage = await EmbeddedClient.stats();
     if (mounted) {
       setState(() {
         _lists = lists;
-        _health = health;
         _bufferSizeMb = bufferSizeMb;
         _tmdbKeySource = tmdbKeySource;
-        _myWatchOn = myWatchOn;
-        _channelsOn = channelsOn;
         _dataUsageTotal =
             usage == null ? null : formatBytes(usage.total.total);
       });
     }
-  }
-
-  /// Autonomi status plus the x0x switches once known (Channels first —
-  /// the CONTENT section's order); just the status before that.
-  String get _builtInClientsSubtitle {
-    final health = _health?.label ?? 'Checking…';
-    final mw = _myWatchOn;
-    final ch = _channelsOn;
-    if (mw == null || ch == null) return health;
-    return '$health · Channels ${ch ? 'on' : 'off'} · '
-        'My W@tch ${mw ? 'on' : 'off'}';
-  }
-
-  Future<void> _openBuiltInClients() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const BuiltInClientsScreen()),
-    );
-    await _reload();
   }
 
   Future<void> _loadVersion() async {
@@ -151,11 +100,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (_) {
       // Platform channel unavailable (tests, bare desktop builds).
     }
-  }
-
-  Future<void> _refreshHealth() async {
-    final health = await EmbeddedClient.health();
-    if (mounted) setState(() => _health = health);
   }
 
   Future<void> _pickBufferSize() async {
@@ -348,6 +292,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() {});
   }
 
+  Widget _versionRow(WiTokens t, String name, String version) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(name,
+                  style: TextStyle(color: t.boneDim, fontSize: 12.5)),
+            ),
+            Text(
+              version,
+              style: TextStyle(
+                  color: t.bone, fontSize: 12.5, fontFamily: 'monospace'),
+            ),
+          ],
+        ),
+      );
+
+  /// Everything a bug report wants, one clipboard payload.
+  Future<void> _copyVersions() async {
+    final v = _stackVersions;
+    await Clipboard.setData(ClipboardData(
+      text: [
+        'W@tch ${_version ?? 'unknown'}',
+        if (v != null) ...[
+          'ant-core ${v.antCore}',
+          'x0x ${v.x0x}',
+          'saorsa-core ${v.saorsaCore}',
+          'saorsa-gossip ${v.saorsaGossip}',
+          'ant-quic ${v.antQuic}',
+        ],
+      ].join('\n'),
+    ));
+    wiMessengerKey.currentState?.showSnackBar(
+      const SnackBar(content: Text('Versions copied')),
+    );
+  }
+
   static String _themeModeLabel(ThemeMode mode) => switch (mode) {
         ThemeMode.dark => 'Dark  ·  default',
         ThemeMode.light => 'Light',
@@ -517,37 +498,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     value: NetworkPause.instance.paused,
                     onChanged: (v) async {
                       await NetworkPause.instance.setPaused(v);
-                      await _refreshHealth();
-                      await _reload(); // clients subtitle follows the agents
+                      await _reload();
                     },
                   ),
                 ),
-                // Data usage: what the app has moved this period, total
-                // and per component — the in-app answer to the
-                // wi-netmon capture sessions.
+                // Data: one page for everything data (2026-09-06 reorg
+                // — absorbed the Data usage, Data saving, Mobile data
+                // and Built-in clients sub-pages): usage counters on
+                // top, then auto-pause when idle, the built-in clients
+                // with their Off / Wi-Fi / Wi-Fi + mobile pills, and
+                // the streaming/download mobile-data policies.
                 ListTile(
                   leading: Icon(Icons.data_usage, color: t.accent),
-                  title: Text('Data usage',
+                  title: Text('Data',
                       style: TextStyle(color: t.bone, fontSize: 15)),
                   subtitle: Text(
                     _dataUsageTotal == null
-                        ? 'Per-component up/down totals'
-                        : '$_dataUsageTotal this period',
+                        ? 'Usage, auto-pause, and the built-in clients'
+                        : '$_dataUsageTotal this period · auto-pause · '
+                            'built-in clients',
                     style: TextStyle(color: t.ash, fontSize: 12),
                   ),
                   trailing: Icon(Icons.chevron_right, color: t.ash),
                   onTap: () async {
                     await Navigator.of(context).push(
-                      MaterialPageRoute(
-                          builder: (_) => const DataUsageScreen()),
+                      MaterialPageRoute(builder: (_) => const DataScreen()),
                     );
                     await _reload(); // subtitle follows a reset
                   },
                 ),
-                // Then Buffer size (2026-08-30, moved in from the former
-                // STREAMING section), then the two embedded network
-                // clients: Autonomi streams/downloads media, x0x carries
-                // My W@tch and Channels gossip.
+                // Then Buffer size (2026-08-30, moved in from the
+                // former STREAMING section) closes the section.
                 ListTile(
                   leading: Icon(Icons.memory_outlined, color: t.accent),
                   title: Text('Buffer size',
@@ -569,39 +550,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     'effect the next time you press Play.',
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
-                ),
-                // Data saving groups the automatic quiet-time rules
-                // (auto-pause when idle + the mobile-data policies) on
-                // one sub-page — the 2026-09-05 reorg that unclutters
-                // this section.
-                ListTile(
-                  leading: Icon(Icons.data_saver_on_outlined,
-                      color: t.accent),
-                  title: Text('Data saving',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
-                  subtitle: Text(
-                    'Auto-pause when idle · mobile data rules',
-                    style: TextStyle(color: t.ash, fontSize: 12),
-                  ),
-                  trailing: Icon(Icons.chevron_right, color: t.ash),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                        builder: (_) => const DataSavingScreen()),
-                  ),
-                ),
-                // The two embedded network clients merged behind one
-                // door (2026-09-05 reorg): Autonomi status, the x0x
-                // feature switches, and the compiled-in versions.
-                ListTile(
-                  leading: Icon(Icons.cloud_outlined, color: t.accent),
-                  title: Text('Built-in clients',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
-                  subtitle: Text(
-                    _builtInClientsSubtitle,
-                    style: TextStyle(color: t.ash, fontSize: 12),
-                  ),
-                  trailing: Icon(Icons.chevron_right, color: t.ash),
-                  onTap: _openBuiltInClients,
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
@@ -750,15 +698,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ],
                   ),
                 ),
-                ListTile(
-                  leading: Icon(Icons.info_outline, color: t.accent),
-                  title: Text('Version',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
-                  subtitle: Text(
-                    _version ?? 'Unknown',
-                    style: TextStyle(color: t.ash, fontSize: 12),
+                // Version details live here since the 2026-09-06 reorg
+                // (moved off the old Built-in clients page): the app
+                // version with the compiled-in network stack behind an
+                // expansion (values from `GET /versions`, baked out of
+                // Cargo.lock at build time — never hardcoded here). An
+                // old core without the route keeps the plain row.
+                if (_stackVersions == null)
+                  ListTile(
+                    leading: Icon(Icons.info_outline, color: t.accent),
+                    title: Text('Version',
+                        style: TextStyle(color: t.bone, fontSize: 15)),
+                    subtitle: Text(
+                      _version ?? 'Unknown',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                  )
+                else
+                  ExpansionTile(
+                    leading: Icon(Icons.info_outline, color: t.accent),
+                    title: Text('Version',
+                        style: TextStyle(color: t.bone, fontSize: 15)),
+                    subtitle: Text(
+                      '${_version ?? 'Unknown'} · network stack details',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                    iconColor: t.ash,
+                    collapsedIconColor: t.ash,
+                    childrenPadding: const EdgeInsets.only(bottom: 8),
+                    children: [
+                      _versionRow(t, 'App', _version ?? 'unknown'),
+                      _versionRow(t, 'ant-core', _stackVersions!.antCore),
+                      _versionRow(t, 'x0x', _stackVersions!.x0x),
+                      _versionRow(
+                          t, 'saorsa-core', _stackVersions!.saorsaCore),
+                      _versionRow(
+                          t, 'saorsa-gossip', _stackVersions!.saorsaGossip),
+                      _versionRow(t, 'ant-quic', _stackVersions!.antQuic),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+                          child: TextButton.icon(
+                            onPressed: _copyVersions,
+                            icon:
+                                Icon(Icons.copy, size: 16, color: t.accent),
+                            label: Text('Copy versions',
+                                style: TextStyle(
+                                    color: t.accent, fontSize: 13)),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
                 // Android-only: the OS's record of why the app last
                 // closed — lets a device without adb report a crash.
                 if (ExitInfoService.instance.supported)
