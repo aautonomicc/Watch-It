@@ -271,7 +271,7 @@ LAN plus public bootstrap for remote devices), implemented in
   now. Devices must be online *together* for changes to travel — there is
   no relay in the middle, by design.
 
-### Channels — public signed media lists (2026-08-27, unreleased)
+### Channels — public signed media lists (shipped 2026-08-27, v0.1.0-alpha.65)
 
 The PUBLIC content space (docs/PLAN-personal-vs-channels.md; My W@tch +
 Upload are the private space). A **channel** is an Ed25519 identity:
