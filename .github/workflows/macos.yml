@@ -1,0 +1,66 @@
+name: macOS build
+
+# Runs on release tags (like the Windows zip) and on manual dispatch for
+# ad-hoc builds. Produces an UNSIGNED ad-hoc-signed .dmg — first-run needs
+# right-click → Open (or `xattr -d com.apple.quarantine`) to pass
+# Gatekeeper; a real signing cert is a beta/1.0 concern. The Rust core is
+# built for BOTH arches and lipo'd so the dmg runs on Apple Silicon and
+# Intel Macs alike (flutter build macos is universal by default).
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/watchit_core
+      - name: Build watchit_core (Rust cdylib, universal)
+        working-directory: native/watchit_core
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build --release --lib --target aarch64-apple-darwin
+          cargo build --release --lib --target x86_64-apple-darwin
+          lipo -create -output libwatchit_core.dylib \
+            target/aarch64-apple-darwin/release/libwatchit_core.dylib \
+            target/x86_64-apple-darwin/release/libwatchit_core.dylib
+          lipo -info libwatchit_core.dylib
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.6
+          cache: true
+      - name: Build Flutter macOS app
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build macos --release
+      # The Rust core isn't wired into the Xcode project; it's bundled
+      # post-build (embedded_client.dart dlopens Contents/Frameworks/
+      # explicitly). Adding a file breaks the build's ad-hoc seal, so the
+      # whole bundle is re-signed ad-hoc afterwards.
+      - name: Bundle Rust core and re-sign
+        run: |
+          APP="app/build/macos/Build/Products/Release/W@tch.app"
+          test -d "$APP"
+          mkdir -p "$APP/Contents/Frameworks"
+          cp native/watchit_core/libwatchit_core.dylib "$APP/Contents/Frameworks/"
+          codesign --force --sign - "$APP/Contents/Frameworks/libwatchit_core.dylib"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP"
+      - name: Create dmg
+        run: |
+          mkdir dmg-root
+          cp -R "app/build/macos/Build/Products/Release/W@tch.app" dmg-root/
+          ln -s /Applications dmg-root/Applications
+          hdiutil create -volname "W@tch" -srcfolder dmg-root -ov \
+            -format UDZO Watch-It-macos.dmg
+          ls -lh Watch-It-macos.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Watch-It-macos
+          path: Watch-It-macos.dmg
