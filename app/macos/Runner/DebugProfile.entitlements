@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Sandbox off on purpose: W@tch ships as an unsigned .dmg outside the
+	     App Store, runs an embedded localhost streaming server, bundles the
+	     Rust core dylib post-build, and writes downloads to the real
+	     Downloads folder — same behaviour as the Linux/Windows builds.
+	     Revisit if App Store distribution ever matters. -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+</dict>
+</plist>

@@ -83,21 +83,29 @@ class EmbeddedClient {
   /// (the loader search path covers the exe dir), and on Linux when the
   /// loader path covers it (e.g. the AppImage's AppRun); desktop builds
   /// also carry the library next to the executable — Linux in the
-  /// bundle's lib/ dir, Windows beside the .exe — so fall back to that
-  /// explicit path.
+  /// bundle's lib/ dir, Windows beside the .exe, macOS in the .app's
+  /// Contents/Frameworks/ (plain dlopen doesn't search it) — so fall
+  /// back to that explicit path.
   static DynamicLibrary? _openLibrary() {
-    final name =
-        Platform.isWindows ? 'watchit_core.dll' : 'libwatchit_core.so';
+    final name = Platform.isWindows
+        ? 'watchit_core.dll'
+        : Platform.isMacOS
+            ? 'libwatchit_core.dylib'
+            : 'libwatchit_core.so';
     try {
       return DynamicLibrary.open(name);
     } catch (_) {
-      if (!Platform.isLinux && !Platform.isWindows) return null;
+      if (!Platform.isLinux && !Platform.isWindows && !Platform.isMacOS) {
+        return null;
+      }
     }
     try {
       final exeDir = File(Platform.resolvedExecutable).parent.path;
       final path = Platform.isWindows
           ? '$exeDir\\watchit_core.dll'
-          : '$exeDir/lib/libwatchit_core.so';
+          : Platform.isMacOS
+              ? '$exeDir/../Frameworks/libwatchit_core.dylib'
+              : '$exeDir/lib/libwatchit_core.so';
       return DynamicLibrary.open(path);
     } catch (_) {
       return null;
