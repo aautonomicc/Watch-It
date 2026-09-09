@@ -35,12 +35,12 @@ Want this exact library? It's a one-file download:
 films and episodes, posters and descriptions included, ready to import.
 
 <p>
-  <img src="docs/screenshots/detail-linux.jpg" width="49%" alt="Night of the Living Dead detail page in W@tch — poster, rating, version picker, Play and Download buttons, favourite heart" />
+  <img src="docs/screenshots/detail-linux.jpg" width="49%" alt="Big Buck Bunny detail page in W@tch — poster, rating, version picker, Play and Download buttons, favourite heart" />
   <img src="docs/screenshots/season-linux.jpg" width="49%" alt="One Step Beyond Season 1 in W@tch — season poster, rating, Download season button, and the episode list with stills and descriptions" />
 </p>
 
-*Left — a film's detail page: pick between uploads of the same film (here 480p
-or 1080p), stream it with Play, save it for offline with Download, or heart it
+*Left — a film's detail page: pick between uploads of the same film (here 1080p,
+720p or 480p), stream it with Play, save it for offline with Download, or heart it
 into the Favourites row. Right — a season page: every episode with stills, air
 dates and descriptions, plus a one-tap Download season.*
 
