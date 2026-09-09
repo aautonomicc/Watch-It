@@ -15,20 +15,37 @@ import '../theme/tokens.dart';
 import 'channel_avatar.dart';
 import 'drawer_status.dart';
 
+/// Width of the pinned side-panel variant of the drawer (a touch
+/// narrower than the modal drawer's 304 default — it shares the window
+/// with the poster wall permanently).
+const double kPinnedDrawerWidth = 290;
+
+/// Minimum window width (logical px) at which the home screen pins the
+/// drawer open on desktop. Below it — a squeezed desktop window, or any
+/// mobile screen — home falls back to the modal far-right-burger layout,
+/// so the panel can never crowd out the wall.
+const double kPinnedDrawerMinWindowWidth = 1000;
+
 /// Modal left drawer for hopping between browsable lists (the enabled
 /// user lists). Mounted on the home screen and on every list page
 /// (there, [currentListId] marks the open list and navigation replaces
-/// the page instead of stacking).
+/// the page instead of stacking). With [pinned] the same content renders
+/// as a fixed side panel instead (wide desktop home windows): no Drawer
+/// chrome, and navigation stops popping — there is no modal to close.
 class WiLibraryDrawer extends StatefulWidget {
   const WiLibraryDrawer({
     super.key,
     this.currentListId,
+    this.pinned = false,
     this.healthProvider,
     this.channelsStatusProvider,
   });
 
   /// Id of the list page the drawer is mounted on; null on home.
   final String? currentListId;
+
+  /// Render as a permanent side panel instead of a modal drawer.
+  final bool pinned;
 
   /// Test override for [EmbeddedClient.health] (status rows).
   final Future<ClientHealth> Function()? healthProvider;
@@ -64,7 +81,7 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
 
   void _openList(MediaList list) {
     final navigator = Navigator.of(context);
-    navigator.pop(); // close the drawer
+    if (!widget.pinned) navigator.pop(); // close the modal drawer
     if (list.id == widget.currentListId) return;
     final route =
         MaterialPageRoute<void>(builder: (_) => ListHomeScreen(list: list));
@@ -78,7 +95,7 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
 
   void _openPage(Widget page) {
     final navigator = Navigator.of(context);
-    navigator.pop();
+    if (!widget.pinned) navigator.pop();
     navigator.push(MaterialPageRoute<void>(builder: (_) => page));
   }
 
@@ -93,9 +110,20 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
-    return Drawer(
-      backgroundColor: t.ink,
-      child: SafeArea(
+    final content = _content(t);
+    // Pinned: a plain fixed-width Material — Drawer chrome (elevation,
+    // end-side rounding) belongs to the modal overlay, not a panel.
+    if (widget.pinned) {
+      return Material(
+        color: t.ink,
+        child: SizedBox(width: kPinnedDrawerWidth, child: content),
+      );
+    }
+    return Drawer(backgroundColor: t.ink, child: content);
+  }
+
+  Widget _content(WiTokens t) {
+    return SafeArea(
         // Titles refine as TMDB matches land elsewhere in the app.
         child: ListenableBuilder(
           listenable: MetadataService.instance,
@@ -174,7 +202,6 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
             );
           },
         ),
-      ),
     );
   }
 }
