@@ -20,6 +20,7 @@ import 'package:watchit/services/embedded_client.dart';
 import 'package:watchit/services/import_review.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata.dart';
+import 'package:watchit/services/profiles.dart';
 import 'package:watchit/services/watch_state.dart';
 import 'package:watchit/theme/tokens.dart';
 import 'package:watchit_upload/watchit_upload.dart' as cli;
@@ -892,6 +893,112 @@ void main() {
 
       expect(find.text('Not connected'), findsNothing);
       expect(find.textContaining('Imported "My Films"'), findsOneWidget);
+    });
+  });
+
+  group('Family export/import (profiles)', () {
+    Uint8List familyBundle() => _zipOf({
+          'datamaps/Fam Movie (2024).mkv.datamap': [0x66],
+          'profiles.json': utf8.encode(jsonEncode({
+            'version': 1,
+            'profiles': [
+              {
+                'name': 'Ellie',
+                'kind': 'kid',
+                'allowedLists': ['pack'],
+                'history': [
+                  {
+                    'member': 'Fam Movie (2024).mkv.datamap',
+                    'positionMs': 60000,
+                    'durationMs': 120000,
+                    'completed': false,
+                    'updatedAt': 5000,
+                  },
+                ],
+              },
+            ],
+          })),
+        });
+
+    testWidgets(
+        'the library export dialog offers Include profiles; the '
+        'per-list export dialog does not', (tester) async {
+      await LibraryStore.save([
+        MediaList(id: '1', title: 'My Films', entries: [
+          MediaEntry(
+              name: 'First Movie (2024).mkv',
+              address: FakeEmbeddedHttp.addrForByte(5)),
+        ]),
+      ]);
+      await openMediaLists(tester);
+      await tester.tap(find.byTooltip('Export library'));
+      await tester.pumpAndSettle();
+      expect(find.text('Include profiles'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('List options'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Export'));
+      await tester.pumpAndSettle();
+      expect(find.text('Include watch history'), findsOneWidget);
+      expect(find.text('Include profiles'), findsNothing);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+        'a bundle with profiles asks first; importing merges the '
+        'profile with its allow-list and history', (tester) async {
+      ProfileStore.instance = ProfileStore();
+      FileSelectorPlatform.instance = _FakeFileSelector([
+        XFile.fromData(familyBundle(), path: 'pack.watch-list'),
+      ]);
+      await openMediaLists(tester);
+      await importLocal(tester);
+
+      expect(find.text('This bundle also contains'), findsOneWidget);
+      expect(find.textContaining('Profiles (1 profile)'), findsOneWidget);
+      await tester.tap(find.text('Import'));
+      await tester.pumpAndSettle();
+
+      final store = ProfileStore.instance;
+      final ellie =
+          store.profiles.firstWhere((p) => p.name == 'Ellie');
+      expect(ellie.isKid, isTrue);
+      // The allow-list title resolved to the just-imported list's id.
+      final pack = (await LibraryStore.load())
+          .firstWhere((l) => l.title == 'pack');
+      expect(await store.allowedListIds(ellie.id), {pack.id});
+      // Her history landed on HER profile, not the admin's.
+      final db = await LibraryStore.database();
+      final rows = await db.select(db.watchStates).get();
+      expect(rows.single.profileId, ellie.id);
+      expect(rows.single.positionMs, 60000);
+      // The profiles snackbar queues behind the import one.
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.textContaining('Profiles: 1 added'), findsOneWidget);
+    });
+
+    testWidgets('unchecking Profiles imports the list but no profile',
+        (tester) async {
+      ProfileStore.instance = ProfileStore();
+      FileSelectorPlatform.instance = _FakeFileSelector([
+        XFile.fromData(familyBundle(), path: 'pack.watch-list'),
+      ]);
+      await openMediaLists(tester);
+      await importLocal(tester);
+
+      await tester.tap(find.textContaining('Profiles (1 profile)'));
+      await tester.pump();
+      await tester.tap(find.text('Import'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Imported "pack"'), findsOneWidget);
+      expect(
+          ProfileStore.instance.profiles.where((p) => p.name == 'Ellie'),
+          isEmpty);
     });
   });
 }
