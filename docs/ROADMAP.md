@@ -1,5 +1,11 @@
 # Roadmap
 
+**Unreleased (2026-09-09):** the built-in seed catalog swapped Night of
+the Living Dead for **Big Buck Bunny (2008)** in three quality tiers
+(CC-BY 3.0 Blender Foundation, attribution in the seeded description;
+fresh installs and factory resets only — existing installs keep what
+they seeded; see [SEED-CATALOG.md](SEED-CATALOG.md)).
+
 **Status (2026-09-06):** latest release is **v0.1.0-alpha.92**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
 and every release since alpha.55 ships a signed APK, a Linux AppImage,

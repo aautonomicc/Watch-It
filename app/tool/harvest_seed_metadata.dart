@@ -17,6 +17,16 @@ import 'package:watchit/services/metadata.dart';
 import 'package:watchit/services/seed_catalog.dart';
 import 'package:watchit/services/tmdb_client.dart';
 
+/// Licence attribution appended to a seeded title's overview. Big Buck
+/// Bunny is CC-BY 3.0 (not public domain) — shipping it as a seed
+/// requires crediting the Blender Foundation wherever the description
+/// shows.
+const kOverviewAttribution = <String, String>{
+  'imdb:tt1254207': '\n\n© 2008 Blender Foundation | www.bigbuckbunny.org — '
+      'made by the Blender Institute, licensed under the Creative Commons '
+      'Attribution 3.0 licence.',
+};
+
 Future<void> main() async {
   final apiKey = Platform.environment['TMDB_API_KEY'] ?? '';
   if (apiKey.isEmpty) {
@@ -78,11 +88,14 @@ Future<void> main() async {
                 match.stillPath,
                 '${id}_s${match.season}e${match.episode}_still.jpg',
                 client.fetchStill);
+        final attribution = kOverviewAttribution[key] ?? '';
         rows.add({
           'lookupKey': key,
           'title': match.title,
           'year': match.year,
-          'overview': match.overview,
+          'overview': match.overview == null
+              ? (attribution.isEmpty ? null : attribution.trim())
+              : '${match.overview}$attribution',
           'category': match.category,
           'episodeLabel': match.episodeLabel,
           'posterFile': poster,

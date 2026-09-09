@@ -39,30 +39,36 @@ class SeedList {
   final List<SeedEntry> entries;
 }
 
-/// The built-in catalog seeded on first run: the two Night of the Living
-/// Dead uploads (verified public-domain, uploaded 2026-08-07 from an
-/// archive.org source + the project's own 1080p re-encode). Trimmed from
-/// the full 48-title PD catalog shipped in alpha.48–.50 (see
-/// docs/SEED-CATALOG.md — the old uploads remain live on the network;
-/// existing installs keep whatever they already seeded). The Movies list
-/// reuses the pre-v4 default list id so upgraded installs merge into
-/// their existing list.
+/// The built-in catalog seeded on first run: Big Buck Bunny (2008) in
+/// three quality tiers — the official Blender "sunflower" 1080p release
+/// uploaded as-is plus the project's own 720p/480p encodes (the app's
+/// exact Publish tier settings), uploaded 2026-09-09. Replaces the two
+/// NOTLD uploads seeded alpha.51–.92 (see docs/SEED-CATALOG.md — the
+/// NOTLD uploads remain live on the network; existing installs keep
+/// whatever they already seeded). BBB is CC-BY 3.0 Blender Foundation,
+/// not public domain: it is seeded ONLY (never exported to
+/// catalog/*.watch-list) and its seeded description carries the
+/// attribution. The Movies list reuses the pre-v4 default list id so
+/// upgraded installs merge into their existing list.
 const kSeedLists = <SeedList>[
   SeedList(id: 'default-test-movies', title: 'Movies', entries: [
     SeedEntry(
-      kDefaultMovieName,
-      kDefaultMovieAddress,
-      sizeBytes: 597585042,
-      videoInfo: '480p H.264',
-    ),
-    // Second upload of the same film under the identical network file
-    // name: the genuine-1080p re-encode that was the default movie up to
-    // alpha.47. Size/format info is what tells the two apart in the UI.
-    SeedEntry(
-      kDefaultMovieName,
-      kDefaultMovie1080Address,
-      sizeBytes: 5682464056,
+      kSeedMovie1080Name,
+      kSeedMovie1080Address,
+      sizeBytes: 276134947,
       videoInfo: '1080p H.264',
+    ),
+    SeedEntry(
+      kSeedMovie720Name,
+      kSeedMovie720Address,
+      sizeBytes: 205139247,
+      videoInfo: '720p H.264',
+    ),
+    SeedEntry(
+      kSeedMovie480Name,
+      kSeedMovie480Address,
+      sizeBytes: 86052285,
+      videoInfo: '480p H.264',
     ),
   ]),
 ];
@@ -72,6 +78,7 @@ const kSeedLists = <SeedList>[
 /// full merge, so [LibraryStore.ensureSeedAdditions] delivers exactly
 /// these addresses to them behind its own one-time flag. Fresh (and
 /// pre-v4) installs get them through the normal [kSeedLists] merge.
-const kSeedAdditionAddresses = [
-  kDefaultMovie1080Address,
-];
+/// Empty since the BBB swap: existing installs deliberately get nothing
+/// (they keep their seeded NOTLD; BBB is fresh-installs-only, and every
+/// addition address must be a [kSeedLists] member).
+const kSeedAdditionAddresses = <String>[];

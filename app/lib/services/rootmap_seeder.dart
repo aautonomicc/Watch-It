@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/services.dart' show rootBundle;
 
 import 'embedded_client.dart';
+import 'metadata.dart';
 import 'seed_catalog.dart';
 
 /// Seeds the embedded client's root-map store with data maps bundled as
@@ -17,13 +18,26 @@ import 'seed_catalog.dart';
 /// while connected before it can play. Idempotent and fully offline;
 /// safe to fire-and-forget at startup.
 
+/// Root maps of titles seeded by OLDER releases that still ship as
+/// assets: existing installs keep their seeded NOTLD entries, and the
+/// play path serves locally stored maps only — so if such an install
+/// ever loses its map store (data-dir wipe without a prefs wipe) these
+/// let it re-seed offline instead of 404ing. Never added to the library
+/// by current code.
+const kLegacyBundledRootMapAddresses = [
+  kDefaultMovieAddress,
+  kDefaultMovie1080Address,
+];
+
 /// Addresses whose resolved root map ships inside the app: every entry
-/// of the seeded catalog. The asset for an address must exist at
-/// [bundledRootMapAsset] (a test asserts this, so a catalog change
-/// cannot silently ship a stale or missing map).
+/// of the seeded catalog, plus legacy seeds kept for existing installs.
+/// The asset for an address must exist at [bundledRootMapAsset] (a test
+/// asserts this, so a catalog change cannot silently ship a stale or
+/// missing map).
 final List<String> kBundledRootMapAddresses = [
   for (final list in kSeedLists)
     for (final entry in list.entries) entry.address,
+  ...kLegacyBundledRootMapAddresses,
 ];
 
 /// Asset path of the bundled root map for [address].

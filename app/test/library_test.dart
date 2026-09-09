@@ -441,7 +441,7 @@ void main() {
   });
 
   group('Default seeding', () {
-    test('seeds the full public-domain catalog once', () async {
+    test('seeds the built-in catalog once', () async {
       await LibraryStore.ensureDefaults();
       final lists = await LibraryStore.load();
       for (final seed in kSeedLists) {
@@ -455,7 +455,8 @@ void main() {
       final movies = lists.singleWhere((l) => l.title == 'Movies');
       expect(
         movies.entries.where((e) =>
-            e.address == kDefaultMovieAddress && e.name == kDefaultMovieName),
+            e.address == kSeedMovie1080Address &&
+            e.name == kSeedMovie1080Name),
         hasLength(1),
       );
     });
@@ -467,7 +468,8 @@ void main() {
           id: 'mine',
           title: 'My Films',
           entries: [
-            MediaEntry(name: kDefaultMovieName, address: kDefaultMovieAddress),
+            MediaEntry(
+                name: kSeedMovie1080Name, address: kSeedMovie1080Address),
           ],
         ),
       ]);
@@ -478,7 +480,7 @@ void main() {
       expect(
         lists
             .expand((l) => l.entries)
-            .where((e) => e.address == kDefaultMovieAddress),
+            .where((e) => e.address == kSeedMovie1080Address),
         hasLength(1),
       );
       final movies = lists.singleWhere((l) => l.title == 'Movies');
@@ -525,11 +527,11 @@ void main() {
       expect(await LibraryStore.load(), isEmpty);
     });
 
-    test('a pre-v4 install keeps the held 1080p re-encode in place',
+    test('a pre-v4 install keeps the held NOTLD re-encode in place',
         () async {
-      // The 5.68GB re-encode was the default up to alpha.47 and is a
-      // catalog entry again — it must NOT be rewritten like the truly
-      // stale addresses, and the merge must not duplicate it.
+      // The 5.68GB NOTLD re-encode was the default up to alpha.47 and a
+      // seed entry through alpha.92 — it must NOT be rewritten like the
+      // truly stale addresses, and the BBB catalog seeds around it.
       await LibraryStore.save([
         const MediaList(
           id: 'default-test-movies',
@@ -550,10 +552,11 @@ void main() {
       );
       final seedMovies =
           kSeedLists.singleWhere((l) => l.id == 'default-test-movies');
-      expect(movies.entries, hasLength(seedMovies.entries.length));
-      // The file-info backfill annotates the held copy on the same pass.
-      expect(movies.entries.first.sizeBytes, 5682464056);
-      expect(movies.entries.first.videoInfo, '1080p H.264');
+      // Held NOTLD + the whole BBB catalog merged in around it.
+      expect(movies.entries, hasLength(seedMovies.entries.length + 1));
+      // NOTLD left the catalog, so the file-info backfill no longer
+      // annotates it — the held copy is untouched.
+      expect(movies.entries.first.sizeBytes, isNull);
     });
 
     for (final legacy in kLegacyDefaultMovieAddresses) {
@@ -573,16 +576,18 @@ void main() {
         await LibraryStore.ensureDefaults();
         final lists = await LibraryStore.load();
         // The rename migration also applies on the same pass, and the
-        // rest of the catalog seeds around the migrated entry.
+        // catalog seeds around the migrated entry (which is no longer a
+        // catalog member itself since the BBB swap).
         final seeded = lists.singleWhere((l) => l.title == 'Movies');
         expect(seeded.entries.first.address, kDefaultMovieAddress);
         expect(seeded.entries.first.name, kDefaultMovieName);
         expect(
           seeded.entries,
           hasLength(kSeedLists
-              .singleWhere((l) => l.title == 'Movies')
-              .entries
-              .length),
+                  .singleWhere((l) => l.title == 'Movies')
+                  .entries
+                  .length +
+              1),
         );
         // Seeding does not duplicate the migrated entry.
         expect(
@@ -596,7 +601,9 @@ void main() {
   });
 
   group('Seed additions', () {
-    test('a v4-seeded install gains the addition next to its sibling',
+    test(
+        'a v4-seeded install gains nothing — additions are empty since '
+        'the BBB swap (existing installs keep their seeded NOTLD)',
         () async {
       SharedPreferences.setMockInitialValues({
         'defaults_seeded_v4': true,
@@ -611,56 +618,15 @@ void main() {
       ]);
       await LibraryStore.ensureDefaults();
       final movies = (await LibraryStore.load()).single;
-      expect(movies.entries, hasLength(3));
-      final added = movies.entries[1];
-      expect(added.address, kDefaultMovie1080Address);
-      expect(added.name, kDefaultMovieName);
-      expect(added.sizeBytes, 5682464056);
-      expect(added.videoInfo, '1080p H.264');
+      expect(kSeedAdditionAddresses, isEmpty);
+      expect(movies.entries, hasLength(2));
+      expect(movies.entries.first.address, kDefaultMovieAddress);
+      expect(
+        movies.entries.map((e) => e.address),
+        isNot(contains(kSeedMovie1080Address)),
+      );
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getBool('seed_additions_v1'), isTrue);
-    });
-
-    test('appends at the end when the sibling entry is gone', () async {
-      SharedPreferences.setMockInitialValues({
-        'defaults_seeded_v4': true,
-      'terms_accepted_version_v1': kTermsVersion,
-        'seed_fileinfo_v1': true,
-      });
-      await LibraryStore.save([
-        const MediaList(id: 'default-test-movies', title: 'Movies', entries: [
-          MediaEntry(name: 'Mine.mp4', address: _addr),
-        ]),
-      ]);
-      await LibraryStore.ensureDefaults();
-      final movies = (await LibraryStore.load()).single;
-      expect(movies.entries, hasLength(2));
-      expect(movies.entries.last.address, kDefaultMovie1080Address);
-    });
-
-    test('an addition the user already holds is not re-added', () async {
-      SharedPreferences.setMockInitialValues({
-        'defaults_seeded_v4': true,
-      'terms_accepted_version_v1': kTermsVersion,
-        'seed_fileinfo_v1': true,
-      });
-      await LibraryStore.save([
-        const MediaList(id: 'mine', title: 'My Films', entries: [
-          MediaEntry(
-              name: kDefaultMovieName, address: kDefaultMovie1080Address),
-        ]),
-        const MediaList(id: 'default-test-movies', title: 'Movies', entries: [
-          MediaEntry(name: kDefaultMovieName, address: kDefaultMovieAddress),
-        ]),
-      ]);
-      await LibraryStore.ensureDefaults();
-      final lists = await LibraryStore.load();
-      expect(
-        lists
-            .expand((l) => l.entries)
-            .where((e) => e.address == kDefaultMovie1080Address),
-        hasLength(1),
-      );
     });
 
     test('a deleted seed list is not recreated for an addition', () async {
@@ -713,15 +679,24 @@ void main() {
   });
 
   group('Metadata', () {
-    test('default movie resolves from the bundled catalog', () {
-      final meta = fallbackMetadataFor(const MediaEntry(
-        name: kDefaultMovieName,
-        address: kDefaultMovieAddress,
-      ));
-      expect(meta.title, 'Night of the Living Dead');
-      expect(meta.year, 1968);
-      expect(meta.overview, isNotNull);
-      expect(meta.posterAsset, 'assets/posters/notld_1968.jpg');
+    test('seeded movie resolves from the bundled catalog', () {
+      for (final address in [
+        kSeedMovie1080Address,
+        kSeedMovie720Address,
+        kSeedMovie480Address,
+      ]) {
+        final meta = fallbackMetadataFor(MediaEntry(
+          name: kSeedMovie1080Name,
+          address: address,
+        ));
+        expect(meta.title, 'Big Buck Bunny');
+        expect(meta.year, 2008);
+        // BBB is CC-BY 3.0, not public domain — the attribution must ride
+        // the description everywhere it shows.
+        expect(meta.overview, contains('Blender Foundation'));
+        expect(meta.overview, contains('Creative Commons Attribution'));
+        expect(meta.posterAsset, 'assets/posters/bbb_2008.jpg');
+      }
     });
 
     test('unknown address falls back to parsed file name', () {

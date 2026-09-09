@@ -19,8 +19,14 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('a bundled root-map asset exists for every seeded address '
-      '(especially the default movie)', () async {
+      '(catalog + legacy)', () async {
+    expect(kBundledRootMapAddresses, contains(kSeedMovie1080Address));
+    expect(kBundledRootMapAddresses, contains(kSeedMovie720Address));
+    expect(kBundledRootMapAddresses, contains(kSeedMovie480Address));
+    // Legacy NOTLD maps stay bundled so existing installs that lose
+    // their map store can still re-seed offline.
     expect(kBundledRootMapAddresses, contains(kDefaultMovieAddress));
+    expect(kBundledRootMapAddresses, contains(kDefaultMovie1080Address));
     for (final address in kBundledRootMapAddresses) {
       final data = await rootBundle.load(bundledRootMapAsset(address));
       expect(data.lengthInBytes, greaterThan(0),

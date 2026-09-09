@@ -6,6 +6,10 @@ Status: IMPLEMENTED 2026-08-09 (option A). The user resolved §2 on
 migration). Option B's `ensureSeedRemovals` was NOT built; it can be
 added later if removal-everywhere is ever wanted.
 
+SUPERSEDED 2026-09-09: the NOTLD seed itself was swapped for Big Buck
+Bunny (2008) in three quality tiers, same option-A rules (fresh
+installs only) — see docs/SEED-CATALOG.md.
+
 ## 1. Goal
 
 Next release ships a seed catalog containing ONLY the two Night of the
