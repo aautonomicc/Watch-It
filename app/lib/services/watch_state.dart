@@ -145,11 +145,14 @@ class WatchStateStore extends ChangeNotifier {
 
   /// Merge externally sourced states (a bundle's history.json, a My
   /// W@tch sync doc): newer-updatedAt-wins per address, so an import
-  /// never regresses local progress. Externally sourced states always
-  /// belong to the ADMIN profile — sync and imports are install-level
-  /// features; kid profiles' viewing stays on this device. Returns how
-  /// many rows were written.
-  Future<int> mergeAll(Iterable<WatchState> states) async {
+  /// never regresses local progress. Externally sourced states belong
+  /// to the ADMIN profile by default — sync and imports are
+  /// install-level features; the family import passes [profileId] to
+  /// land each profile's exported history on its merged profile.
+  /// Returns how many rows were written.
+  Future<int> mergeAll(Iterable<WatchState> states,
+      {String? profileId}) async {
+    final target = profileId ?? kAdminProfileId;
     final db = await LibraryStore.database();
     var written = 0;
     for (final state in states) {
@@ -158,7 +161,7 @@ class WatchStateStore extends ChangeNotifier {
           await (db.select(db.watchStates)..where(
                 (t) =>
                     t.address.equals(address) &
-                    t.profileId.equals(kAdminProfileId),
+                    t.profileId.equals(target),
               ))
               .getSingleOrNull();
       if (existing != null && existing.updatedAt >= state.updatedAt) {
@@ -169,7 +172,7 @@ class WatchStateStore extends ChangeNotifier {
           .insertOnConflictUpdate(
             WatchStatesCompanion.insert(
               address: address,
-              profileId: const Value(kAdminProfileId),
+              profileId: Value(target),
               positionMs: state.positionMs,
               durationMs: state.durationMs,
               completed: Value(state.completed),

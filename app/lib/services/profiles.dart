@@ -478,6 +478,26 @@ class ProfileStore extends ChangeNotifier {
     return true;
   }
 
+  /// The stored (hashed) admin recovery code — exported beside the
+  /// admin PIN by the family export so "Forgot PIN?" survives a move to
+  /// a new device. Null when no admin PIN (or code) is set.
+  Future<String?> adminRecoveryHash() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_recoveryKey);
+  }
+
+  /// Adopt an imported admin PIN hash and recovery-code hash TOGETHER
+  /// (they are a pair — the code recovers exactly this PIN). Only the
+  /// family import calls this, and only when the device admin has no
+  /// PIN of its own; both values are already salted hashes.
+  Future<void> adoptAdminPinPair(String pinHash, String recoveryHash) async {
+    final p = _profiles.firstWhere((p) => p.isAdmin);
+    await updateProfile(p.copyWith(pinHash: pinHash));
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_recoveryKey, recoveryHash);
+    await _clearFailures(p.id);
+  }
+
   static String _newRecoveryCode() {
     // No 0/O/1/I — the code gets read off a screen and typed back.
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';

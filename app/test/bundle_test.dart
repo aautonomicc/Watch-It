@@ -15,6 +15,7 @@ import 'package:watchit/services/bundle.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/list_import.dart';
 import 'package:watchit/services/metadata.dart';
+import 'package:watchit/services/profiles.dart';
 import 'package:watchit/services/watch_state.dart';
 
 const _addrA =
@@ -910,6 +911,126 @@ void main() {
           applyLibraryPrefs(
               lists, {'x'}, const {}),
           same(lists));
+    });
+  });
+
+  group('Family export (profiles member)', () {
+    test(
+        'includeProfiles adds profiles.json + avatar members, and '
+        'history.json carries ONLY the Admin profile — other profiles '
+        'travel per-profile inside profiles.json', () async {
+      ProfileStore.instance = ProfileStore();
+      ProfileStore.postersDirProvider = () async => postersDir;
+      addTearDown(() => ProfileStore.postersDirProvider = null);
+      final fake = await _FakeEmbedded.start();
+      addTearDown(() => fake.server.close(force: true));
+      fake.datamaps[_addrA] = [9, 9, 9];
+
+      final store = ProfileStore.instance;
+      await store.ensureLoaded();
+      final kid = await store.create(name: 'Ellie', kind: ProfileKind.kid);
+      final avatarName = await ProfileStore.saveAvatarImage(
+          kid.id, Uint8List.fromList([4, 5, 6]));
+      await store.updateProfile(kid.copyWith(avatar: avatarName));
+      await WatchStateStore.instance.mergeAll(const [
+        WatchState(
+          address: _addrA,
+          positionMs: 60000,
+          durationMs: 120000,
+          completed: false,
+          updatedAt: 5000,
+        ),
+      ]); // admin row
+      await WatchStateStore.instance.mergeAll(const [
+        WatchState(
+          address: _addrA,
+          positionMs: 30000,
+          durationMs: 120000,
+          completed: false,
+          updatedAt: 6000,
+        ),
+      ], profileId: kid.id);
+
+      final result = await buildBundle(
+        [_list],
+        const BundleExportOptions(
+            includeHistory: true, includeProfiles: true),
+        base: fake.base,
+        postersDirProvider: postersDirProvider,
+      );
+      final archive = ZipDecoder().decodeBytes(result.bytes);
+      final names = archive.files.map((f) => f.name).toSet();
+      expect(names, contains('profiles.json'));
+      expect(names, contains('profiles/$avatarName'));
+
+      // history.json = the admin's row only.
+      final history = jsonDecode(utf8.decode(archive.files
+              .firstWhere((f) => f.name == 'history.json')
+              .readBytes()!))
+          as Map<String, dynamic>;
+      final historyRow = (history['entries'] as List).single as Map;
+      expect(historyRow['positionMs'], 60000);
+
+      // The kid's row rides inside profiles.json under her profile.
+      final profiles = jsonDecode(utf8.decode(archive.files
+              .firstWhere((f) => f.name == 'profiles.json')
+              .readBytes()!))
+          as Map<String, dynamic>;
+      final ellie = (profiles['profiles'] as List)
+          .cast<Map<String, dynamic>>()
+          .firstWhere((p) => p['name'] == 'Ellie');
+      final kidRow = (ellie['history'] as List).single as Map;
+      expect(kidRow['member'],
+          'Night of the Living Dead (1968).mp4.datamap');
+      expect(kidRow['positionMs'], 30000);
+      // No bare address anywhere — same privacy rule as history.json.
+      expect(utf8.decode(archive.files
+              .firstWhere((f) => f.name == 'profiles.json')
+              .readBytes()!),
+          isNot(contains(_addrA)));
+
+      // And the whole thing round-trips through the parser.
+      final parsed = parseBundle(result.bytes);
+      expect(parsed.hasProfiles, isTrue);
+      expect(parsed.profilesData!.profiles.map((p) => p.name),
+          containsAll(['Admin', 'Ellie']));
+      expect(parsed.profileAvatars[avatarName], [4, 5, 6]);
+    });
+
+    test('a plain export carries no profiles member; hostile avatar '
+        'member names are dropped at parse', () async {
+      final fake = await _FakeEmbedded.start();
+      addTearDown(() => fake.server.close(force: true));
+      fake.datamaps[_addrA] = [9, 9, 9];
+      final result = await buildBundle(
+        [_list],
+        const BundleExportOptions(includeHistory: false),
+        base: fake.base,
+        postersDirProvider: postersDirProvider,
+      );
+      final archive = ZipDecoder().decodeBytes(result.bytes);
+      expect(archive.files.map((f) => f.name).contains('profiles.json'),
+          isFalse);
+
+      // Hand-built bundle: only the exact avatar file shape survives.
+      final hostile = Archive()
+        ..addFile(ArchiveFile.bytes(
+            'datamaps/A (2020).mp4.datamap', [1]))
+        ..addFile(ArchiveFile.string(
+            'profiles.json',
+            jsonEncode({
+              'profiles': [
+                {'name': 'X', 'kind': 'adult'},
+              ],
+            })))
+        ..addFile(
+            ArchiveFile.bytes('profiles/profile_avatar_x_1.img', [7]))
+        ..addFile(ArchiveFile.bytes('profiles/../evil.img', [8]))
+        ..addFile(ArchiveFile.bytes('profiles/notavatar.img', [9]));
+      final parsed = parseBundle(
+          Uint8List.fromList(ZipEncoder().encode(hostile)));
+      expect(parsed.profilesData!.profiles.single.name, 'X');
+      expect(parsed.profileAvatars.keys, ['profile_avatar_x_1.img']);
     });
   });
 }

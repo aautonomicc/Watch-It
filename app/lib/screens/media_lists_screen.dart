@@ -22,6 +22,7 @@ import '../services/import_review.dart';
 import '../services/library_store.dart';
 import '../services/list_import.dart';
 import '../services/metadata_service.dart';
+import '../services/profile_transfer.dart';
 import '../theme/tokens.dart';
 import '../widgets/channel_avatar.dart';
 import '../widgets/channel_badge.dart';
@@ -620,11 +621,13 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     }
 
     var importHistory = true;
-    if (bundle.historyCount > 0) {
+    var importProfiles = true;
+    if (bundle.historyCount > 0 || bundle.hasProfiles) {
       if (!mounted) return;
       final choice = await _promptBundleImportOptions(bundle);
       if (choice == null) return; // whole import cancelled
-      importHistory = choice;
+      importHistory = choice.history;
+      importProfiles = choice.profiles;
     }
 
     if (!mounted) return;
@@ -671,6 +674,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       result.lists,
       bundle: bundle,
       importHistory: importHistory,
+      importProfiles: importProfiles,
       memberAddresses: result.addressByMember,
       extraNotes: [
         if (result.datamapsInvalid > 0)
@@ -686,15 +690,19 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     );
   }
 
-  /// A bundle can carry the exporter's watch history — someone else's
-  /// viewing state, so it is never applied silently. Returns the
-  /// checkbox value, or null when the user cancels the whole import.
-  Future<bool?> _promptBundleImportOptions(ParsedBundle bundle) async {
+  /// A bundle can carry the exporter's watch history and (a family
+  /// export) their viewing profiles — someone else's state, so neither
+  /// is applied silently. Returns the checkbox values, or null when the
+  /// user cancels the whole import.
+  Future<({bool history, bool profiles})?> _promptBundleImportOptions(
+      ParsedBundle bundle) async {
     final t = WiTokens.of(context);
-    // Default ON: the exporter included it deliberately, and this dialog
-    // is the explicit chance to opt out.
+    // Defaults ON: the exporter included them deliberately, and this
+    // dialog is the explicit chance to opt out.
     var history = true;
+    var profiles = true;
     final entries = bundle.historyCount;
+    final profileCount = bundle.profilesData?.profiles.length ?? 0;
     final go = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -706,22 +714,41 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CheckboxListTile(
-                value: history,
-                activeColor: t.accent,
-                checkColor: t.ink,
-                controlAffinity: ListTileControlAffinity.leading,
-                onChanged: (v) =>
-                    setDialogState(() => history = v ?? true),
-                title: Text(
-                    'Watch history ($entries '
-                    '${entries == 1 ? 'entry' : 'entries'})',
-                    style: TextStyle(color: t.bone, fontSize: 14)),
-                subtitle: Text(
-                    "The exporter's resume points and watched marks — "
-                    'merged only where newer than yours',
-                    style: TextStyle(color: t.ash, fontSize: 11.5)),
-              ),
+              if (entries > 0)
+                CheckboxListTile(
+                  value: history,
+                  activeColor: t.accent,
+                  checkColor: t.ink,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  onChanged: (v) =>
+                      setDialogState(() => history = v ?? true),
+                  title: Text(
+                      'Watch history ($entries '
+                      '${entries == 1 ? 'entry' : 'entries'})',
+                      style: TextStyle(color: t.bone, fontSize: 14)),
+                  subtitle: Text(
+                      "The exporter's resume points and watched marks — "
+                      'merged only where newer than yours',
+                      style: TextStyle(color: t.ash, fontSize: 11.5)),
+                ),
+              if (bundle.hasProfiles)
+                CheckboxListTile(
+                  value: profiles,
+                  activeColor: t.accent,
+                  checkColor: t.ink,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  onChanged: (v) =>
+                      setDialogState(() => profiles = v ?? true),
+                  title: Text(
+                      'Profiles ($profileCount '
+                      '${profileCount == 1 ? 'profile' : 'profiles'})',
+                      style: TextStyle(color: t.bone, fontSize: 14)),
+                  subtitle: Text(
+                      'Merged with yours by name — profiles, PINs and '
+                      'per-profile history already on this device always '
+                      'win',
+                      style: TextStyle(color: t.ash, fontSize: 11.5)),
+                ),
             ],
           ),
           actions: [
@@ -738,7 +765,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       ),
     );
     if (go != true) return null;
-    return history;
+    return (history: history, profiles: profiles);
   }
 
   /// Merge freshly imported lists into the library (clash dialog per
@@ -749,6 +776,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     List<ParsedMediaList> parsed, {
     ParsedBundle? bundle,
     bool importHistory = true,
+    bool importProfiles = true,
     Map<String, String> memberAddresses = const {},
     Set<String> mergeExisting = const {},
     List<String> extraNotes = const [],
@@ -861,6 +889,32 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       }
       MetadataService.instance.notifyExternalSeed();
     }
+    // A family export's profiles member — merged by name against the
+    // library as it stands AFTER the list import, so kid allow-list
+    // titles land on the merged lists' real ids.
+    if (importProfiles && bundle.profilesData != null) {
+      final summary = await importProfilesData(
+        bundle.profilesData!,
+        bundle.profileAvatars,
+        addressByMember: memberAddresses,
+        lists: lists,
+      );
+      if (!mounted) return;
+      final parts = [
+        if (summary.merged > 0)
+          '${summary.merged} merged with '
+              '${summary.merged == 1 ? 'an existing profile' : 'existing profiles'}',
+        if (summary.added > 0) '${summary.added} added',
+        if (summary.adminPinAdopted) 'admin PIN adopted',
+        if (summary.historyMerged > 0)
+          '${summary.historyMerged} watch-history '
+              '${summary.historyMerged == 1 ? 'entry' : 'entries'}',
+      ];
+      if (parts.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Profiles: ${parts.join(', ')}')));
+      }
+    }
   }
 
   /// Ask what to do with an imported list whose name already exists:
@@ -933,7 +987,10 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     var safe = baseName.replaceAll(RegExp(r'[/\\:*?"<>|]'), '_').trim();
     if (safe.isEmpty) safe = 'media-list';
 
-    var includeHistory = false; // shared lists shouldn't leak viewing habits
+    // Both default OFF: shared lists shouldn't leak viewing habits, and
+    // a family export (profiles + PINs) is a deliberate migration act.
+    var includeHistory = false;
+    var includeProfiles = false;
     final go = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -981,6 +1038,22 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
                     'a new device, not for sharing',
                     style: TextStyle(color: t.ash, fontSize: 11.5)),
               ),
+              if (library)
+                CheckboxListTile(
+                  value: includeProfiles,
+                  activeColor: t.accent,
+                  checkColor: t.ink,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  onChanged: (v) =>
+                      setDialogState(() => includeProfiles = v ?? false),
+                  title: Text('Include profiles',
+                      style: TextStyle(color: t.bone, fontSize: 14)),
+                  subtitle: Text(
+                      "Everyone's profiles, PINs and viewing history — "
+                      'moves the whole family to a new device. Never '
+                      'share this bundle.',
+                      style: TextStyle(color: t.ash, fontSize: 11.5)),
+                ),
             ],
           ),
           actions: [
@@ -1011,6 +1084,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         BundleExportOptions(
           includeHistory: includeHistory,
           includeLibrary: library,
+          includeProfiles: includeProfiles,
         ),
         base: widget.importBase,
       );

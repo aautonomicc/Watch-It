@@ -14,6 +14,8 @@ import 'embedded_client.dart';
 import 'library_store.dart';
 import 'list_import.dart';
 import 'metadata.dart';
+import 'profile_transfer.dart';
+import 'profiles.dart';
 import 'watch_state.dart';
 
 /// `.watch-list` bundle: a zip that carries the `.datamap` files of a
@@ -36,6 +38,7 @@ const int kMaxBundleBytes = 200 * 1024 * 1024;
 const int kMaxMetadataJsonBytes = 50 * 1024 * 1024;
 const int kMaxLibraryJsonBytes = 5 * 1024 * 1024;
 const int kMaxHistoryJsonBytes = 20 * 1024 * 1024;
+const int kMaxProfilesJsonBytes = 5 * 1024 * 1024;
 const int kMaxPosterBytes = 10 * 1024 * 1024;
 const int kMaxRootMapBytes = 32 * 1024 * 1024;
 
@@ -128,6 +131,8 @@ class ParsedBundle {
     required this.posters,
     required this.libraryPrefs,
     this.historyByMember = const {},
+    this.profilesData,
+    this.profileAvatars = const {},
   });
 
   /// The inner `list.txt` — optional since spec v2; null means every
@@ -154,7 +159,17 @@ class ParsedBundle {
   /// decision — re-export on alpha.45+ restores dropped history).
   final Map<String, BundleHistoryRow> historyByMember;
 
+  /// The family export's profiles.json, when the bundle carries one
+  /// (services/profile_transfer.dart); null = a plain library bundle.
+  final ParsedProfiles? profilesData;
+
+  /// File-avatar bytes from `profiles/` members, by (validated) base
+  /// name.
+  final Map<String, Uint8List> profileAvatars;
+
   int get historyCount => historyByMember.length;
+
+  bool get hasProfiles => profilesData != null;
 
   bool get hasSeedableExtras =>
       metadataRows.isNotEmpty || posters.isNotEmpty || historyCount > 0;
@@ -186,6 +201,7 @@ class BundleExportOptions {
   const BundleExportOptions({
     required this.includeHistory,
     this.includeLibrary = false,
+    this.includeProfiles = false,
     this.omitCategories = false,
   });
 
@@ -195,6 +211,12 @@ class BundleExportOptions {
 
   /// Library export only: add library.json (per-list order/visibility).
   final bool includeLibrary;
+
+  /// Library export only: add profiles.json + `profiles/` avatar
+  /// members — the whole family's viewing profiles, PINs and
+  /// per-profile histories (services/profile_transfer.dart). Explicit
+  /// opt-in like history: a shared bundle must not leak the household.
+  final bool includeProfiles;
 
   /// Channel manifests set this: channels carry no category tags —
   /// metadata rows travel with `category` nulled so subscribers never
@@ -406,10 +428,15 @@ Future<BundleBuildResult> buildBundle(
 
   // History rows are keyed by `.datamap` member name (spec v2), never by
   // address — an entry whose map is missing has no member, so its state
-  // stays out rather than leaking a bare address.
+  // stays out rather than leaking a bare address. Only the Admin
+  // profile's rows: history.json has always meant "the exporter's own
+  // history" and imports into the receiver's Admin; other profiles'
+  // states travel per-profile inside profiles.json when opted in.
   if (options.includeHistory && memberByAddr.isNotEmpty) {
     final states = await (db.select(db.watchStates)
-          ..where((t) => t.address.isIn(memberByAddr.keys)))
+          ..where((t) =>
+              t.address.isIn(memberByAddr.keys) &
+              t.profileId.equals(kAdminProfileId)))
         .get();
     if (states.isNotEmpty) {
       archive.addFile(ArchiveFile.string(
@@ -428,6 +455,18 @@ Future<BundleBuildResult> buildBundle(
           ],
         }),
       ));
+    }
+  }
+
+  // The family export: profiles.json + file avatars under `profiles/`.
+  // Old importers ignore both (unknown members), so the bundle stays a
+  // valid plain library everywhere.
+  if (options.includeProfiles) {
+    final export = await buildProfilesExport(memberByAddr: memberByAddr);
+    archive.addFile(ArchiveFile.string('profiles.json', export.json));
+    for (final avatar in export.avatarFiles.entries) {
+      archive.addFile(ArchiveFile.noCompress(
+          'profiles/${avatar.key}', avatar.value.length, avatar.value));
     }
   }
 
@@ -540,6 +579,8 @@ ParsedBundle parseBundleMembers(List<BundleZipMember> members) {
   final posters = <String, Uint8List>{};
   final libraryPrefs = <String, ({bool enabled, int position})>{};
   final historyByMember = <String, BundleHistoryRow>{};
+  ParsedProfiles? profilesData;
+  final profileAvatars = <String, Uint8List>{};
 
   for (final file in members) {
     final name = file.name;
@@ -613,7 +654,25 @@ ParsedBundle parseBundleMembers(List<BundleZipMember> members) {
             }
           }
         } catch (_) {}
+      case 'profiles.json':
+        final data = file.read(kMaxProfilesJsonBytes);
+        if (data == null) continue;
+        try {
+          profilesData = parseProfilesJson(utf8.decode(data));
+        } catch (_) {
+          // Malformed profiles: the library still imports.
+        }
       default:
+        // `profiles/` avatar members — only the exact ProfileStore file
+        // shape is accepted (path-traversal-proof by construction).
+        if (name.startsWith('profiles/')) {
+          final base = name.substring('profiles/'.length);
+          if (isProfileAvatarMemberName(base)) {
+            final data = file.read(kMaxPosterBytes);
+            if (data != null) profileAvatars[base] = data;
+          }
+          continue;
+        }
         // `.datamap` members: `datamaps/` directory canonically, zip root
         // also accepted (the hand-made `zip lib.watch-list *.datamap`
         // floor). The directory form wins on a duplicate base name.
@@ -656,6 +715,8 @@ ParsedBundle parseBundleMembers(List<BundleZipMember> members) {
     posters: posters,
     libraryPrefs: libraryPrefs,
     historyByMember: historyByMember,
+    profilesData: profilesData,
+    profileAvatars: profileAvatars,
   );
 }
 
