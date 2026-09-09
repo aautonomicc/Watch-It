@@ -73,14 +73,14 @@ void main() {
     await boot();
     await tester.pumpWidget(const WatchItApp());
     await tester.pumpAndSettle();
-    expect(find.text('Who\'s watching?'), findsNothing);
+    expect(find.text('Who\'s w@tching?'), findsNothing);
     expect(find.text('Movies'), findsOneWidget);
     // No switch button while only the Admin exists.
     expect(find.byTooltip('Switch profile'), findsNothing);
   });
 
   testWidgets(
-      'multi-profile launch without auto-login asks "Who\'s watching?" '
+      'multi-profile launch without auto-login asks "Who\'s w@tching?" '
       'and tapping a profile signs in', (tester) async {
     await boot();
     await ProfileStore.instance
@@ -89,13 +89,22 @@ void main() {
 
     await tester.pumpWidget(const WatchItApp());
     await tester.pumpAndSettle();
-    expect(find.text('Who\'s watching?'), findsOneWidget);
+    expect(find.text('Who\'s w@tching?'), findsOneWidget);
+    // The heading wears the wordmark treatment (BrandWordmark's exact
+    // styling): Anton in bone with the @ in accent blue.
+    final heading =
+        tester.widget<Text>(find.text('Who\'s w@tching?'));
+    final headingSpan = heading.textSpan! as TextSpan;
+    expect(headingSpan.style!.fontFamily, 'Anton');
+    final atSpan = headingSpan.children![1] as TextSpan;
+    expect(atSpan.text, '@');
+    expect(atSpan.style!.color, WiTokens.dark.accent);
     expect(find.text('Admin'), findsOneWidget);
     expect(find.text('Ellie'), findsOneWidget);
 
     await tester.tap(find.text('Ellie'));
     await tester.pumpAndSettle();
-    expect(find.text('Who\'s watching?'), findsNothing);
+    expect(find.text('Who\'s w@tching?'), findsNothing);
     expect(find.text('Movies'), findsOneWidget);
     expect(find.byTooltip('Switch profile'), findsOneWidget);
   });
@@ -281,7 +290,7 @@ void main() {
     // Cancel keeps the kid signed in.
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-    expect(find.text('Who\'s watching?'), findsNothing);
+    expect(find.text('Who\'s w@tching?'), findsNothing);
 
     // The right PIN reaches the picker.
     await tester.tap(find.byTooltip('Switch profile'));
@@ -289,7 +298,7 @@ void main() {
     await tester.enterText(find.byType(TextField), '4321');
     await tester.tap(find.text('Unlock'));
     await tester.pumpAndSettle();
-    expect(find.text('Who\'s watching?'), findsOneWidget);
+    expect(find.text('Who\'s w@tching?'), findsOneWidget);
   });
 
   testWidgets('kid home hides the Downloads row and its indicator',
@@ -324,6 +333,6 @@ void main() {
     await switchProfileFlow(
         tester.element(find.text('Settings').first));
     await tester.pumpAndSettle();
-    expect(find.text('Who\'s watching?'), findsOneWidget);
+    expect(find.text('Who\'s w@tching?'), findsOneWidget);
   });
 }

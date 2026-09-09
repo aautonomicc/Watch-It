@@ -610,7 +610,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
               style: TextStyle(color: t.bone, fontSize: 15),
             ),
             subtitle: Text(
-              'Skip "Who\'s watching?" and open straight into this '
+              'Skip "Who\'s w@tching?" and open straight into this '
               'profile — the kids\' TV case. Only one profile can have '
               'this.',
               style: TextStyle(color: t.ash, fontSize: 12),
