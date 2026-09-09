@@ -2,6 +2,7 @@ import 'package:flutter/material.dart' show ThemeMode;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'home_sections.dart';
+import 'profiles.dart';
 
 /// App-wide user preferences (playback tuning etc.), separate from the
 /// media library which lives in [LibraryStore].
@@ -251,17 +252,21 @@ class AppSettings {
 
   static const _themeModeKey = 'theme_mode_v1';
 
-  /// Colour scheme (Settings → Appearance). Dark is the default — the
-  /// app's original look; [ThemeMode.system] follows the OS setting.
+  /// Colour scheme (Settings → Appearance), per profile — Appearance is
+  /// one of the few settings every profile may change, so a kid's pick
+  /// must not restyle the whole family's app. The Admin profile keeps
+  /// the historic unsuffixed key.
   static Future<ThemeMode> themeMode() async {
     final prefs = await SharedPreferences.getInstance();
-    final name = prefs.getString(_themeModeKey);
+    final name =
+        prefs.getString(ProfileStore.instance.prefKey(_themeModeKey));
     return ThemeMode.values.asNameMap()[name] ?? ThemeMode.dark;
   }
 
   static Future<void> setThemeMode(ThemeMode mode) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_themeModeKey, mode.name);
+    await prefs.setString(
+        ProfileStore.instance.prefKey(_themeModeKey), mode.name);
   }
 
   static const _pauseDownloadsOnPlayKey = 'pause_downloads_on_play_v1';

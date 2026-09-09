@@ -235,6 +235,32 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   "Publish update" with a live cost preview; Restore channel by phrase
 - Settings is untouched — publishing is an activity, not a setting
 
+### 10. Profiles (alpha.93)
+
+Netflix-style viewing profiles for family devices — invisible until a
+second profile exists (a pre-profile install is silently the lone
+"Admin" profile).
+
+- **"Who's watching?"** full-screen picker at launch when several
+  profiles exist and none is set to auto-select; circular avatars
+  (12 drawn presets or a forced-square image crop), lock icon on
+  PIN-protected profiles, "Kids" tag under kid profiles
+- **Switch button** in the home app bar: the active profile's avatar
+  (only when 2+ profiles). Leaving a KID profile prompts for the admin
+  PIN when one is set
+- **Settings → Profiles** (admin only, tops the Settings page):
+  profile list, Add profile (name → type Kid|Adult → avatar → allowed
+  lists for kids → auto-select → PIN), Admin PIN with one-time
+  recovery code ("Forgot PIN?" on the admin prompt takes the code)
+- **Kid profiles**: wall/drawer/search show only allow-listed lists;
+  Downloads (row, indicator, buttons) and edit surfaces hidden
+  entirely; settings restricted
+- **Non-admin settings**: Switch profile + Appearance + Buffer size +
+  About (minus Clear all data)
+- Watch positions, favourites and colour scheme are per profile;
+  library, downloads, wallet, channels and the network identity are
+  shared (profiles, not accounts)
+
 ## Layout adaptation
 
 | | Mobile (Android/iOS) | Desktop (Linux/Win/Mac) | TV (Android TV, 10-foot) |

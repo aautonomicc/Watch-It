@@ -10,6 +10,7 @@ import 'screens/album_screen.dart';
 import 'screens/artist_screen.dart';
 import 'screens/batch_upload_screen.dart' show offerBatchResume;
 import 'screens/detail_screen.dart';
+import 'screens/profile_picker_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/show_screen.dart';
@@ -31,6 +32,7 @@ import 'services/metadata.dart';
 import 'services/metadata_service.dart';
 import 'services/network_events.dart';
 import 'services/network_pause.dart';
+import 'services/profiles.dart';
 import 'services/metadata_seeder.dart';
 import 'services/my_watch_sync.dart';
 import 'services/rootmap_seeder.dart';
@@ -48,6 +50,7 @@ import 'widgets/downloads_indicator.dart';
 import 'widgets/library_drawer.dart';
 import 'widgets/messenger.dart';
 import 'widgets/poster_cards.dart';
+import 'widgets/profile_avatar.dart';
 import 'widgets/tmdb_nudge.dart';
 import 'widgets/watch_progress.dart';
 
@@ -111,16 +114,18 @@ Future<void> main() async {
     final tag = UpdateCheck.instance.availableTag;
     if (tag == null) return;
     final url = UpdateCheck.instance.releaseUrl;
-    wiMessengerKey.currentState?.showSnackBar(SnackBar(
-      content: Text('Update available: $tag'),
-      duration: const Duration(seconds: 8),
-      action: url == null
-          ? null
-          : SnackBarAction(
-              label: 'View',
-              onPressed: () => launchUrl(Uri.parse(url)),
-            ),
-    ));
+    wiMessengerKey.currentState?.showSnackBar(
+      SnackBar(
+        content: Text('Update available: $tag'),
+        duration: const Duration(seconds: 8),
+        action: url == null
+            ? null
+            : SnackBarAction(
+                label: 'View',
+                onPressed: () => launchUrl(Uri.parse(url)),
+              ),
+      ),
+    );
   });
   unawaited(UpdateCheck.instance.maybeCheck());
   // My W@tch background sync: publishes this device's lists/viewpoints
@@ -135,8 +140,19 @@ Future<void> main() async {
   // only, resume when Wi-Fi returns. A no-op with the default
   // everything-allowed settings.
   X0xCellularGate.instance.start();
+  // Profiles before the first frame: a pre-profile install silently
+  // becomes the lone Admin profile here, and the launch profile
+  // (single / auto-login / ask) decides what the gate shows. The
+  // per-profile stores reload through this hook on every later switch.
+  ProfileStore.onSwitch = () async {
+    WatchStateStore.instance.onProfileSwitched();
+    await FavouritesStore.instance.onProfileSwitched();
+    wiThemeMode.value = await AppSettings.themeMode();
+  };
+  await ProfileStore.instance.ensureLoaded();
   // Colour scheme (dark default / light / system) before the first frame
-  // so the app never flashes the wrong theme.
+  // so the app never flashes the wrong theme. Per-profile — read after
+  // the profile store picked the launch profile.
   wiThemeMode.value = await AppSettings.themeMode();
   runApp(const WatchItApp());
 }
@@ -182,7 +198,7 @@ class WatchItApp extends StatelessWidget {
         theme: wiTheme(WiTokens.light, brightness: Brightness.light),
         darkTheme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
         themeMode: mode,
-        home: const TermsGate(child: HomeScreen()),
+        home: const TermsGate(child: ProfileGate(child: HomeScreen())),
       ),
     );
   }
@@ -227,6 +243,33 @@ class _TermsGateState extends State<TermsGate> {
   }
 }
 
+/// Profile gate, inside the terms gate: shows "Who's watching?" while
+/// nobody is signed in (multi-profile launch without auto-login, or
+/// after Switch profile), else the app keyed by the active profile —
+/// switching rekeys the whole tree so every screen rebuilds against the
+/// new profile's watch states, favourites, lists and theme. Invisible
+/// while only the migrated Admin profile exists.
+class ProfileGate extends StatelessWidget {
+  const ProfileGate({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: ProfileStore.instance,
+      builder: (context, _) {
+        final store = ProfileStore.instance;
+        if (!store.hasActive) return const ProfilePickerScreen();
+        return KeyedSubtree(
+          key: ValueKey('profile-${store.activeId}'),
+          child: child,
+        );
+      },
+    );
+  }
+}
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -255,8 +298,12 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     unawaited(DownloadManager.instance.ensureLoaded());
     // A crash or shutdown can leave a batch upload cut short — once per
     // launch, offer to continue it (and sweep finished batch records).
-    // A silent no-op on mobile or with nothing interrupted.
-    unawaited(offerBatchResume(context));
+    // A silent no-op on mobile or with nothing interrupted. Admin only:
+    // uploads are an admin concern, and the dialog would leak titles a
+    // kid profile shouldn't see.
+    if (ProfileStore.instance.isAdmin) {
+      unawaited(offerBatchResume(context));
+    }
     _reload();
   }
 
@@ -288,13 +335,22 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     // The hearted addresses behind the Favourites row must be in before
     // the first build settles.
     await FavouritesStore.instance.ensureLoaded();
-    final lists = await LibraryStore.load();
+    // A kid profile sees only its allow-listed lists — filtered right
+    // here, so every downstream surface fed from _lists (wall rows,
+    // Continue/Recent/Favourites, search, section reconcile) is gated
+    // by construction.
+    final lists = ProfileStore.instance.visibleLists(await LibraryStore.load());
     final continueRow = await continueWatching(lists);
     // Re-checked on every reload so the banner disappears as soon as a
     // key is entered in Settings (returning from there reloads).
-    final nudge = await shouldShowTmdbNudge();
-    final sections =
-        reconcileHomeSections(await AppSettings.homeSections(), lists);
+    // Admin only: the banner points at Settings → Metadata, which
+    // restricted profiles can't reach.
+    final nudge =
+        ProfileStore.instance.isAdmin && await shouldShowTmdbNudge();
+    final sections = reconcileHomeSections(
+      await AppSettings.homeSections(),
+      lists,
+    );
     if (!mounted) return;
     setState(() {
       _lists = lists;
@@ -312,45 +368,43 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
 
   // Reloading on return is didPopNext's job — no _reload() here.
   Future<void> _openSettings() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const SettingsScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
   }
 
   Future<void> _openSearch() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => SearchScreen(lists: _lists)),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => SearchScreen(lists: _lists)));
   }
 
   Future<void> _openEntry(MediaEntry entry) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => DetailScreen(entry: entry)),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => DetailScreen(entry: entry)));
   }
 
   /// A series card opens the show's page: big artwork + synopsis with
   /// every season of the show found in the list as tiles.
   Future<void> _openShow(HomeShow group) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ShowScreen(seasons: group.seasons),
-      ),
+      MaterialPageRoute(builder: (_) => ShowScreen(seasons: group.seasons)),
     );
   }
 
   /// An album card opens the album page: cover art + tracklist.
   Future<void> _openAlbum(HomeAlbum group) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => AlbumScreen(group: group)),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => AlbumScreen(group: group)));
   }
 
   /// An artist card opens the artist page: their albums as tiles.
   Future<void> _openArtist(HomeArtist group) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ArtistScreen(group: group)),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => ArtistScreen(group: group)));
   }
 
   @override
@@ -399,7 +453,22 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
           ],
         ),
         actions: [
-          const DownloadsIndicator(),
+          // Downloads are hidden ENTIRELY from kid profiles (the agreed
+          // rule — half-hiding would let kids start invisible ones).
+          if (!ProfileStore.instance.isKid) const DownloadsIndicator(),
+          // The active profile's avatar switches profiles — only shown
+          // once a second profile exists (before that the feature is
+          // invisible).
+          if (ProfileStore.instance.multiProfile)
+            IconButton(
+              tooltip: 'Switch profile',
+              icon: ProfileAvatar(
+                name: ProfileStore.instance.active?.name ?? '?',
+                avatar: ProfileStore.instance.active?.avatar,
+                size: 26,
+              ),
+              onPressed: () => unawaited(switchProfileFlow(context)),
+            ),
           Builder(
             builder: (context) => IconButton(
               tooltip: 'Browse lists',
@@ -425,7 +494,8 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
                     tokens: t,
                     variant: _lists.isNotEmpty
                         ? _EmptyVariant.allHidden
-                        : _EmptyVariant.empty)
+                        : _EmptyVariant.empty,
+                  )
                 : _libraryView(t, visible),
           ),
         ],
@@ -473,26 +543,26 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
         separatorBuilder: (_, _) => const SizedBox(width: 12),
         itemBuilder: (context, i) => switch (items[i]) {
           HomeEntry() && final item => PosterCard(
-              entry: item.entry,
-              versions: item.allVersions,
-              tokens: t,
-              onTap: () => _openEntry(item.entry),
-            ),
+            entry: item.entry,
+            versions: item.allVersions,
+            tokens: t,
+            onTap: () => _openEntry(item.entry),
+          ),
           HomeShow() && final group => ShowCard(
-              group: group,
-              tokens: t,
-              onTap: () => _openShow(group),
-            ),
+            group: group,
+            tokens: t,
+            onTap: () => _openShow(group),
+          ),
           HomeAlbum() && final album => AlbumCard(
-              group: album,
-              tokens: t,
-              onTap: () => _openAlbum(album),
-            ),
+            group: album,
+            tokens: t,
+            onTap: () => _openAlbum(album),
+          ),
           HomeArtist() && final artist => ArtistCard(
-              group: artist,
-              tokens: t,
-              onTap: () => _openArtist(artist),
-            ),
+            group: artist,
+            tokens: t,
+            onTap: () => _openArtist(artist),
+          ),
           // groupShows never yields bare seasons.
           HomeSeason() => const SizedBox.shrink(),
         },
@@ -519,18 +589,19 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
         if (!section.visible) continue;
         children.addAll(switch (section.id) {
           kSectionContinue => _continueSection(t, _continue),
-          kSectionFavourites => favourites.isEmpty
-              ? const <Widget>[]
-              : [_sectionTitle(t, 'Favourites'), _itemsRow(t, favourites)],
-          kSectionDownloads => downloads.isEmpty
-              ? const <Widget>[]
-              : [_sectionTitle(t, 'Downloads'), _itemsRow(t, downloads)],
-          _ => _recent.isEmpty
-              ? const <Widget>[]
-              : [
-                  _sectionTitle(t, 'Recently Added'),
-                  _itemsRow(t, _recent)
-                ],
+          kSectionFavourites =>
+            favourites.isEmpty
+                ? const <Widget>[]
+                : [_sectionTitle(t, 'Favourites'), _itemsRow(t, favourites)],
+          // The Downloads row never renders for a kid profile.
+          kSectionDownloads =>
+            downloads.isEmpty || ProfileStore.instance.isKid
+                ? const <Widget>[]
+                : [_sectionTitle(t, 'Downloads'), _itemsRow(t, downloads)],
+          _ =>
+            _recent.isEmpty
+                ? const <Widget>[]
+                : [_sectionTitle(t, 'Recently Added'), _itemsRow(t, _recent)],
         });
       } else if (section.visible) {
         // Sections whose list is hidden or was deleted after the last
@@ -635,7 +706,7 @@ class _ContinueCard extends StatelessWidget {
     final parsed = parseMediaName(entry.name);
     final marker = parsed.isEpisode
         ? 'S${parsed.season.toString().padLeft(2, '0')}'
-            'E${parsed.episode.toString().padLeft(2, '0')}'
+              'E${parsed.episode.toString().padLeft(2, '0')}'
         : null;
     final state = item.state;
     final progress = state != null && state.resumable ? state.progress : null;
@@ -665,13 +736,14 @@ class _ContinueCard extends StatelessWidget {
                         Container(
                           color: t.ink2,
                           child: Icon(
-                              marker != null
-                                  ? Icons.live_tv_outlined
-                                  : parsed.isAudio
-                                      ? Icons.music_note
-                                      : Icons.movie_outlined,
-                              color: t.ash,
-                              size: 40),
+                            marker != null
+                                ? Icons.live_tv_outlined
+                                : parsed.isAudio
+                                ? Icons.music_note
+                                : Icons.movie_outlined,
+                            color: t.ash,
+                            size: 40,
+                          ),
                         ),
                     if (progress != null && progress > 0)
                       watchProgressBar(t, progress),
@@ -688,8 +760,11 @@ class _ContinueCard extends StatelessWidget {
                             color: Colors.black.withValues(alpha: 0.65),
                             shape: BoxShape.circle,
                           ),
-                          child:
-                              Icon(Icons.music_note, size: 13, color: t.accent),
+                          child: Icon(
+                            Icons.music_note,
+                            size: 13,
+                            color: t.accent,
+                          ),
                         ),
                       ),
                     // Aggregated across the title's quality tiers — a
@@ -740,13 +815,13 @@ class _EmptyState extends StatelessWidget {
     final t = tokens;
     final (title, hint) = switch (variant) {
       _EmptyVariant.empty => (
-          'Your library is empty',
-          'Use "Add to library" in Settings → My Media to get started.',
-        ),
+        'Your library is empty',
+        'Use "Add to library" in Settings → My Media to get started.',
+      ),
       _EmptyVariant.allHidden => (
-          'All your lists are hidden',
-          'Enable a list in Settings → My Media to show it here.',
-        ),
+        'All your lists are hidden',
+        'Enable a list in Settings → My Media to show it here.',
+      ),
     };
     return Center(
       child: Column(
@@ -763,10 +838,7 @@ class _EmptyState extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          Text(
-            hint,
-            style: TextStyle(fontSize: 12, color: t.ash),
-          ),
+          Text(hint, style: TextStyle(fontSize: 12, color: t.ash)),
         ],
       ),
     );

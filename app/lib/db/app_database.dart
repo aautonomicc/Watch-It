@@ -59,12 +59,17 @@ class MediaEntries extends Table {
 }
 
 /// Playback progress for one file, keyed by its XOR address (content
-/// addressing means the same file is the same everywhere it appears).
+/// addressing means the same file is the same everywhere it appears)
+/// per profile — each profile keeps its own resume points.
 /// Local-only — no accounts, no telemetry (docs/ARCHITECTURE.md).
 @DataClassName('WatchStateRow')
 class WatchStates extends Table {
   /// Normalized XOR address (lowercase, no 0x prefix).
   TextColumn get address => text()();
+
+  /// Owning profile ([Profiles.id]); pre-profile rows belong to the
+  /// migrated Admin profile (services/profiles.dart, kAdminProfileId).
+  TextColumn get profileId => text().withDefault(const Constant('admin'))();
   IntColumn get positionMs => integer()();
 
   /// 0 while the player has not reported a duration yet.
@@ -76,7 +81,46 @@ class WatchStates extends Table {
   IntColumn get updatedAt => integer()(); // epoch ms
 
   @override
-  Set<Column> get primaryKey => {address};
+  Set<Column> get primaryKey => {address, profileId};
+}
+
+/// A viewing profile (services/profiles.dart). Netflix-style: profiles
+/// share the install's network identity, wallet, lists and downloads —
+/// only viewing state (watch points, favourites, theme, list access)
+/// is per-profile. A fresh/upgraded install silently holds one Admin
+/// profile; the profile UI stays invisible until a second is created.
+@DataClassName('ProfileRow')
+class Profiles extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+
+  /// 'admin' | 'adult' | 'kid' — see [ProfileKind].
+  TextColumn get kind => text()();
+
+  /// `preset:<n>` for a built-in avatar, else a posters-dir file name
+  /// (`profile_avatar_<id>_<ts>.img`); null = initial letter.
+  TextColumn get avatar => text().nullable()();
+
+  /// `<salt-hex>:<sha256-hex>` of the profile's PIN; null = none.
+  TextColumn get pinHash => text().nullable()();
+
+  /// At most one profile auto-selects at launch (the kids' TV case).
+  BoolColumn get autoLogin => boolean().withDefault(const Constant(false))();
+  IntColumn get position => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Which lists a KID profile may see — presence = allowed. Adult/admin
+/// profiles have no rows here (they see everything).
+@DataClassName('ProfileListAccessRow')
+class ProfileListAccess extends Table {
+  TextColumn get profileId => text()();
+  TextColumn get listId => text()();
+
+  @override
+  Set<Column> get primaryKey => {profileId, listId};
 }
 
 /// Cached TMDB match for one parsed-file-name lookup, keyed by
@@ -164,87 +208,120 @@ class Downloads extends Table {
 }
 
 @DriftDatabase(
-    tables: [MediaLists, MediaEntries, MetadataCache, WatchStates, Downloads])
+  tables: [
+    MediaLists,
+    MediaEntries,
+    MetadataCache,
+    WatchStates,
+    Downloads,
+    Profiles,
+    ProfileListAccess,
+  ],
+)
 class AppDatabase extends _$AppDatabase {
   // Keep the database in the app support dir with the rest of the app
   // data — drift_flutter's default (documents dir) degrades to $HOME on
   // headless Linux.
   AppDatabase()
-      : super(driftDatabase(
+    : super(
+        driftDatabase(
           name: 'watchit',
           native: const DriftNativeOptions(
             databaseDirectory: getApplicationSupportDirectory,
           ),
-        ));
+        ),
+      );
 
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 12;
+  int get schemaVersion => 13;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
-        onUpgrade: (m, from, to) async {
-          if (from < 2) await m.createTable(metadataCache); // alpha.23
-          if (from < 3) {
-            // alpha.25: per-list home-screen visibility toggle.
-            await m.addColumn(mediaLists, mediaLists.enabled);
-          }
-          if (from >= 2 && from < 4) {
-            // alpha.27: ratings, show/season synopses, air dates, episode
-            // screenshots. It is only a cache — drop and refetch so
-            // existing rows gain the new fields.
-            await m.deleteTable(metadataCache.actualTableName);
-            await m.createTable(metadataCache);
-          }
-          if (from < 5) {
-            // alpha.29: resume points + Recently Added.
-            await m.createTable(watchStates);
-            await m.addColumn(mediaEntries, mediaEntries.addedAt);
-          }
-          if (from < 6) {
-            // alpha.30: download manager.
-            await m.createTable(downloads);
-          }
-          if (from >= 6 && from < 7) {
-            // alpha.38: system-vs-user pause distinction so downloads
-            // auto-resume on reconnect / Wi-Fi return. (An older `from`
-            // just created the table with the column already in it.)
-            await m.addColumn(downloads, downloads.pausedBySystem);
-          }
-          if (from < 8) {
-            // alpha.48: per-entry file size + video-format label, the
-            // info that tells same-title uploads in different formats
-            // apart.
-            await m.addColumn(mediaEntries, mediaEntries.sizeBytes);
-            await m.addColumn(mediaEntries, mediaEntries.videoInfo);
-          }
-          if (from < 10) {
-            // Channels: subscribed channels land as read-only lists
-            // marked with the channel public key.
-            await m.addColumn(mediaLists, mediaLists.channelPubkey);
-          }
-          if (from < 11) {
-            // Channel profile: author + avatar member name on channel
-            // lists (refreshed from each imported manifest).
-            await m.addColumn(mediaLists, mediaLists.channelAuthor);
-            await m.addColumn(mediaLists, mediaLists.channelAvatar);
-          }
-          if (from >= 4 && from < 12) {
-            // Music edits: album artist on music rows. (An older `from`
-            // created or recreated the table with the column in it.)
-            await m.addColumn(metadataCache, metadataCache.artist);
-          }
-          if (from >= 4 && from < 9) {
-            // alpha.57: Edit details — user-authored metadata rows are
-            // flagged so they can be listed/cleared distinctly. (An
-            // older `from` created or recreated the table with the
-            // column already in it.)
-            await m.addColumn(metadataCache, metadataCache.userEdited);
-          }
-        },
-        beforeOpen: (details) async {
-          await customStatement('PRAGMA foreign_keys = ON');
-        },
-      );
+    onUpgrade: (m, from, to) async {
+      if (from < 2) await m.createTable(metadataCache); // alpha.23
+      if (from < 3) {
+        // alpha.25: per-list home-screen visibility toggle.
+        await m.addColumn(mediaLists, mediaLists.enabled);
+      }
+      if (from >= 2 && from < 4) {
+        // alpha.27: ratings, show/season synopses, air dates, episode
+        // screenshots. It is only a cache — drop and refetch so
+        // existing rows gain the new fields.
+        await m.deleteTable(metadataCache.actualTableName);
+        await m.createTable(metadataCache);
+      }
+      if (from < 5) {
+        // alpha.29: resume points + Recently Added.
+        await m.createTable(watchStates);
+        await m.addColumn(mediaEntries, mediaEntries.addedAt);
+      }
+      if (from < 6) {
+        // alpha.30: download manager.
+        await m.createTable(downloads);
+      }
+      if (from >= 6 && from < 7) {
+        // alpha.38: system-vs-user pause distinction so downloads
+        // auto-resume on reconnect / Wi-Fi return. (An older `from`
+        // just created the table with the column already in it.)
+        await m.addColumn(downloads, downloads.pausedBySystem);
+      }
+      if (from < 8) {
+        // alpha.48: per-entry file size + video-format label, the
+        // info that tells same-title uploads in different formats
+        // apart.
+        await m.addColumn(mediaEntries, mediaEntries.sizeBytes);
+        await m.addColumn(mediaEntries, mediaEntries.videoInfo);
+      }
+      if (from < 10) {
+        // Channels: subscribed channels land as read-only lists
+        // marked with the channel public key.
+        await m.addColumn(mediaLists, mediaLists.channelPubkey);
+      }
+      if (from < 11) {
+        // Channel profile: author + avatar member name on channel
+        // lists (refreshed from each imported manifest).
+        await m.addColumn(mediaLists, mediaLists.channelAuthor);
+        await m.addColumn(mediaLists, mediaLists.channelAvatar);
+      }
+      if (from >= 4 && from < 12) {
+        // Music edits: album artist on music rows. (An older `from`
+        // created or recreated the table with the column in it.)
+        await m.addColumn(metadataCache, metadataCache.artist);
+      }
+      if (from < 13) {
+        // Profiles: viewing profiles + kid list access; watch
+        // states gain a profile column (existing rows keep the
+        // 'admin' default = they belong to the migrated Admin
+        // profile). alterTable recreates watch_states with the new
+        // composite primary key and copies the rows across.
+        await m.createTable(profiles);
+        await m.createTable(profileListAccess);
+        // Existence-guarded: a from<5 upgrade creates the table with
+        // the column already in it further up this list.
+        final hasWatchStates = await customSelect(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name='watch_states'")
+            .get()
+            .then((rows) => rows.isNotEmpty);
+        if (hasWatchStates) {
+          await m.alterTable(TableMigration(
+            watchStates,
+            newColumns: [watchStates.profileId],
+          ));
+        }
+      }
+      if (from >= 4 && from < 9) {
+        // alpha.57: Edit details — user-authored metadata rows are
+        // flagged so they can be listed/cleared distinctly. (An
+        // older `from` created or recreated the table with the
+        // column already in it.)
+        await m.addColumn(metadataCache, metadataCache.userEdited);
+      }
+    },
+    beforeOpen: (details) async {
+      await customStatement('PRAGMA foreign_keys = ON');
+    },
+  );
 }

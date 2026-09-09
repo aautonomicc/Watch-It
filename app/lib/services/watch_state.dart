@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import '../db/app_database.dart';
 import '../models/media_list.dart';
 import 'library_store.dart';
+import 'profiles.dart';
 
 /// Playback progress for one file, keyed by its (normalized) XOR address.
 class WatchState {
@@ -63,15 +64,30 @@ class WatchStateStore extends ChangeNotifier {
   static String _normalize(String address) =>
       address.toLowerCase().replaceFirst('0x', '');
 
+  /// Watch states are per profile — everything here reads and writes
+  /// the ACTIVE profile's rows (Admin for a pre-profile install).
+  static String get _profileId => ProfileStore.instance.activeId;
+
+  /// The active profile changed: drop the memory mirror so lookups
+  /// rebuild against the new profile's rows.
+  void onProfileSwitched() {
+    _memory = null;
+    _loadingMemory = false;
+    notifyListeners();
+  }
+
   /// Record playback progress for [entry]. Positions in the last 5% of a
   /// known duration mark the file completed; watching again from earlier
   /// clears the flag (a rewatch resumes like anything else).
-  Future<void> record(MediaEntry entry,
-      {required Duration position, required Duration duration}) async {
+  Future<void> record(
+    MediaEntry entry, {
+    required Duration position,
+    required Duration duration,
+  }) async {
     final db = await LibraryStore.database();
-    final completed = duration > Duration.zero &&
-        position.inMilliseconds >=
-            duration.inMilliseconds * completedFraction;
+    final completed =
+        duration > Duration.zero &&
+        position.inMilliseconds >= duration.inMilliseconds * completedFraction;
     final state = WatchState(
       address: _normalize(entry.address),
       positionMs: position.inMilliseconds,
@@ -79,9 +95,12 @@ class WatchStateStore extends ChangeNotifier {
       completed: completed,
       updatedAt: DateTime.now().millisecondsSinceEpoch,
     );
-    await db.into(db.watchStates).insertOnConflictUpdate(
+    await db
+        .into(db.watchStates)
+        .insertOnConflictUpdate(
           WatchStatesCompanion.insert(
             address: state.address,
+            profileId: Value(_profileId),
             positionMs: state.positionMs,
             durationMs: state.durationMs,
             completed: Value(state.completed),
@@ -108,9 +127,12 @@ class WatchStateStore extends ChangeNotifier {
       completed: true,
       updatedAt: DateTime.now().millisecondsSinceEpoch,
     );
-    await db.into(db.watchStates).insertOnConflictUpdate(
+    await db
+        .into(db.watchStates)
+        .insertOnConflictUpdate(
           WatchStatesCompanion.insert(
             address: state.address,
+            profileId: Value(_profileId),
             positionMs: state.positionMs,
             durationMs: state.durationMs,
             completed: Value(state.completed),
@@ -121,23 +143,33 @@ class WatchStateStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Merge externally sourced states (a bundle's history.json):
-  /// newer-updatedAt-wins per address, so an import never regresses local
-  /// progress. Returns how many rows were written.
+  /// Merge externally sourced states (a bundle's history.json, a My
+  /// W@tch sync doc): newer-updatedAt-wins per address, so an import
+  /// never regresses local progress. Externally sourced states always
+  /// belong to the ADMIN profile — sync and imports are install-level
+  /// features; kid profiles' viewing stays on this device. Returns how
+  /// many rows were written.
   Future<int> mergeAll(Iterable<WatchState> states) async {
     final db = await LibraryStore.database();
     var written = 0;
     for (final state in states) {
       final address = _normalize(state.address);
-      final existing = await (db.select(db.watchStates)
-            ..where((t) => t.address.equals(address)))
-          .getSingleOrNull();
+      final existing =
+          await (db.select(db.watchStates)..where(
+                (t) =>
+                    t.address.equals(address) &
+                    t.profileId.equals(kAdminProfileId),
+              ))
+              .getSingleOrNull();
       if (existing != null && existing.updatedAt >= state.updatedAt) {
         continue;
       }
-      await db.into(db.watchStates).insertOnConflictUpdate(
+      await db
+          .into(db.watchStates)
+          .insertOnConflictUpdate(
             WatchStatesCompanion.insert(
               address: address,
+              profileId: const Value(kAdminProfileId),
               positionMs: state.positionMs,
               durationMs: state.durationMs,
               completed: Value(state.completed),
@@ -210,28 +242,36 @@ class WatchStateStore extends ChangeNotifier {
   /// The stored state for [entry]'s address, or null when never played.
   Future<WatchState?> stateFor(MediaEntry entry) async {
     final db = await LibraryStore.database();
-    final row = await (db.select(db.watchStates)
-          ..where((t) => t.address.equals(_normalize(entry.address))))
-        .getSingleOrNull();
+    final row =
+        await (db.select(db.watchStates)..where(
+              (t) =>
+                  t.address.equals(_normalize(entry.address)) &
+                  t.profileId.equals(_profileId),
+            ))
+            .getSingleOrNull();
     return row == null ? null : _fromRow(row);
   }
 
-  /// All stored states, most recently updated first.
-  Future<List<WatchState>> all() async {
+  /// All the active profile's states, most recently updated first —
+  /// or, with [profileId], a specific profile's (My W@tch sync reads
+  /// the Admin profile's whatever profile is watching).
+  Future<List<WatchState>> all({String? profileId}) async {
     final db = await LibraryStore.database();
-    final rows = await (db.select(db.watchStates)
-          ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]))
-        .get();
+    final rows =
+        await (db.select(db.watchStates)
+              ..where((t) => t.profileId.equals(profileId ?? _profileId))
+              ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]))
+            .get();
     return [for (final row in rows) _fromRow(row)];
   }
 
   static WatchState _fromRow(WatchStateRow row) => WatchState(
-        address: row.address,
-        positionMs: row.positionMs,
-        durationMs: row.durationMs,
-        completed: row.completed,
-        updatedAt: row.updatedAt,
-      );
+    address: row.address,
+    positionMs: row.positionMs,
+    durationMs: row.durationMs,
+    completed: row.completed,
+    updatedAt: row.updatedAt,
+  );
 }
 
 /// `43:12` / `1:03:12` — a resume position for the Resume button.

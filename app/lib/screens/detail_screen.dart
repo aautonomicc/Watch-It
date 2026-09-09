@@ -15,6 +15,7 @@ import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/embedded_client.dart';
 import '../services/network_policy.dart';
+import '../services/profiles.dart';
 import '../services/version_choice.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
@@ -97,9 +98,11 @@ class _DetailScreenState extends State<DetailScreen> {
       // else the tier the user last streamed. Only ever applied once —
       // a manual picker choice is never overridden.
       _autoSelected = true;
-      final preferred = preferredVersion(versions,
-          preferredHeight: await AppSettings.lastStreamedHeight(),
-          opened: entry);
+      final preferred = preferredVersion(
+        versions,
+        preferredHeight: await AppSettings.lastStreamedHeight(),
+        opened: entry,
+      );
       if (_selected == null &&
           _normalize(preferred.address) != _normalize(entry.address)) {
         _selected = preferred;
@@ -145,8 +148,7 @@ class _DetailScreenState extends State<DetailScreen> {
     final base = EmbeddedClient.baseUrl();
     if (base == null) return;
     try {
-      final res =
-          await http.get(Uri.parse('$base/resolve/${entry.address}'));
+      final res = await http.get(Uri.parse('$base/resolve/${entry.address}'));
       if (res.statusCode != 200) return;
       final size =
           (jsonDecode(res.body) as Map<String, dynamic>)['size'] as int?;
@@ -159,12 +161,14 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   /// `480p H.264 · 570 MB`, or null while nothing is known yet.
-  String? get _fileInfoLine => formatInfoLine(MediaEntry(
-        name: entry.name,
-        address: entry.address,
-        sizeBytes: _sizeBytes,
-        videoInfo: _videoInfo,
-      ));
+  String? get _fileInfoLine => formatInfoLine(
+    MediaEntry(
+      name: entry.name,
+      address: entry.address,
+      sizeBytes: _sizeBytes,
+      videoInfo: _videoInfo,
+    ),
+  );
 
   /// Switch the page to another upload of the same title: resume point,
   /// download state, and file info all reload for the picked version.
@@ -208,8 +212,10 @@ class _DetailScreenState extends State<DetailScreen> {
           final t = WiTokens.of(context);
           return AlertDialog(
             backgroundColor: t.ink2,
-            title: Text('Client unavailable',
-                style: TextStyle(color: t.bone, fontSize: 16)),
+            title: Text(
+              'Client unavailable',
+              style: TextStyle(color: t.bone, fontSize: 16),
+            ),
             content: Text(
               'The built-in Autonomi client could not start on this '
               'platform, so streaming is not available.',
@@ -231,9 +237,14 @@ class _DetailScreenState extends State<DetailScreen> {
     if (!source.local) {
       final gate = await streamingGateNow();
       if (gate == StreamingGate.block) {
-        wiMessengerKey.currentState?.showSnackBar(const SnackBar(
-            content: Text("You're on mobile data — streaming is set to "
-                'Wi-Fi only (Settings → Network)')));
+        wiMessengerKey.currentState?.showSnackBar(
+          const SnackBar(
+            content: Text(
+              "You're on mobile data — streaming is set to "
+              'Wi-Fi only (Settings → Network)',
+            ),
+          ),
+        );
         return;
       }
       if (gate == StreamingGate.ask) {
@@ -281,8 +292,10 @@ class _DetailScreenState extends State<DetailScreen> {
           nextFor: (e) {
             final next = nextEpisode(lists, e);
             if (next == null) return null;
-            return preferredVersion(versionsInLibrary(lists, next),
-                preferredHeight: lastStreamedHeight);
+            return preferredVersion(
+              versionsInLibrary(lists, next),
+              preferredHeight: lastStreamedHeight,
+            );
           },
           sourceFor: _sourceFor,
           bufferSizeMb: bufferSizeMb,
@@ -293,7 +306,8 @@ class _DetailScreenState extends State<DetailScreen> {
       final resumed = await DownloadManager.instance.resumeAfterPlayback();
       if (resumed) {
         wiMessengerKey.currentState?.showSnackBar(
-            const SnackBar(content: Text('Downloads resumed')));
+          const SnackBar(content: Text('Downloads resumed')),
+        );
       }
     }
     // Refresh the Resume button with the position playback stopped at.
@@ -318,8 +332,10 @@ class _DetailScreenState extends State<DetailScreen> {
           context: context,
           builder: (context) => AlertDialog(
             backgroundColor: t.ink2,
-            title: Text('Remove download?',
-                style: TextStyle(color: t.bone, fontSize: 16)),
+            title: Text(
+              'Remove download?',
+              style: TextStyle(color: t.bone, fontSize: 16),
+            ),
             content: Text(
               'The downloaded file is deleted from this device and '
               'playback goes back to streaming. The file stays on '
@@ -405,7 +421,8 @@ class _DetailScreenState extends State<DetailScreen> {
     // Offline the download button still allows the local actions —
     // pausing a queued/running task, removing a finished one — but not
     // the ones that need the network (start, resume, retry).
-    final downloadBlocked = offline &&
+    final downloadBlocked =
+        offline &&
         (task == null ||
             task.status == DownloadStatus.paused ||
             task.status == DownloadStatus.error);
@@ -413,11 +430,11 @@ class _DetailScreenState extends State<DetailScreen> {
       null => (Icons.download_outlined, 'Download'),
       DownloadStatus.queued => (Icons.pause, 'Queued'),
       DownloadStatus.downloading => (
-          Icons.pause,
-          task!.progress != null
-              ? 'Downloading ${(task.progress! * 100).round()}%'
-              : 'Downloading'
-        ),
+        Icons.pause,
+        task!.progress != null
+            ? 'Downloading ${(task.progress! * 100).round()}%'
+            : 'Downloading',
+      ),
       DownloadStatus.paused => (Icons.play_arrow, 'Resume download'),
       DownloadStatus.error => (Icons.refresh, 'Retry download'),
       DownloadStatus.done => (Icons.download_done, 'Downloaded'),
@@ -426,22 +443,27 @@ class _DetailScreenState extends State<DetailScreen> {
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
-        title: Text(meta.title,
-            style: TextStyle(color: t.bone, fontSize: 16),
-            overflow: TextOverflow.ellipsis),
+        title: Text(
+          meta.title,
+          style: TextStyle(color: t.bone, fontSize: 16),
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           // Edit details: user-authored title/description/artwork — the
           // way in for files TMDB doesn't know. The editor writes the
           // metadata cache; MetadataService notifies and this page's
-          // ListenableBuilder repaints with the new details.
-          IconButton(
-            tooltip: 'Edit details',
-            icon: Icon(Icons.edit_outlined, color: t.boneDim, size: 20),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                  builder: (_) => EditDetailsScreen(entry: entry)),
+          // ListenableBuilder repaints with the new details. Hidden
+          // from kid profiles (editing is curation, not viewing).
+          if (!ProfileStore.instance.isKid)
+            IconButton(
+              tooltip: 'Edit details',
+              icon: Icon(Icons.edit_outlined, color: t.boneDim, size: 20),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => EditDetailsScreen(entry: entry),
+                ),
+              ),
             ),
-          ),
         ],
       ),
       body: ListView(
@@ -454,9 +476,8 @@ class _DetailScreenState extends State<DetailScreen> {
               meta.episodeLabel != null
                   ? Icons.live_tv_outlined
                   : Icons.movie_outlined,
-              overlay: (_state != null &&
-                      _state!.resumable &&
-                      _state!.progress > 0)
+              overlay:
+                  (_state != null && _state!.resumable && _state!.progress > 0)
                   ? watchProgressBar(t, _state!.progress)
                   : null,
             ),
@@ -473,18 +494,24 @@ class _DetailScreenState extends State<DetailScreen> {
                 ),
                 if (meta.episodeLabel != null) ...[
                   const SizedBox(height: 4),
-                  Text(meta.episodeLabel!,
-                      style: TextStyle(fontSize: 13.5, color: t.boneDim)),
+                  Text(
+                    meta.episodeLabel!,
+                    style: TextStyle(fontSize: 13.5, color: t.boneDim),
+                  ),
                 ],
                 if (meta.year != null) ...[
                   const SizedBox(height: 4),
-                  Text('${meta.year}',
-                      style: TextStyle(fontSize: 13, color: t.ash)),
+                  Text(
+                    '${meta.year}',
+                    style: TextStyle(fontSize: 13, color: t.ash),
+                  ),
                 ],
                 if (meta.category != null) ...[
                   const SizedBox(height: 4),
-                  Text(meta.category!,
-                      style: TextStyle(fontSize: 12, color: t.ash)),
+                  Text(
+                    meta.category!,
+                    style: TextStyle(fontSize: 12, color: t.ash),
+                  ),
                 ],
                 // Format and exact size of this specific upload — what
                 // tells two copies of the same title apart. With more
@@ -495,15 +522,19 @@ class _DetailScreenState extends State<DetailScreen> {
                   _versionPicker(t),
                 ] else if (_fileInfoLine != null) ...[
                   const SizedBox(height: 4),
-                  Text(_fileInfoLine!,
-                      style: TextStyle(fontSize: 12, color: t.ash)),
+                  Text(
+                    _fileInfoLine!,
+                    style: TextStyle(fontSize: 12, color: t.ash),
+                  ),
                 ],
                 // Air date matters on episode pages; a movie's release
                 // date is already covered by the year line.
                 if (meta.episodeLabel != null && meta.airDate != null) ...[
                   const SizedBox(height: 4),
-                  Text('Aired ${formatAirDate(meta.airDate!)}',
-                      style: TextStyle(fontSize: 12, color: t.ash)),
+                  Text(
+                    'Aired ${formatAirDate(meta.airDate!)}',
+                    style: TextStyle(fontSize: 12, color: t.ash),
+                  ),
                 ],
                 if (meta.rating != null) ...[
                   const SizedBox(height: 10),
@@ -514,11 +545,16 @@ class _DetailScreenState extends State<DetailScreen> {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.check_circle_outline,
-                          color: t.accent, size: 16),
+                      Icon(
+                        Icons.check_circle_outline,
+                        color: t.accent,
+                        size: 16,
+                      ),
                       const SizedBox(width: 5),
-                      Text('Watched',
-                          style: TextStyle(fontSize: 12.5, color: t.boneDim)),
+                      Text(
+                        'Watched',
+                        style: TextStyle(fontSize: 12.5, color: t.boneDim),
+                      ),
                     ],
                   ),
                 ],
@@ -529,61 +565,74 @@ class _DetailScreenState extends State<DetailScreen> {
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     FilledButton.icon(
-                      onPressed:
-                          playBlocked ? null : () => _play(context),
+                      onPressed: playBlocked ? null : () => _play(context),
                       style: FilledButton.styleFrom(
                         backgroundColor: t.accent,
                         foregroundColor: t.ink,
                       ),
                       icon: const Icon(Icons.play_arrow),
-                      label: Text(_state?.resumable ?? false
-                          ? 'Resume · ${positionLabel(_state!.positionMs)}'
-                          : 'Play'),
+                      label: Text(
+                        _state?.resumable ?? false
+                            ? 'Resume · ${positionLabel(_state!.positionMs)}'
+                            : 'Play',
+                      ),
                     ),
                     if (_state?.resumable ?? false)
                       TextButton(
                         onPressed: playBlocked
                             ? null
                             : () => _play(context, fromStart: true),
-                        child: Text('Start over',
-                            style: TextStyle(color: t.boneDim)),
+                        child: Text(
+                          'Start over',
+                          style: TextStyle(color: t.boneDim),
+                        ),
                       ),
-                    OutlinedButton.icon(
-                      onPressed: downloadBlocked
-                          ? null
-                          : () => _onDownloadPressed(task),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: downloaded ? t.accent : t.bone,
-                        side: BorderSide(
-                            color: downloaded ? t.accent : t.ash),
+                    // Downloads are hidden ENTIRELY from kid profiles
+                    // (agreed rule — a visible button that "only"
+                    // errored would still let kids start invisible
+                    // transfers). Adults share the install-wide pool.
+                    if (!ProfileStore.instance.isKid)
+                      OutlinedButton.icon(
+                        onPressed: downloadBlocked
+                            ? null
+                            : () => _onDownloadPressed(task),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: downloaded ? t.accent : t.bone,
+                          side: BorderSide(
+                            color: downloaded ? t.accent : t.ash,
+                          ),
+                        ),
+                        icon: Icon(downloadIcon, size: 18),
+                        label: Text(downloadLabel),
                       ),
-                      icon: Icon(downloadIcon, size: 18),
-                      label: Text(downloadLabel),
-                    ),
                     // Heart the version this page currently shows; the home
                     // screen's Favourites row picks it up. Per-address on
                     // purpose — with two uploads of one title the user
                     // hearts the copy they actually want.
                     IconButton(
-                      tooltip: FavouritesStore.instance.isFavourite(entry.address)
+                      tooltip:
+                          FavouritesStore.instance.isFavourite(entry.address)
                           ? 'Remove from Favourites'
                           : 'Add to Favourites',
                       icon: Icon(
                         FavouritesStore.instance.isFavourite(entry.address)
                             ? Icons.favorite
                             : Icons.favorite_border,
-                        color: FavouritesStore.instance.isFavourite(entry.address)
+                        color:
+                            FavouritesStore.instance.isFavourite(entry.address)
                             ? t.accent
                             : t.boneDim,
                       ),
                       onPressed: () => unawaited(
-                          FavouritesStore.instance.toggle(entry.address)),
+                        FavouritesStore.instance.toggle(entry.address),
+                      ),
                     ),
                     if (_next != null)
                       OutlinedButton.icon(
                         onPressed: () => Navigator.of(context).pushReplacement(
                           MaterialPageRoute(
-                              builder: (_) => DetailScreen(entry: _next!)),
+                            builder: (_) => DetailScreen(entry: _next!),
+                          ),
                         ),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: t.bone,
@@ -598,15 +647,13 @@ class _DetailScreenState extends State<DetailScreen> {
                   const SizedBox(height: 10),
                   Row(
                     children: [
-                      Icon(Icons.cloud_off_outlined,
-                          size: 15, color: t.rust),
+                      Icon(Icons.cloud_off_outlined, size: 15, color: t.rust),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
                           'Offline — this title is not downloaded, so it '
                           'cannot play until the connection is back.',
-                          style:
-                              TextStyle(fontSize: 11.5, color: t.boneDim),
+                          style: TextStyle(fontSize: 11.5, color: t.boneDim),
                         ),
                       ),
                     ],
@@ -631,20 +678,21 @@ class _DetailScreenState extends State<DetailScreen> {
                         ? 'Download failed — ${task.error ?? 'unknown error'}'
                         : downloadSizeLabel(task),
                     style: TextStyle(
-                        fontSize: 11,
-                        color: task.status == DownloadStatus.error
-                            ? t.rust
-                            : t.boneDim),
+                      fontSize: 11,
+                      color: task.status == DownloadStatus.error
+                          ? t.rust
+                          : t.boneDim,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 8),
                 Text(
                   downloaded
                       ? 'Downloaded — plays from this device, no network '
-                          'needed.'
+                            'needed.'
                       : 'Streams from Autonomi via the built-in client — '
-                          'first start can take a minute while it connects '
-                          'and fetches chunks.',
+                            'first start can take a minute while it connects '
+                            'and fetches chunks.',
                   style: TextStyle(fontSize: 11, color: t.ash),
                 ),
               ],
@@ -666,12 +714,10 @@ class _DetailScreenState extends State<DetailScreen> {
           const SizedBox(height: 24),
           sectionLabel(t, 'FILE'),
           const SizedBox(height: 6),
-          Text(entry.name,
-              style: TextStyle(fontSize: 12.5, color: t.boneDim)),
+          Text(entry.name, style: TextStyle(fontSize: 12.5, color: t.boneDim)),
           if (_fileInfoLine != null) ...[
             const SizedBox(height: 4),
-            Text(_fileInfoLine!,
-                style: TextStyle(fontSize: 12, color: t.ash)),
+            Text(_fileInfoLine!, style: TextStyle(fontSize: 12, color: t.ash)),
           ],
         ],
       ),
@@ -702,8 +748,10 @@ Future<bool> maybePauseDownloadsForStreaming(BuildContext context) async {
     builder: (context) => StatefulBuilder(
       builder: (context, setDialogState) => AlertDialog(
         backgroundColor: t.ink2,
-        title: Text('Pause downloads while playing?',
-            style: TextStyle(color: t.bone, fontSize: 16)),
+        title: Text(
+          'Pause downloads while playing?',
+          style: TextStyle(color: t.bone, fontSize: 16),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -717,26 +765,25 @@ Future<bool> maybePauseDownloadsForStreaming(BuildContext context) async {
             const SizedBox(height: 8),
             CheckboxListTile(
               value: remember,
-              onChanged: (v) =>
-                  setDialogState(() => remember = v ?? false),
+              onChanged: (v) => setDialogState(() => remember = v ?? false),
               controlAffinity: ListTileControlAffinity.leading,
               contentPadding: EdgeInsets.zero,
               activeColor: t.accent,
-              title: Text('Remember my choice',
-                  style: TextStyle(color: t.boneDim, fontSize: 13)),
+              title: Text(
+                'Remember my choice',
+                style: TextStyle(color: t.boneDim, fontSize: 13),
+              ),
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: Text('Keep downloading',
-                style: TextStyle(color: t.ash)),
+            child: Text('Keep downloading', style: TextStyle(color: t.ash)),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Pause downloads',
-                style: TextStyle(color: t.accent)),
+            child: Text('Pause downloads', style: TextStyle(color: t.accent)),
           ),
         ],
       ),
@@ -744,9 +791,9 @@ Future<bool> maybePauseDownloadsForStreaming(BuildContext context) async {
   );
   if (pause == null) return false; // dismissed — leave downloads running
   if (remember) {
-    await AppSettings.setPauseDownloadsOnPlay(pause
-        ? PauseDownloadsOnPlay.always
-        : PauseDownloadsOnPlay.never);
+    await AppSettings.setPauseDownloadsOnPlay(
+      pause ? PauseDownloadsOnPlay.always : PauseDownloadsOnPlay.never,
+    );
   }
   if (!pause) return false;
   return DownloadManager.instance.pauseAllForPlayback();
@@ -761,8 +808,10 @@ Future<bool?> confirmCellularStreaming(BuildContext context) {
     context: context,
     builder: (context) => AlertDialog(
       backgroundColor: t.ink2,
-      title: Text("You're on mobile data",
-          style: TextStyle(color: t.bone, fontSize: 16)),
+      title: Text(
+        "You're on mobile data",
+        style: TextStyle(color: t.bone, fontSize: 16),
+      ),
       content: Text(
         'Streaming uses your mobile-data allowance (a movie can be '
         'several GB). Stream anyway? You will not be asked again '

@@ -15,6 +15,7 @@ import '../services/embedded_client.dart';
 import '../services/exit_info.dart';
 import '../services/metadata_service.dart';
 import '../services/network_pause.dart';
+import '../services/profiles.dart';
 import '../services/storage_usage.dart';
 import '../services/update_check.dart';
 import '../theme/tokens.dart';
@@ -26,6 +27,8 @@ import 'downloads_screen.dart';
 import 'exit_info_screen.dart';
 import 'media_lists_screen.dart';
 import 'my_watch_screen.dart';
+import 'profile_picker_screen.dart' show switchProfileFlow;
+import 'profiles_screen.dart';
 import 'publish_screen.dart' show PublishScreen, isDesktopPlatform;
 import 'terms_screen.dart';
 import 'wallet_screen.dart';
@@ -39,6 +42,10 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  /// Non-admin profiles get the agreed restricted page: Switch profile
+  /// + Appearance + Buffer size + About (minus Clear all data).
+  bool get _isAdmin => ProfileStore.instance.isAdmin;
+
   List<MediaList>? _lists;
   String? _version;
   int _bufferSizeMb = AppSettings.defaultBufferSizeMb;
@@ -85,8 +92,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _lists = lists;
         _bufferSizeMb = bufferSizeMb;
         _tmdbKeySource = tmdbKeySource;
-        _dataUsageTotal =
-            usage == null ? null : formatBytes(usage.total.total);
+        _dataUsageTotal = usage == null ? null : formatBytes(usage.total.total);
       });
     }
   }
@@ -95,7 +101,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final info = await PackageInfo.fromPlatform();
       if (mounted) {
-        setState(() => _version = '${info.version} (build ${info.buildNumber})');
+        setState(
+          () => _version = '${info.version} (build ${info.buildNumber})',
+        );
       }
     } catch (_) {
       // Platform channel unavailable (tests, bare desktop builds).
@@ -108,8 +116,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => SimpleDialog(
         backgroundColor: t.ink2,
-        title: Text('Buffer size',
-            style: TextStyle(color: t.bone, fontSize: 16)),
+        title: Text(
+          'Buffer size',
+          style: TextStyle(color: t.bone, fontSize: 16),
+        ),
         children: [
           RadioGroup<int>(
             groupValue: _bufferSizeMb,
@@ -147,7 +157,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       hint: _tmdbKeySource == TmdbKeySource.user
           ? 'New key (leave empty to remove yours)'
           : 'API key or read access token',
-      note: 'Get a free key at themoviedb.org/settings/api '
+      note:
+          'Get a free key at themoviedb.org/settings/api '
           '(a TMDB account is free too).',
     );
     if (entered == null) return;
@@ -182,8 +193,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: t.ink2,
-        title: Text('Clear all data?',
-            style: TextStyle(color: t.bone, fontSize: 16)),
+        title: Text(
+          'Clear all data?',
+          style: TextStyle(color: t.bone, fontSize: 16),
+        ),
         content: Text(
           'This resets W@tch to factory defaults, deleting everything '
           'stored on this device:\n\n'
@@ -211,8 +224,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: t.ink2,
-        title: Text('Are you sure?',
-            style: TextStyle(color: t.rust, fontSize: 16)),
+        title: Text(
+          'Are you sure?',
+          style: TextStyle(color: t.rust, fontSize: 16),
+        ),
         content: Text(
           'Your media lists exist only on this device — they are not '
           'stored on the network. Unless you exported them to a file, '
@@ -228,8 +243,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child:
-                Text('Delete everything', style: TextStyle(color: t.rust)),
+            child: Text('Delete everything', style: TextStyle(color: t.rust)),
           ),
         ],
       ),
@@ -240,9 +254,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _openMediaLists() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const MediaListsScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const MediaListsScreen()));
     await _reload();
   }
 
@@ -254,8 +268,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => SimpleDialog(
         backgroundColor: t.ink2,
-        title: Text('Colour scheme',
-            style: TextStyle(color: t.bone, fontSize: 16)),
+        title: Text(
+          'Colour scheme',
+          style: TextStyle(color: t.bone, fontSize: 16),
+        ),
         children: [
           RadioGroup<ThemeMode>(
             groupValue: wiThemeMode.value,
@@ -276,8 +292,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: TextStyle(color: t.bone, fontSize: 14),
                     ),
                     subtitle: mode == ThemeMode.system
-                        ? Text('Follows the device setting',
-                            style: TextStyle(color: t.ash, fontSize: 11.5))
+                        ? Text(
+                            'Follows the device setting',
+                            style: TextStyle(color: t.ash, fontSize: 11.5),
+                          )
                         : null,
                   ),
               ],
@@ -293,47 +311,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _versionRow(WiTokens t, String name, String version) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(name,
-                  style: TextStyle(color: t.boneDim, fontSize: 12.5)),
-            ),
-            Text(
-              version,
-              style: TextStyle(
-                  color: t.bone, fontSize: 12.5, fontFamily: 'monospace'),
-            ),
-          ],
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(name, style: TextStyle(color: t.boneDim, fontSize: 12.5)),
         ),
-      );
+        Text(
+          version,
+          style: TextStyle(
+            color: t.bone,
+            fontSize: 12.5,
+            fontFamily: 'monospace',
+          ),
+        ),
+      ],
+    ),
+  );
 
   /// Everything a bug report wants, one clipboard payload.
   Future<void> _copyVersions() async {
     final v = _stackVersions;
-    await Clipboard.setData(ClipboardData(
-      text: [
-        'W@tch ${_version ?? 'unknown'}',
-        if (v != null) ...[
-          'ant-core ${v.antCore}',
-          'x0x ${v.x0x}',
-          'saorsa-core ${v.saorsaCore}',
-          'saorsa-gossip ${v.saorsaGossip}',
-          'ant-quic ${v.antQuic}',
-        ],
-      ].join('\n'),
-    ));
+    await Clipboard.setData(
+      ClipboardData(
+        text: [
+          'W@tch ${_version ?? 'unknown'}',
+          if (v != null) ...[
+            'ant-core ${v.antCore}',
+            'x0x ${v.x0x}',
+            'saorsa-core ${v.saorsaCore}',
+            'saorsa-gossip ${v.saorsaGossip}',
+            'ant-quic ${v.antQuic}',
+          ],
+        ].join('\n'),
+      ),
+    );
     wiMessengerKey.currentState?.showSnackBar(
       const SnackBar(content: Text('Versions copied')),
     );
   }
 
   static String _themeModeLabel(ThemeMode mode) => switch (mode) {
-        ThemeMode.dark => 'Dark  ·  default',
-        ThemeMode.light => 'Light',
-        ThemeMode.system => 'System default',
-      };
+    ThemeMode.dark => 'Dark  ·  default',
+    ThemeMode.light => 'Light',
+    ThemeMode.system => 'System default',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -349,13 +371,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               children: [
-                // Renamed from LIBRARY (2026-08-30): the section covers
-                // everything your content does — channels, device sync,
-                // your media, uploads, and downloads.
+                // Profiles lead the page. The admin manages the family;
+                // everyone else gets only Switch profile here — the
+                // agreed non-admin settings scope is Appearance +
+                // Buffer size + About (minus Clear all data), enforced
+                // by the _isAdmin gates through the sections below.
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
                   child: Text(
-                    'CONTENT',
+                    'PROFILES',
                     style: TextStyle(
                       fontSize: 11,
                       letterSpacing: 1.5,
@@ -364,103 +388,175 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
-                // Channels — the PUBLIC space, amber; leads the section
-                // (2026-08-29), above the private tiles.
-                ListTile(
-                  leading:
-                      const Icon(Icons.podcasts, color: WiTokens.channelAmber),
-                  title: Text('Channels',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
-                  subtitle: Text(
-                    'Public · anyone with the code',
-                    style: TextStyle(color: t.ash, fontSize: 12),
-                  ),
-                  trailing: Icon(Icons.chevron_right, color: t.ash),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const ChannelsScreen()),
-                  ),
-                ),
-                // My W@tch directly under Channels (2026-08-29): the two
-                // sharing surfaces sit together — public above, private
-                // below.
-                ListTile(
-                  leading: Icon(Icons.devices_outlined, color: t.accent),
-                  title: Text('My W@tch',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
-                  subtitle: Text(
-                    'Link your devices — watch lists, viewing positions, '
-                    'and detail edits sync automatically',
-                    style: TextStyle(color: t.ash, fontSize: 12),
-                  ),
-                  trailing: Icon(Icons.chevron_right, color: t.ash),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const MyWatchScreen()),
-                  ),
-                ),
-                // One door for the whole library: lists AND the home-row
-                // order/visibility (the separate "Home screen" page
-                // merged in here).
-                ListTile(
-                  leading: Icon(Icons.video_library_outlined, color: t.accent),
-                  title: Text('My Media',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
-                  subtitle: Text(
-                    lists.isEmpty
-                        ? 'No lists yet — home row order and visibility'
-                        : '${lists.length} '
-                            '${lists.length == 1 ? 'list' : 'lists'} · '
-                            '${lists.where((l) => l.enabled).length} shown '
-                            'on home · row order and visibility',
-                    style: TextStyle(color: t.ash, fontSize: 12),
-                  ),
-                  trailing: Icon(Icons.chevron_right, color: t.ash),
-                  onTap: _openMediaLists,
-                ),
-                // Upload — moved out of the home drawer (2026-08-29);
-                // desktop-only like the Publish flow it opens.
-                if (isDesktopPlatform)
+                if (_isAdmin)
                   ListTile(
-                    leading:
-                        Icon(Icons.cloud_upload_outlined, color: t.accent),
-                    title: Text('Upload',
-                        style: TextStyle(color: t.bone, fontSize: 15)),
+                    leading: Icon(Icons.people_outline, color: t.accent),
+                    title: Text(
+                      'Profiles',
+                      style: TextStyle(color: t.bone, fontSize: 15),
+                    ),
                     subtitle: Text(
-                      'Private · only your devices',
+                      ProfileStore.instance.multiProfile
+                          ? '${ProfileStore.instance.profiles.length} '
+                                'profiles · avatars, PINs and kid access'
+                          : 'Add profiles for family members — each gets '
+                                'its own viewing positions and look',
                       style: TextStyle(color: t.ash, fontSize: 12),
                     ),
                     trailing: Icon(Icons.chevron_right, color: t.ash),
                     onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const PublishScreen()),
+                      MaterialPageRoute(builder: (_) => const ProfilesScreen()),
                     ),
                   ),
-                // Downloads closes the section (2026-08-30, moved out of
-                // its own DOWNLOADS section): below My Media, and below
-                // Upload where that tile shows (desktop).
-                ListenableBuilder(
-                  listenable: DownloadManager.instance,
-                  builder: (context, _) {
-                    final manager = DownloadManager.instance;
-                    final active = manager.activeCount;
-                    final done = manager.doneCount;
-                    return ListTile(
-                      leading:
-                          Icon(Icons.download_outlined, color: t.accent),
-                      title: Text('Downloads',
-                          style: TextStyle(color: t.bone, fontSize: 15)),
+                if (!_isAdmin)
+                  ListTile(
+                    leading: Icon(
+                      Icons.switch_account_outlined,
+                      color: t.accent,
+                    ),
+                    title: Text(
+                      'Switch profile',
+                      style: TextStyle(color: t.bone, fontSize: 15),
+                    ),
+                    subtitle: Text(
+                      'Back to "Who\'s watching?"',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                    onTap: () => switchProfileFlow(context),
+                  ),
+                if (_isAdmin) ...[
+                  // Renamed from LIBRARY (2026-08-30): the section covers
+                  // everything your content does — channels, device sync,
+                  // your media, uploads, and downloads.
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+                    child: Text(
+                      'CONTENT',
+                      style: TextStyle(
+                        fontSize: 11,
+                        letterSpacing: 1.5,
+                        fontWeight: FontWeight.w700,
+                        color: t.ash,
+                      ),
+                    ),
+                  ),
+                  // Channels — the PUBLIC space, amber; leads the section
+                  // (2026-08-29), above the private tiles.
+                  ListTile(
+                    leading: const Icon(
+                      Icons.podcasts,
+                      color: WiTokens.channelAmber,
+                    ),
+                    title: Text(
+                      'Channels',
+                      style: TextStyle(color: t.bone, fontSize: 15),
+                    ),
+                    subtitle: Text(
+                      'Public · anyone with the code',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                    trailing: Icon(Icons.chevron_right, color: t.ash),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const ChannelsScreen()),
+                    ),
+                  ),
+                  // My W@tch directly under Channels (2026-08-29): the two
+                  // sharing surfaces sit together — public above, private
+                  // below.
+                  ListTile(
+                    leading: Icon(Icons.devices_outlined, color: t.accent),
+                    title: Text(
+                      'My W@tch',
+                      style: TextStyle(color: t.bone, fontSize: 15),
+                    ),
+                    subtitle: Text(
+                      'Link your devices — watch lists, viewing positions, '
+                      'and detail edits sync automatically',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                    trailing: Icon(Icons.chevron_right, color: t.ash),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const MyWatchScreen()),
+                    ),
+                  ),
+                  // One door for the whole library: lists AND the home-row
+                  // order/visibility (the separate "Home screen" page
+                  // merged in here).
+                  ListTile(
+                    leading: Icon(
+                      Icons.video_library_outlined,
+                      color: t.accent,
+                    ),
+                    title: Text(
+                      'My Media',
+                      style: TextStyle(color: t.bone, fontSize: 15),
+                    ),
+                    subtitle: Text(
+                      lists.isEmpty
+                          ? 'No lists yet — home row order and visibility'
+                          : '${lists.length} '
+                                '${lists.length == 1 ? 'list' : 'lists'} · '
+                                '${lists.where((l) => l.enabled).length} shown '
+                                'on home · row order and visibility',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                    trailing: Icon(Icons.chevron_right, color: t.ash),
+                    onTap: _openMediaLists,
+                  ),
+                  // Upload — moved out of the home drawer (2026-08-29);
+                  // desktop-only like the Publish flow it opens.
+                  if (isDesktopPlatform)
+                    ListTile(
+                      leading: Icon(
+                        Icons.cloud_upload_outlined,
+                        color: t.accent,
+                      ),
+                      title: Text(
+                        'Upload',
+                        style: TextStyle(color: t.bone, fontSize: 15),
+                      ),
                       subtitle: Text(
-                        manager.tasks.isEmpty
-                            ? 'Queue, storage, and playback behaviour'
-                            : '$active active · $done downloaded',
+                        'Private · only your devices',
                         style: TextStyle(color: t.ash, fontSize: 12),
                       ),
                       trailing: Icon(Icons.chevron_right, color: t.ash),
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
-                            builder: (_) => const DownloadsScreen()),
+                          builder: (_) => const PublishScreen(),
+                        ),
                       ),
-                    );
-                  },
-                ),
+                    ),
+                  // Downloads closes the section (2026-08-30, moved out of
+                  // its own DOWNLOADS section): below My Media, and below
+                  // Upload where that tile shows (desktop).
+                  ListenableBuilder(
+                    listenable: DownloadManager.instance,
+                    builder: (context, _) {
+                      final manager = DownloadManager.instance;
+                      final active = manager.activeCount;
+                      final done = manager.doneCount;
+                      return ListTile(
+                        leading: Icon(Icons.download_outlined, color: t.accent),
+                        title: Text(
+                          'Downloads',
+                          style: TextStyle(color: t.bone, fontSize: 15),
+                        ),
+                        subtitle: Text(
+                          manager.tasks.isEmpty
+                              ? 'Queue, storage, and playback behaviour'
+                              : '$active active · $done downloaded',
+                          style: TextStyle(color: t.ash, fontSize: 12),
+                        ),
+                        trailing: Icon(Icons.chevron_right, color: t.ash),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const DownloadsScreen(),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
                   child: Text(
@@ -476,63 +572,74 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 // Offline mode leads the section (2026-09-05 reorg —
                 // the one switch that stops everything, easiest to
                 // find at the top; formerly "Pause all network
-                // activity" lower down).
-                ListenableBuilder(
-                  listenable: NetworkPause.instance,
-                  builder: (context, _) => SwitchListTile(
-                    secondary:
-                        Icon(Icons.pause_circle_outline, color: t.accent),
-                    title: Text('Offline mode',
-                        style: TextStyle(color: t.bone, fontSize: 15)),
-                    subtitle: Text(
-                      NetworkPause.instance.paused
-                          ? (NetworkPause.instance.autoPaused
-                              ? 'Paused automatically after sitting idle — '
-                                  'playing something resumes it'
-                              : 'Paused — nothing is streamed or synced '
-                                  'until you switch this off')
-                          : 'Disconnects from Autonomi and pauses Channels '
-                              'and My W@tch until switched back on',
-                      style: TextStyle(color: t.ash, fontSize: 12),
+                // activity" lower down). Admin only, like Data below —
+                // non-admin profiles keep just Buffer size here.
+                if (_isAdmin)
+                  ListenableBuilder(
+                    listenable: NetworkPause.instance,
+                    builder: (context, _) => SwitchListTile(
+                      secondary: Icon(
+                        Icons.pause_circle_outline,
+                        color: t.accent,
+                      ),
+                      title: Text(
+                        'Offline mode',
+                        style: TextStyle(color: t.bone, fontSize: 15),
+                      ),
+                      subtitle: Text(
+                        NetworkPause.instance.paused
+                            ? (NetworkPause.instance.autoPaused
+                                  ? 'Paused automatically after sitting idle — '
+                                        'playing something resumes it'
+                                  : 'Paused — nothing is streamed or synced '
+                                        'until you switch this off')
+                            : 'Disconnects from Autonomi and pauses Channels '
+                                  'and My W@tch until switched back on',
+                        style: TextStyle(color: t.ash, fontSize: 12),
+                      ),
+                      value: NetworkPause.instance.paused,
+                      onChanged: (v) async {
+                        await NetworkPause.instance.setPaused(v);
+                        await _reload();
+                      },
                     ),
-                    value: NetworkPause.instance.paused,
-                    onChanged: (v) async {
-                      await NetworkPause.instance.setPaused(v);
-                      await _reload();
-                    },
                   ),
-                ),
                 // Data: one page for everything data (2026-09-06 reorg
                 // — absorbed the Data usage, Data saving, Mobile data
                 // and Built-in clients sub-pages): usage counters on
                 // top, then auto-pause when idle, the built-in clients
                 // with their Off / Wi-Fi / Wi-Fi + mobile pills, and
                 // the streaming/download mobile-data policies.
-                ListTile(
-                  leading: Icon(Icons.data_usage, color: t.accent),
-                  title: Text('Data',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
-                  subtitle: Text(
-                    _dataUsageTotal == null
-                        ? 'Usage, auto-pause, and the built-in clients'
-                        : '$_dataUsageTotal this period · auto-pause · '
-                            'built-in clients',
-                    style: TextStyle(color: t.ash, fontSize: 12),
+                if (_isAdmin)
+                  ListTile(
+                    leading: Icon(Icons.data_usage, color: t.accent),
+                    title: Text(
+                      'Data',
+                      style: TextStyle(color: t.bone, fontSize: 15),
+                    ),
+                    subtitle: Text(
+                      _dataUsageTotal == null
+                          ? 'Usage, auto-pause, and the built-in clients'
+                          : '$_dataUsageTotal this period · auto-pause · '
+                                'built-in clients',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                    trailing: Icon(Icons.chevron_right, color: t.ash),
+                    onTap: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const DataScreen()),
+                      );
+                      await _reload(); // subtitle follows a reset
+                    },
                   ),
-                  trailing: Icon(Icons.chevron_right, color: t.ash),
-                  onTap: () async {
-                    await Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const DataScreen()),
-                    );
-                    await _reload(); // subtitle follows a reset
-                  },
-                ),
                 // Then Buffer size (2026-08-30, moved in from the
                 // former STREAMING section) closes the section.
                 ListTile(
                   leading: Icon(Icons.memory_outlined, color: t.accent),
-                  title: Text('Buffer size',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  title: Text(
+                    'Buffer size',
+                    style: TextStyle(color: t.bone, fontSize: 15),
+                  ),
                   subtitle: Text(
                     '$_bufferSizeMb MB',
                     style: TextStyle(color: t.ash, fontSize: 12),
@@ -551,47 +658,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
-                  child: Text(
-                    'METADATA',
-                    style: TextStyle(
-                      fontSize: 11,
-                      letterSpacing: 1.5,
-                      fontWeight: FontWeight.w700,
-                      color: t.ash,
+                if (_isAdmin) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
+                    child: Text(
+                      'METADATA',
+                      style: TextStyle(
+                        fontSize: 11,
+                        letterSpacing: 1.5,
+                        fontWeight: FontWeight.w700,
+                        color: t.ash,
+                      ),
                     ),
                   ),
-                ),
-                ListTile(
-                  leading: Icon(Icons.image_search_outlined, color: t.accent),
-                  title: Text('TMDB API key',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
-                  subtitle: Text(
-                    switch (_tmdbKeySource) {
+                  ListTile(
+                    leading: Icon(Icons.image_search_outlined, color: t.accent),
+                    title: Text(
+                      'TMDB API key',
+                      style: TextStyle(color: t.bone, fontSize: 15),
+                    ),
+                    subtitle: Text(switch (_tmdbKeySource) {
                       TmdbKeySource.user => 'Using your key',
                       TmdbKeySource.none =>
                         'Not set — titles come from file names only',
-                    },
-                    style: TextStyle(color: t.ash, fontSize: 12),
+                    }, style: TextStyle(color: t.ash, fontSize: 12)),
+                    trailing: Icon(Icons.chevron_right, color: t.ash),
+                    onTap: _editTmdbApiKey,
                   ),
-                  trailing: Icon(Icons.chevron_right, color: t.ash),
-                  onTap: _editTmdbApiKey,
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                  child: Text(
-                    'Artwork, descriptions, and categories are matched from '
-                    'TMDB using each entry\'s file name, then cached on this '
-                    'device. W@tch ships without a key: create a free one '
-                    'at themoviedb.org (Settings → API) and paste either the '
-                    'API key or the read access token here — it is never '
-                    'displayed. Imported bundles carry metadata and posters, '
-                    'so a key is only needed for titles a bundle doesn\'t '
-                    'cover.',
-                    style: TextStyle(fontSize: 11.5, color: t.ash),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                    child: Text(
+                      'Artwork, descriptions, and categories are matched from '
+                      'TMDB using each entry\'s file name, then cached on this '
+                      'device. W@tch ships without a key: create a free one '
+                      'at themoviedb.org (Settings → API) and paste either the '
+                      'API key or the read access token here — it is never '
+                      'displayed. Imported bundles carry metadata and posters, '
+                      'so a key is only needed for titles a bundle doesn\'t '
+                      'cover.',
+                      style: TextStyle(fontSize: 11.5, color: t.ash),
+                    ),
                   ),
-                ),
+                ],
                 // Appearance sits below Metadata (2026-08-30, moved down
                 // from second place).
                 Padding(
@@ -608,11 +716,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 ListTile(
                   leading: Icon(Icons.dark_mode_outlined, color: t.accent),
-                  title: Text('Colour scheme',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  title: Text(
+                    'Colour scheme',
+                    style: TextStyle(color: t.bone, fontSize: 15),
+                  ),
                   subtitle: Text(
-                    _themeModeLabel(wiThemeMode.value)
-                        .replaceFirst('  ·  default', ' (default)'),
+                    _themeModeLabel(
+                      wiThemeMode.value,
+                    ).replaceFirst('  ·  default', ' (default)'),
                     style: TextStyle(color: t.ash, fontSize: 12),
                   ),
                   trailing: Icon(Icons.chevron_right, color: t.ash),
@@ -623,7 +734,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 // PUBLISHING) since the Publish→Upload rename — one
                 // wallet funds both spaces
                 // (docs/PLAN-personal-vs-channels.md).
-                if (isDesktopPlatform) ...[
+                if (_isAdmin && isDesktopPlatform) ...[
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
                     child: Text(
@@ -637,10 +748,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                   ListTile(
-                    leading: Icon(Icons.account_balance_wallet_outlined,
-                        color: t.accent),
-                    title: Text('Wallet',
-                        style: TextStyle(color: t.bone, fontSize: 15)),
+                    leading: Icon(
+                      Icons.account_balance_wallet_outlined,
+                      color: t.accent,
+                    ),
+                    title: Text(
+                      'Wallet',
+                      style: TextStyle(color: t.bone, fontSize: 15),
+                    ),
                     subtitle: Text(
                       'The ANT wallet that pays for uploading files to '
                       'the network',
@@ -648,8 +763,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     trailing: Icon(Icons.chevron_right, color: t.ash),
                     onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                          builder: (_) => const WalletScreen()),
+                      MaterialPageRoute(builder: (_) => const WalletScreen()),
                     ),
                   ),
                 ],
@@ -707,8 +821,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (_stackVersions == null)
                   ListTile(
                     leading: Icon(Icons.info_outline, color: t.accent),
-                    title: Text('Version',
-                        style: TextStyle(color: t.bone, fontSize: 15)),
+                    title: Text(
+                      'Version',
+                      style: TextStyle(color: t.bone, fontSize: 15),
+                    ),
                     subtitle: Text(
                       _version ?? 'Unknown',
                       style: TextStyle(color: t.ash, fontSize: 12),
@@ -717,8 +833,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 else
                   ExpansionTile(
                     leading: Icon(Icons.info_outline, color: t.accent),
-                    title: Text('Version',
-                        style: TextStyle(color: t.bone, fontSize: 15)),
+                    title: Text(
+                      'Version',
+                      style: TextStyle(color: t.bone, fontSize: 15),
+                    ),
                     subtitle: Text(
                       '${_version ?? 'Unknown'} · network stack details',
                       style: TextStyle(color: t.ash, fontSize: 12),
@@ -730,10 +848,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _versionRow(t, 'App', _version ?? 'unknown'),
                       _versionRow(t, 'ant-core', _stackVersions!.antCore),
                       _versionRow(t, 'x0x', _stackVersions!.x0x),
+                      _versionRow(t, 'saorsa-core', _stackVersions!.saorsaCore),
                       _versionRow(
-                          t, 'saorsa-core', _stackVersions!.saorsaCore),
-                      _versionRow(
-                          t, 'saorsa-gossip', _stackVersions!.saorsaGossip),
+                        t,
+                        'saorsa-gossip',
+                        _stackVersions!.saorsaGossip,
+                      ),
                       _versionRow(t, 'ant-quic', _stackVersions!.antQuic),
                       Align(
                         alignment: Alignment.centerLeft,
@@ -741,11 +861,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
                           child: TextButton.icon(
                             onPressed: _copyVersions,
-                            icon:
-                                Icon(Icons.copy, size: 16, color: t.accent),
-                            label: Text('Copy versions',
-                                style: TextStyle(
-                                    color: t.accent, fontSize: 13)),
+                            icon: Icon(Icons.copy, size: 16, color: t.accent),
+                            label: Text(
+                              'Copy versions',
+                              style: TextStyle(color: t.accent, fontSize: 13),
+                            ),
                           ),
                         ),
                       ),
@@ -755,11 +875,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 // closed — lets a device without adb report a crash.
                 if (ExitInfoService.instance.supported)
                   ListTile(
-                    leading:
-                        Icon(Icons.report_gmailerrorred_outlined,
-                            color: t.accent),
-                    title: Text('Why did the app close?',
-                        style: TextStyle(color: t.bone, fontSize: 15)),
+                    leading: Icon(
+                      Icons.report_gmailerrorred_outlined,
+                      color: t.accent,
+                    ),
+                    title: Text(
+                      'Why did the app close?',
+                      style: TextStyle(color: t.bone, fontSize: 15),
+                    ),
                     subtitle: Text(
                       'Android\'s record of recent app exits — use it '
                       'to report a crash',
@@ -767,8 +890,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     trailing: Icon(Icons.chevron_right, color: t.ash),
                     onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                          builder: (_) => const ExitInfoScreen()),
+                      MaterialPageRoute(builder: (_) => const ExitInfoScreen()),
                     ),
                   ),
                 if (isDesktopPlatform) ...[
@@ -778,27 +900,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       final tag = UpdateCheck.instance.availableTag;
                       if (tag == null) return const SizedBox.shrink();
                       return ListTile(
-                        leading:
-                            Icon(Icons.system_update_alt, color: t.accent),
-                        title: Text('Update available',
-                            style:
-                                TextStyle(color: t.accent, fontSize: 15)),
+                        leading: Icon(Icons.system_update_alt, color: t.accent),
+                        title: Text(
+                          'Update available',
+                          style: TextStyle(color: t.accent, fontSize: 15),
+                        ),
                         subtitle: Text(
                           '$tag — open the release page to download',
                           style: TextStyle(color: t.ash, fontSize: 12),
                         ),
-                        trailing: Icon(Icons.open_in_new,
-                            color: t.ash, size: 18),
-                        onTap: () => launchUrl(Uri.parse(
+                        trailing: Icon(
+                          Icons.open_in_new,
+                          color: t.ash,
+                          size: 18,
+                        ),
+                        onTap: () => launchUrl(
+                          Uri.parse(
                             UpdateCheck.instance.releaseUrl ??
-                                UpdateCheck.releasePage)),
+                                UpdateCheck.releasePage,
+                          ),
+                        ),
                       );
                     },
                   ),
                   SwitchListTile(
                     secondary: Icon(Icons.update, color: t.accent),
-                    title: Text('Check for updates on startup',
-                        style: TextStyle(color: t.bone, fontSize: 15)),
+                    title: Text(
+                      'Check for updates on startup',
+                      style: TextStyle(color: t.bone, fontSize: 15),
+                    ),
                     subtitle: Text(
                       'At most once a day, W@tch asks GitHub for the '
                       'latest release and mentions it here if it is '
@@ -818,8 +948,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
                 ListTile(
                   leading: Icon(Icons.gavel_outlined, color: t.accent),
-                  title: Text('Open-source licenses',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  title: Text(
+                    'Open-source licenses',
+                    style: TextStyle(color: t.bone, fontSize: 15),
+                  ),
                   subtitle: Text(
                     'W@tch code is MIT; the app as a whole is '
                     'distributed under GPLv3',
@@ -834,8 +966,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 ListTile(
                   leading: Icon(Icons.policy_outlined, color: t.accent),
-                  title: Text('Terms of Use & Disclaimer',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  title: Text(
+                    'Terms of Use & Disclaimer',
+                    style: TextStyle(color: t.bone, fontSize: 15),
+                  ),
                   subtitle: Text(
                     'The terms you accepted on first launch',
                     style: TextStyle(color: t.ash, fontSize: 12),
@@ -847,31 +981,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 ListTile(
                   leading: Icon(Icons.sd_storage_outlined, color: t.accent),
-                  title: Text('Size on disk',
-                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  title: Text(
+                    'Size on disk',
+                    style: TextStyle(color: t.bone, fontSize: 15),
+                  ),
                   subtitle: Text(
                     !_dataSizeKnown
                         ? 'Measuring…'
                         : _dataSizeBytes == null
-                            ? 'Unknown on this platform'
-                            : '${formatBytes(_dataSizeBytes!)} — lists, '
-                                'artwork, metadata, data maps and network '
-                                'state',
+                        ? 'Unknown on this platform'
+                        : '${formatBytes(_dataSizeBytes!)} — lists, '
+                              'artwork, metadata, data maps and network '
+                              'state',
                     style: TextStyle(color: t.ash, fontSize: 12),
                   ),
                   trailing: Icon(Icons.refresh, color: t.ash, size: 18),
                   onTap: _loadDataSize,
                 ),
-                ListTile(
-                  leading: Icon(Icons.delete_forever_outlined, color: t.rust),
-                  title: Text('Clear all data',
-                      style: TextStyle(color: t.rust, fontSize: 15)),
-                  subtitle: Text(
-                    'Reset W@tch to factory defaults',
-                    style: TextStyle(color: t.ash, fontSize: 12),
+                // The one About row non-admin profiles never see (the
+                // agreed scope: About minus Clear all data).
+                if (_isAdmin)
+                  ListTile(
+                    leading: Icon(Icons.delete_forever_outlined, color: t.rust),
+                    title: Text(
+                      'Clear all data',
+                      style: TextStyle(color: t.rust, fontSize: 15),
+                    ),
+                    subtitle: Text(
+                      'Reset W@tch to factory defaults',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                    onTap: _clearAllData,
                   ),
-                  onTap: _clearAllData,
-                ),
                 const SizedBox(height: 80),
               ],
             ),

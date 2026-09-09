@@ -750,6 +750,34 @@ against the x0x project.
 - [ ] Daily buckets/graph, Wi-Fi vs cellular tagging, budget alerts
       (deferred from the data-usage plan)
 
+## Profiles — family viewing (shipped 2026-09-09, v0.1.0-alpha.93)
+
+Netflix-style profiles for shared/family devices. Profiles are NOT
+accounts: the network identity, wallet, channels, lists and downloaded
+files stay install-global — a profile scopes only viewing state.
+
+- [x] Silent migration: every existing install becomes a lone "Admin"
+      profile; the whole feature stays invisible until a second
+      profile is created (Settings → Profiles)
+- [x] Profile types at creation: **Kid** (list allow-list is the sole
+      content control, downloads hidden entirely, restricted settings)
+      or **Adult** (full library + downloads, restricted settings)
+- [x] Per-profile viewing state: watch positions/Continue Watching,
+      favourites, colour scheme (schema v13: watch states keyed per
+      profile; My W@tch sync stays pinned to the Admin profile's)
+- [x] "Who's watching?" picker at launch (multi-profile), avatars from
+      12 built-in presets or a cropped image, optional auto-login
+      profile (the kids'-TV case)
+- [x] PINs: optional per profile, salted-hashed, rate-limited; admin
+      resets child PINs; admin PIN has a one-time recovery code
+      (shown once at set/change, itself stored hashed)
+- [x] Guards: admin PIN required to switch away from a kid profile;
+      prompt to set an admin PIN when the first profile is created
+      (skippable with an explicit warning)
+- [x] Non-admin settings scope: Switch profile + Appearance + Buffer
+      size + About (minus Clear all data)
+- [ ] Android TV / leanback UI for the family-TV case (phase 4)
+
 ## Phase 3 — All desktop platforms
 - [x] Windows build + packaging → CI-built portable zip, shipped with
       every release since alpha.55 (unsigned: SmartScreen "More info →

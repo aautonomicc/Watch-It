@@ -15,6 +15,7 @@ import 'library_store.dart';
 import 'metadata.dart';
 import 'metadata_service.dart';
 import 'my_watch_api.dart';
+import 'profiles.dart';
 import 'user_metadata.dart';
 import 'watch_state.dart';
 
@@ -501,7 +502,8 @@ class MyWatchSync {
     final haveHashes = await _localHaveHashes(libKeys);
     final tmdbSection = await _localTmdbSection(libKeys, remote);
     // Newest-first from the store, so a budget trim drops the stalest.
-    final ourWatchStates = await WatchStateStore.instance.all();
+    final ourWatchStates =
+        await WatchStateStore.instance.all(profileId: kAdminProfileId);
     final built = buildDocWithinBudget(
       lists: lists,
       tombstones: state.tombstones,

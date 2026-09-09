@@ -4,6 +4,7 @@ import '../models/media_list.dart';
 import '../services/connectivity.dart';
 import '../services/download_manager.dart';
 import '../services/metadata_service.dart';
+import '../services/profiles.dart';
 import '../services/season_grouping.dart';
 import '../services/version_choice.dart';
 import '../theme/tokens.dart';
@@ -39,15 +40,23 @@ class ShowScreen extends StatelessWidget {
 
   /// Queue every not-yet-downloaded episode ([remaining]) for download.
   Future<void> _downloadAll(
-      BuildContext context, List<MediaEntry> remaining) async {
+    BuildContext context,
+    List<MediaEntry> remaining,
+  ) async {
     for (final entry in remaining) {
       await DownloadManager.instance.enqueue(entry);
     }
     if (!context.mounted) return;
     final n = remaining.length;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
         content: Text(
-            n == 1 ? '1 episode added to downloads' : '$n episodes added to downloads')));
+          n == 1
+              ? '1 episode added to downloads'
+              : '$n episodes added to downloads',
+        ),
+      ),
+    );
   }
 
   Widget _build(BuildContext context) {
@@ -55,7 +64,8 @@ class ShowScreen extends StatelessWidget {
     // Any episode's match carries the show title, artwork, rating, and
     // synopsis; the first is as good as any.
     final meta = MetadataService.instance.metadataFor(
-        seasons.first.episodes.first);
+      seasons.first.episodes.first,
+    );
     final overview = meta.showOverview ?? meta.overview;
     // Episodes across every season not fully downloaded yet — what
     // "download show" queues (all seasons' episodes are already in
@@ -74,25 +84,28 @@ class ShowScreen extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
-        title: Text(meta.title,
-            style: TextStyle(color: t.bone, fontSize: 16),
-            overflow: TextOverflow.ellipsis),
+        title: Text(
+          meta.title,
+          style: TextStyle(color: t.bone, fontSize: 16),
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           // Edit details for the whole show — title, year, synopsis, and
           // show poster, written under the show's own key and overlaid
           // on every episode by MetadataService.
-          IconButton(
-            tooltip: 'Edit details',
-            icon: Icon(Icons.edit_outlined, color: t.boneDim, size: 20),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => EditDetailsScreen(
-                  entry: seasons.first.episodes.first,
-                  scope: EditDetailsScope.show,
+          if (!ProfileStore.instance.isKid)
+            IconButton(
+              tooltip: 'Edit details',
+              icon: Icon(Icons.edit_outlined, color: t.boneDim, size: 20),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => EditDetailsScreen(
+                    entry: seasons.first.episodes.first,
+                    scope: EditDetailsScope.show,
+                  ),
                 ),
               ),
             ),
-          ),
         ],
       ),
       body: ListView(
@@ -117,13 +130,17 @@ class ShowScreen extends StatelessWidget {
                 ),
                 if (meta.year != null) ...[
                   const SizedBox(height: 4),
-                  Text('${meta.year}',
-                      style: TextStyle(fontSize: 13, color: t.ash)),
+                  Text(
+                    '${meta.year}',
+                    style: TextStyle(fontSize: 13, color: t.ash),
+                  ),
                 ],
                 if (meta.category != null) ...[
                   const SizedBox(height: 4),
-                  Text(meta.category!,
-                      style: TextStyle(fontSize: 12, color: t.ash)),
+                  Text(
+                    meta.category!,
+                    style: TextStyle(fontSize: 12, color: t.ash),
+                  ),
                 ],
                 if (meta.rating != null) ...[
                   const SizedBox(height: 10),
@@ -134,11 +151,15 @@ class ShowScreen extends StatelessWidget {
                   Text(
                     overview,
                     style: TextStyle(
-                        fontSize: 13.5, height: 1.5, color: t.boneDim),
+                      fontSize: 13.5,
+                      height: 1.5,
+                      color: t.boneDim,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 16),
-                if (remaining.isEmpty)
+                // Downloads are hidden entirely from kid profiles.
+                if (remaining.isEmpty && !ProfileStore.instance.isKid)
                   OutlinedButton.icon(
                     onPressed: null,
                     style: OutlinedButton.styleFrom(
@@ -148,7 +169,7 @@ class ShowScreen extends StatelessWidget {
                     icon: const Icon(Icons.download_done, size: 18),
                     label: const Text('Show downloaded'),
                   )
-                else
+                else if (!ProfileStore.instance.isKid)
                   OutlinedButton.icon(
                     onPressed: offline
                         ? null
@@ -158,9 +179,11 @@ class ShowScreen extends StatelessWidget {
                       side: BorderSide(color: t.ash),
                     ),
                     icon: const Icon(Icons.download_outlined, size: 18),
-                    label: Text(remaining.length == episodes.length
-                        ? 'Download show'
-                        : 'Download remaining (${remaining.length})'),
+                    label: Text(
+                      remaining.length == episodes.length
+                          ? 'Download show'
+                          : 'Download remaining (${remaining.length})',
+                    ),
                   ),
               ],
             ),
@@ -197,12 +220,13 @@ class _SeasonTile extends StatelessWidget {
     final meta = MetadataService.instance.metadataFor(group.episodes.first);
     final count = group.episodes.length;
     // An episode counts as downloaded when ANY of its quality tiers is.
-    final badge = versionGroupDownloadBadge(
-        t, [for (final e in group.episodes) group.versionsOf(e)]);
+    final badge = versionGroupDownloadBadge(t, [
+      for (final e in group.episodes) group.versionsOf(e),
+    ]);
     return InkWell(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => SeasonScreen(group: group)),
-      ),
+      onTap: () => Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => SeasonScreen(group: group))),
       borderRadius: BorderRadius.circular(6),
       child: SizedBox(
         width: 120,
@@ -220,8 +244,11 @@ class _SeasonTile extends StatelessWidget {
                     posterImage(meta, fit: BoxFit.cover) ??
                         Container(
                           color: t.ink2,
-                          child: Icon(Icons.live_tv_outlined,
-                              color: t.ash, size: 40),
+                          child: Icon(
+                            Icons.live_tv_outlined,
+                            color: t.ash,
+                            size: 40,
+                          ),
                         ),
                     ?badge,
                   ],
