@@ -9,6 +9,7 @@ import 'models/media_list.dart';
 import 'screens/album_screen.dart';
 import 'screens/artist_screen.dart';
 import 'screens/batch_upload_screen.dart' show offerBatchResume;
+import 'screens/publish_screen.dart' show isDesktopPlatform;
 import 'screens/detail_screen.dart';
 import 'screens/profile_picker_screen.dart';
 import 'screens/search_screen.dart';
@@ -243,7 +244,7 @@ class _TermsGateState extends State<TermsGate> {
   }
 }
 
-/// Profile gate, inside the terms gate: shows "Who's watching?" while
+/// Profile gate, inside the terms gate: shows "Who's w@tching?" while
 /// nobody is signed in (multi-profile launch without auto-login, or
 /// after Switch profile), else the app keyed by the active profile —
 /// switching rekeys the whole tree so every screen rebuilds against the
@@ -283,10 +284,21 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   List<HomeItem> _recent = const [];
   List<HomeSection> _sections = const [];
   bool _tmdbNudge = false;
+  // Pinned side-panel drawer (wide desktop windows): open by default,
+  // the far-left burger toggles it, the choice persists. Bumping the
+  // epoch remounts the panel so it re-reads lists/sections — the modal
+  // drawer got that for free by being rebuilt on every open.
+  bool _drawerPinned = true;
+  int _drawerEpoch = 0;
 
   @override
   void initState() {
     super.initState();
+    unawaited(AppSettings.drawerPinned().then((pinned) {
+      if (mounted && pinned != _drawerPinned) {
+        setState(() => _drawerPinned = pinned);
+      }
+    }));
     // Watch states change while a player is open on top of this screen —
     // refresh the Continue Watching row as they land.
     WatchStateStore.instance.addListener(_reloadRows);
@@ -358,7 +370,13 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
       _recent = recentlyAdded(lists);
       _sections = sections;
       _tmdbNudge = nudge;
+      _drawerEpoch++;
     });
+  }
+
+  void _togglePinnedDrawer() {
+    setState(() => _drawerPinned = !_drawerPinned);
+    unawaited(AppSettings.setDrawerPinned(_drawerPinned));
   }
 
   Future<void> _reloadRows() async {
@@ -429,20 +447,56 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   }
 
   Widget _scaffold(WiTokens t, List<MediaList> visible) {
+    // Wide desktop windows pin the drawer open as a side panel with the
+    // burger on the FAR LEFT toggling it (search moves into the
+    // actions). Gated on window width, not just platform, so a squeezed
+    // desktop window falls back to the modal layout: search in
+    // `leading`, drawer from the menu action on the far right (same
+    // pattern as ListHomeScreen).
+    final pinnable = isDesktopPlatform &&
+        MediaQuery.sizeOf(context).width >= kPinnedDrawerMinWindowWidth;
+    final pinned = pinnable && _drawerPinned;
+    final body = Column(
+      children: [
+        if (_tmdbNudge)
+          TmdbNudgeBanner(
+            onOpenSettings: _openSettings,
+            onDismiss: () async {
+              await AppSettings.setTmdbNudgeDismissed();
+              if (mounted) setState(() => _tmdbNudge = false);
+            },
+          ),
+        Expanded(
+          child: visible.isEmpty
+              ? _EmptyState(
+                  tokens: t,
+                  variant: _lists.isNotEmpty
+                      ? _EmptyVariant.allHidden
+                      : _EmptyVariant.empty,
+                )
+              : _libraryView(t, visible),
+        ),
+      ],
+    );
     return Scaffold(
-      // Left drawer for hopping straight to a list's page. Flutter would
-      // put the drawer hamburger in `leading` — search claims that slot
-      // instead, and the drawer opens from the menu action on the far
-      // right (same pattern as ListHomeScreen).
-      drawer: const WiLibraryDrawer(),
+      // When the panel is available the burger toggles IT — no modal
+      // drawer, so the two surfaces can never stack.
+      drawer: pinnable ? null : const WiLibraryDrawer(),
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
-        leading: IconButton(
-          tooltip: 'Search',
-          icon: Icon(Icons.search, color: t.boneDim),
-          onPressed: _openSearch,
-        ),
+        leading: pinnable
+            ? IconButton(
+                tooltip:
+                    pinned ? 'Hide library panel' : 'Show library panel',
+                icon: Icon(Icons.menu, color: t.boneDim),
+                onPressed: _togglePinnedDrawer,
+              )
+            : IconButton(
+                tooltip: 'Search',
+                icon: Icon(Icons.search, color: t.boneDim),
+                onPressed: _openSearch,
+              ),
         // App-bar lockup: the launcher icon's bucket mark + wordmark.
         title: Row(
           mainAxisSize: MainAxisSize.min,
@@ -453,6 +507,12 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
           ],
         ),
         actions: [
+          if (pinnable)
+            IconButton(
+              tooltip: 'Search',
+              icon: Icon(Icons.search, color: t.boneDim),
+              onPressed: _openSearch,
+            ),
           // Downloads are hidden ENTIRELY from kid profiles (the agreed
           // rule — half-hiding would let kids start invisible ones).
           if (!ProfileStore.instance.isKid) const DownloadsIndicator(),
@@ -469,37 +529,28 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
               ),
               onPressed: () => unawaited(switchProfileFlow(context)),
             ),
-          Builder(
-            builder: (context) => IconButton(
-              tooltip: 'Browse lists',
-              icon: Icon(Icons.menu, color: t.boneDim),
-              onPressed: () => Scaffold.of(context).openDrawer(),
+          if (!pinnable)
+            Builder(
+              builder: (context) => IconButton(
+                tooltip: 'Browse lists',
+                icon: Icon(Icons.menu, color: t.boneDim),
+                onPressed: () => Scaffold.of(context).openDrawer(),
+              ),
             ),
-          ),
         ],
       ),
-      body: Column(
-        children: [
-          if (_tmdbNudge)
-            TmdbNudgeBanner(
-              onOpenSettings: _openSettings,
-              onDismiss: () async {
-                await AppSettings.setTmdbNudgeDismissed();
-                if (mounted) setState(() => _tmdbNudge = false);
-              },
-            ),
-          Expanded(
-            child: visible.isEmpty
-                ? _EmptyState(
-                    tokens: t,
-                    variant: _lists.isNotEmpty
-                        ? _EmptyVariant.allHidden
-                        : _EmptyVariant.empty,
-                  )
-                : _libraryView(t, visible),
-          ),
-        ],
-      ),
+      body: pinned
+          ? Row(
+              children: [
+                WiLibraryDrawer(
+                  key: ValueKey('pinned-drawer-$_drawerEpoch'),
+                  pinned: true,
+                ),
+                VerticalDivider(width: 1, thickness: 1, color: t.line),
+                Expanded(child: body),
+              ],
+            )
+          : body,
     );
   }
 

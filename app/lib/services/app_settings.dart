@@ -269,6 +269,22 @@ class AppSettings {
         ProfileStore.instance.prefKey(_themeModeKey), mode.name);
   }
 
+  static const _drawerPinnedKey = 'drawer_pinned_v1';
+
+  /// Whether the home screen keeps the library drawer pinned open as a
+  /// side panel (desktop windows wide enough only — see
+  /// kPinnedDrawerMinWindowWidth). Defaults to pinned; the far-left
+  /// burger toggles it and the choice sticks.
+  static Future<bool> drawerPinned() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_drawerPinnedKey) ?? true;
+  }
+
+  static Future<void> setDrawerPinned(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_drawerPinnedKey, value);
+  }
+
   static const _pauseDownloadsOnPlayKey = 'pause_downloads_on_play_v1';
 
   /// What to do with active downloads when streaming playback starts
