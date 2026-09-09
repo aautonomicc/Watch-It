@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/media_list.dart';
+import 'profiles.dart';
 import 'season_grouping.dart';
 
 String _normalize(String address) =>
@@ -18,10 +19,21 @@ class FavouritesStore extends ChangeNotifier {
   /// Replaceable for tests (fresh instance per test).
   static FavouritesStore instance = FavouritesStore();
 
-  static const _key = 'favourites_v1';
+  /// Per-profile slot; the Admin profile keeps the historic unsuffixed
+  /// key so upgrades change nothing.
+  static String get _key => ProfileStore.instance.prefKey('favourites_v1');
 
   final Set<String> _addresses = {};
   bool _loaded = false;
+
+  /// The active profile changed: drop this profile-scoped set and let
+  /// the next [ensureLoaded] read the new profile's slot.
+  Future<void> onProfileSwitched() async {
+    _addresses.clear();
+    _loaded = false;
+    await ensureLoaded();
+    notifyListeners();
+  }
 
   Future<void> ensureLoaded() async {
     if (_loaded) return;

@@ -292,6 +292,16 @@ real audio player screen (artwork + transport instead of a black video
 surface), live network-stack versions under Settings → About, and — as
 of alpha.92 — a single Settings → Network → **Data** page with 3-way
 Off | Wi-Fi | Wi-Fi + mobile pills for the built-in clients.
+
+Alpha.93 brings **profiles** for family devices: Netflix-style viewing
+profiles sharing one library and network identity. A "Who's watching?"
+picker (with avatars and optional per-profile PINs), Kid profiles
+limited to the lists you tick — with downloads and most settings
+hidden — an optional auto-selected profile for the kids' TV, and an
+admin PIN with a one-time recovery code guarding the controls.
+Existing installs are untouched: everything stays exactly as it was
+until a second profile is created in Settings → Profiles.
+
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users

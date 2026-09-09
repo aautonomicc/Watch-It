@@ -8,6 +8,7 @@ import '../services/home_sections.dart';
 import '../services/library_arrangement.dart';
 import '../services/library_store.dart';
 import '../services/metadata_service.dart';
+import '../services/profiles.dart';
 import '../services/channels_api.dart';
 import '../services/embedded_client.dart';
 import '../theme/tokens.dart';
@@ -50,7 +51,9 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
   }
 
   Future<void> _load() async {
-    final lists = await LibraryStore.load();
+    // Kid profiles browse only their allow-listed lists.
+    final lists =
+        ProfileStore.instance.visibleLists(await LibraryStore.load());
     final stored = await AppSettings.homeSections();
     if (!mounted) return;
     setState(() {

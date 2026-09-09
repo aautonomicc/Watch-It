@@ -13,6 +13,7 @@ import '../services/library_store.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/network_pause.dart';
+import '../services/profiles.dart';
 import '../services/now_playing.dart';
 import '../services/screen_wake.dart';
 import '../services/season_grouping.dart' show episodeNameFromLabel;
@@ -183,10 +184,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // An idle auto-pause lifts the moment the user plays something —
       // cleared before mpv's first request can hit the local server.
       await NetworkPause.instance.noteActivity();
-      await _player.open(Media(
-        widget.url,
-        start: widget.resumeFrom > Duration.zero ? widget.resumeFrom : null,
-      ));
+      await _player.open(
+        Media(
+          widget.url,
+          start: widget.resumeFrom > Duration.zero ? widget.resumeFrom : null,
+        ),
+      );
     }());
   }
 
@@ -203,7 +206,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       NowPlayingTrack(
         // For music, meta.title is the album; the track's own name comes
         // from its edited label or the parsed file name.
-        title: episodeNameFromLabel(meta.episodeLabel) ??
+        title:
+            episodeNameFromLabel(meta.episodeLabel) ??
             parsed.trackTitle ??
             meta.title,
         artist: meta.trackArtist ?? meta.artist,
@@ -232,8 +236,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (h == null || h <= 0) return;
     if (_entry.videoInfo != null && _entry.videoInfo!.isNotEmpty) return;
     if (!_resolutionNoted.add(_entry.address.toLowerCase())) return;
-    unawaited(LibraryStore.noteEntryInfo(_entry.address,
-        videoInfo: resolutionLabel(h)));
+    unawaited(
+      LibraryStore.noteEntryInfo(_entry.address, videoInfo: resolutionLabel(h)),
+    );
   }
 
   void _onPosition(Duration pos) {
@@ -241,8 +246,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _position = pos;
     // The audio layout draws its own seek bar off _position.
     if (_isAudio && mounted) setState(() {});
-    NowPlaying.instance.updatePlayback(this,
-        position: pos, duration: _player.state.duration);
+    NowPlaying.instance.updatePlayback(
+      this,
+      position: pos,
+      duration: _player.state.duration,
+    );
     if (!_playbackStarted) {
       _playbackStarted = true;
       // Playback is demonstrably working — drop any earlier error
@@ -263,18 +271,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // buffering must not wipe an existing resume point), and nothing
     // after the end was recorded as watched.
     if (!_playbackStarted || _completed || _position <= Duration.zero) return;
-    unawaited(WatchStateStore.instance.record(
-      _entry,
-      position: _position,
-      duration: _player.state.duration,
-    ));
+    unawaited(
+      WatchStateStore.instance.record(
+        _entry,
+        position: _position,
+        duration: _player.state.duration,
+      ),
+    );
   }
 
   void _onCompleted() {
     if (!_playbackStarted || _completed) return;
     _completed = true;
-    unawaited(WatchStateStore.instance
-        .markCompleted(_entry, duration: _player.state.duration));
+    unawaited(
+      WatchStateStore.instance.markCompleted(
+        _entry,
+        duration: _player.state.duration,
+      ),
+    );
     final next = widget.nextFor?.call(_entry);
     if (next == null || !mounted) return;
     // Chain rule: a downloaded next episode always chains; a streamed
@@ -309,7 +323,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final next = _upNext;
     if (next == null) return;
     final fallback = streamUrl(EmbeddedClient.baseUrl(), next);
-    final source = widget.sourceFor?.call(next) ??
+    final source =
+        widget.sourceFor?.call(next) ??
         (fallback == null ? null : (url: fallback, local: false));
     if (source == null) return;
     final meta = MetadataService.instance.metadataFor(next);
@@ -343,9 +358,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final bytes = await _player.screenshot();
     if (!mounted) return;
     if (bytes == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No frame to capture yet — wait for the video '
-              'to start.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No frame to capture yet — wait for the video '
+            'to start.',
+          ),
+        ),
+      );
       return;
     }
     final key = parseMediaName(_entry.name).lookupKey;
@@ -359,8 +379,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       posterFile: Value(name),
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Frame saved as this title\'s artwork')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Frame saved as this title\'s artwork')),
+    );
   }
 
   @override
@@ -436,7 +457,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
           Text(
             'Playback failed',
             style: TextStyle(
-                color: t.bone, fontSize: 15, fontWeight: FontWeight.w700),
+              color: t.bone,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
@@ -544,66 +568,84 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 onSeek: (pos) => unawaited(_player.seek(pos)),
               )
             else
-            // The stock controls draw their own grey buffering spinner in
-            // the centre of the video; our branded overlay already covers
-            // buffering, so blank out the built-in one on all platforms.
-            // The bottom controls default to zero bottom margin, which puts
-            // them on top of the Android navigation buttons — lift them
-            // clear, and draw the seek bar at twice the stock thickness.
-            MaterialVideoControlsTheme(
-              normal: kDefaultMaterialVideoControlsThemeData.copyWith(
-                bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
-                bottomButtonBarMargin:
-                    const EdgeInsets.only(left: 16, right: 8, bottom: 48),
-                seekBarMargin:
-                    const EdgeInsets.only(left: 16, right: 16, bottom: 48),
-                seekBarHeight: 4.8,
-                topButtonBar: [
-                  const Spacer(),
-                  MaterialCustomButton(
-                    onPressed: () => unawaited(_useFrameAsPoster()),
-                    icon: const Icon(Icons.photo_camera_outlined),
+              // The stock controls draw their own grey buffering spinner in
+              // the centre of the video; our branded overlay already covers
+              // buffering, so blank out the built-in one on all platforms.
+              // The bottom controls default to zero bottom margin, which puts
+              // them on top of the Android navigation buttons — lift them
+              // clear, and draw the seek bar at twice the stock thickness.
+              MaterialVideoControlsTheme(
+                normal: kDefaultMaterialVideoControlsThemeData.copyWith(
+                  bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
+                  bottomButtonBarMargin: const EdgeInsets.only(
+                    left: 16,
+                    right: 8,
+                    bottom: 48,
                   ),
-                ],
-              ),
-              fullscreen:
-                  kDefaultMaterialVideoControlsThemeDataFullscreen.copyWith(
-                bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
-                bottomButtonBarMargin:
-                    const EdgeInsets.only(left: 16, right: 8, bottom: 64),
-                seekBarMargin:
-                    const EdgeInsets.only(left: 16, right: 16, bottom: 64),
-                seekBarHeight: 4.8,
-                topButtonBar: [
-                  const Spacer(),
-                  MaterialCustomButton(
-                    onPressed: () => unawaited(_useFrameAsPoster()),
-                    icon: const Icon(Icons.photo_camera_outlined),
+                  seekBarMargin: const EdgeInsets.only(
+                    left: 16,
+                    right: 16,
+                    bottom: 48,
                   ),
-                ],
-              ),
-              child: MaterialDesktopVideoControlsTheme(
-                normal: desktopControlsTheme(
+                  seekBarHeight: 4.8,
+                  topButtonBar: [
+                    const Spacer(),
+                    if (!ProfileStore.instance.isKid)
+                      MaterialCustomButton(
+                        onPressed: () => unawaited(_useFrameAsPoster()),
+                        icon: const Icon(Icons.photo_camera_outlined),
+                      ),
+                  ],
+                ),
+                fullscreen: kDefaultMaterialVideoControlsThemeDataFullscreen
+                    .copyWith(
+                      bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
+                      bottomButtonBarMargin: const EdgeInsets.only(
+                        left: 16,
+                        right: 8,
+                        bottom: 64,
+                      ),
+                      seekBarMargin: const EdgeInsets.only(
+                        left: 16,
+                        right: 16,
+                        bottom: 64,
+                      ),
+                      seekBarHeight: 4.8,
+                      topButtonBar: [
+                        const Spacer(),
+                        if (!ProfileStore.instance.isKid)
+                          MaterialCustomButton(
+                            onPressed: () => unawaited(_useFrameAsPoster()),
+                            icon: const Icon(Icons.photo_camera_outlined),
+                          ),
+                      ],
+                    ),
+                child: MaterialDesktopVideoControlsTheme(
+                  normal: desktopControlsTheme(
                     kDefaultMaterialDesktopVideoControlsThemeData,
                     topButtonBar: [
                       const Spacer(),
-                      MaterialDesktopCustomButton(
-                        onPressed: () => unawaited(_useFrameAsPoster()),
-                        icon: const Icon(Icons.photo_camera_outlined),
-                      ),
-                    ]),
-                fullscreen: desktopControlsTheme(
+                      if (!ProfileStore.instance.isKid)
+                        MaterialDesktopCustomButton(
+                          onPressed: () => unawaited(_useFrameAsPoster()),
+                          icon: const Icon(Icons.photo_camera_outlined),
+                        ),
+                    ],
+                  ),
+                  fullscreen: desktopControlsTheme(
                     kDefaultMaterialDesktopVideoControlsThemeDataFullscreen,
                     topButtonBar: [
                       const Spacer(),
-                      MaterialDesktopCustomButton(
-                        onPressed: () => unawaited(_useFrameAsPoster()),
-                        icon: const Icon(Icons.photo_camera_outlined),
-                      ),
-                    ]),
-                child: Video(controller: _controller),
+                      if (!ProfileStore.instance.isKid)
+                        MaterialDesktopCustomButton(
+                          onPressed: () => unawaited(_useFrameAsPoster()),
+                          icon: const Icon(Icons.photo_camera_outlined),
+                        ),
+                    ],
+                  ),
+                  child: Video(controller: _controller),
+                ),
               ),
-            ),
             if (_error != null)
               _errorOverlay(context)
             else if (_buffering)
@@ -667,7 +709,8 @@ class AudioPlayerView extends StatelessWidget {
       builder: (context, _) {
         final meta = MetadataService.instance.metadataFor(entry);
         final parsed = parseMediaName(entry.name);
-        final trackTitle = episodeNameFromLabel(meta.episodeLabel) ??
+        final trackTitle =
+            episodeNameFromLabel(meta.episodeLabel) ??
             parsed.trackTitle ??
             meta.title;
         final artist = meta.trackArtist ?? meta.artist;
@@ -682,17 +725,23 @@ class AudioPlayerView extends StatelessWidget {
               Expanded(
                 child: Center(
                   child: ConstrainedBox(
-                    constraints:
-                        const BoxConstraints(maxWidth: 320, maxHeight: 320),
+                    constraints: const BoxConstraints(
+                      maxWidth: 320,
+                      maxHeight: 320,
+                    ),
                     child: AspectRatio(
                       aspectRatio: 1,
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(10),
-                        child: entryPosterImage(meta, fit: BoxFit.cover) ??
+                        child:
+                            entryPosterImage(meta, fit: BoxFit.cover) ??
                             Container(
                               color: t.ink2,
-                              child: Icon(Icons.music_note,
-                                  color: t.ash, size: 96),
+                              child: Icon(
+                                Icons.music_note,
+                                color: t.ash,
+                                size: 96,
+                              ),
                             ),
                       ),
                     ),
@@ -706,9 +755,10 @@ class AudioPlayerView extends StatelessWidget {
                 textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: t.bone),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: t.bone,
+                ),
               ),
               if (artist != null || album != null) ...[
                 const SizedBox(height: 4),
@@ -723,34 +773,37 @@ class AudioPlayerView extends StatelessWidget {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Text(_clock(position),
-                      style: TextStyle(
-                          fontSize: 11,
-                          color: t.ash,
-                          fontFamily: wiMonoFamily,
-                          fontFamilyFallback: wiMonoFallback)),
+                  Text(
+                    _clock(position),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: t.ash,
+                      fontFamily: wiMonoFamily,
+                      fontFamilyFallback: wiMonoFallback,
+                    ),
+                  ),
                   Expanded(
                     child: Slider(
                       value: maxMs == 0
                           ? 0
-                          : position.inMilliseconds
-                              .clamp(0, maxMs)
-                              .toDouble(),
+                          : position.inMilliseconds.clamp(0, maxMs).toDouble(),
                       max: maxMs == 0 ? 1 : maxMs.toDouble(),
                       activeColor: t.accent,
                       inactiveColor: t.ink2,
                       onChanged: maxMs == 0
                           ? null
-                          : (v) =>
-                              onSeek(Duration(milliseconds: v.round())),
+                          : (v) => onSeek(Duration(milliseconds: v.round())),
                     ),
                   ),
-                  Text(_clock(duration),
-                      style: TextStyle(
-                          fontSize: 11,
-                          color: t.ash,
-                          fontFamily: wiMonoFamily,
-                          fontFamilyFallback: wiMonoFallback)),
+                  Text(
+                    _clock(duration),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: t.ash,
+                      fontFamily: wiMonoFamily,
+                      fontFamilyFallback: wiMonoFallback,
+                    ),
+                  ),
                 ],
               ),
               Row(
@@ -769,8 +822,10 @@ class AudioPlayerView extends StatelessWidget {
                       foregroundColor: t.ink,
                     ),
                     onPressed: onPlayPause,
-                    icon: Icon(playing ? Icons.pause : Icons.play_arrow,
-                        size: 32),
+                    icon: Icon(
+                      playing ? Icons.pause : Icons.play_arrow,
+                      size: 32,
+                    ),
                   ),
                   const SizedBox(width: 8),
                   IconButton(
@@ -793,10 +848,10 @@ class AudioPlayerView extends StatelessWidget {
 /// instead of sitting on the film forever. [topButtonBar] carries the
 /// screen's own buttons (frame-as-artwork capture).
 MaterialDesktopVideoControlsThemeData desktopControlsTheme(
-        MaterialDesktopVideoControlsThemeData base,
-        {List<Widget> topButtonBar = const []}) =>
-    base.copyWith(
-      bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
-      hideMouseOnControlsRemoval: true,
-      topButtonBar: topButtonBar,
-    );
+  MaterialDesktopVideoControlsThemeData base, {
+  List<Widget> topButtonBar = const [],
+}) => base.copyWith(
+  bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
+  hideMouseOnControlsRemoval: true,
+  topButtonBar: topButtonBar,
+);

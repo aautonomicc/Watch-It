@@ -8,6 +8,7 @@ import '../services/channels_api.dart';
 import '../services/embedded_client.dart';
 import '../services/my_watch_sync.dart';
 import '../services/network_pause.dart';
+import '../services/profiles.dart';
 import '../services/x0x_cellular.dart';
 import '../theme/tokens.dart';
 
@@ -79,8 +80,7 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
   Future<void> _pollChannels() async {
     final ChannelsStatus status;
     try {
-      status = await (widget.channelsStatusProvider ??
-          ChannelsApi().status)();
+      status = await (widget.channelsStatusProvider ?? ChannelsApi().status)();
     } catch (_) {
       return; // embedded client unreachable; row stays hidden
     }
@@ -95,8 +95,9 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
 
   /// Short "x min ago"-style stamp for the My W@tch row.
   static String _relative(int ms) {
-    final delta =
-        DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(ms));
+    final delta = DateTime.now().difference(
+      DateTime.fromMillisecondsSinceEpoch(ms),
+    );
     if (delta.inSeconds < 60) return 'just now';
     if (delta.inMinutes < 60) return '${delta.inMinutes} min ago';
     if (delta.inHours < 48) return '${delta.inHours} h ago';
@@ -152,9 +153,9 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
     if (h == null || h.state == 'unavailable') return const SizedBox.shrink();
     final (color, text) = switch (h.state) {
       'ready' => (
-          const Color(0xff4caf50),
-          'Connected · ${h.peers} ${h.peers == 1 ? 'peer' : 'peers'}',
-        ),
+        const Color(0xff4caf50),
+        'Connected · ${h.peers} ${h.peers == 1 ? 'peer' : 'peers'}',
+      ),
       'connecting' => (t.accent, 'Connecting…'),
       'paused' => (t.ash, 'Network paused'),
       _ => (const Color(0xffe57373), 'Connection error'),
@@ -167,32 +168,38 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
     final (color, text) = switch (s) {
       MyWatchSyncStatus(linked: false) => (t.ash, 'My W@tch: not linked'),
       MyWatchSyncStatus(enabled: false) => (
-          t.ash,
-          NetworkPause.instance.isAgentPaused(X0xAgent.myWatch)
-              ? 'My W@tch: paused with the network'
-              : X0xCellularGate.instance.isPaused(X0xAgent.myWatch)
-                  ? 'My W@tch: paused on mobile data'
-                  : 'My W@tch: switched off',
-        ),
+        t.ash,
+        NetworkPause.instance.isAgentPaused(X0xAgent.myWatch)
+            ? 'My W@tch: paused with the network'
+            : X0xCellularGate.instance.isPaused(X0xAgent.myWatch)
+            ? 'My W@tch: paused on mobile data'
+            : 'My W@tch: switched off',
+      ),
       MyWatchSyncStatus(agentState: != 'ready') => (
-          t.accent,
-          'My W@tch: connecting…',
-        ),
+        t.accent,
+        'My W@tch: connecting…',
+      ),
       MyWatchSyncStatus(syncing: true) => (t.accent, 'My W@tch: syncing…'),
       MyWatchSyncStatus(problems: [_, ...]) => (
-          const Color(0xffffb74d),
-          'My W@tch: sync issue',
-        ),
+        const Color(0xffffb74d),
+        'My W@tch: sync issue',
+      ),
       MyWatchSyncStatus(:final lastSyncMs?) => (
-          const Color(0xff4caf50),
-          'My W@tch: synced ${_relative(lastSyncMs)}',
-        ),
+        const Color(0xff4caf50),
+        'My W@tch: synced ${_relative(lastSyncMs)}',
+      ),
       _ => (const Color(0xff4caf50), 'My W@tch: linked'),
     };
-    return _row(t,
-        color: color,
-        text: text,
-        onTap: () => _openPage(const MyWatchScreen()));
+    // Status is fine for everyone; the page behind it is an admin
+    // surface (device linking).
+    return _row(
+      t,
+      color: color,
+      text: text,
+      onTap: ProfileStore.instance.isAdmin
+          ? () => _openPage(const MyWatchScreen())
+          : null,
+    );
   }
 
   Widget _channelsRow(WiTokens t) {
@@ -200,28 +207,32 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
     if (c == null || !c.supported) return const SizedBox.shrink();
     final (color, text) = switch (c) {
       ChannelsStatus(enabled: false) => (
-          t.ash,
-          NetworkPause.instance.isAgentPaused(X0xAgent.channels)
-              ? 'Channels: paused with the network'
-              : X0xCellularGate.instance.isPaused(X0xAgent.channels)
-                  ? 'Channels: paused on mobile data'
-                  : 'Channels: switched off',
-        ),
+        t.ash,
+        NetworkPause.instance.isAgentPaused(X0xAgent.channels)
+            ? 'Channels: paused with the network'
+            : X0xCellularGate.instance.isPaused(X0xAgent.channels)
+            ? 'Channels: paused on mobile data'
+            : 'Channels: switched off',
+      ),
       ChannelsStatus(state: 'ready') => (
-          const Color(0xff4caf50),
-          'Channels: connected',
-        ),
+        const Color(0xff4caf50),
+        'Channels: connected',
+      ),
       ChannelsStatus(state: 'starting') => (
-          WiTokens.channelAmber,
-          'Channels: connecting…',
-        ),
+        WiTokens.channelAmber,
+        'Channels: connecting…',
+      ),
       _ => (t.ash, 'Channels: not connected'),
     };
-    return _row(t,
-        color: color,
-        text: text,
-        spinner: c.state == 'starting',
-        onTap: () => _openPage(const ChannelsScreen()));
+    return _row(
+      t,
+      color: color,
+      text: text,
+      spinner: c.state == 'starting',
+      onTap: ProfileStore.instance.isAdmin
+          ? () => _openPage(const ChannelsScreen())
+          : null,
+    );
   }
 
   @override

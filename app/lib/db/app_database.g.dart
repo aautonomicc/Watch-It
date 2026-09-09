@@ -2135,6 +2135,18 @@ class $WatchStatesTable extends WatchStates
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _profileIdMeta = const VerificationMeta(
+    'profileId',
+  );
+  @override
+  late final GeneratedColumn<String> profileId = GeneratedColumn<String>(
+    'profile_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('admin'),
+  );
   static const VerificationMeta _positionMsMeta = const VerificationMeta(
     'positionMs',
   );
@@ -2186,6 +2198,7 @@ class $WatchStatesTable extends WatchStates
   @override
   List<GeneratedColumn> get $columns => [
     address,
+    profileId,
     positionMs,
     durationMs,
     completed,
@@ -2210,6 +2223,12 @@ class $WatchStatesTable extends WatchStates
       );
     } else if (isInserting) {
       context.missing(_addressMeta);
+    }
+    if (data.containsKey('profile_id')) {
+      context.handle(
+        _profileIdMeta,
+        profileId.isAcceptableOrUnknown(data['profile_id']!, _profileIdMeta),
+      );
     }
     if (data.containsKey('position_ms')) {
       context.handle(
@@ -2245,7 +2264,7 @@ class $WatchStatesTable extends WatchStates
   }
 
   @override
-  Set<GeneratedColumn> get $primaryKey => {address};
+  Set<GeneratedColumn> get $primaryKey => {address, profileId};
   @override
   WatchStateRow map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
@@ -2253,6 +2272,10 @@ class $WatchStatesTable extends WatchStates
       address: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}address'],
+      )!,
+      profileId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}profile_id'],
       )!,
       positionMs: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
@@ -2282,6 +2305,10 @@ class $WatchStatesTable extends WatchStates
 class WatchStateRow extends DataClass implements Insertable<WatchStateRow> {
   /// Normalized XOR address (lowercase, no 0x prefix).
   final String address;
+
+  /// Owning profile ([Profiles.id]); pre-profile rows belong to the
+  /// migrated Admin profile (services/profiles.dart, kAdminProfileId).
+  final String profileId;
   final int positionMs;
 
   /// 0 while the player has not reported a duration yet.
@@ -2293,6 +2320,7 @@ class WatchStateRow extends DataClass implements Insertable<WatchStateRow> {
   final int updatedAt;
   const WatchStateRow({
     required this.address,
+    required this.profileId,
     required this.positionMs,
     required this.durationMs,
     required this.completed,
@@ -2302,6 +2330,7 @@ class WatchStateRow extends DataClass implements Insertable<WatchStateRow> {
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['address'] = Variable<String>(address);
+    map['profile_id'] = Variable<String>(profileId);
     map['position_ms'] = Variable<int>(positionMs);
     map['duration_ms'] = Variable<int>(durationMs);
     map['completed'] = Variable<bool>(completed);
@@ -2312,6 +2341,7 @@ class WatchStateRow extends DataClass implements Insertable<WatchStateRow> {
   WatchStatesCompanion toCompanion(bool nullToAbsent) {
     return WatchStatesCompanion(
       address: Value(address),
+      profileId: Value(profileId),
       positionMs: Value(positionMs),
       durationMs: Value(durationMs),
       completed: Value(completed),
@@ -2326,6 +2356,7 @@ class WatchStateRow extends DataClass implements Insertable<WatchStateRow> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return WatchStateRow(
       address: serializer.fromJson<String>(json['address']),
+      profileId: serializer.fromJson<String>(json['profileId']),
       positionMs: serializer.fromJson<int>(json['positionMs']),
       durationMs: serializer.fromJson<int>(json['durationMs']),
       completed: serializer.fromJson<bool>(json['completed']),
@@ -2337,6 +2368,7 @@ class WatchStateRow extends DataClass implements Insertable<WatchStateRow> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'address': serializer.toJson<String>(address),
+      'profileId': serializer.toJson<String>(profileId),
       'positionMs': serializer.toJson<int>(positionMs),
       'durationMs': serializer.toJson<int>(durationMs),
       'completed': serializer.toJson<bool>(completed),
@@ -2346,12 +2378,14 @@ class WatchStateRow extends DataClass implements Insertable<WatchStateRow> {
 
   WatchStateRow copyWith({
     String? address,
+    String? profileId,
     int? positionMs,
     int? durationMs,
     bool? completed,
     int? updatedAt,
   }) => WatchStateRow(
     address: address ?? this.address,
+    profileId: profileId ?? this.profileId,
     positionMs: positionMs ?? this.positionMs,
     durationMs: durationMs ?? this.durationMs,
     completed: completed ?? this.completed,
@@ -2360,6 +2394,7 @@ class WatchStateRow extends DataClass implements Insertable<WatchStateRow> {
   WatchStateRow copyWithCompanion(WatchStatesCompanion data) {
     return WatchStateRow(
       address: data.address.present ? data.address.value : this.address,
+      profileId: data.profileId.present ? data.profileId.value : this.profileId,
       positionMs: data.positionMs.present
           ? data.positionMs.value
           : this.positionMs,
@@ -2375,6 +2410,7 @@ class WatchStateRow extends DataClass implements Insertable<WatchStateRow> {
   String toString() {
     return (StringBuffer('WatchStateRow(')
           ..write('address: $address, ')
+          ..write('profileId: $profileId, ')
           ..write('positionMs: $positionMs, ')
           ..write('durationMs: $durationMs, ')
           ..write('completed: $completed, ')
@@ -2384,13 +2420,20 @@ class WatchStateRow extends DataClass implements Insertable<WatchStateRow> {
   }
 
   @override
-  int get hashCode =>
-      Object.hash(address, positionMs, durationMs, completed, updatedAt);
+  int get hashCode => Object.hash(
+    address,
+    profileId,
+    positionMs,
+    durationMs,
+    completed,
+    updatedAt,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is WatchStateRow &&
           other.address == this.address &&
+          other.profileId == this.profileId &&
           other.positionMs == this.positionMs &&
           other.durationMs == this.durationMs &&
           other.completed == this.completed &&
@@ -2399,6 +2442,7 @@ class WatchStateRow extends DataClass implements Insertable<WatchStateRow> {
 
 class WatchStatesCompanion extends UpdateCompanion<WatchStateRow> {
   final Value<String> address;
+  final Value<String> profileId;
   final Value<int> positionMs;
   final Value<int> durationMs;
   final Value<bool> completed;
@@ -2406,6 +2450,7 @@ class WatchStatesCompanion extends UpdateCompanion<WatchStateRow> {
   final Value<int> rowid;
   const WatchStatesCompanion({
     this.address = const Value.absent(),
+    this.profileId = const Value.absent(),
     this.positionMs = const Value.absent(),
     this.durationMs = const Value.absent(),
     this.completed = const Value.absent(),
@@ -2414,6 +2459,7 @@ class WatchStatesCompanion extends UpdateCompanion<WatchStateRow> {
   });
   WatchStatesCompanion.insert({
     required String address,
+    this.profileId = const Value.absent(),
     required int positionMs,
     required int durationMs,
     this.completed = const Value.absent(),
@@ -2425,6 +2471,7 @@ class WatchStatesCompanion extends UpdateCompanion<WatchStateRow> {
        updatedAt = Value(updatedAt);
   static Insertable<WatchStateRow> custom({
     Expression<String>? address,
+    Expression<String>? profileId,
     Expression<int>? positionMs,
     Expression<int>? durationMs,
     Expression<bool>? completed,
@@ -2433,6 +2480,7 @@ class WatchStatesCompanion extends UpdateCompanion<WatchStateRow> {
   }) {
     return RawValuesInsertable({
       if (address != null) 'address': address,
+      if (profileId != null) 'profile_id': profileId,
       if (positionMs != null) 'position_ms': positionMs,
       if (durationMs != null) 'duration_ms': durationMs,
       if (completed != null) 'completed': completed,
@@ -2443,6 +2491,7 @@ class WatchStatesCompanion extends UpdateCompanion<WatchStateRow> {
 
   WatchStatesCompanion copyWith({
     Value<String>? address,
+    Value<String>? profileId,
     Value<int>? positionMs,
     Value<int>? durationMs,
     Value<bool>? completed,
@@ -2451,6 +2500,7 @@ class WatchStatesCompanion extends UpdateCompanion<WatchStateRow> {
   }) {
     return WatchStatesCompanion(
       address: address ?? this.address,
+      profileId: profileId ?? this.profileId,
       positionMs: positionMs ?? this.positionMs,
       durationMs: durationMs ?? this.durationMs,
       completed: completed ?? this.completed,
@@ -2464,6 +2514,9 @@ class WatchStatesCompanion extends UpdateCompanion<WatchStateRow> {
     final map = <String, Expression>{};
     if (address.present) {
       map['address'] = Variable<String>(address.value);
+    }
+    if (profileId.present) {
+      map['profile_id'] = Variable<String>(profileId.value);
     }
     if (positionMs.present) {
       map['position_ms'] = Variable<int>(positionMs.value);
@@ -2487,6 +2540,7 @@ class WatchStatesCompanion extends UpdateCompanion<WatchStateRow> {
   String toString() {
     return (StringBuffer('WatchStatesCompanion(')
           ..write('address: $address, ')
+          ..write('profileId: $profileId, ')
           ..write('positionMs: $positionMs, ')
           ..write('durationMs: $durationMs, ')
           ..write('completed: $completed, ')
@@ -3127,6 +3181,684 @@ class DownloadsCompanion extends UpdateCompanion<DownloadRow> {
   }
 }
 
+class $ProfilesTable extends Profiles
+    with TableInfo<$ProfilesTable, ProfileRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ProfilesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _avatarMeta = const VerificationMeta('avatar');
+  @override
+  late final GeneratedColumn<String> avatar = GeneratedColumn<String>(
+    'avatar',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _pinHashMeta = const VerificationMeta(
+    'pinHash',
+  );
+  @override
+  late final GeneratedColumn<String> pinHash = GeneratedColumn<String>(
+    'pin_hash',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _autoLoginMeta = const VerificationMeta(
+    'autoLogin',
+  );
+  @override
+  late final GeneratedColumn<bool> autoLogin = GeneratedColumn<bool>(
+    'auto_login',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("auto_login" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _positionMeta = const VerificationMeta(
+    'position',
+  );
+  @override
+  late final GeneratedColumn<int> position = GeneratedColumn<int>(
+    'position',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    name,
+    kind,
+    avatar,
+    pinHash,
+    autoLogin,
+    position,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'profiles';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ProfileRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_kindMeta);
+    }
+    if (data.containsKey('avatar')) {
+      context.handle(
+        _avatarMeta,
+        avatar.isAcceptableOrUnknown(data['avatar']!, _avatarMeta),
+      );
+    }
+    if (data.containsKey('pin_hash')) {
+      context.handle(
+        _pinHashMeta,
+        pinHash.isAcceptableOrUnknown(data['pin_hash']!, _pinHashMeta),
+      );
+    }
+    if (data.containsKey('auto_login')) {
+      context.handle(
+        _autoLoginMeta,
+        autoLogin.isAcceptableOrUnknown(data['auto_login']!, _autoLoginMeta),
+      );
+    }
+    if (data.containsKey('position')) {
+      context.handle(
+        _positionMeta,
+        position.isAcceptableOrUnknown(data['position']!, _positionMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ProfileRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ProfileRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
+      avatar: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}avatar'],
+      ),
+      pinHash: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}pin_hash'],
+      ),
+      autoLogin: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}auto_login'],
+      )!,
+      position: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}position'],
+      )!,
+    );
+  }
+
+  @override
+  $ProfilesTable createAlias(String alias) {
+    return $ProfilesTable(attachedDatabase, alias);
+  }
+}
+
+class ProfileRow extends DataClass implements Insertable<ProfileRow> {
+  final String id;
+  final String name;
+
+  /// 'admin' | 'adult' | 'kid' — see [ProfileKind].
+  final String kind;
+
+  /// `preset:<n>` for a built-in avatar, else a posters-dir file name
+  /// (`profile_avatar_<id>_<ts>.img`); null = initial letter.
+  final String? avatar;
+
+  /// `<salt-hex>:<sha256-hex>` of the profile's PIN; null = none.
+  final String? pinHash;
+
+  /// At most one profile auto-selects at launch (the kids' TV case).
+  final bool autoLogin;
+  final int position;
+  const ProfileRow({
+    required this.id,
+    required this.name,
+    required this.kind,
+    this.avatar,
+    this.pinHash,
+    required this.autoLogin,
+    required this.position,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['name'] = Variable<String>(name);
+    map['kind'] = Variable<String>(kind);
+    if (!nullToAbsent || avatar != null) {
+      map['avatar'] = Variable<String>(avatar);
+    }
+    if (!nullToAbsent || pinHash != null) {
+      map['pin_hash'] = Variable<String>(pinHash);
+    }
+    map['auto_login'] = Variable<bool>(autoLogin);
+    map['position'] = Variable<int>(position);
+    return map;
+  }
+
+  ProfilesCompanion toCompanion(bool nullToAbsent) {
+    return ProfilesCompanion(
+      id: Value(id),
+      name: Value(name),
+      kind: Value(kind),
+      avatar: avatar == null && nullToAbsent
+          ? const Value.absent()
+          : Value(avatar),
+      pinHash: pinHash == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pinHash),
+      autoLogin: Value(autoLogin),
+      position: Value(position),
+    );
+  }
+
+  factory ProfileRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ProfileRow(
+      id: serializer.fromJson<String>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      kind: serializer.fromJson<String>(json['kind']),
+      avatar: serializer.fromJson<String?>(json['avatar']),
+      pinHash: serializer.fromJson<String?>(json['pinHash']),
+      autoLogin: serializer.fromJson<bool>(json['autoLogin']),
+      position: serializer.fromJson<int>(json['position']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'name': serializer.toJson<String>(name),
+      'kind': serializer.toJson<String>(kind),
+      'avatar': serializer.toJson<String?>(avatar),
+      'pinHash': serializer.toJson<String?>(pinHash),
+      'autoLogin': serializer.toJson<bool>(autoLogin),
+      'position': serializer.toJson<int>(position),
+    };
+  }
+
+  ProfileRow copyWith({
+    String? id,
+    String? name,
+    String? kind,
+    Value<String?> avatar = const Value.absent(),
+    Value<String?> pinHash = const Value.absent(),
+    bool? autoLogin,
+    int? position,
+  }) => ProfileRow(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    kind: kind ?? this.kind,
+    avatar: avatar.present ? avatar.value : this.avatar,
+    pinHash: pinHash.present ? pinHash.value : this.pinHash,
+    autoLogin: autoLogin ?? this.autoLogin,
+    position: position ?? this.position,
+  );
+  ProfileRow copyWithCompanion(ProfilesCompanion data) {
+    return ProfileRow(
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      avatar: data.avatar.present ? data.avatar.value : this.avatar,
+      pinHash: data.pinHash.present ? data.pinHash.value : this.pinHash,
+      autoLogin: data.autoLogin.present ? data.autoLogin.value : this.autoLogin,
+      position: data.position.present ? data.position.value : this.position,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ProfileRow(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('kind: $kind, ')
+          ..write('avatar: $avatar, ')
+          ..write('pinHash: $pinHash, ')
+          ..write('autoLogin: $autoLogin, ')
+          ..write('position: $position')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, name, kind, avatar, pinHash, autoLogin, position);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ProfileRow &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.kind == this.kind &&
+          other.avatar == this.avatar &&
+          other.pinHash == this.pinHash &&
+          other.autoLogin == this.autoLogin &&
+          other.position == this.position);
+}
+
+class ProfilesCompanion extends UpdateCompanion<ProfileRow> {
+  final Value<String> id;
+  final Value<String> name;
+  final Value<String> kind;
+  final Value<String?> avatar;
+  final Value<String?> pinHash;
+  final Value<bool> autoLogin;
+  final Value<int> position;
+  final Value<int> rowid;
+  const ProfilesCompanion({
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.avatar = const Value.absent(),
+    this.pinHash = const Value.absent(),
+    this.autoLogin = const Value.absent(),
+    this.position = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ProfilesCompanion.insert({
+    required String id,
+    required String name,
+    required String kind,
+    this.avatar = const Value.absent(),
+    this.pinHash = const Value.absent(),
+    this.autoLogin = const Value.absent(),
+    this.position = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       name = Value(name),
+       kind = Value(kind);
+  static Insertable<ProfileRow> custom({
+    Expression<String>? id,
+    Expression<String>? name,
+    Expression<String>? kind,
+    Expression<String>? avatar,
+    Expression<String>? pinHash,
+    Expression<bool>? autoLogin,
+    Expression<int>? position,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (kind != null) 'kind': kind,
+      if (avatar != null) 'avatar': avatar,
+      if (pinHash != null) 'pin_hash': pinHash,
+      if (autoLogin != null) 'auto_login': autoLogin,
+      if (position != null) 'position': position,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ProfilesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? name,
+    Value<String>? kind,
+    Value<String?>? avatar,
+    Value<String?>? pinHash,
+    Value<bool>? autoLogin,
+    Value<int>? position,
+    Value<int>? rowid,
+  }) {
+    return ProfilesCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      kind: kind ?? this.kind,
+      avatar: avatar ?? this.avatar,
+      pinHash: pinHash ?? this.pinHash,
+      autoLogin: autoLogin ?? this.autoLogin,
+      position: position ?? this.position,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (avatar.present) {
+      map['avatar'] = Variable<String>(avatar.value);
+    }
+    if (pinHash.present) {
+      map['pin_hash'] = Variable<String>(pinHash.value);
+    }
+    if (autoLogin.present) {
+      map['auto_login'] = Variable<bool>(autoLogin.value);
+    }
+    if (position.present) {
+      map['position'] = Variable<int>(position.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ProfilesCompanion(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('kind: $kind, ')
+          ..write('avatar: $avatar, ')
+          ..write('pinHash: $pinHash, ')
+          ..write('autoLogin: $autoLogin, ')
+          ..write('position: $position, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $ProfileListAccessTable extends ProfileListAccess
+    with TableInfo<$ProfileListAccessTable, ProfileListAccessRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ProfileListAccessTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _profileIdMeta = const VerificationMeta(
+    'profileId',
+  );
+  @override
+  late final GeneratedColumn<String> profileId = GeneratedColumn<String>(
+    'profile_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _listIdMeta = const VerificationMeta('listId');
+  @override
+  late final GeneratedColumn<String> listId = GeneratedColumn<String>(
+    'list_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [profileId, listId];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'profile_list_access';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ProfileListAccessRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('profile_id')) {
+      context.handle(
+        _profileIdMeta,
+        profileId.isAcceptableOrUnknown(data['profile_id']!, _profileIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_profileIdMeta);
+    }
+    if (data.containsKey('list_id')) {
+      context.handle(
+        _listIdMeta,
+        listId.isAcceptableOrUnknown(data['list_id']!, _listIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_listIdMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {profileId, listId};
+  @override
+  ProfileListAccessRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ProfileListAccessRow(
+      profileId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}profile_id'],
+      )!,
+      listId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}list_id'],
+      )!,
+    );
+  }
+
+  @override
+  $ProfileListAccessTable createAlias(String alias) {
+    return $ProfileListAccessTable(attachedDatabase, alias);
+  }
+}
+
+class ProfileListAccessRow extends DataClass
+    implements Insertable<ProfileListAccessRow> {
+  final String profileId;
+  final String listId;
+  const ProfileListAccessRow({required this.profileId, required this.listId});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['profile_id'] = Variable<String>(profileId);
+    map['list_id'] = Variable<String>(listId);
+    return map;
+  }
+
+  ProfileListAccessCompanion toCompanion(bool nullToAbsent) {
+    return ProfileListAccessCompanion(
+      profileId: Value(profileId),
+      listId: Value(listId),
+    );
+  }
+
+  factory ProfileListAccessRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ProfileListAccessRow(
+      profileId: serializer.fromJson<String>(json['profileId']),
+      listId: serializer.fromJson<String>(json['listId']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'profileId': serializer.toJson<String>(profileId),
+      'listId': serializer.toJson<String>(listId),
+    };
+  }
+
+  ProfileListAccessRow copyWith({String? profileId, String? listId}) =>
+      ProfileListAccessRow(
+        profileId: profileId ?? this.profileId,
+        listId: listId ?? this.listId,
+      );
+  ProfileListAccessRow copyWithCompanion(ProfileListAccessCompanion data) {
+    return ProfileListAccessRow(
+      profileId: data.profileId.present ? data.profileId.value : this.profileId,
+      listId: data.listId.present ? data.listId.value : this.listId,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ProfileListAccessRow(')
+          ..write('profileId: $profileId, ')
+          ..write('listId: $listId')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(profileId, listId);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ProfileListAccessRow &&
+          other.profileId == this.profileId &&
+          other.listId == this.listId);
+}
+
+class ProfileListAccessCompanion extends UpdateCompanion<ProfileListAccessRow> {
+  final Value<String> profileId;
+  final Value<String> listId;
+  final Value<int> rowid;
+  const ProfileListAccessCompanion({
+    this.profileId = const Value.absent(),
+    this.listId = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ProfileListAccessCompanion.insert({
+    required String profileId,
+    required String listId,
+    this.rowid = const Value.absent(),
+  }) : profileId = Value(profileId),
+       listId = Value(listId);
+  static Insertable<ProfileListAccessRow> custom({
+    Expression<String>? profileId,
+    Expression<String>? listId,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (profileId != null) 'profile_id': profileId,
+      if (listId != null) 'list_id': listId,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ProfileListAccessCompanion copyWith({
+    Value<String>? profileId,
+    Value<String>? listId,
+    Value<int>? rowid,
+  }) {
+    return ProfileListAccessCompanion(
+      profileId: profileId ?? this.profileId,
+      listId: listId ?? this.listId,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (profileId.present) {
+      map['profile_id'] = Variable<String>(profileId.value);
+    }
+    if (listId.present) {
+      map['list_id'] = Variable<String>(listId.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ProfileListAccessCompanion(')
+          ..write('profileId: $profileId, ')
+          ..write('listId: $listId, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3135,6 +3867,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $MetadataCacheTable metadataCache = $MetadataCacheTable(this);
   late final $WatchStatesTable watchStates = $WatchStatesTable(this);
   late final $DownloadsTable downloads = $DownloadsTable(this);
+  late final $ProfilesTable profiles = $ProfilesTable(this);
+  late final $ProfileListAccessTable profileListAccess =
+      $ProfileListAccessTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -3145,6 +3880,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     metadataCache,
     watchStates,
     downloads,
+    profiles,
+    profileListAccess,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -4356,6 +5093,7 @@ typedef $$MetadataCacheTableProcessedTableManager =
 typedef $$WatchStatesTableCreateCompanionBuilder =
     WatchStatesCompanion Function({
       required String address,
+      Value<String> profileId,
       required int positionMs,
       required int durationMs,
       Value<bool> completed,
@@ -4365,6 +5103,7 @@ typedef $$WatchStatesTableCreateCompanionBuilder =
 typedef $$WatchStatesTableUpdateCompanionBuilder =
     WatchStatesCompanion Function({
       Value<String> address,
+      Value<String> profileId,
       Value<int> positionMs,
       Value<int> durationMs,
       Value<bool> completed,
@@ -4383,6 +5122,11 @@ class $$WatchStatesTableFilterComposer
   });
   ColumnFilters<String> get address => $composableBuilder(
     column: $table.address,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get profileId => $composableBuilder(
+    column: $table.profileId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4421,6 +5165,11 @@ class $$WatchStatesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get profileId => $composableBuilder(
+    column: $table.profileId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get positionMs => $composableBuilder(
     column: $table.positionMs,
     builder: (column) => ColumnOrderings(column),
@@ -4453,6 +5202,9 @@ class $$WatchStatesTableAnnotationComposer
   });
   GeneratedColumn<String> get address =>
       $composableBuilder(column: $table.address, builder: (column) => column);
+
+  GeneratedColumn<String> get profileId =>
+      $composableBuilder(column: $table.profileId, builder: (column) => column);
 
   GeneratedColumn<int> get positionMs => $composableBuilder(
     column: $table.positionMs,
@@ -4503,6 +5255,7 @@ class $$WatchStatesTableTableManager
           updateCompanionCallback:
               ({
                 Value<String> address = const Value.absent(),
+                Value<String> profileId = const Value.absent(),
                 Value<int> positionMs = const Value.absent(),
                 Value<int> durationMs = const Value.absent(),
                 Value<bool> completed = const Value.absent(),
@@ -4510,6 +5263,7 @@ class $$WatchStatesTableTableManager
                 Value<int> rowid = const Value.absent(),
               }) => WatchStatesCompanion(
                 address: address,
+                profileId: profileId,
                 positionMs: positionMs,
                 durationMs: durationMs,
                 completed: completed,
@@ -4519,6 +5273,7 @@ class $$WatchStatesTableTableManager
           createCompanionCallback:
               ({
                 required String address,
+                Value<String> profileId = const Value.absent(),
                 required int positionMs,
                 required int durationMs,
                 Value<bool> completed = const Value.absent(),
@@ -4526,6 +5281,7 @@ class $$WatchStatesTableTableManager
                 Value<int> rowid = const Value.absent(),
               }) => WatchStatesCompanion.insert(
                 address: address,
+                profileId: profileId,
                 positionMs: positionMs,
                 durationMs: durationMs,
                 completed: completed,
@@ -4858,6 +5614,397 @@ typedef $$DownloadsTableProcessedTableManager =
       DownloadRow,
       PrefetchHooks Function()
     >;
+typedef $$ProfilesTableCreateCompanionBuilder =
+    ProfilesCompanion Function({
+      required String id,
+      required String name,
+      required String kind,
+      Value<String?> avatar,
+      Value<String?> pinHash,
+      Value<bool> autoLogin,
+      Value<int> position,
+      Value<int> rowid,
+    });
+typedef $$ProfilesTableUpdateCompanionBuilder =
+    ProfilesCompanion Function({
+      Value<String> id,
+      Value<String> name,
+      Value<String> kind,
+      Value<String?> avatar,
+      Value<String?> pinHash,
+      Value<bool> autoLogin,
+      Value<int> position,
+      Value<int> rowid,
+    });
+
+class $$ProfilesTableFilterComposer
+    extends Composer<_$AppDatabase, $ProfilesTable> {
+  $$ProfilesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get avatar => $composableBuilder(
+    column: $table.avatar,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get pinHash => $composableBuilder(
+    column: $table.pinHash,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get autoLogin => $composableBuilder(
+    column: $table.autoLogin,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get position => $composableBuilder(
+    column: $table.position,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ProfilesTableOrderingComposer
+    extends Composer<_$AppDatabase, $ProfilesTable> {
+  $$ProfilesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get avatar => $composableBuilder(
+    column: $table.avatar,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get pinHash => $composableBuilder(
+    column: $table.pinHash,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get autoLogin => $composableBuilder(
+    column: $table.autoLogin,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get position => $composableBuilder(
+    column: $table.position,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ProfilesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ProfilesTable> {
+  $$ProfilesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<String> get avatar =>
+      $composableBuilder(column: $table.avatar, builder: (column) => column);
+
+  GeneratedColumn<String> get pinHash =>
+      $composableBuilder(column: $table.pinHash, builder: (column) => column);
+
+  GeneratedColumn<bool> get autoLogin =>
+      $composableBuilder(column: $table.autoLogin, builder: (column) => column);
+
+  GeneratedColumn<int> get position =>
+      $composableBuilder(column: $table.position, builder: (column) => column);
+}
+
+class $$ProfilesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ProfilesTable,
+          ProfileRow,
+          $$ProfilesTableFilterComposer,
+          $$ProfilesTableOrderingComposer,
+          $$ProfilesTableAnnotationComposer,
+          $$ProfilesTableCreateCompanionBuilder,
+          $$ProfilesTableUpdateCompanionBuilder,
+          (
+            ProfileRow,
+            BaseReferences<_$AppDatabase, $ProfilesTable, ProfileRow>,
+          ),
+          ProfileRow,
+          PrefetchHooks Function()
+        > {
+  $$ProfilesTableTableManager(_$AppDatabase db, $ProfilesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ProfilesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ProfilesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ProfilesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                Value<String?> avatar = const Value.absent(),
+                Value<String?> pinHash = const Value.absent(),
+                Value<bool> autoLogin = const Value.absent(),
+                Value<int> position = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ProfilesCompanion(
+                id: id,
+                name: name,
+                kind: kind,
+                avatar: avatar,
+                pinHash: pinHash,
+                autoLogin: autoLogin,
+                position: position,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String name,
+                required String kind,
+                Value<String?> avatar = const Value.absent(),
+                Value<String?> pinHash = const Value.absent(),
+                Value<bool> autoLogin = const Value.absent(),
+                Value<int> position = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ProfilesCompanion.insert(
+                id: id,
+                name: name,
+                kind: kind,
+                avatar: avatar,
+                pinHash: pinHash,
+                autoLogin: autoLogin,
+                position: position,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ProfilesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ProfilesTable,
+      ProfileRow,
+      $$ProfilesTableFilterComposer,
+      $$ProfilesTableOrderingComposer,
+      $$ProfilesTableAnnotationComposer,
+      $$ProfilesTableCreateCompanionBuilder,
+      $$ProfilesTableUpdateCompanionBuilder,
+      (ProfileRow, BaseReferences<_$AppDatabase, $ProfilesTable, ProfileRow>),
+      ProfileRow,
+      PrefetchHooks Function()
+    >;
+typedef $$ProfileListAccessTableCreateCompanionBuilder =
+    ProfileListAccessCompanion Function({
+      required String profileId,
+      required String listId,
+      Value<int> rowid,
+    });
+typedef $$ProfileListAccessTableUpdateCompanionBuilder =
+    ProfileListAccessCompanion Function({
+      Value<String> profileId,
+      Value<String> listId,
+      Value<int> rowid,
+    });
+
+class $$ProfileListAccessTableFilterComposer
+    extends Composer<_$AppDatabase, $ProfileListAccessTable> {
+  $$ProfileListAccessTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get profileId => $composableBuilder(
+    column: $table.profileId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get listId => $composableBuilder(
+    column: $table.listId,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ProfileListAccessTableOrderingComposer
+    extends Composer<_$AppDatabase, $ProfileListAccessTable> {
+  $$ProfileListAccessTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get profileId => $composableBuilder(
+    column: $table.profileId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get listId => $composableBuilder(
+    column: $table.listId,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ProfileListAccessTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ProfileListAccessTable> {
+  $$ProfileListAccessTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get profileId =>
+      $composableBuilder(column: $table.profileId, builder: (column) => column);
+
+  GeneratedColumn<String> get listId =>
+      $composableBuilder(column: $table.listId, builder: (column) => column);
+}
+
+class $$ProfileListAccessTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ProfileListAccessTable,
+          ProfileListAccessRow,
+          $$ProfileListAccessTableFilterComposer,
+          $$ProfileListAccessTableOrderingComposer,
+          $$ProfileListAccessTableAnnotationComposer,
+          $$ProfileListAccessTableCreateCompanionBuilder,
+          $$ProfileListAccessTableUpdateCompanionBuilder,
+          (
+            ProfileListAccessRow,
+            BaseReferences<
+              _$AppDatabase,
+              $ProfileListAccessTable,
+              ProfileListAccessRow
+            >,
+          ),
+          ProfileListAccessRow,
+          PrefetchHooks Function()
+        > {
+  $$ProfileListAccessTableTableManager(
+    _$AppDatabase db,
+    $ProfileListAccessTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ProfileListAccessTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ProfileListAccessTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ProfileListAccessTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> profileId = const Value.absent(),
+                Value<String> listId = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ProfileListAccessCompanion(
+                profileId: profileId,
+                listId: listId,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String profileId,
+                required String listId,
+                Value<int> rowid = const Value.absent(),
+              }) => ProfileListAccessCompanion.insert(
+                profileId: profileId,
+                listId: listId,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ProfileListAccessTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ProfileListAccessTable,
+      ProfileListAccessRow,
+      $$ProfileListAccessTableFilterComposer,
+      $$ProfileListAccessTableOrderingComposer,
+      $$ProfileListAccessTableAnnotationComposer,
+      $$ProfileListAccessTableCreateCompanionBuilder,
+      $$ProfileListAccessTableUpdateCompanionBuilder,
+      (
+        ProfileListAccessRow,
+        BaseReferences<
+          _$AppDatabase,
+          $ProfileListAccessTable,
+          ProfileListAccessRow
+        >,
+      ),
+      ProfileListAccessRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -4872,4 +6019,8 @@ class $AppDatabaseManager {
       $$WatchStatesTableTableManager(_db, _db.watchStates);
   $$DownloadsTableTableManager get downloads =>
       $$DownloadsTableTableManager(_db, _db.downloads);
+  $$ProfilesTableTableManager get profiles =>
+      $$ProfilesTableTableManager(_db, _db.profiles);
+  $$ProfileListAccessTableTableManager get profileListAccess =>
+      $$ProfileListAccessTableTableManager(_db, _db.profileListAccess);
 }
