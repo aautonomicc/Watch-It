@@ -89,29 +89,35 @@ void main() {
       }
     });
 
-    test('format info is the probed truth, not the file name tag', () {
-      // The NOTLD archive.org upload says [1080p] in its name but is
-      // really 480p — the catalog must carry what ffprobe measured, or
-      // the info is worse than none.
+    test('format info agrees with each tier name tag', () {
+      // The BBB tiers were encoded by the project itself with the app's
+      // own Publish settings, so — unlike the old NOTLD archive.org
+      // upload whose [1080p] tag lied — every name tag must match the
+      // probed truth exactly.
       final movies =
           kSeedLists.singleWhere((l) => l.id == 'default-test-movies');
-      final notld = movies.entries
-          .singleWhere((e) => e.address == kDefaultMovieAddress);
-      expect(notld.name, contains('[1080p]'));
-      expect(notld.videoInfo, '480p H.264');
+      for (final e in movies.entries) {
+        final tag = RegExp(r'\[(\d{3,4}p)\]').firstMatch(e.name)!.group(1);
+        expect(e.videoInfo, '$tag H.264', reason: e.name);
+      }
     });
 
-    test('the two NOTLD uploads share a name, differ by format info', () {
-      // Same film stored twice under the identical network file name —
-      // the size/format columns are the only thing telling them apart,
-      // which is exactly what they exist for.
+    test('the three BBB tiers share a lookup key, differ by tier', () {
+      // Same film stored three times — the quality tags differ but the
+      // parsed lookup key is identical, so the wall folds them into one
+      // card with a version picker; size/format tell the tiers apart.
       final movies =
           kSeedLists.singleWhere((l) => l.id == 'default-test-movies');
-      final notld1080 = movies.entries
-          .singleWhere((e) => e.address == kDefaultMovie1080Address);
-      expect(notld1080.name, kDefaultMovieName);
-      expect(notld1080.videoInfo, '1080p H.264');
-      expect(notld1080.sizeBytes, 5682464056);
+      expect(movies.entries, hasLength(3));
+      expect(
+        movies.entries
+            .map((e) => parseMediaName(e.name).lookupKey)
+            .toSet()
+            .single,
+        'imdb:tt1254207',
+      );
+      expect(movies.entries.map((e) => e.videoInfo).toSet(), hasLength(3));
+      expect(movies.entries.map((e) => e.sizeBytes).toSet(), hasLength(3));
     });
   });
 
@@ -187,7 +193,8 @@ void main() {
       SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true});
       await LibraryStore.save([
         const MediaList(id: 'default-test-movies', title: 'Movies', entries: [
-          MediaEntry(name: kDefaultMovieName, address: kDefaultMovieAddress),
+          MediaEntry(
+              name: kSeedMovie1080Name, address: kSeedMovie1080Address),
           MediaEntry(name: 'My Import.mp4', address: _addrB),
         ]),
       ]);
@@ -197,11 +204,11 @@ void main() {
           .toList();
       final seedInfo = kSeedLists
           .expand((l) => l.entries)
-          .singleWhere((e) => e.address == kDefaultMovieAddress);
-      final notld = entries
-          .singleWhere((e) => e.address == kDefaultMovieAddress);
-      expect(notld.sizeBytes, seedInfo.sizeBytes);
-      expect(notld.videoInfo, seedInfo.videoInfo);
+          .singleWhere((e) => e.address == kSeedMovie1080Address);
+      final seeded = entries
+          .singleWhere((e) => e.address == kSeedMovie1080Address);
+      expect(seeded.sizeBytes, seedInfo.sizeBytes);
+      expect(seeded.videoInfo, seedInfo.videoInfo);
       // Non-catalog entries are never touched, and nothing is re-added.
       final mine = entries.singleWhere((e) => e.address == _addrB);
       expect(mine.sizeBytes, isNull);

@@ -72,11 +72,13 @@ void main() {
     };
     expect({for (final r in cached) r.lookupKey}, keys);
     expect(cached.every((r) => r.found), isTrue);
-    final notld = cached.singleWhere(
-        (r) => r.lookupKey == parseMediaName(kDefaultMovieName).lookupKey);
-    expect(notld.title, 'Night of the Living Dead');
-    expect(notld.posterFile, isNotNull);
-    expect(File('${postersDir.path}/${notld.posterFile}').existsSync(),
+    final bbb = cached.singleWhere(
+        (r) => r.lookupKey == parseMediaName(kSeedMovie1080Name).lookupKey);
+    expect(bbb.title, 'Big Buck Bunny');
+    // The CC-BY attribution must ride the seeded description.
+    expect(bbb.overview, contains('Blender Foundation'));
+    expect(bbb.posterFile, isNotNull);
+    expect(File('${postersDir.path}/${bbb.posterFile}').existsSync(),
         isTrue);
     // Every seeded artwork reference resolves to a written file.
     for (final r in cached) {
@@ -93,27 +95,27 @@ void main() {
     // Second launch: the flag short-circuits — a row deleted by the user
     // (factory reset aside) is not re-seeded.
     await (db.delete(db.metadataCache)
-          ..where((t) => t.lookupKey.equals(notld.lookupKey)))
+          ..where((t) => t.lookupKey.equals(bbb.lookupKey)))
         .go();
     await seed();
     expect(
         await (db.select(db.metadataCache)
-              ..where((t) => t.lookupKey.equals(notld.lookupKey)))
+              ..where((t) => t.lookupKey.equals(bbb.lookupKey)))
             .getSingleOrNull(),
         isNull);
   });
 
   test('existing cache rows and poster files always win', () async {
     final db = await LibraryStore.database();
-    final key = parseMediaName(kDefaultMovieName).lookupKey;
+    final key = parseMediaName(kSeedMovie1080Name).lookupKey;
     await db.into(db.metadataCache).insert(MetadataCacheCompanion.insert(
           lookupKey: key,
           found: true,
           title: const Value('User Title'),
-          posterFile: const Value('movie_10331.jpg'),
+          posterFile: const Value('movie_10378.jpg'),
           fetchedAt: 1,
         ));
-    final posterFile = File('${postersDir.path}/movie_10331.jpg');
+    final posterFile = File('${postersDir.path}/movie_10378.jpg');
     await posterFile.writeAsBytes([1, 2, 3]);
 
     await seed();
@@ -124,8 +126,8 @@ void main() {
     expect(row.title, 'User Title');
     expect(posterFile.readAsBytesSync(), [1, 2, 3]);
     // The bundle's row for the same lookupKey was skipped, not duplicated
-    // (the trimmed catalog's only lookupKey is NOTLD's, so the user's row
-    // is the whole cache).
+    // (the catalog's only lookupKey is BBB's, so the user's row is the
+    // whole cache).
     expect((await db.select(db.metadataCache).get()).length, 1);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getBool(kSeedMetadataFlag), isTrue);

@@ -324,13 +324,16 @@ GPLv3.
 
 ### Bundled catalog
 
-A fresh install seeds *Night of the Living Dead* (1968) in two versions
-— a 480p archive.org upload and a 1080p re-encode, sharing one poster
-card with a version picker (see
-[docs/SEED-CATALOG.md](docs/SEED-CATALOG.md)). Alpha.48–.50 bundled a
-48-title public-domain catalog; alpha.51 trimmed the bundle to NOTLD
-only — installs that already seeded the full catalog keep it, and the
-old uploads remain playable on the network — and the full catalog
+A fresh install seeds *Big Buck Bunny* (2008) — the Blender
+Institute's open-movie short, © 2008 Blender Foundation |
+www.bigbuckbunny.org, licensed CC-BY 3.0 — in three quality tiers
+(1080p / 720p / 480p H.264) sharing one poster card with a version
+picker (see [docs/SEED-CATALOG.md](docs/SEED-CATALOG.md)).
+Alpha.48–.50 bundled a 48-title public-domain catalog; alpha.51
+trimmed the bundle to *Night of the Living Dead* (1968), and the
+post-alpha.92 swap replaced NOTLD with Big Buck Bunny — installs that
+already seeded earlier catalogs keep them, and the old uploads remain
+playable on the network — and the full catalog
 (now 40 titles — *The Lady Vanishes* was removed 2026-08-11 after its
 US copyright turned out to have been restored by the URAA, and
 *The Hunchback of Notre Dame* (1939) plus *Petticoat Junction*

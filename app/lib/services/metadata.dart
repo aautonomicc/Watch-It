@@ -106,25 +106,52 @@ class MediaMetadata {
   final String? trackArtist;
 }
 
-/// XOR address of the built-in default movie seeded on first run — the
-/// public-domain catalog's NOTLD upload (H.264 8-bit archive.org source,
-/// uploaded 2026-08-07; part of kSeedLists in seed_catalog.dart).
+/// XOR address of the Night of the Living Dead 480p upload that was the
+/// seeded default movie from alpha.48 through alpha.92 (H.264 8-bit
+/// archive.org source, uploaded 2026-08-07). No longer part of
+/// kSeedLists — kept only as the rewrite target of the
+/// [kLegacyDefaultMovieAddresses] migration and so existing installs'
+/// bundled root map keeps re-seeding (see rootmap_seeder.dart).
 const kDefaultMovieAddress =
     '442180e7d60e9a16bfaeb7f00aff6e47c754934986b9010f5f75e101ef4da20e';
 
-/// File name of the built-in default movie as stored on the network.
-/// Follows the Plex/Jellyfin naming convention
+/// Network file name of the NOTLD uploads (both share it). Follows the
+/// Plex/Jellyfin naming convention
 /// (`Title (Year) {imdb-ttXXXXXXX} - [quality].ext`) — see docs/NAMING.md.
 const kDefaultMovieName =
     'Night of the Living Dead (1968) {imdb-tt0063350} - [1080p].mp4';
 
 /// The genuine-1080p NOTLD upload (the 5.68GB H.264 re-encode that was
-/// the default movie up to v0.1.0-alpha.47). Back in the seed catalog as
-/// a second entry alongside [kDefaultMovieAddress] — same film, same
-/// network file name, told apart by size/format info — so it must NOT be
-/// listed in [kLegacyDefaultMovieAddresses].
+/// the default movie up to v0.1.0-alpha.47; a seed entry through
+/// alpha.92). Same film and network file name as [kDefaultMovieAddress],
+/// told apart by size/format info — so it must NOT be listed in
+/// [kLegacyDefaultMovieAddresses].
 const kDefaultMovie1080Address =
     '66cacd0604b01b2c2f1da1c1c3c05609d3b4cc448cff3b6cdd868e6b7eebcb13';
+
+/// The Big Buck Bunny seed uploads (2026-09-09, official Blender
+/// "sunflower" 1080p 30fps release + the project's own 720p/480p tier
+/// encodes made with the app's exact Publish ffmpeg settings). BBB is
+/// CC-BY 3.0 Blender Foundation — NOT public domain — so it is seeded
+/// only (never listed in catalog/*.watch-list) and its description
+/// carries the attribution everywhere it shows.
+const kSeedMovie1080Address =
+    '4b4b3fe644b9685c4d3f4d94291a447c45eda86bde506fe88ed83afa8b9a75fb';
+const kSeedMovie720Address =
+    'ee15ef9c25b554c07232146dc4d41e0455768e77b8a3f23b469de97539e69074';
+const kSeedMovie480Address =
+    '2eb2b6524cc711c69352e150c19ee89de3b87142d8f8e8d7472118b6d7896451';
+
+/// Network file names of the Big Buck Bunny seed uploads — per-tier
+/// quality tags exactly as the in-app Publish flow would name them, so
+/// the three fold into one wall card via the version picker (folding is
+/// by parsed lookup key, which ignores the tag).
+const kSeedMovie1080Name =
+    'Big Buck Bunny (2008) {imdb-tt1254207} - [1080p].mp4';
+const kSeedMovie720Name =
+    'Big Buck Bunny (2008) {imdb-tt1254207} - [720p].mp4';
+const kSeedMovie480Name =
+    'Big Buck Bunny (2008) {imdb-tt1254207} - [480p].mp4';
 
 /// Stale addresses the default movie was seeded under in older releases;
 /// migrated to [kDefaultMovieAddress] by [LibraryStore.ensureDefaults].
@@ -136,22 +163,24 @@ const kLegacyDefaultMovieAddresses = [
   'cebd7965268b61d98907378670f13e55a2694064d0eed7ef4be9c19eaaf03988',
 ];
 
-const _notld = MediaMetadata(
-  title: 'Night of the Living Dead',
-  year: 1968,
+const _bbb = MediaMetadata(
+  title: 'Big Buck Bunny',
+  year: 2008,
   overview:
-      'Seven strangers barricade themselves inside a rural Pennsylvania '
-      'farmhouse as the recently dead rise to feed on the living. George A. '
-      'Romero’s landmark 1968 independent film invented the modern '
-      'zombie genre and is now in the public domain.',
-  posterAsset: 'assets/posters/notld_1968.jpg',
+      'A gentle giant rabbit takes cheerful revenge on three bullying '
+      'rodents in the Blender Institute’s classic open-movie short.\n\n'
+      '© 2008 Blender Foundation | www.bigbuckbunny.org — made by the '
+      'Blender Institute, licensed under the Creative Commons '
+      'Attribution 3.0 licence.',
+  posterAsset: 'assets/posters/bbb_2008.jpg',
   mediaType: 'movie',
 );
 
 /// Bundled catalog, keyed by XOR address.
 const _byAddress = <String, MediaMetadata>{
-  kDefaultMovieAddress: _notld,
-  kDefaultMovie1080Address: _notld,
+  kSeedMovie1080Address: _bbb,
+  kSeedMovie720Address: _bbb,
+  kSeedMovie480Address: _bbb,
 };
 
 /// Offline fallback metadata for [entry]. Always returns something
