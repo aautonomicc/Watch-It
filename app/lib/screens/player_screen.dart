@@ -21,6 +21,24 @@ import '../services/user_metadata.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 
+/// Rewords a pre-first-frame streaming error when the real problem is
+/// connectivity, not the file. An unreachable network makes `/xor` fail
+/// and mpv print misleading lines ("Failed to recognize file format."),
+/// so when the embedded client can't fetch chunks — paused, still
+/// connecting, or ready with zero peers (e.g. a VPN blocking Autonomi) —
+/// the overlay should say that instead of the raw mpv line. Returns null
+/// when the client looks healthy (keep the player's own error).
+({String title, String message})? connectivityErrorFor(ClientHealth health) {
+  if (health.state == 'ready' && health.peers > 0) return null;
+  return (
+    title: "Can't reach the Autonomi network",
+    message: health.state == 'paused'
+        ? 'The network is paused — resume it in Settings, then try again.'
+        : 'Wait for "Connected" with peers on the home screen, then try '
+            'again.\nUsing a VPN? Some VPNs block Autonomi.',
+  );
+}
+
 /// Full-screen video playback of an HTTP stream via media_kit (libmpv).
 ///
 /// Streaming from Autonomi has a slow cold start (every chunk comes off
@@ -98,6 +116,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _buffering = true;
   bool _playbackStarted = false;
   String? _error;
+
+  /// Headline override for the error overlay when the real problem is
+  /// connectivity, not the file ("Can't reach the Autonomi network"
+  /// instead of "Playback failed").
+  String? _errorTitle;
   int _fetchedBytes = 0;
 
   /// What is playing right now — advances past [widget.entry] when the
@@ -164,7 +187,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // rendering, errors would show a "Playback failed" overlay on top
     // of a working video.
     _errorSub = _player.stream.error.listen((e) {
-      if (mounted && !_playbackStarted) setState(() => _error = e);
+      if (!mounted || _playbackStarted) return;
+      setState(() => _error = e);
+      // A streamed file that errors before the first frame is usually a
+      // connectivity problem, not a broken file — an unreachable network
+      // makes /xor fail and mpv print misleading lines like "Failed to
+      // recognize file format." Probe the client and reword.
+      if (!_isLocal) unawaited(_explainStreamError());
     });
     _positionSub = _player.stream.position.listen(_onPosition);
     _durationSub = _player.stream.duration.listen((d) {
@@ -191,6 +220,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ),
       );
     }());
+  }
+
+  /// When a pre-first-frame error hits a network stream, check whether
+  /// the embedded client can actually reach the Autonomi network and, if
+  /// not, replace the raw mpv line with what is really wrong (see
+  /// [connectivityErrorFor]).
+  Future<void> _explainStreamError() async {
+    final health = await EmbeddedClient.health();
+    if (!mounted || _playbackStarted || _error == null) return;
+    final reworded = connectivityErrorFor(health);
+    if (reworded == null) return;
+    setState(() {
+      _errorTitle = reworded.title;
+      _error = reworded.message;
+    });
   }
 
   /// Music files opened via the detail page get the media notification
@@ -255,7 +299,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _playbackStarted = true;
       // Playback is demonstrably working — drop any earlier error
       // (a failed decoder attempt that mpv recovered from).
-      if (mounted) setState(() => _error = null);
+      if (mounted) {
+        setState(() {
+          _error = null;
+          _errorTitle = null;
+        });
+      }
     }
     // Throttled resume-point save; the final position is saved in
     // dispose so quitting mid-playback loses at most nothing.
@@ -337,6 +386,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _playbackStarted = false;
       _buffering = true;
       _error = null;
+      _errorTitle = null;
       _position = Duration.zero;
       _duration = Duration.zero;
     });
@@ -455,7 +505,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           Icon(Icons.error_outline, color: t.accent, size: 40),
           const SizedBox(height: 12),
           Text(
-            'Playback failed',
+            _errorTitle ?? 'Playback failed',
             style: TextStyle(
               color: t.bone,
               fontSize: 15,

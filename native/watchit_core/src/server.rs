@@ -1087,6 +1087,28 @@ fn serve_stored_map(
     method: Method,
     headers: &HeaderMap,
 ) -> Response {
+    // A body needs chunks off the network. Starting a 200/206 and then
+    // aborting with zero bytes makes players print nonsense ("Failed to
+    // recognize file format."), so refuse up front while the client
+    // can't fetch (paused / still connecting / dialing blocked). HEAD
+    // stays serviceable — its headers come from the map alone.
+    if method != Method::HEAD {
+        if engine.paused() {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "network is paused — resume it in Settings",
+            )
+                .into_response();
+        }
+        if !engine.is_ready() {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "not connected to the Autonomi network yet — wait for \
+                 the connection, then try again",
+            )
+                .into_response();
+        }
+    }
     let size = root.original_file_size() as u64;
 
     let range = headers
@@ -1949,6 +1971,37 @@ mod channel_api_tests {
         let (status, _) =
             send_head(&app, "/channel/manifest/nothex", None).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn xor_get_refuses_when_client_cannot_serve() {
+        // A stored map whose chunks can't be fetched must refuse the GET
+        // with 503 instead of sending 200/206 headers and aborting with
+        // an empty body (which makes mpv print "Failed to recognize
+        // file format." at the user).
+        let engine = test_engine("xor-unserved");
+        let (addr, root) = upload();
+        engine.store_root_map(addr, &root);
+        let app = router(engine);
+        let uri = format!("/xor/{}", hex::encode(addr));
+
+        // Not connected (no client installed).
+        let (status, body) = send(&app, "GET", &uri, vec![], None).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(String::from_utf8_lossy(&body).contains("not connected"));
+
+        // Paused gets its own wording.
+        engine.set_paused(true);
+        let (status, body) = send(&app, "GET", &uri, vec![], None).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(String::from_utf8_lossy(&body).contains("paused"));
+        engine.set_paused(false);
+
+        // HEAD keeps serving headers offline — they come from the map
+        // alone (the size probes and tests rely on this).
+        let (status, headers) = send_head(&app, &uri, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(headers[header::ACCEPT_RANGES], "bytes");
     }
 
     #[tokio::test(flavor = "multi_thread")]
