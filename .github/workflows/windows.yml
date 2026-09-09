@@ -37,12 +37,14 @@ jobs:
       # BtbN shared build (small exes + DLLs shared between them) is
       # ~half the size of two static exes; pinned tag + sha256 keeps the
       # build reproducible. ffplay is dropped.
+      # NOTE: BtbN prunes dated autobuild tags after ~2 weeks — a 404 here
+      # means the pin expired: repin to the newest dated tag + fresh sha256.
       - name: Bundle ffmpeg (BtbN win64-gpl-shared, pinned)
         shell: pwsh
         run: |
-          $tag = "autobuild-2026-08-25-13-06"
-          $name = "ffmpeg-n8.1.2-44-g7c533d0f86-win64-gpl-shared-8.1"
-          $sha256 = "53c28beda739244ac70784e09edff8fe915acca68e7eb8952d97cd5a015ea146"
+          $tag = "autobuild-2026-09-08-23-15"
+          $name = "ffmpeg-n8.1.2-51-g7ba069f4f1-win64-gpl-shared-8.1"
+          $sha256 = "3c58b18680120dc1008652ac321b1b46666147bfbe1a67a6378d3fb52593c108"
           $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/$tag/$name.zip"
           Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
           $actual = (Get-FileHash ffmpeg.zip -Algorithm SHA256).Hash.ToLower()
