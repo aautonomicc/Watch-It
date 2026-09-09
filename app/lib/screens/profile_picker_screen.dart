@@ -25,7 +25,7 @@ Future<void> switchProfileFlow(BuildContext context) async {
   store.signOut();
 }
 
-/// "Who's watching?" — shown by the ProfileGate whenever nobody is
+/// "Who's w@tching?" — shown by the ProfileGate whenever nobody is
 /// signed in (multi-profile launch without an auto-login profile, or
 /// after Switch profile). Tapping a profile verifies its PIN (if any)
 /// and signs it in.
@@ -57,12 +57,26 @@ class ProfilePickerScreen extends StatelessWidget {
                   children: [
                     const BrandMark(height: 28),
                     const SizedBox(height: 24),
-                    Text(
-                      'Who\'s watching?',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: t.bone,
+                    // The heading wears the wordmark's exact treatment
+                    // (Anton, bone, accent-blue @ — see BrandWordmark):
+                    // the one sanctioned use of Anton outside the
+                    // wordmark itself, tying the picker to the brand.
+                    Text.rich(
+                      TextSpan(
+                        style: TextStyle(
+                          fontFamily: 'Anton',
+                          fontSize: 26,
+                          color: t.bone,
+                          letterSpacing: 0.5,
+                        ),
+                        children: [
+                          const TextSpan(text: 'Who\'s w'),
+                          TextSpan(
+                            text: '@',
+                            style: TextStyle(color: t.accent),
+                          ),
+                          const TextSpan(text: 'tching?'),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 32),

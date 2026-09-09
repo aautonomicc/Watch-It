@@ -419,7 +419,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: TextStyle(color: t.bone, fontSize: 15),
                     ),
                     subtitle: Text(
-                      'Back to "Who\'s watching?"',
+                      'Back to "Who\'s w@tching?"',
                       style: TextStyle(color: t.ash, fontSize: 12),
                     ),
                     onTap: () => switchProfileFlow(context),
