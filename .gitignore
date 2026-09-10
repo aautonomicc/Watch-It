@@ -11,3 +11,5 @@ squashfs-root/
 
 # Pure-Dart package build state (cli/, packages/)
 .dart_tool/
+# Offline Android artifact-validator bytecode cache.
+scripts/__pycache__/

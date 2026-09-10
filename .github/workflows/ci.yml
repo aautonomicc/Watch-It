@@ -6,6 +6,13 @@ on:
   pull_request:
 
 jobs:
+  android-artifact-validator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: bash -n scripts/build_android.sh native/build-android.sh
+      - run: python3 -m unittest discover -s scripts -p 'test_android_apk.py'
+
   flutter:
     runs-on: ubuntu-latest
     defaults:
