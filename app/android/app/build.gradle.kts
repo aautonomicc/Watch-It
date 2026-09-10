@@ -26,6 +26,8 @@ require(watchAbis.isNotEmpty() && watchAbis.all { it in supportedWatchAbis }
 val watchTestSetting = providers.environmentVariable("WATCHIT_TEST_APP").orElse("0").get()
 require(watchTestSetting in listOf("0", "1")) { "WATCHIT_TEST_APP must be 0 or 1" }
 val watchTestApp = watchTestSetting == "1"
+val watchSplitPerAbi = providers.gradleProperty("split-per-abi")
+    .orElse("false").get().toBoolean()
 
 android {
     namespace = "io.github.aautonomicc.watchit"
@@ -48,7 +50,9 @@ android {
         versionName = flutter.versionName
         manifestPlaceholders["watchitAppLabel"] = if (watchTestApp) "W@tch Test" else "W@tch"
         ndk {
-            abiFilters += watchAbis
+            // Flutter configures splits for --split-per-abi; AGP rejects
+            // combining those splits with defaultConfig's ndk.abiFilters.
+            if (!watchSplitPerAbi) abiFilters += watchAbis
         }
     }
 
