@@ -50,6 +50,19 @@ def run(*args):
     return subprocess.run(args, check=True, text=True, capture_output=True).stdout.strip()
 
 
+def manifest_fields(badging, expected_package):
+    package = re.search(r"^package: name='([^']+)'", badging, re.M)
+    # Build-tools 36 calls this minSdkVersion; older aapt2 uses sdkVersion.
+    sdk = re.search(r"^(?:minSdkVersion|sdkVersion):'(\d+)'", badging, re.M)
+    if not package or package[1] != expected_package:
+        raise ValueError("Manifest package does not match the requested build")
+    if not sdk or int(sdk[1]) != 24:
+        raise ValueError("Expected the pinned minimum Android API 24")
+    if "leanback-launchable-activity:" not in badging:
+        raise ValueError("Missing TV launcher entry")
+    return package[1], int(sdk[1])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("apk", type=Path)
@@ -62,14 +75,7 @@ def main():
     args = parser.parse_args()
     native = inspect_native(args.apk, args.abis.split(","))
     badging = run(args.aapt2, "dump", "badging", str(args.apk))
-    package = re.search(r"^package: name='([^']+)'", badging, re.M)
-    sdk = re.search(r"^sdkVersion:'(\d+)'", badging, re.M)
-    if not package or package[1] != args.package:
-        raise ValueError("Manifest package does not match the requested build")
-    if not sdk or int(sdk[1]) != 24:
-        raise ValueError("Expected the pinned minimum Android API 24")
-    if "leanback-launchable-activity:" not in badging:
-        raise ValueError("Missing TV launcher entry")
+    package, min_sdk = manifest_fields(badging, args.package)
     signature = run(args.apksigner, "verify", "--verbose", "--print-certs", str(args.apk))
     certs = re.findall(r"^Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]{64})$", signature, re.M)
     if not certs:
@@ -78,7 +84,7 @@ def main():
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     receipt = {
         "artifact": args.apk.name, "bytes": args.apk.stat().st_size,
-        "sha256": digest, "package": package[1], "min_sdk": int(sdk[1]),
+        "sha256": digest, "package": package, "min_sdk": min_sdk,
         "native_libraries": native, "signer_certificate_sha256": certs,
         "signature_verification": signature, "manifest_badging": badging,
         "hardware_test": "NOT RUN", "signer_ownership": "NOT ATTESTED",
