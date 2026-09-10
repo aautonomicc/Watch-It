@@ -1,0 +1,19 @@
+WEBVTT
+
+NOTE Authored player test cues. Latvian text is unreviewed, not film dialogue.
+
+00:00:00.000 --> 00:03:00.000
+TEST — latviešu subtitri
+Šis ir subtitru pārslēgšanas tests.
+
+00:03:00.000 --> 00:06:00.000
+TEST — latviešu subtitri
+Pauze. Pārbaudiet, vai teksts ir redzams.
+
+00:06:00.000 --> 00:09:00.000
+TEST — latviešu subtitri
+Pārbaudiet burtus: ā, č, ē, ģ, ī, ķ, ļ, ņ, š, ū, ž.
+
+00:09:00.000 --> 00:12:00.000
+TEST — latviešu subtitri
+Izslēdziet subtitrus, lai pabeigtu testu.

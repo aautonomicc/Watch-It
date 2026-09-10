@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:drift/drift.dart' show Value;
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -22,6 +23,8 @@ import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../services/tv_settings.dart';
 import '../widgets/tv_player_controls.dart';
+import '../widgets/tv_track_menu.dart';
+import '../services/caption_file.dart';
 
 /// Rewords a pre-first-frame streaming error when the real problem is
 /// connectivity, not the file. An unreachable network makes `/xor` fail
@@ -150,6 +153,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// The episode offered by the "Up next" overlay, when one exists.
   MediaEntry? _upNext;
   int _countdown = 0;
+  bool _trackMenuOpen = false;
 
   @override
   void initState() {
@@ -355,7 +359,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _countdown = 10;
       });
       _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (!mounted) return;
+        if (!mounted || _trackMenuOpen) return;
         if (_countdown <= 1) {
           _playNext();
         } else {
@@ -624,7 +628,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   onSeek: (pos) => unawaited(_player.seek(pos)),
                 )
               else if (tv)
-                Video(controller: _controller, controls: null)
+                Video(
+                  controller: _controller,
+                  controls: null,
+                  subtitleViewConfiguration: const SubtitleViewConfiguration(
+                    visible: false,
+                  ),
+                )
               else
                 // The stock controls draw their own grey buffering spinner in
                 // the centre of the video; our branded overlay already covers
@@ -728,7 +738,73 @@ class _PlayerScreenState extends State<PlayerScreen> {
       onSeek: (position) => unawaited(_player.seek(position)),
       onExit: () => Navigator.of(context).pop(),
       onNext: _upNext == null ? null : _playNext,
+      onTracks: _showTracks,
+      captions: SubtitleView(
+        controller: _controller,
+        configuration: const SubtitleViewConfiguration(
+          textScaler: TextScaler.noScaling,
+          style: TextStyle(
+            fontSize: 24,
+            height: 1.4,
+            color: Colors.white,
+            backgroundColor: Color(0xbb000000),
+          ),
+          padding: EdgeInsets.fromLTRB(24, 0, 24, 24),
+        ),
+      ),
       child: child,
+    );
+  }
+
+  Future<void> _showTracks() async {
+    _trackMenuOpen = true;
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (_) => StreamBuilder<Tracks>(
+          stream: _player.stream.tracks,
+          initialData: _player.state.tracks,
+          builder: (_, available) => StreamBuilder<Track>(
+            stream: _player.stream.track,
+            initialData: _player.state.track,
+            builder: (_, selected) => TvTrackMenu(
+              tracks: available.data ?? const Tracks(),
+              selected: selected.data ?? const Track(),
+              onAudio: _player.setAudioTrack,
+              onCaption: _player.setSubtitleTrack,
+              onLoadCaptions: _loadCaptionFile,
+            ),
+          ),
+        ),
+      );
+    } finally {
+      _trackMenuOpen = false;
+    }
+  }
+
+  Future<void> _loadCaptionFile() async {
+    final entry = _entry;
+    final file = await openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(
+          label: 'Captions',
+          extensions: ['srt', 'vtt'],
+          mimeTypes: ['application/x-subrip', 'text/vtt', 'text/plain'],
+        ),
+      ],
+    );
+    if (file == null || !mounted || entry != _entry) return;
+    if (await file.length() > CaptionFile.maxBytes) {
+      throw const FormatException('Caption size');
+    }
+    final caption = CaptionFile.parse(file.name, await file.readAsBytes());
+    if (!mounted || entry != _entry) return;
+    await _player.setSubtitleTrack(
+      SubtitleTrack.data(
+        caption.text,
+        title: caption.name,
+        language: caption.language,
+      ),
     );
   }
 }
