@@ -767,9 +767,9 @@ class _ContinueCard extends StatelessWidget {
       if (!item.isNextUp)
         state?.remainingLabel ?? (progress != null ? 'In progress' : null),
     ].nonNulls.join(' · ');
-    return InkWell(
+    return WiCardInk(
+      tokens: t,
       onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
       child: SizedBox(
         width: 120,
         child: Column(

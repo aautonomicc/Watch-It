@@ -7,6 +7,53 @@ import '../theme/tokens.dart';
 import 'download_badge.dart';
 import 'watch_progress.dart';
 
+/// InkWell for wall cards that draws its own focus ring. Ink highlights
+/// paint on the ancestor Material BEHIND the card's opaque poster image,
+/// so keyboard/D-pad focus (Android TV remotes, desktop Tab/arrows)
+/// would be invisible on a plain InkWell. The ring is a
+/// foregroundDecoration, so gaining focus never shifts layout; select/
+/// enter activation comes with InkWell for free.
+class WiCardInk extends StatefulWidget {
+  const WiCardInk({
+    super.key,
+    required this.tokens,
+    required this.onTap,
+    required this.child,
+  });
+
+  final WiTokens tokens;
+  final VoidCallback onTap;
+  final Widget child;
+
+  @override
+  State<WiCardInk> createState() => _WiCardInkState();
+}
+
+class _WiCardInkState extends State<WiCardInk> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: widget.onTap,
+      borderRadius: BorderRadius.circular(6),
+      onFocusChange: (focused) => setState(() => _focused = focused),
+      child: Container(
+        foregroundDecoration: _focused
+            ? BoxDecoration(
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  width: 2.5,
+                  color: widget.tokens.accent,
+                ),
+              )
+            : null,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
 /// Wall card for a single (non-episode) entry: poster with watch bar and
 /// download badge, title/year underneath. Shared by the home shelves and
 /// the per-list browse grid.
@@ -37,9 +84,9 @@ class PosterCard extends StatelessWidget {
     final meta = MetadataService.instance.metadataFor(entry);
     final allVersions = versions.isEmpty ? [entry] : versions;
     final badge = versionsDownloadBadge(t, allVersions);
-    return InkWell(
+    return WiCardInk(
+      tokens: t,
       onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
       child: SizedBox(
         width: 120,
         child: Column(
@@ -114,9 +161,9 @@ class AlbumCard extends StatelessWidget {
     final meta = MetadataService.instance.metadataFor(group.tracks.first);
     final n = group.tracks.length;
     final badge = groupDownloadBadge(t, group.tracks);
-    return InkWell(
+    return WiCardInk(
+      tokens: t,
       onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
       child: SizedBox(
         width: 120,
         child: Column(
@@ -243,9 +290,9 @@ class ArtistCard extends StatelessWidget {
         ]),
     };
 
-    return InkWell(
+    return WiCardInk(
+      tokens: t,
       onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
       child: SizedBox(
         width: 120,
         child: Column(
@@ -313,9 +360,9 @@ class ShowCard extends StatelessWidget {
       for (final s in group.seasons)
         for (final e in s.episodes) s.versionsOf(e)
     ]);
-    return InkWell(
+    return WiCardInk(
+      tokens: t,
       onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
       child: SizedBox(
         width: 120,
         child: Column(
