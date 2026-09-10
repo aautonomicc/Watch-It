@@ -88,6 +88,17 @@ class ApkNativeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn("Unsupported or duplicate", result.stderr)
 
+    def test_current_and_legacy_aapt2_minimum_api_fields(self):
+        for field in ("minSdkVersion", "sdkVersion"):
+            badging = ("package: name='io.github.aautonomicc.watchit' versionCode='95'\n"
+                       f"{field}:'24'\ntargetSdkVersion:'36'\n"
+                       "leanback-launchable-activity: name='example.MainActivity'\n")
+            self.assertEqual(VERIFY.manifest_fields(badging, "io.github.aautonomicc.watchit"),
+                             ("io.github.aautonomicc.watchit", 24))
+            with self.assertRaisesRegex(ValueError, "minimum Android API"):
+                VERIFY.manifest_fields(badging.replace(":'24'", ":'23'"),
+                                       "io.github.aautonomicc.watchit")
+
 
 if __name__ == "__main__":
     unittest.main()
