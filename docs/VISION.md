@@ -19,7 +19,10 @@ library private by construction.
 
 1. **One app, six platforms.** Android, Android TV, iOS, Linux, Windows, macOS from
    a single codebase. Same UI language everywhere, adapted to touch vs desktop vs
-   the 10-foot TV experience.
+   the 10-foot TV experience. (Five of the six ship today: Android,
+   Linux and Windows since the early alphas, macOS since alpha.92, and
+   Android TV since alpha.95 — TV runs the normal UI for now, the
+   10-foot layout is still to come; iOS remains.)
 2. **Client-only. No server, ever.** The Autonomi network is the backend. Install the
    app, add a list, get a poster-wall library. No accounts, no configuration, nothing
    to host.
@@ -53,7 +56,9 @@ library private by construction.
    My W@tch links them peer-to-peer (shipped alpha.61/.62): lists,
    viewing positions, edits, and artwork travel directly between your
    devices, end-to-end encrypted, with no account and no third party in
-   the middle.
+   the middle. On a shared family device, viewing state splits into
+   Netflix-style profiles (shipped alpha.93 — Kid profiles, PINs, a
+   "Who's w@tching?" picker) while the library itself stays common.
 
 ## Non-goals
 

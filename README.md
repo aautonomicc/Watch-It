@@ -124,10 +124,13 @@ server compatibility** — Autonomi *is* the backend.
 
 ## Status
 
-**Working alpha on Android, Linux, and Windows** — [the latest release](https://github.com/aautonomicc/Watch-It/releases)
-ships a signed APK, a Linux AppImage, and a Windows portable zip (since
-alpha.55; unzip and run `watchit.exe` — the binaries are unsigned, so
-SmartScreen needs "More info → Run anyway") that connect to the live Autonomi network
+**Working alpha on Android (incl. Android TV), Linux, Windows, and
+macOS** — [the latest release](https://github.com/aautonomicc/Watch-It/releases)
+ships a signed APK, a Linux AppImage, a Windows portable zip (since
+alpha.55; unzip and run `watchit.exe` — unsigned, so SmartScreen needs
+"More info → Run anyway"), and a macOS universal dmg (since alpha.92;
+Apple Silicon + Intel, unsigned — right-click → Open). All of them
+connect to the live Autonomi network
 with an embedded Rust client (no gateway, no sidecar) and stream with
 byte-exact seeking and a chunk cache with keep-ahead prefetch. Since
 alpha.40 the library is **datamap-first**: entries are created from
@@ -300,7 +303,26 @@ limited to the lists you tick — with downloads and most settings
 hidden — an optional auto-selected profile for the kids' TV, and an
 admin PIN with a one-time recovery code guarding the controls.
 Existing installs are untouched: everything stays exactly as it was
-until a second profile is created in Settings → Profiles.
+until a second profile is created in Settings → Profiles. Alpha.93
+also swaps the seeded demo title: fresh installs now come with
+*Big Buck Bunny* (2008) in three quality tiers instead of Night of the
+Living Dead (see Bundled catalog below).
+
+Alpha.94 makes wide desktop windows keep the library drawer **pinned
+open** as a side panel (the burger, now on the far left, hides and
+shows it — remembered across launches) and restyles the profile picker
+heading to "Who's w@tching?" in the wordmark's own lettering.
+Alpha.95 puts W@tch on **Android TV**: the same APK now appears in the
+TV launcher (leanback entry + banner) and the whole wall is drivable
+by remote, with a visible focus ring on every card — 10-foot layouts
+come later. It also lets profiles travel with the family: a library
+export can include the device's profiles (avatars, PINs, kid list
+access, per-profile watch history) behind an opt-in checkbox, and
+importing merges them by name — the profiles already on the device
+always win on a clash. And when the network is unreachable at play
+time, the player now says so plainly ("Can't reach the Autonomi
+network", with a VPN hint) instead of surfacing a cryptic decoder
+error.
 
 Docs:
 
@@ -340,8 +362,8 @@ www.bigbuckbunny.org, licensed CC-BY 3.0 — in three quality tiers
 (1080p / 720p / 480p H.264) sharing one poster card with a version
 picker (see [docs/SEED-CATALOG.md](docs/SEED-CATALOG.md)).
 Alpha.48–.50 bundled a 48-title public-domain catalog; alpha.51
-trimmed the bundle to *Night of the Living Dead* (1968), and the
-post-alpha.92 swap replaced NOTLD with Big Buck Bunny — installs that
+trimmed the bundle to *Night of the Living Dead* (1968), and
+alpha.93 replaced NOTLD with Big Buck Bunny — installs that
 already seeded earlier catalogs keep them, and the old uploads remain
 playable on the network — and the full catalog
 (now 40 titles — *The Lady Vanishes* was removed 2026-08-11 after its
