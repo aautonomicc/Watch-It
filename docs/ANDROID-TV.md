@@ -57,6 +57,10 @@ the system file picker. The device must provide a compatible picker. Captions
 are per playback, are not uploaded or synced, and unload with the media. A name
 ending in `.lv.vtt` or `.en.srt`, for example, supplies a language label. Invalid
 files produce a named error rather than a false successful selection.
+Paste captions also accepts timed SRT/WebVTT text and explicitly reads the
+clipboard only when Paste from clipboard is activated. It works without a
+document picker. The Google TV Streamer reports a framework DocumentsStub, so
+do not assume the file-picker action offers browsing on that device.
 
 Captions sit above the transport while controls are visible, then return toward
 the bottom of the picture when controls hide. Back closes the menu and returns

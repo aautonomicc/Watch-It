@@ -16,6 +16,8 @@ switching. Keep TEST in the filename and visible cue text.
 3. If the device has a document picker, select `bbb-TEST.en.vtt`, then select
    `bbb-TEST.lv.vtt`. Both files can be copied to its Download folder for this
    test. A picker missing on a TV is a capability limitation to report.
+   On a TV without a real picker, use Paste captions to enter the same timed
+   text instead. Set the label to e.g. `bbb-TEST.lv` to retain a language tag.
 4. Verify the expected labelled cue appears, including Latvian diacritics.
    Seek into each cue and pause: captions must remain above the transport.
 5. Turn captions off, close with Back, and resume using Select. Record any

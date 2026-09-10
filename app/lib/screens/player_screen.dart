@@ -25,6 +25,7 @@ import '../services/tv_settings.dart';
 import '../widgets/tv_player_controls.dart';
 import '../widgets/tv_track_menu.dart';
 import '../services/caption_file.dart';
+import '../widgets/caption_text_dialog.dart';
 
 /// Rewords a pre-first-frame streaming error when the real problem is
 /// connectivity, not the file. An unreachable network makes `/xor` fail
@@ -741,15 +742,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       onTracks: _showTracks,
       captions: SubtitleView(
         controller: _controller,
-        configuration: const SubtitleViewConfiguration(
-          textScaler: TextScaler.noScaling,
-          style: TextStyle(
+        configuration: SubtitleViewConfiguration(
+          textScaler: MediaQuery.textScalerOf(context),
+          style: const TextStyle(
             fontSize: 24,
             height: 1.4,
             color: Colors.white,
             backgroundColor: Color(0xbb000000),
           ),
-          padding: EdgeInsets.fromLTRB(24, 0, 24, 24),
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
         ),
       ),
       child: child,
@@ -773,6 +774,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               onAudio: _player.setAudioTrack,
               onCaption: _player.setSubtitleTrack,
               onLoadCaptions: _loadCaptionFile,
+              onPasteCaptions: _pasteCaptionText,
             ),
           ),
         ),
@@ -799,6 +801,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     final caption = CaptionFile.parse(file.name, await file.readAsBytes());
     if (!mounted || entry != _entry) return;
+    await _player.setSubtitleTrack(
+      SubtitleTrack.data(
+        caption.text,
+        title: caption.name,
+        language: caption.language,
+      ),
+    );
+  }
+
+  Future<void> _pasteCaptionText() async {
+    final entry = _entry;
+    final caption = await showDialog<CaptionFile>(
+      context: context,
+      builder: (_) => const CaptionTextDialog(),
+    );
+    if (caption == null || !mounted || entry != _entry) return;
     await _player.setSubtitleTrack(
       SubtitleTrack.data(
         caption.text,
