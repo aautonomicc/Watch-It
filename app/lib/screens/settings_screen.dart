@@ -375,6 +375,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 if (TvSettings.instance.enabled)
                   ListTile(
+                    autofocus: true,
                     leading: Icon(Icons.tv, color: t.accent),
                     title: const Text('TV display'),
                     subtitle: const Text('Screen margins and Grove palette'),

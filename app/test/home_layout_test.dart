@@ -16,6 +16,7 @@ import 'package:watchit/services/watch_state.dart';
 import 'package:watchit/services/terms.dart';
 import 'package:watchit/services/tv_settings.dart';
 import 'package:watchit/screens/settings_screen.dart';
+import 'package:watchit/screens/tv_display_screen.dart';
 import 'package:watchit/theme/tokens.dart';
 
 String _addr(int i) => i.toRadixString(16).padLeft(64, '0');
@@ -85,6 +86,9 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.select);
     await tester.pumpAndSettle();
     expect(find.byType(SettingsScreen), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(find.byType(TvDisplayScreen), findsOneWidget);
   }, variant: TargetPlatformVariant.only(TargetPlatform.android));
 
   testWidgets('hidden special row stays off the wall', (tester) async {
