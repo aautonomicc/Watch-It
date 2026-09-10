@@ -20,6 +20,8 @@ import '../services/season_grouping.dart' show episodeNameFromLabel;
 import '../services/user_metadata.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
+import '../services/tv_settings.dart';
+import '../widgets/tv_player_controls.dart';
 
 /// Rewords a pre-first-frame streaming error when the real problem is
 /// connectivity, not the file. An unreachable network makes `/xor` fail
@@ -35,7 +37,7 @@ import '../theme/tokens.dart';
     message: health.state == 'paused'
         ? 'The network is paused — resume it in Settings, then try again.'
         : 'Wait for "Connected" with peers on the home screen, then try '
-            'again.\nUsing a VPN? Some VPNs block Autonomi.',
+              'again.\nUsing a VPN? Some VPNs block Autonomi.',
   );
 }
 
@@ -289,7 +291,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (pos <= Duration.zero) return;
     _position = pos;
     // The audio layout draws its own seek bar off _position.
-    if (_isAudio && mounted) setState(() {});
+    if ((_isAudio || TvSettings.instance.enabled) && mounted) setState(() {});
     NowPlaying.instance.updatePlayback(
       this,
       position: pos,
@@ -595,115 +597,138 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tv = TvSettings.instance.enabled;
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text(_title, style: const TextStyle(fontSize: 15)),
-      ),
+      appBar: tv
+          ? null
+          : AppBar(
+              backgroundColor: Colors.black,
+              foregroundColor: Colors.white,
+              title: Text(_title, style: const TextStyle(fontSize: 15)),
+            ),
       body: SafeArea(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // Music: artwork + transport instead of a black video surface
-            // (no frame-capture button — there are no frames).
-            if (_isAudio)
-              AudioPlayerView(
-                entry: _entry,
-                position: _position,
-                duration: _duration,
-                playing: _playing,
-                onPlayPause: () => unawaited(_player.playOrPause()),
-                onSeek: (pos) => unawaited(_player.seek(pos)),
-              )
-            else
-              // The stock controls draw their own grey buffering spinner in
-              // the centre of the video; our branded overlay already covers
-              // buffering, so blank out the built-in one on all platforms.
-              // The bottom controls default to zero bottom margin, which puts
-              // them on top of the Android navigation buttons — lift them
-              // clear, and draw the seek bar at twice the stock thickness.
-              MaterialVideoControlsTheme(
-                normal: kDefaultMaterialVideoControlsThemeData.copyWith(
-                  bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
-                  bottomButtonBarMargin: const EdgeInsets.only(
-                    left: 16,
-                    right: 8,
-                    bottom: 48,
+        child: _tvTransport(
+          Stack(
+            fit: StackFit.expand,
+            children: [
+              // Music: artwork + transport instead of a black video surface
+              // (no frame-capture button — there are no frames).
+              if (_isAudio)
+                AudioPlayerView(
+                  entry: _entry,
+                  position: _position,
+                  duration: _duration,
+                  playing: _playing,
+                  onPlayPause: () => unawaited(_player.playOrPause()),
+                  onSeek: (pos) => unawaited(_player.seek(pos)),
+                )
+              else if (tv)
+                Video(controller: _controller, controls: null)
+              else
+                // The stock controls draw their own grey buffering spinner in
+                // the centre of the video; our branded overlay already covers
+                // buffering, so blank out the built-in one on all platforms.
+                // The bottom controls default to zero bottom margin, which puts
+                // them on top of the Android navigation buttons — lift them
+                // clear, and draw the seek bar at twice the stock thickness.
+                MaterialVideoControlsTheme(
+                  normal: kDefaultMaterialVideoControlsThemeData.copyWith(
+                    bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
+                    bottomButtonBarMargin: const EdgeInsets.only(
+                      left: 16,
+                      right: 8,
+                      bottom: 48,
+                    ),
+                    seekBarMargin: const EdgeInsets.only(
+                      left: 16,
+                      right: 16,
+                      bottom: 48,
+                    ),
+                    seekBarHeight: 4.8,
+                    topButtonBar: [
+                      const Spacer(),
+                      if (!ProfileStore.instance.isKid)
+                        MaterialCustomButton(
+                          onPressed: () => unawaited(_useFrameAsPoster()),
+                          icon: const Icon(Icons.photo_camera_outlined),
+                        ),
+                    ],
                   ),
-                  seekBarMargin: const EdgeInsets.only(
-                    left: 16,
-                    right: 16,
-                    bottom: 48,
-                  ),
-                  seekBarHeight: 4.8,
-                  topButtonBar: [
-                    const Spacer(),
-                    if (!ProfileStore.instance.isKid)
-                      MaterialCustomButton(
-                        onPressed: () => unawaited(_useFrameAsPoster()),
-                        icon: const Icon(Icons.photo_camera_outlined),
+                  fullscreen: kDefaultMaterialVideoControlsThemeDataFullscreen
+                      .copyWith(
+                        bufferingIndicatorBuilder: (_) =>
+                            const SizedBox.shrink(),
+                        bottomButtonBarMargin: const EdgeInsets.only(
+                          left: 16,
+                          right: 8,
+                          bottom: 64,
+                        ),
+                        seekBarMargin: const EdgeInsets.only(
+                          left: 16,
+                          right: 16,
+                          bottom: 64,
+                        ),
+                        seekBarHeight: 4.8,
+                        topButtonBar: [
+                          const Spacer(),
+                          if (!ProfileStore.instance.isKid)
+                            MaterialCustomButton(
+                              onPressed: () => unawaited(_useFrameAsPoster()),
+                              icon: const Icon(Icons.photo_camera_outlined),
+                            ),
+                        ],
                       ),
-                  ],
-                ),
-                fullscreen: kDefaultMaterialVideoControlsThemeDataFullscreen
-                    .copyWith(
-                      bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
-                      bottomButtonBarMargin: const EdgeInsets.only(
-                        left: 16,
-                        right: 8,
-                        bottom: 64,
-                      ),
-                      seekBarMargin: const EdgeInsets.only(
-                        left: 16,
-                        right: 16,
-                        bottom: 64,
-                      ),
-                      seekBarHeight: 4.8,
+                  child: MaterialDesktopVideoControlsTheme(
+                    normal: desktopControlsTheme(
+                      kDefaultMaterialDesktopVideoControlsThemeData,
                       topButtonBar: [
                         const Spacer(),
                         if (!ProfileStore.instance.isKid)
-                          MaterialCustomButton(
+                          MaterialDesktopCustomButton(
                             onPressed: () => unawaited(_useFrameAsPoster()),
                             icon: const Icon(Icons.photo_camera_outlined),
                           ),
                       ],
                     ),
-                child: MaterialDesktopVideoControlsTheme(
-                  normal: desktopControlsTheme(
-                    kDefaultMaterialDesktopVideoControlsThemeData,
-                    topButtonBar: [
-                      const Spacer(),
-                      if (!ProfileStore.instance.isKid)
-                        MaterialDesktopCustomButton(
-                          onPressed: () => unawaited(_useFrameAsPoster()),
-                          icon: const Icon(Icons.photo_camera_outlined),
-                        ),
-                    ],
+                    fullscreen: desktopControlsTheme(
+                      kDefaultMaterialDesktopVideoControlsThemeDataFullscreen,
+                      topButtonBar: [
+                        const Spacer(),
+                        if (!ProfileStore.instance.isKid)
+                          MaterialDesktopCustomButton(
+                            onPressed: () => unawaited(_useFrameAsPoster()),
+                            icon: const Icon(Icons.photo_camera_outlined),
+                          ),
+                      ],
+                    ),
+                    child: Video(controller: _controller),
                   ),
-                  fullscreen: desktopControlsTheme(
-                    kDefaultMaterialDesktopVideoControlsThemeDataFullscreen,
-                    topButtonBar: [
-                      const Spacer(),
-                      if (!ProfileStore.instance.isKid)
-                        MaterialDesktopCustomButton(
-                          onPressed: () => unawaited(_useFrameAsPoster()),
-                          icon: const Icon(Icons.photo_camera_outlined),
-                        ),
-                    ],
-                  ),
-                  child: Video(controller: _controller),
                 ),
-              ),
-            if (_error != null)
-              _errorOverlay(context)
-            else if (_buffering)
-              _bufferingOverlay(context),
-            if (_upNext != null) _upNextOverlay(context, _upNext!),
-          ],
+              if (_error != null)
+                _errorOverlay(context)
+              else if (_buffering)
+                _bufferingOverlay(context),
+              if (_upNext != null) _upNextOverlay(context, _upNext!),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _tvTransport(Widget child) {
+    if (!TvSettings.instance.enabled) return child;
+    return TvPlayerControls(
+      title: _title,
+      position: _position,
+      duration: _duration,
+      playing: _playing,
+      onPlayPause: () => unawaited(_player.playOrPause()),
+      onSeek: (position) => unawaited(_player.seek(position)),
+      onExit: () => Navigator.of(context).pop(),
+      onNext: _upNext == null ? null : _playNext,
+      child: child,
     );
   }
 }
