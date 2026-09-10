@@ -54,6 +54,11 @@ and uses the pub lockfile. Unselected JNI ABIs are excluded even when present in
 plugin AARs or left by a previous build. An `Invalid depfile` build log prevents
 the wrapper from labeling the result validated.
 
+For split APKs, Flutter's `split-per-abi` Gradle property supplies the ABI split
+configuration. The app sets `ndk.abiFilters` only for non-split builds: Android's
+Gradle plugin rejects both being set together. Packaging exclusions and the
+post-build artifact check still apply in both modes.
+
 Each selected ABI produces an APK, SHA-256 file and JSON receipt in `dist/`.
 The receipt records the source revision and dirty state, Flutter/Rust/cargo-ndk
 versions, package/minimum API, actual native libraries, and certificate report.
