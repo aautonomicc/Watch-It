@@ -31,6 +31,14 @@ APK covers it — no extra platform port. What it needs on top:
 - Hardware decode matters more here (TV boxes have weak CPUs) — libmpv uses
   MediaCodec on Android, same path as phones.
 
+Status (alpha.95): the manifest work (leanback entry, TV banner,
+leanback/touchscreen not-required) and card-level D-pad focus — a
+visible accent focus ring + select-activation on every wall card —
+shipped, so the APK appears in the TV launcher and the library
+browses by remote today. The 10-foot layout mode is still open, and
+real-TV-box testing is pending (emulator video playback is unreliable:
+emulated codecs render black).
+
 ## High-level structure
 
 Client-only. There is no server component anywhere in the design; the Autonomi network
@@ -394,6 +402,17 @@ ships, and stored in the OS keychain beside the wallet key
 - **SQLite (drift)** — lists, metadata cache, watch history, resume points, download
   index, settings.
 - **Riverpod** — app state management.
+- **Profiles (alpha.93)** — Netflix-style family viewing profiles are
+  a *viewing-state scope*, not accounts: watch positions, favourites
+  and colour scheme are keyed per profile (drift schema v13 —
+  `profiles` + `profile_list_access` tables, `watch_states.profile_id`),
+  while the library, downloads, wallet, channels and the network
+  identity stay install-global; My W@tch sync stays pinned to the
+  Admin profile's state. PINs are salted-hashed and rate-limited; the
+  admin PIN has a one-time recovery code, itself stored hashed. Since
+  alpha.95 profiles can optionally ride a library bundle (export
+  checkbox → `profiles.json` + avatar members; import merges by name,
+  device wins — old importers ignore the members).
 - No accounts, no cloud. Lists, watch state, and user edits sync between a
   user's own linked devices via My W@tch (above) — device-to-device, no
   third party holds anything.
@@ -403,11 +422,11 @@ ships, and stored in the OS keychain beside the wallet key
 | Platform | Artifact | Notes |
 |---|---|---|
 | Android | APK / AAB | targetSdk 34; Play Store optional, sideload-friendly |
-| Android TV | same APK / AAB | leanback launcher entry + TV banner asset; sideloads onto any TV box; Play Store TV listing optional |
+| Android TV | same APK / AAB | leanback launcher entry + TV banner shipped in alpha.95; sideloads onto any TV box; Play Store TV listing optional |
 | iOS | IPA | needs Apple dev account; TestFlight first |
 | Linux | AppImage + Flatpak | AppImage matches existing workflow |
 | Windows | portable zip | CI-built, ships with every release since alpha.55; unsigned (SmartScreen "More info → Run anyway"), installer/signing deferred to beta |
-| macOS | .dmg | notarization needed for distribution |
+| macOS | .dmg | CI-built universal (Apple Silicon + Intel) dmg with bundled ffmpeg, ships with every release since alpha.92; unsigned (right-click → Open), notarization deferred to beta |
 
 ## Repo layout
 

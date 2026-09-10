@@ -1,16 +1,29 @@
 # Roadmap
 
-**Unreleased (2026-09-09):** the built-in seed catalog swapped Night of
-the Living Dead for **Big Buck Bunny (2008)** in three quality tiers
+**Status (2026-09-10):** latest release is **v0.1.0-alpha.95**
+([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
+a release now ships **four artifacts**: a signed APK, a Linux AppImage,
+a Windows portable zip (since alpha.55), and a macOS universal dmg
+(since alpha.92 — unsigned, right-click → Open). The headline of the
+newest wave is **family & TV**: alpha.93 ships **profiles** (its own
+section below — Netflix-style viewing profiles with a "Who's watching?"
+picker, Kid/Adult types, per-profile PINs and an admin PIN with a
+one-time recovery code) and swaps the built-in seed catalog from Night
+of the Living Dead to **Big Buck Bunny (2008)** in three quality tiers
 (CC-BY 3.0 Blender Foundation, attribution in the seeded description;
 fresh installs and factory resets only — existing installs keep what
-they seeded; see [SEED-CATALOG.md](SEED-CATALOG.md)).
-
-**Status (2026-09-06):** latest release is **v0.1.0-alpha.92**
-([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
-and every release since alpha.55 ships a signed APK, a Linux AppImage,
-**and a Windows portable zip**. The headline of the newest wave is
-**network & data control** (its own section below): alpha.85 "Data
+they seeded; see [SEED-CATALOG.md](SEED-CATALOG.md)); alpha.94 pins
+the library drawer open as a side panel on wide desktop home windows
+(the burger, now far left, toggles it) and restyles the picker heading
+to "Who's w@tching?" in the wordmark treatment; alpha.95 is the first
+**Android TV** release — leanback launcher entry + TV banner and a
+D-pad/keyboard focus ring on every wall card (the normal UI; 10-foot
+layouts are still Phase 4) — plus **family export/import** (profiles
+optionally ride a library bundle, merging by name with the device
+winning) and honest playback errors when the network is unreachable
+("Can't reach the Autonomi network" with a VPN hint instead of a raw
+player error). Before that, **network & data control**
+(its own section below): alpha.85 "Data
 Saver" cuts the streaming readahead to an adaptive window and adds
 Offline mode plus auto-pause-when-idle, alpha.86 ships the
 per-component data usage screen (also `W@tch/<List>` download folders
@@ -326,6 +339,13 @@ From the alpha.37 field reports — full plan in
 - [x] System-pause auto-resume: pauses caused by the system (connection
       loss, waiting-for-Wi-Fi, Android timeout) resume automatically on
       reconnect/Wi-Fi/app-resume/next-launch; user pauses stay manual
+- [x] Honest connectivity errors at play time (alpha.95): when the
+      client can't fetch chunks (network paused / not connected yet /
+      a VPN blocking Autonomi), the stream route refuses with a clear
+      503 instead of starting an empty stream, and the player shows
+      "Can't reach the Autonomi network" with a state-matched hint
+      (incl. "Using a VPN? Some VPNs block Autonomi") instead of the
+      raw decoder error the empty stream used to provoke
 
 ## Datamap-first privacy (planned 2026-08-01, three releases)
 
@@ -776,14 +796,37 @@ files stay install-global — a profile scopes only viewing state.
       (skippable with an explicit warning)
 - [x] Non-admin settings scope: Switch profile + Appearance + Buffer
       size + About (minus Clear all data)
-- [ ] Android TV / leanback UI for the family-TV case (phase 4)
+- [x] "Who's w@tching?" picker heading in the wordmark's own
+      treatment — Anton, bone, blue @ (alpha.94)
+- [x] Family export/import (alpha.95): the library-export dialog gains
+      an opt-in **Include profiles** checkbox (default off — "Never
+      share this bundle") that carries every profile into the bundle:
+      kind, avatar, PIN, kid allow-lists (by list title), per-profile
+      watch history, and the admin PIN + recovery code as a pair.
+      Import offers a "Profiles (N)" checkbox and merges BY NAME with
+      the device winning on every conflict (PINs only fill gaps, kid
+      allow-lists union, unmatched profiles are created fresh); old
+      app versions simply ignore the extra bundle members
+- [x] Android TV first cut for the family-TV case (alpha.95) — see
+      Phase 4
+- [ ] TV 10-foot layouts + real-TV-box testing (phase 4)
 
 ## Phase 3 — All desktop platforms
 - [x] Windows build + packaging → CI-built portable zip, shipped with
       every release since alpha.55 (unsigned: SmartScreen "More info →
       Run anyway"; installer + code signing deferred to beta —
       decision in [PLAN-alpha55.md](PLAN-alpha55.md) §6)
-- [ ] macOS build and packaging (.dmg)
+- [x] macOS build and packaging (.dmg) → CI-built **universal dmg**
+      (Apple Silicon + Intel, ffmpeg bundled so upload quality tiers
+      work), shipped with every release since alpha.92; unsigned —
+      right-click → Open, or `xattr -dr com.apple.quarantine` —
+      notarization deferred to beta, and still untested on real Mac
+      hardware
+- [x] Pinned library drawer on wide desktop windows (alpha.94): home
+      windows ≥1000 logical px keep the drawer open as a 290px side
+      panel beside the wall — the burger (far left) hides/shows it,
+      remembered across launches; narrow windows and mobile keep the
+      modal drawer
 - [ ] Keyboard map, window polish, hover thumbnails on seek bar
 - [ ] Shared-list format v1 documented → plain text shipped (alpha.25/.31),
       bundle spec locked ([BUNDLE-FORMAT.md](BUNDLE-FORMAT.md)); import from an
@@ -791,8 +834,17 @@ files stay install-global — a profile scopes only viewing state.
 - v0.3 release + demo video (poster-wall streaming from Autonomi is the headline)
 
 ## Phase 4 — Android TV, polish & iOS
-- [ ] Android TV: leanback launcher entry + TV banner, D-pad focus traversal across
-      all screens, 10-foot layout mode, remote player controls; test on a real TV box
+- [x] Android TV first cut (alpha.95): `LEANBACK_LAUNCHER` entry + TV
+      banner (recomposed after the release into a centred
+      bucket-and-wordmark lockup), leanback/touchscreen features marked
+      not-required so phone installs are unaffected, and a visible
+      accent focus ring + select-activation on every wall card — the
+      same APK appears in the TV launcher and the library browses by
+      D-pad/remote with the normal UI
+- [ ] Android TV rest: 10-foot layout mode, focus polish on the
+      remaining screens, remote player controls; test on a real TV box
+      (emulator video playback is unreliable — emulated codecs render
+      black)
 - [ ] iOS build + TestFlight (FFI path required if sidecar chosen elsewhere)
 - [ ] Chapter markers, playback speed, subtitle handling for streamed items
 - [ ] Light theme, poster size options, keyboard-map settings

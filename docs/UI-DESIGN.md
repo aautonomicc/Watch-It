@@ -27,6 +27,12 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - **Recently Added** per list
 - **Next Up** (next unwatched episode per show)
 - List switcher in the sidebar/drawer: All · <list name> · <list name> · Downloads
+- Desktop (alpha.94): home windows ≥1000 logical px keep the library
+  drawer **pinned open** as a 290px side panel beside the wall — the
+  burger sits on the far left of the app bar and toggles it (remembered
+  across launches), search moves to the right. Narrower windows and
+  mobile keep the modal drawer with the old layout (search left, burger
+  far right)
 
 ### 2. Library grid
 - Poster wall, infinite scroll, alphabet fast-scroller on the right
@@ -241,10 +247,12 @@ Netflix-style viewing profiles for family devices — invisible until a
 second profile exists (a pre-profile install is silently the lone
 "Admin" profile).
 
-- **"Who's watching?"** full-screen picker at launch when several
-  profiles exist and none is set to auto-select; circular avatars
-  (12 drawn presets or a forced-square image crop), lock icon on
-  PIN-protected profiles, "Kids" tag under kid profiles
+- **"Who's w@tching?"** full-screen picker at launch when several
+  profiles exist and none is set to auto-select; the heading is in the
+  wordmark's own treatment since alpha.94 (Anton, bone, the @ in accent
+  blue — the one sanctioned Anton use outside the wordmark); circular
+  avatars (12 drawn presets or a forced-square image crop), lock icon
+  on PIN-protected profiles, "Kids" tag under kid profiles
 - **Switch button** in the home app bar: the active profile's avatar
   (only when 2+ profiles). Leaving a KID profile prompts for the admin
   PIN when one is set
@@ -260,6 +268,13 @@ second profile exists (a pre-profile install is silently the lone
 - Watch positions, favourites and colour scheme are per profile;
   library, downloads, wallet, channels and the network identity are
   shared (profiles, not accounts)
+- **Family export/import** (alpha.95): the Export-library dialog gains
+  an opt-in **Include profiles** checkbox (default off, "Never share
+  this bundle"); the import dialog then offers **Profiles (N)**.
+  Profiles merge by name and the device always wins on a clash — a
+  backup PIN or avatar only fills a gap, kid allow-lists union, and
+  the admin PIN travels together with its recovery code so "Forgot
+  PIN?" keeps working on the new device
 
 ## Layout adaptation
 
@@ -275,7 +290,13 @@ TV notes: larger base type scale (readable at 3 m), no hover-only affordances, t
 entry kept to add/import flows only (paste via network share or a shown-on-TV import
 address is preferred over typing addresses with a remote).
 
-## Built so far (alpha.92)
+Shipped so far for TV (alpha.95): the leanback launcher entry + TV
+banner (a centred bucket-and-wordmark lockup on ink) and a visible
+accent focus ring with select-activation on every wall card, so the
+library browses by D-pad/remote today — running the *normal* layout;
+the 10-foot column above remains the target.
+
+## Built so far (alpha.95)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,
@@ -374,6 +395,14 @@ share surface, a real audio player screen (artwork + transport instead
 of a black video surface), short audio kept out of Continue Watching,
 live network-stack versions under About, and the single Settings →
 Network → Data page with 3-way Off | Wi-Fi | Wi-Fi + mobile pills for
-the built-in clients.
+the built-in clients. Alpha.93 adds the profiles surfaces described
+above (Who's-w@tching picker, Settings → Profiles, kid gating) and the
+Big Buck Bunny seed card with its three-tier version picker; alpha.94
+the pinned desktop drawer and the wordmark-styled picker heading;
+alpha.95 the Android TV launcher entry with the wall-card focus ring,
+the Include-profiles export/import checkboxes, and the honest "Can't
+reach the Autonomi network" playback overlay.
 Still to come from this document: filter/sort + fast-scroller on
-the grid, the full desktop keyboard map, mobile gestures, and the TV layout.
+the grid, the full desktop keyboard map, mobile gestures, and the
+10-foot TV layout (the TV launcher entry + D-pad focus ring shipped
+in alpha.95).
