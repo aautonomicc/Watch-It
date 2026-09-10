@@ -182,7 +182,7 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   positions, edits, and artwork current whenever linked devices are
   online together — the page never needs to be open
 
-### 9. Channels (2026-08-27, unreleased)
+### 9. Channels (shipped 2026-08-27, alpha.65)
 - Settings → CONTENT tile **Channels** at the top of the section
   (amber icon, "Public · anyone with the code") — a separate door from
   the blue Upload tile on purpose; every channel surface carries an
