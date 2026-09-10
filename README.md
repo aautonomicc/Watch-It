@@ -25,12 +25,13 @@ QR code) and watch lists, viewing positions, and your own edits and artwork
 travel between them automatically — peer-to-peer and end-to-end encrypted,
 with no account and no cloud.
 
-![W@tch home screen on Linux — connected to the live Autonomi network, browsing a library of public-domain films and shows](docs/screenshots/home-linux.jpg)
+![W@tch desktop home screen — pinned library panel, Continue Watching with resume bars, Recently Added and Movies shelves of poster cards](docs/screenshots/home-linux.jpg)
 
-*W@tch on Linux: connected to the live network, browsing a library of public-domain
-films and shows streamed straight from Autonomi — no key, no account, no server.*
+*The W@tch home screen on desktop: Continue Watching, Recently Added and your
+own lists, streamed straight from Autonomi — no key, no account, no server.
+(Sample library — the titles shown are invented for the screenshot.)*
 
-Want this exact library? It's a one-file download:
+Want a ready-made library? It's a one-file download:
 [**Public Domain.watch-list**](catalog/README.md) — 40 public-domain
 films and episodes, posters and descriptions included, ready to import.
 
