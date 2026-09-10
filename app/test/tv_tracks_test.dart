@@ -9,6 +9,7 @@ import 'package:watchit/theme/tokens.dart';
 import 'package:watchit/widgets/tv_app_frame.dart';
 import 'package:watchit/widgets/tv_track_menu.dart';
 import 'package:watchit/widgets/tv_player_controls.dart';
+import 'package:watchit/widgets/caption_text_dialog.dart';
 
 void main() {
   setUp(() => TvSettings.instance = TvSettings(enabled: true));
@@ -269,6 +270,79 @@ void main() {
     expect(c.text, contains('Šis ir tests.'));
     expect(c.text.startsWith('WEBVTT'), isTrue);
   });
+
+  testWidgets(
+    'typed captions validate before returning a per-playback attachment',
+    (tester) async {
+      CaptionFile? picked;
+      await tester.pumpWidget(
+        app(
+          Builder(
+            builder: (context) => TextButton(
+              child: const Text('Open'),
+              onPressed: () async {
+                picked = await showDialog<CaptionFile>(
+                  context: context,
+                  builder: (_) => const CaptionTextDialog(),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Load captions'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Use timed SRT or WebVTT captions under 2 MB.'),
+        findsOneWidget,
+      );
+      expect(picked, isNull);
+      await tester.enterText(find.byType(TextField).first, 'bbb-TEST.lv');
+      await tester.enterText(
+        find.byType(TextField).last,
+        'WEBVTT\n\n00:00.000 --> 00:10.000\nTEST — Šis ir tests.\n',
+      );
+      await tester.tap(find.text('Load captions'));
+      await tester.pumpAndSettle();
+      expect(picked?.language, 'lv');
+      expect(picked?.name, 'bbb-TEST.lv.vtt');
+      expect(picked?.text, contains('Šis ir tests.'));
+      expect(find.byType(CaptionTextDialog), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'clipboard is read only on explicit Paste and empty text is named',
+    (tester) async {
+      var reads = 0;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.getData') {
+            reads++;
+            return <String, dynamic>{'text': ''};
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      await tester.pumpWidget(app(const CaptionTextDialog()));
+      await tester.pumpAndSettle();
+      expect(reads, 0);
+      await tester.tap(find.text('Paste from clipboard'));
+      await tester.pumpAndSettle();
+      expect(reads, 1);
+      expect(find.textContaining('The clipboard has no text'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
   test(
     'caption parser accepts SRT and refuses unsupported or untimed input',
     () {

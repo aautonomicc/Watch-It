@@ -37,6 +37,7 @@ class TvTrackMenu extends StatefulWidget {
     required this.onAudio,
     required this.onCaption,
     this.onLoadCaptions,
+    this.onPasteCaptions,
   });
 
   final Tracks tracks;
@@ -44,6 +45,7 @@ class TvTrackMenu extends StatefulWidget {
   final Future<void> Function(AudioTrack) onAudio;
   final Future<void> Function(SubtitleTrack) onCaption;
   final Future<void> Function()? onLoadCaptions;
+  final Future<void> Function()? onPasteCaptions;
 
   @override
   State<TvTrackMenu> createState() => _TvTrackMenuState();
@@ -159,7 +161,7 @@ class _TvTrackMenuState extends State<TvTrackMenu> {
               const Padding(
                 padding: EdgeInsets.all(12),
                 child: Text(
-                  'No caption tracks in this media. You can load an SRT or VTT file.',
+                  'No caption tracks in this media. Load a file or paste timed caption text.',
                 ),
               ),
             for (var i = 0; i < captions.length; i++)
@@ -176,6 +178,17 @@ class _TvTrackMenuState extends State<TvTrackMenu> {
         ),
       ),
       actions: [
+        if (widget.onPasteCaptions != null)
+          TextButton.icon(
+            onPressed: _busy
+                ? null
+                : () => _run(
+                    widget.onPasteCaptions!,
+                    'Could not load captions. Please try again.',
+                  ),
+            icon: const Icon(Icons.content_paste),
+            label: const Text('Paste captions'),
+          ),
         if (widget.onLoadCaptions != null)
           TextButton.icon(
             onPressed: _busy
