@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -13,6 +14,8 @@ import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata_service.dart';
 import 'package:watchit/services/watch_state.dart';
 import 'package:watchit/services/terms.dart';
+import 'package:watchit/services/tv_settings.dart';
+import 'package:watchit/screens/settings_screen.dart';
 import 'package:watchit/theme/tokens.dart';
 
 String _addr(int i) => i.toRadixString(16).padLeft(64, '0');
@@ -67,6 +70,22 @@ void main() {
 
     expect(dy(tester, 'Beta'), lessThan(dy(tester, 'Alpha')));
   });
+
+  testWidgets('TV remote reaches Settings with the metadata banner absent', (tester) async {
+    TvSettings.instance = TvSettings(enabled: true);
+    addTearDown(() { TvSettings.instance = TvSettings(); });
+    await seedLibrary();
+    await tester.pumpWidget(const WatchItApp());
+    await tester.pumpAndSettle();
+    expect(find.text('Settings'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(find.byType(SettingsScreen), findsOneWidget);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
 
   testWidgets('hidden special row stays off the wall', (tester) async {
     SharedPreferences.setMockInitialValues({

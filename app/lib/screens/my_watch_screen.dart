@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../widgets/wi_qr.dart';
+import '../widgets/device_name_dialog.dart';
 
 import '../services/library_store.dart';
 import '../services/my_watch_api.dart';
@@ -172,30 +173,10 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
   }
 
   Future<String?> _askDeviceName(String title) async {
-    final controller = TextEditingController(text: _defaultDeviceName());
     final name = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 48,
-          decoration: const InputDecoration(
-            labelText: 'Device name',
-            helperText: 'How this device appears on your other devices',
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('Continue'),
-          ),
-        ],
-      ),
+      builder: (_) =>
+          DeviceNameDialog(title: title, initialName: _defaultDeviceName()),
     );
     if (name == null || name.isEmpty) return null;
     return name;
