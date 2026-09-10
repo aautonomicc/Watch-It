@@ -43,6 +43,29 @@ in dark mode and is off by default; phone/profile appearance is unchanged.
 The palette was developed with feedback from the BNR/skaists independent
 validator, rather than replacing the upstream product identity.
 
+## Audio and captions
+
+The TV transport has an Audio & Captions button. The menu lists tracks actually
+reported by the player, with their supplied title and language. Automatic audio
+uses the file's default; Captions off explicitly disables subtitles. Metadata is
+a label, not proof that a translation or dub was reviewed. An absent language is
+not manufactured or silently replaced. Selection calls the existing player's
+track API without reopening or seeking the movie.
+
+Load caption file attaches a local UTF-8 SRT or WebVTT file, up to 2 MiB, through
+the system file picker. The device must provide a compatible picker. Captions
+are per playback, are not uploaded or synced, and unload with the media. A name
+ending in `.lv.vtt` or `.en.srt`, for example, supplies a language label. Invalid
+files produce a named error rather than a false successful selection.
+
+Captions sit above the transport while controls are visible, then return toward
+the bottom of the picture when controls hide. Back closes the menu and returns
+focus to Play/Pause. An existing next-episode countdown waits while the menu is
+open so a picked file is not inadvertently attached to the next item.
+
+See [the language and playback pilot](LANGUAGE-PLAYBACK-PILOT.md) for labelled
+test captions and the distinction between playback tests and speech assessment.
+
 ## Verification
 
 `flutter test test/tv_experience_test.dart test/home_layout_test.dart test/tv_seek_test.dart`
@@ -53,6 +76,8 @@ Back behavior, conditional Next, and reaching Settings without the TMDB banner.
 Several cases explicitly use Flutter's Android target platform.
 Timeline tests cover remote preview/commit, cancellation with Android Back,
 focus departure, bounds, hidden-control timing, dragging and unknown duration.
+`flutter test test/tv_tracks_test.dart` covers remote track selection, failure
+state, menu return focus, bounded layout, caption placement and local-file input.
 
 The tests caught an invisible page-sized focus target that trapped directional
 navigation, and an overflowing transport row when Next was present. The page
