@@ -46,6 +46,17 @@ Download, or heart it into the Favourites row. Right — a season page: every
 episode with stills, air dates and descriptions, plus one-tap downloads for the
 rest of the season. (As above, the titles shown are invented for the screenshots.)*
 
+<p>
+  <img src="docs/screenshots/music-linux.jpg" width="49%" alt="A music list in W@tch — genre filter chips and a grid of square album covers with artist and track counts" />
+  <img src="docs/screenshots/album-linux.jpg" width="49%" alt="An album playing in W@tch — cover art, seek bar, transport controls and the track list with the current track highlighted" />
+</p>
+
+*Left — a music list: square album covers with genre filters, artist cards and
+per-album track counts. Right — an album playing: cover art, seek bar and
+transport controls above the track list, with downloaded tracks marked and the
+playing track highlighted. (As above, the titles shown are invented for the
+screenshots.)*
+
 ## How it works
 
 1. **Upload from the app — or with the CLI.** On desktop, the
