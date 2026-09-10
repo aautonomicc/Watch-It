@@ -162,13 +162,6 @@ class _TvFocusFrameState extends State<TvFocusFrame>
                         color: WiTokens.of(context).bone,
                         width: 3,
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: WiTokens.of(context).accent,
-                          blurRadius: 3,
-                          spreadRadius: 1,
-                        ),
-                      ],
                     ),
                   ),
                 ),
