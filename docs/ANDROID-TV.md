@@ -22,6 +22,12 @@ channel falls back to the ordinary interface.
   when the existing episode flow supplies an adjacent item. Back hides the
   visible transport first; another Back leaves playback. The on-screen Back
   action leaves directly. Existing resume-point and playback code is retained.
+- Up from Play/Pause reaches the timeline. Left/Right preview a destination
+  ten seconds at a time, including held-key repeats, without seeking the player.
+  Select commits the preview once. Back cancels it and keeps the controls open;
+  moving off the timeline also abandons the preview. The controls stay visible
+  while the timeline has focus. Pointer dragging previews until release, then
+  commits one seek. The displayed preview is a timestamp, not a thumbnail.
 
 ## Screen fit and colour
 
@@ -39,12 +45,14 @@ validator, rather than replacing the upstream product identity.
 
 ## Verification
 
-`flutter test test/tv_experience_test.dart test/home_layout_test.dart`
+`flutter test test/tv_experience_test.dart test/home_layout_test.dart test/tv_seek_test.dart`
 exercises native TV/phone detection and missing-channel fallback, screen margins,
 remote activation and cancellation of the name dialog, whitespace validation,
 phone keyboard submission, media keys, bounded seeking, overlay visibility,
 Back behavior, conditional Next, and reaching Settings without the TMDB banner.
 Several cases explicitly use Flutter's Android target platform.
+Timeline tests cover remote preview/commit, cancellation with Android Back,
+focus departure, bounds, hidden-control timing, dragging and unknown duration.
 
 The tests caught an invisible page-sized focus target that trapped directional
 navigation, and an overflowing transport row when Next was present. The page

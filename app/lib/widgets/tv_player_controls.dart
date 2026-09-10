@@ -38,6 +38,8 @@ class _TvPlayerControlsState extends State<TvPlayerControls> {
     skipTraversal: true,
   );
   final _play = FocusNode(debugLabel: 'TV play pause');
+  final _timeline = FocusNode(debugLabel: 'TV seek timeline');
+  Duration? _scrubPosition;
   Timer? _timer;
   bool _visible = true;
 
@@ -55,7 +57,10 @@ class _TvPlayerControlsState extends State<TvPlayerControls> {
 
   void _scheduleHide() {
     _timer?.cancel();
-    if (_visible && widget.playing) {
+    if (_visible &&
+        widget.playing &&
+        !_timeline.hasFocus &&
+        _scrubPosition == null) {
       _timer = Timer(const Duration(seconds: 6), _hide);
     }
   }
@@ -63,7 +68,10 @@ class _TvPlayerControlsState extends State<TvPlayerControls> {
   void _hide() {
     _timer?.cancel();
     if (!mounted) return;
-    setState(() => _visible = false);
+    setState(() {
+      _visible = false;
+      _scrubPosition = null;
+    });
     _remote.requestFocus();
   }
 
@@ -83,6 +91,58 @@ class _TvPlayerControlsState extends State<TvPlayerControls> {
     );
     widget.onSeek(Duration(milliseconds: ms));
     _show();
+  }
+
+  void _preview(double milliseconds) {
+    if (widget.duration <= Duration.zero) return;
+    _timer?.cancel();
+    setState(
+      () => _scrubPosition = Duration(
+        milliseconds: milliseconds.round().clamp(
+          0,
+          widget.duration.inMilliseconds,
+        ),
+      ),
+    );
+  }
+
+  void _commitScrub() {
+    final target = _scrubPosition;
+    if (target == null) return;
+    widget.onSeek(target);
+    setState(() => _scrubPosition = null);
+    _show();
+  }
+
+  void _cancelScrub() {
+    setState(() => _scrubPosition = null);
+    _scheduleHide();
+  }
+
+  KeyEventResult _timelineKey(FocusNode node, KeyEvent event) {
+    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.arrowRight) {
+      final base = _scrubPosition ?? widget.position;
+      _preview(
+        (base.inMilliseconds +
+                (key == LogicalKeyboardKey.arrowRight ? 10000 : -10000))
+            .toDouble(),
+      );
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.select || key == LogicalKeyboardKey.enter) {
+      if (event is KeyDownEvent) {
+        if (_scrubPosition == null) {
+          _preview(widget.position.inMilliseconds.toDouble());
+        } else {
+          _commitScrub();
+        }
+      }
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   void _toggle() {
@@ -129,7 +189,9 @@ class _TvPlayerControlsState extends State<TvPlayerControls> {
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.escape) {
-      if (_visible) {
+      if (_scrubPosition != null) {
+        _cancelScrub();
+      } else if (_visible) {
         _hide();
       } else {
         widget.onExit();
@@ -152,6 +214,7 @@ class _TvPlayerControlsState extends State<TvPlayerControls> {
     _timer?.cancel();
     _remote.dispose();
     _play.dispose();
+    _timeline.dispose();
     super.dispose();
   }
 
@@ -159,7 +222,13 @@ class _TvPlayerControlsState extends State<TvPlayerControls> {
   Widget build(BuildContext context) => PopScope(
     canPop: !_visible,
     onPopInvokedWithResult: (didPop, _) {
-      if (!didPop) _hide();
+      if (!didPop) {
+        if (_scrubPosition != null) {
+          _cancelScrub();
+        } else {
+          _hide();
+        }
+      }
     },
     child: Focus(
       focusNode: _remote,
@@ -209,18 +278,58 @@ class _TvPlayerControlsState extends State<TvPlayerControls> {
                     Row(
                       children: [
                         Text(
-                          _clock(widget.position),
+                          _clock(_scrubPosition ?? widget.position),
                           style: const TextStyle(color: Colors.white),
                         ),
                         const SizedBox(width: 16),
                         Expanded(
-                          child: LinearProgressIndicator(
-                            value: widget.duration > Duration.zero
-                                ? (widget.position.inMilliseconds /
-                                          widget.duration.inMilliseconds)
-                                      .clamp(0.0, 1.0)
-                                : 0,
-                            minHeight: 5,
+                          child: Focus(
+                            focusNode: _timeline,
+                            canRequestFocus: widget.duration > Duration.zero,
+                            descendantsAreFocusable: false,
+                            onKeyEvent: _timelineKey,
+                            onFocusChange: (focused) {
+                              if (!mounted) return;
+                              if (!focused && _scrubPosition != null) {
+                                setState(() => _scrubPosition = null);
+                              }
+                              _scheduleHide();
+                            },
+                            child: Semantics(
+                              label: 'Playback position',
+                              child: Slider(
+                                key: const ValueKey('tv-seek-slider'),
+                                min: 0,
+                                max: widget.duration > Duration.zero
+                                    ? widget.duration.inMilliseconds.toDouble()
+                                    : 1,
+                                value: (_scrubPosition ?? widget.position)
+                                    .inMilliseconds
+                                    .toDouble()
+                                    .clamp(
+                                      0,
+                                      widget.duration > Duration.zero
+                                          ? widget.duration.inMilliseconds
+                                                .toDouble()
+                                          : 1,
+                                    ),
+                                semanticFormatterCallback: (value) => _clock(
+                                  Duration(milliseconds: value.round()),
+                                ),
+                                onChangeStart: widget.duration > Duration.zero
+                                    ? (value) {
+                                        _timeline.requestFocus();
+                                        _preview(value);
+                                      }
+                                    : null,
+                                onChanged: widget.duration > Duration.zero
+                                    ? _preview
+                                    : null,
+                                onChangeEnd: widget.duration > Duration.zero
+                                    ? (_) => _commitScrub()
+                                    : null,
+                              ),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 16),
@@ -230,7 +339,14 @@ class _TvPlayerControlsState extends State<TvPlayerControls> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 20),
+                    Text(
+                      _scrubPosition == null
+                          ? 'Timeline: left / right to choose a time'
+                          : 'Seek to ${_clock(_scrubPosition!)} · Select to confirm · Back to cancel',
+                      key: const ValueKey('tv-seek-hint'),
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 12),
                     Wrap(
                       alignment: WrapAlignment.center,
                       crossAxisAlignment: WrapCrossAlignment.center,
