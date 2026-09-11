@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:watchit/models/media_list.dart';
@@ -191,6 +193,92 @@ void main() {
       final kept = built.doc['watch'] as List;
       expect((kept.first as Map)['address'], _addr(1000));
       expect(kept.length, lessThan(MyWatchSync.maxDocWatchStates));
+    });
+
+    test('the budget is measured in UTF-8 bytes, not string length — a '
+        'doc full of multibyte text must not slip past the server cap', () {
+      // 30 rows of 'é' × 1500: ~45 KB of characters but ~90 KB of UTF-8
+      // bytes. A code-unit budget publishes this and the server refuses
+      // it ("sync document too large") every cycle.
+      final built = MyWatchSync.buildDocWithinBudget(
+        lists: const [],
+        tombstones: const {},
+        watchStates: const [],
+        nowMs: 1,
+        metaRows: [
+          for (var i = 0; i < 30; i++)
+            {
+              'key': 'movie:titre $i:2020',
+              'updated_ms': 5000 - i,
+              'title': 'Titre édité $i',
+              'overview': 'é' * 1500,
+            },
+        ],
+      );
+      expect(utf8.encode(jsonEncode(built.doc)).length,
+          lessThanOrEqualTo(MyWatchSync.maxDocBytes));
+      expect(built.metaDropped, greaterThan(0));
+    });
+
+    test('list entries trim as the last resort instead of publishing an '
+        'over-budget doc the server refuses', () {
+      // A library whose entries alone are far over the byte budget —
+      // the Fire-Stick failure: every other section already dropped,
+      // the pre-fix code published ~65 KB anyway and the server refused
+      // it, so the device could never sync anything at all.
+      final lists = [
+        MediaList(id: 'a', title: 'Movies', entries: [
+          for (var i = 0; i < MyWatchSync.maxDocEntries; i++)
+            MediaEntry(
+              name: 'A rather long movie file name number $i (1080p).mp4',
+              address: _addr(i + 1),
+              addedAt: 1000 + i,
+              sizeBytes: 1234567890,
+              videoInfo: '1080p H.264 AAC stereo 2.4 GB',
+            ),
+        ]),
+      ];
+      final built = MyWatchSync.buildDocWithinBudget(
+        lists: lists,
+        tombstones: const {},
+        watchStates: const [],
+        nowMs: 1,
+        metaRows: [
+          {
+            'key': 'movie:title:2020',
+            'updated_ms': 5000,
+            'title': 'Edited title',
+            'overview': 'd' * 1500,
+          },
+        ],
+      );
+      expect(utf8.encode(jsonEncode(built.doc)).length,
+          lessThanOrEqualTo(MyWatchSync.maxDocBytes));
+      expect(built.entriesDropped, greaterThan(0));
+      // The doc still carries a (partial) library — trimmed, not empty.
+      final entries =
+          ((built.doc['lists'] as List).single as Map)['entries'] as List;
+      expect(entries, isNotEmpty);
+      expect(entries.length,
+          MyWatchSync.maxDocEntries - built.entriesDropped);
+    });
+
+    test('the have list shrinks before any detail edit drops', () {
+      final built = MyWatchSync.buildDocWithinBudget(
+        lists: const [],
+        tombstones: const {},
+        watchStates: const [],
+        nowMs: 1,
+        metaRows: metaRows(3),
+        haveHashes: [
+          for (var i = 0; i < 8000; i++) i.toRadixString(16).padLeft(8, '0'),
+        ],
+      );
+      expect(built.metaDropped, 0);
+      expect((built.doc['have'] as List).length, lessThan(8000));
+      expect(((built.doc['meta'] as Map)['rows'] as List), hasLength(3));
+      expect(utf8.encode(jsonEncode(built.doc)).length,
+          lessThanOrEqualTo(MyWatchSync.maxDocBytes));
     });
 
     test('meta rows drop oldest-first only once no watch state is left', () {
