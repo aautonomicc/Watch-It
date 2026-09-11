@@ -29,11 +29,19 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   “Make something beautiful. Give someone a piece of it. Stay
   connected to its maker.” Receiving a public address is Keep, not
   a devops paste-XOR chore.
-- **Skaists bloom** (beehive-nature family, green/yellow → purple)
-  breathes in three moments only: New bee soft idle after the
-  receive sheet arrives and after the piece is real; Raver
-  celebration pulse on Keep; Cypherpunk still, with a verify-flash.
-  Empty walls show a still hive — never a step list.
+- **Skaists bloom** is the beehive-WELLness mark (skaists mandala
+  geometry, wellness colorway: sovereign-purple `#9C6FD6` → blue
+  `#6FA9E0` → teal `#45C2DC` → lime-biomass `#8FD14F`). It breathes
+  in three moments only: New bee soft idle after the receive sheet
+  arrives and after the piece is real; Raver celebration pulse on
+  Keep; Cypherpunk still, with a verify-flash. Empty walls show a
+  still hive — never a step list. The wordmark stays separate.
+- **Post-Keep estate connect** is soft and full-atlas: after Keep,
+  a snack action opens https://skaists.dev/surfaces/ grouped by
+  the eight families (beehive-nature / biomass / bnr / …) with
+  every LIVE card from estate.json (gallery, music, buzz, ant-door,
+  bFood…). Not a hand shortlist, and not an auto-modal — My Media
+  header stays compact.
 - **bLanguage eco corpus** (26 living languages) localizes the
   upgraded Keep / empty / badge / rights surfaces. Cypherpunk stays
   English on purpose (protocol density). Register names are proper

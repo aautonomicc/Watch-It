@@ -111,6 +111,9 @@ flutter:
     - assets/seed_metadata/posters/
     - assets/tmdb_logo.png
     - assets/qr_logo.png
+    - assets/skaists_bloom.svg
+    - assets/skaists_bloom.png
+    - assets/skaists_estate.json
     - assets/fonts/Anton-OFL.txt
     - assets/licenses/gpl-3.0.txt
 

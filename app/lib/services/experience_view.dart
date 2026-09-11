@@ -186,6 +186,34 @@ class ExperienceCopy {
         },
       );
 
+  String get estateTitle => switch (view) {
+        ExperienceView.newBee => 'Stay connected',
+        ExperienceView.raver => 'The estate is still open',
+        ExperienceView.cypherpunk => 'skaists.dev/surfaces',
+      };
+
+  String get estateEmotion => switch (view) {
+        ExperienceView.newBee =>
+          'The garden they come from is still open — walk any door.',
+        ExperienceView.raver =>
+          'Full atlas. Families, then every live card.',
+        ExperienceView.cypherpunk =>
+          'estate.json v1 · 8 families · LIVE cards only · '
+              'https://skaists.dev/{path}',
+      };
+
+  String get estateAtlasVerb => switch (view) {
+        ExperienceView.newBee => 'Open the atlas',
+        ExperienceView.raver => 'skaists.dev/surfaces',
+        ExperienceView.cypherpunk => 'GET /surfaces/',
+      };
+
+  String get estateSnackAction => switch (view) {
+        ExperienceView.newBee => 'Estate',
+        ExperienceView.raver => 'Estate',
+        ExperienceView.cypherpunk => 'atlas',
+      };
+
   String get receiveDoorTitle => _l(
         'receiveDoorTitle.${view.name}',
         switch (view) {

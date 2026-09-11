@@ -39,12 +39,14 @@ class WiTokens extends ThemeExtension<WiTokens> {
   /// content spaces (docs/PLAN-personal-vs-channels.md Part 3).
   static const channelAmber = Color(0xFFFFB300);
 
-  /// Skaists bloom (beehive-nature family): nectar green → pollen
-  /// yellow → twilight purple. UI code never invents these hexes —
-  /// [SkaistsBloom] reads them here.
-  static const bloomGreen = Color(0xFF8FBF4D);
-  static const bloomYellow = Color(0xFFF4D35E);
-  static const bloomPurple = Color(0xFF7B4FBF);
+  /// Beehive-WELLness bloom (skaists mandala, bnr-design @ cdee76a):
+  /// sovereign-purple core → blue → teal → lime-biomass rim.
+  /// The mark itself is assets/skaists_bloom.svg — never wordmark
+  /// text on the mandala. SkaistsBloom reads these hexes here.
+  static const bloomCore = Color(0xFF9C6FD6);
+  static const bloomBlue = Color(0xFF6FA9E0);
+  static const bloomTeal = Color(0xFF45C2DC);
+  static const bloomRim = Color(0xFF8FD14F);
 
   static const dark = WiTokens(
     ink: Color(0xFF0A0A0A),

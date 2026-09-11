@@ -802,6 +802,8 @@ void main() {
       expect(find.byTooltip('Receive a piece'), findsOneWidget);
       expect(find.textContaining('These rows are your home wall'),
           findsNothing);
+      expect(find.text('Stay connected'), findsNothing);
+      expect(find.text('beehive-nature'), findsNothing);
 
       final row = find.widgetWithText(ListTile, 'My Films');
       expect(row, findsOneWidget);

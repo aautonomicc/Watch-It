@@ -63,6 +63,16 @@ void main() {
         contains('public address ≠ redistribute permission'));
   });
 
+  test('estate connect copy points at the public atlas', () {
+    expect(ExperienceCopy(ExperienceView.newBee).estateSnackAction, 'Estate');
+    expect(ExperienceCopy(ExperienceView.raver).estateAtlasVerb,
+        'skaists.dev/surfaces');
+    expect(ExperienceCopy(ExperienceView.cypherpunk).estateTitle,
+        'skaists.dev/surfaces');
+    expect(ExperienceCopy(ExperienceView.cypherpunk).estateEmotion,
+        contains('estate.json v1'));
+  });
+
   test('Cypherpunk copy keeps Luna\'s engineering contract visible', () {
     final copy = ExperienceCopy(ExperienceView.cypherpunk);
     expect(copy.receiveEmotion, contains('read-only'));

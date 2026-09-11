@@ -27,6 +27,7 @@ import '../services/profile_transfer.dart';
 import '../services/experience_view.dart';
 import '../theme/tokens.dart';
 import '../widgets/adoption_invite.dart';
+import '../widgets/estate_connect_sheet.dart';
 import '../widgets/channel_avatar.dart';
 import '../widgets/channel_badge.dart';
 import '../widgets/experience_switch.dart';
@@ -268,12 +269,17 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       ),
     ], titles);
     await _reload();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(ExperienceCopy.of(context).keptSnack)),
-      );
-    }
+    if (!mounted) return;
+    final copy = ExperienceCopy.of(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(copy.keptSnack),
+        action: SnackBarAction(
+          label: copy.estateSnackAction,
+          onPressed: () => EstateConnectSheet.show(context),
+        ),
+      ),
+    );
   }
 
   /// Checkbox picker over the existing lists — hidden ones included
