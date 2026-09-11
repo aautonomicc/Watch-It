@@ -841,6 +841,13 @@ files stay install-global — a profile scopes only viewing state.
       accent focus ring + select-activation on every wall card — the
       same APK appears in the TV launcher and the library browses by
       D-pad/remote with the normal UI
+- [x] Voice search on Android (unreleased; from PR #7 by
+      loviswaternakamoto): a mic button in the Search app bar starts the
+      system speech recognizer — no app-side mic permission, the single
+      best transcription fills the query and searches immediately,
+      cancel keeps the typed text, no-recognizer devices get a
+      keyboard-fallback snackbar; Android-only (incl. TV), see
+      [ANDROID-TV.md](ANDROID-TV.md)
 - [ ] Android TV rest: 10-foot layout mode, focus polish on the
       remaining screens, remote player controls; test on a real TV box
       (emulator video playback is unreliable — emulated codecs render

@@ -6,6 +6,8 @@ import android.app.UiModeManager
 import android.content.res.Configuration
 import android.app.ApplicationExitInfo
 import android.content.Intent
+import android.content.ActivityNotFoundException
+import android.speech.RecognizerIntent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -22,6 +24,7 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val SAVE_DOCUMENT_REQUEST = 7002
+        private const val VOICE_SEARCH_REQUEST = 7003
     }
 
     private var channel: MethodChannel? = null
@@ -30,6 +33,7 @@ class MainActivity : FlutterActivity() {
     // In-flight "watchit/export" saveFile call: the dialog's outcome
     // arrives via onActivityResult, so the MethodChannel.Result waits here.
     private var pendingSave: MethodChannel.Result? = null
+    private var pendingVoice: MethodChannel.Result? = null
     private var pendingSavePath: String? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -41,6 +45,29 @@ class MainActivity : FlutterActivity() {
                     result.success(mode.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION)
                 } else {
                     result.notImplemented()
+                }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "watchit/voice")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "recognize") {
+                    result.notImplemented()
+                } else if (pendingVoice != null) {
+                    result.error("busy", "Voice search is already open.", null)
+                } else {
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                        .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        .putExtra(RecognizerIntent.EXTRA_PROMPT, "Search your W@tch library")
+                        .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                    pendingVoice = result
+                    try {
+                        startActivityForResult(intent, VOICE_SEARCH_REQUEST)
+                    } catch (_: ActivityNotFoundException) {
+                        pendingVoice = null
+                        result.error("unavailable", "Voice search is unavailable. Use the keyboard.", null)
+                    } catch (_: SecurityException) {
+                        pendingVoice = null
+                        result.error("unavailable", "Voice search could not start. Use the keyboard.", null)
+                    }
                 }
             }
         val ch = MethodChannel(
@@ -294,6 +321,15 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == VOICE_SEARCH_REQUEST) {
+            val result = pendingVoice
+            pendingVoice = null
+            val spoken = if (resultCode == RESULT_OK)
+                data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+                else null
+            result?.success(spoken)
+            return
+        }
         if (requestCode != SAVE_DOCUMENT_REQUEST) {
             try {
                 super.onActivityResult(requestCode, resultCode, data)
@@ -444,6 +480,8 @@ class MainActivity : FlutterActivity() {
             ?: uri.lastPathSegment ?: "file"
 
     override fun onDestroy() {
+        pendingVoice?.success(null)
+        pendingVoice = null
         DownloadForegroundService.onTimeoutCallback = null
         MediaPlaybackService.onEvent = null
         channel = null
