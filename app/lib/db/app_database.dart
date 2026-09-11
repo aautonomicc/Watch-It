@@ -347,7 +347,16 @@ class AppDatabase extends _$AppDatabase {
         }
       }
       if (from < 15) {
-        await m.addColumn(mediaEntries, mediaEntries.publicReference);
+        // Partial migration fixtures may exercise only profiles/watch
+        // state tables and have no media_entries table yet.
+        final hasMediaEntries = await customSelect(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name='media_entries'")
+            .get()
+            .then((rows) => rows.isNotEmpty);
+        if (hasMediaEntries) {
+          await m.addColumn(mediaEntries, mediaEntries.publicReference);
+        }
       }
       if (from >= 4 && from < 9) {
         // alpha.57: Edit details — user-authored metadata rows are
