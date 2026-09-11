@@ -151,6 +151,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// End reached for [_entry] (watched state already recorded).
   bool _completed = false;
 
+  /// On TV the video surface opts out of the overscan frame (full-bleed
+  /// video, controls inset — issue #2); audio keeps the framed layout.
+  bool get _tvVideo => TvSettings.instance.enabled && !_isAudio;
+  bool _fullBleedHeld = false;
+
   /// The episode offered by the "Up next" overlay, when one exists.
   MediaEntry? _upNext;
   int _countdown = 0;
@@ -162,6 +167,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _entry = widget.entry;
     _title = widget.title;
     _isLocal = widget.isLocal;
+    _syncFullBleed();
     _player = Player(
       configuration: PlayerConfiguration(
         bufferSize: widget.bufferSizeMb * 1024 * 1024,
@@ -370,6 +376,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }());
   }
 
+  /// Take or release the frame's full-bleed hold to match the current
+  /// entry. Deferred to post-frame: the hold flips during build/unmount,
+  /// when notifying the frame's listeners is illegal.
+  void _syncFullBleed() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final want = _tvVideo;
+      if (want == _fullBleedHeld) return;
+      _fullBleedHeld = want;
+      want
+          ? TvSettings.instance.pushFullBleed()
+          : TvSettings.instance.popFullBleed();
+    });
+  }
+
   /// Roll straight into the next episode inside this player. The
   /// pause-downloads decision made for the first episode carries over —
   /// chaining never re-prompts.
@@ -386,6 +407,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final meta = MetadataService.instance.metadataFor(next);
     setState(() {
       _entry = next;
+      _syncFullBleed();
       _title = playerTitle(meta);
       _isLocal = source.local;
       _upNext = null;
@@ -443,6 +465,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    if (_fullBleedHeld) {
+      _fullBleedHeld = false;
+      final tv = TvSettings.instance;
+      WidgetsBinding.instance.addPostFrameCallback((_) => tv.popFullBleed());
+    }
     _saveProgress();
     _healthTimer?.cancel();
     _countdownTimer?.cancel();
@@ -603,6 +630,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   Widget build(BuildContext context) {
     final tv = TvSettings.instance.enabled;
+    // Full-bleed video: the frame's padding is gone, so the player insets
+    // its own overlays (transport, buffering/error/up-next) by the same
+    // overscan margins the frame would have applied.
+    final overlayInset = _tvVideo
+        ? TvSettings.instance.overscanInsets(MediaQuery.sizeOf(context))
+        : EdgeInsets.zero;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: tv
@@ -716,21 +749,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     child: Video(controller: _controller),
                   ),
                 ),
+              // The dim scrims stay full-bleed (their content is centered,
+              // overscan-safe); only the bottom-anchored banner insets.
               if (_error != null)
                 _errorOverlay(context)
               else if (_buffering)
                 _bufferingOverlay(context),
-              if (_upNext != null) _upNextOverlay(context, _upNext!),
+              if (_upNext != null)
+                Padding(
+                  padding: overlayInset,
+                  child: _upNextOverlay(context, _upNext!),
+                ),
             ],
           ),
+          overlayInset,
         ),
       ),
     );
   }
 
-  Widget _tvTransport(Widget child) {
+  Widget _tvTransport(Widget child, EdgeInsets inset) {
     if (!TvSettings.instance.enabled) return child;
     return TvPlayerControls(
+      inset: inset,
       title: _title,
       position: _position,
       duration: _duration,
