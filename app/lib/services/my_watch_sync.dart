@@ -114,13 +114,15 @@ class MyWatchSync {
   static const periodSecs = 30;
 
   /// Caps keeping the published document under the store's 64 KiB value
-  /// limit: entries beyond these are dropped from the doc (log only —
-  /// they stay local, they just do not sync).
+  /// limit: entries beyond these are dropped from the doc — they stay
+  /// local, they just do not sync. Counts only; the real guarantee is
+  /// the byte budget below, which trims further when these still leave
+  /// the doc too big.
   static const maxDocEntries = 400;
   static const maxDocWatchStates = 300;
 
-  /// Byte budget for the whole published doc (the server refuses at
-  /// 60 000); meta rows are dropped oldest-first until it fits.
+  /// UTF-8 byte budget for the whole published doc (the server refuses
+  /// at 60 000); [buildDocWithinBudget] trims sections until it fits.
   static const maxDocBytes = 56000;
 
   /// A synced description is capped here — the doc has to share its
@@ -525,6 +527,12 @@ class MyWatchSync {
     if (built.metaDropped > 0) {
       _problems.add('${built.metaDropped} detail edit(s) did not fit in the '
           'sync document this cycle');
+    }
+    if (built.entriesDropped > 0) {
+      _problems.add('${built.entriesDropped} list entr'
+          '${built.entriesDropped == 1 ? 'y' : 'ies'} did not fit in the '
+          'sync document — they stay on this device, the rest of the '
+          'library still syncs');
     }
     if (built.tmdbDropped > 0) {
       // Self-healing: applied rows join the receivers' `have` lists,
@@ -1253,8 +1261,9 @@ class MyWatchSync {
     Map<String, dynamic>? tmdbSection,
     Map<String, ChannelSyncSub> channelSubs = const {},
     Map<String, int> channelStones = const {},
+    int entryCap = maxDocEntries,
   }) {
-    var entryBudget = maxDocEntries;
+    var entryBudget = entryCap;
     final listDocs = <Map<String, dynamic>>[];
     for (final l in lists) {
       // Channel lists sync as subscriptions (`channels` below), never as
@@ -1333,18 +1342,24 @@ class MyWatchSync {
   /// watch states drop first (stalest-played last quarter per round — a
   /// stale resume point is the cheapest loss and returns once the doc
   /// has room), then the TMDB section shrinks (it self-heals: applied
-  /// rows join the receivers' `have` lists and stop being needed), and
-  /// the user's detail edits drop only when nothing else is left.
-  /// Before this reprioritisation a long viewing history (300 states ≈
-  /// 45 KB alone) could permanently crowd every detail edit out of the
-  /// doc while list entries kept syncing fine — the "publishes sync,
-  /// edits don't" failure. [watchStates] must arrive newest-first (the
-  /// store's order).
+  /// rows join the receivers' `have` lists and stop being needed), then
+  /// the `have` list shrinks (pure optimisation — linked devices just
+  /// republish some TMDB rows we already hold), then the user's detail
+  /// edits drop, and only when nothing else is left the list entries
+  /// themselves are trimmed — so the doc ALWAYS fits and the publish
+  /// never fails outright. Before that last rung a library whose
+  /// entries alone blew the budget published an over-limit doc every
+  /// cycle, the server refused it ("sync document too large"), and the
+  /// device could never sync anything at all. The budget is measured in
+  /// UTF-8 bytes (what the server counts), not string length — the two
+  /// diverge on any non-ASCII title or description. [watchStates] must
+  /// arrive newest-first (the store's order).
   static ({
     Map<String, dynamic> doc,
     int watchDropped,
     int metaDropped,
     int tmdbDropped,
+    int entriesDropped,
   }) buildDocWithinBudget({
     required List<MediaList> lists,
     required Map<String, Map<String, int>> tombstones,
@@ -1357,30 +1372,53 @@ class MyWatchSync {
     Map<String, int> channelStones = const {},
   }) {
     final tmdbRows = (tmdbSection?['rows'] as List?)?.length ?? 0;
+    var totalEntries = 0;
+    for (final l in lists) {
+      if (!l.isChannel) totalEntries += l.entries.length;
+    }
     var watch = watchStates;
+    var have = haveHashes;
     var meta = metaRows;
     var tmdb = tmdbSection;
+    var entryCap = totalEntries.clamp(0, maxDocEntries);
     Map<String, dynamic> build() => buildDoc(
           lists: lists,
           tombstones: tombstones,
           watchStates: watch,
           nowMs: nowMs,
           metaRows: meta,
-          haveHashes: haveHashes,
+          haveHashes: have,
           tmdbSection: tmdb,
           channelSubs: channelSubs,
           channelStones: channelStones,
+          entryCap: entryCap,
         );
+    int docEntries(Map<String, dynamic> doc) {
+      var n = 0;
+      for (final l in doc['lists'] as List) {
+        n += ((l as Map)['entries'] as List).length;
+      }
+      return n;
+    }
+
     var doc = build();
-    while (jsonEncode(doc).length > maxDocBytes) {
+    while (utf8.encode(jsonEncode(doc)).length > maxDocBytes) {
       if (watch.isNotEmpty) {
         watch = watch.sublist(
             0, watch.length - (watch.length / 4).ceil().clamp(1, watch.length));
       } else if (tmdb != null) {
         tmdb = shrunkenTmdbSection(tmdb);
+      } else if (have.isNotEmpty) {
+        have = have.sublist(
+            0, have.length - (have.length / 4).ceil().clamp(1, have.length));
       } else if (meta.isNotEmpty) {
         // Newest-first order, so the oldest edit drops first.
         meta = meta.sublist(0, meta.length - 1);
+      } else if (entryCap > 0) {
+        // Last resort: the library itself is over budget. A partial
+        // membership doc is safe (the merge is union + tombstones) and
+        // beats a refused publish that syncs nothing.
+        entryCap -= (entryCap / 4).ceil().clamp(1, entryCap);
       } else {
         break;
       }
@@ -1391,6 +1429,7 @@ class MyWatchSync {
       watchDropped: watchStates.length - watch.length,
       metaDropped: metaRows.length - meta.length,
       tmdbDropped: tmdbRows - ((tmdb?['rows'] as List?)?.length ?? 0),
+      entriesDropped: totalEntries - docEntries(doc),
     );
   }
 
