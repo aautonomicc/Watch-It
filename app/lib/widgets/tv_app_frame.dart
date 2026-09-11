@@ -11,21 +11,26 @@ class TvAppFrame extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    // Listens directly (not only via the app-level rebuild) so a player
+    // taking or releasing full bleed always reaches the frame.
+    listenable: TvSettings.instance,
+    builder: (context, _) => _build(context),
+  );
+
+  Widget _build(BuildContext context) {
     final tv = TvSettings.instance;
     if (!tv.enabled) return child;
     final size = MediaQuery.sizeOf(context);
-    final fraction = tv.marginPercent / 100;
     final theme = Theme.of(context);
     final t = WiTokens.of(context);
     return ColoredBox(
       color: t.ink,
       child: Padding(
         key: const ValueKey('tv-safe-area'),
-        padding: EdgeInsets.symmetric(
-          horizontal: size.width * fraction,
-          vertical: size.height * fraction,
-        ),
+        // Video plays edge to edge (standard TV behavior); the player
+        // insets its own controls by the same margins instead.
+        padding: tv.fullBleed ? EdgeInsets.zero : tv.overscanInsets(size),
         child: ClipRect(
           child: MediaQuery(
             data: MediaQuery.of(context).copyWith(

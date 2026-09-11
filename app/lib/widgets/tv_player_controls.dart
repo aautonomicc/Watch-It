@@ -19,6 +19,7 @@ class TvPlayerControls extends StatefulWidget {
     this.onNext,
     this.onTracks,
     this.captions,
+    this.inset = EdgeInsets.zero,
   });
   final Widget child;
   final String title;
@@ -33,6 +34,11 @@ class TvPlayerControls extends StatefulWidget {
 
   /// The caption layer is laid out above the transport, including while paused.
   final Widget? captions;
+
+  /// Safe-area padding for the overlays only: with full-bleed video the
+  /// child renders edge to edge while the top bar, captions and transport
+  /// stay inside the TV overscan margins.
+  final EdgeInsets inset;
 
   @override
   State<TvPlayerControls> createState() => _TvPlayerControlsState();
@@ -258,171 +264,180 @@ class _TvPlayerControlsState extends State<TvPlayerControls> {
         children: [
           widget.child,
           if (_visible) ...[
-            Align(
-              alignment: Alignment.topCenter,
-              child: Container(
-                color: Colors.black87,
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    TextButton.icon(
-                      onPressed: widget.onExit,
-                      icon: const Icon(Icons.arrow_back),
-                      label: const Text('Back to library'),
-                    ),
-                    const SizedBox(width: 24),
-                    Expanded(
-                      child: Text(
-                        widget.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 20,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-          Column(
-            children: [
-              Expanded(
-                child: IgnorePointer(
-                  child: widget.captions ?? const SizedBox.expand(),
-                ),
-              ),
-              if (_visible)
-                Container(
-                  key: const ValueKey('tv-transport'),
+            Padding(
+              padding: widget.inset,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Container(
                   color: Colors.black87,
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
                     children: [
-                      Row(
-                        children: [
-                          Text(
-                            _clock(_scrubPosition ?? widget.position),
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Focus(
-                              focusNode: _timeline,
-                              canRequestFocus: widget.duration > Duration.zero,
-                              descendantsAreFocusable: false,
-                              onKeyEvent: _timelineKey,
-                              onFocusChange: (focused) {
-                                if (!mounted) return;
-                                if (!focused && _scrubPosition != null) {
-                                  setState(() => _scrubPosition = null);
-                                }
-                                _scheduleHide();
-                              },
-                              child: Semantics(
-                                label: 'Playback position',
-                                child: Slider(
-                                  key: const ValueKey('tv-seek-slider'),
-                                  min: 0,
-                                  max: widget.duration > Duration.zero
-                                      ? widget.duration.inMilliseconds
-                                            .toDouble()
-                                      : 1,
-                                  value: (_scrubPosition ?? widget.position)
-                                      .inMilliseconds
-                                      .toDouble()
-                                      .clamp(
-                                        0,
-                                        widget.duration > Duration.zero
-                                            ? widget.duration.inMilliseconds
-                                                  .toDouble()
-                                            : 1,
-                                      ),
-                                  semanticFormatterCallback: (value) => _clock(
-                                    Duration(milliseconds: value.round()),
-                                  ),
-                                  onChangeStart: widget.duration > Duration.zero
-                                      ? (value) {
-                                          _timeline.requestFocus();
-                                          _preview(value);
-                                        }
-                                      : null,
-                                  onChanged: widget.duration > Duration.zero
-                                      ? _preview
-                                      : null,
-                                  onChangeEnd: widget.duration > Duration.zero
-                                      ? (_) => _commitScrub()
-                                      : null,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Text(
-                            _clock(widget.duration),
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                        ],
+                      TextButton.icon(
+                        onPressed: widget.onExit,
+                        icon: const Icon(Icons.arrow_back),
+                        label: const Text('Back to library'),
                       ),
-                      Text(
-                        _scrubPosition == null
-                            ? 'Timeline: left / right to choose a time'
-                            : 'Seek to ${_clock(_scrubPosition!)} · Select to confirm · Back to cancel',
-                        key: const ValueKey('tv-seek-hint'),
-                        style: const TextStyle(color: Colors.white70),
-                      ),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        alignment: WrapAlignment.center,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        spacing: 16,
-                        runSpacing: 8,
-                        children: [
-                          OutlinedButton.icon(
-                            onPressed: widget.duration > Duration.zero
-                                ? () => _seek(-10)
-                                : null,
-                            icon: const Icon(Icons.replay_10),
-                            label: const Text('Back 10s'),
+                      const SizedBox(width: 24),
+                      Expanded(
+                        child: Text(
+                          widget.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            color: Colors.white,
                           ),
-                          FilledButton.icon(
-                            focusNode: _play,
-                            autofocus: true,
-                            onPressed: _toggle,
-                            icon: Icon(
-                              widget.playing ? Icons.pause : Icons.play_arrow,
-                            ),
-                            label: Text(widget.playing ? 'Pause' : 'Play'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: widget.duration > Duration.zero
-                                ? () => _seek(10)
-                                : null,
-                            icon: const Icon(Icons.forward_10),
-                            label: const Text('Forward 10s'),
-                          ),
-                          if (widget.onNext != null) ...[
-                            OutlinedButton.icon(
-                              onPressed: widget.onNext,
-                              icon: const Icon(Icons.skip_next),
-                              label: const Text('Next'),
-                            ),
-                          ],
-                          if (widget.onTracks != null)
-                            OutlinedButton.icon(
-                              onPressed: _openTracks,
-                              icon: const Icon(Icons.closed_caption_outlined),
-                              label: const Text('Audio & Captions'),
-                            ),
-                        ],
+                        ),
                       ),
                     ],
                   ),
                 ),
-            ],
+              ),
+            ),
+          ],
+          Padding(
+            padding: widget.inset,
+            child: Column(
+              children: [
+                Expanded(
+                  child: IgnorePointer(
+                    child: widget.captions ?? const SizedBox.expand(),
+                  ),
+                ),
+                if (_visible)
+                  Container(
+                    key: const ValueKey('tv-transport'),
+                    color: Colors.black87,
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              _clock(_scrubPosition ?? widget.position),
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Focus(
+                                focusNode: _timeline,
+                                canRequestFocus:
+                                    widget.duration > Duration.zero,
+                                descendantsAreFocusable: false,
+                                onKeyEvent: _timelineKey,
+                                onFocusChange: (focused) {
+                                  if (!mounted) return;
+                                  if (!focused && _scrubPosition != null) {
+                                    setState(() => _scrubPosition = null);
+                                  }
+                                  _scheduleHide();
+                                },
+                                child: Semantics(
+                                  label: 'Playback position',
+                                  child: Slider(
+                                    key: const ValueKey('tv-seek-slider'),
+                                    min: 0,
+                                    max: widget.duration > Duration.zero
+                                        ? widget.duration.inMilliseconds
+                                              .toDouble()
+                                        : 1,
+                                    value: (_scrubPosition ?? widget.position)
+                                        .inMilliseconds
+                                        .toDouble()
+                                        .clamp(
+                                          0,
+                                          widget.duration > Duration.zero
+                                              ? widget.duration.inMilliseconds
+                                                    .toDouble()
+                                              : 1,
+                                        ),
+                                    semanticFormatterCallback: (value) =>
+                                        _clock(
+                                          Duration(milliseconds: value.round()),
+                                        ),
+                                    onChangeStart:
+                                        widget.duration > Duration.zero
+                                        ? (value) {
+                                            _timeline.requestFocus();
+                                            _preview(value);
+                                          }
+                                        : null,
+                                    onChanged: widget.duration > Duration.zero
+                                        ? _preview
+                                        : null,
+                                    onChangeEnd: widget.duration > Duration.zero
+                                        ? (_) => _commitScrub()
+                                        : null,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Text(
+                              _clock(widget.duration),
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                          ],
+                        ),
+                        Text(
+                          _scrubPosition == null
+                              ? 'Timeline: left / right to choose a time'
+                              : 'Seek to ${_clock(_scrubPosition!)} · Select to confirm · Back to cancel',
+                          key: const ValueKey('tv-seek-hint'),
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 16,
+                          runSpacing: 8,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: widget.duration > Duration.zero
+                                  ? () => _seek(-10)
+                                  : null,
+                              icon: const Icon(Icons.replay_10),
+                              label: const Text('Back 10s'),
+                            ),
+                            FilledButton.icon(
+                              focusNode: _play,
+                              autofocus: true,
+                              onPressed: _toggle,
+                              icon: Icon(
+                                widget.playing ? Icons.pause : Icons.play_arrow,
+                              ),
+                              label: Text(widget.playing ? 'Pause' : 'Play'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: widget.duration > Duration.zero
+                                  ? () => _seek(10)
+                                  : null,
+                              icon: const Icon(Icons.forward_10),
+                              label: const Text('Forward 10s'),
+                            ),
+                            if (widget.onNext != null) ...[
+                              OutlinedButton.icon(
+                                onPressed: widget.onNext,
+                                icon: const Icon(Icons.skip_next),
+                                label: const Text('Next'),
+                              ),
+                            ],
+                            if (widget.onTracks != null)
+                              OutlinedButton.icon(
+                                onPressed: _openTracks,
+                                icon: const Icon(Icons.closed_caption_outlined),
+                                label: const Text('Audio & Captions'),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
           ),
         ],
       ),
