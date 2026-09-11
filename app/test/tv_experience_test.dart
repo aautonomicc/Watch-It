@@ -202,6 +202,69 @@ void main() {
     },
   );
 
+  testWidgets(
+    'full bleed drops the frame padding while held and restores after',
+    (tester) async {
+      await tester.pumpWidget(app(const Scaffold(body: Text('TV'))));
+      await tester.pumpAndSettle();
+      EdgeInsets pad() =>
+          tester
+                  .widget<Padding>(find.byKey(const ValueKey('tv-safe-area')))
+                  .padding
+              as EdgeInsets;
+      const framed = EdgeInsets.symmetric(horizontal: 40, vertical: 30);
+      expect(pad(), framed);
+      expect(TvSettings.instance.overscanInsets(const Size(800, 600)), framed);
+      TvSettings.instance.pushFullBleed();
+      await tester.pump();
+      expect(pad(), EdgeInsets.zero);
+      // The frame's chrome survives full bleed — only the padding goes.
+      expect(find.byKey(const ValueKey('tv-safe-area')), findsOneWidget);
+      TvSettings.instance.popFullBleed();
+      await tester.pump();
+      expect(pad(), framed);
+    },
+  );
+
+  testWidgets(
+    'player controls inset while the video child stays full-bleed',
+    (tester) async {
+      await tester.pumpWidget(
+        app(
+          Scaffold(
+            body: TvPlayerControls(
+              title: 'Movie',
+              position: Duration.zero,
+              duration: const Duration(seconds: 20),
+              playing: false,
+              onPlayPause: () {},
+              onSeek: (_) {},
+              onExit: () {},
+              inset: const EdgeInsets.symmetric(horizontal: 40, vertical: 30),
+              child: const ColoredBox(
+                key: ValueKey('video-surface'),
+                color: Colors.black,
+              ),
+            ),
+          ),
+          frame: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getRect(find.byKey(const ValueKey('video-surface'))),
+        const Rect.fromLTWH(0, 0, 800, 600),
+      );
+      final transport = tester.getRect(
+        find.byKey(const ValueKey('tv-transport')),
+      );
+      expect(transport.left, 40);
+      expect(transport.right, 760);
+      expect(transport.bottom, 570);
+      expect(tester.getRect(find.text('Back to library')).top, greaterThan(30));
+    },
+  );
+
   Widget player({
     bool playing = false,
     Duration position = const Duration(seconds: 5),
