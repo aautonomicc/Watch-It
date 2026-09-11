@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../services/publish_api.dart';
+import '../services/trezor_suite.dart';
 import '../theme/tokens.dart';
 
 /// Settings → Wallet: the internal upload wallet behind Upload.
@@ -33,11 +34,22 @@ class _WalletScreenState extends State<WalletScreen> {
   WalletBalances? _balances;
   String? _balancesError;
   bool _balancesLoading = false;
+  TrezorSuiteClient? _trezor;
+  TrezorSuiteServer? _trezorServer;
+  String? _trezorAddress;
+  String? _trezorError;
+  bool _trezorBusy = false;
 
   @override
   void initState() {
     super.initState();
     _reload();
+  }
+
+  @override
+  void dispose() {
+    _trezor?.close();
+    super.dispose();
   }
 
   Future<void> _reload() async {
@@ -138,6 +150,79 @@ class _WalletScreenState extends State<WalletScreen> {
     await _reload();
   }
 
+  Future<void> _connectTrezor() async {
+    final token = await showDialog<String>(
+      context: context,
+      builder: (_) => const _TrezorTokenDialog(),
+    );
+    if (token == null || token.trim().isEmpty || !mounted) return;
+    final client = TrezorSuiteClient(token: token.trim());
+    setState(() {
+      _trezorBusy = true;
+      _trezorError = null;
+    });
+    try {
+      final server = await client.initialize();
+      final address = await client.getAddress();
+      if (!mounted) {
+        client.close();
+        return;
+      }
+      _trezor?.close();
+      setState(() {
+        _trezor = client;
+        _trezorServer = server;
+        _trezorAddress = address;
+        _trezorBusy = false;
+      });
+      _snack('Trezor address verified');
+    } catch (e) {
+      client.close();
+      if (mounted) {
+        setState(() {
+          _trezorBusy = false;
+          _trezorError = '${e}';
+        });
+      }
+    }
+  }
+
+  Future<void> _verifyTrezorOnDevice() async {
+    final client = _trezor;
+    if (client == null || _trezorAddress == null) return;
+    setState(() {
+      _trezorBusy = true;
+      _trezorError = null;
+    });
+    try {
+      final address = await client.getAddress(showOnTrezor: true);
+      if (mounted) {
+        setState(() {
+          _trezorBusy = false;
+          _trezorAddress = address;
+        });
+        _snack('Check the address shown on your Trezor');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _trezorBusy = false;
+          _trezorError = '${e}';
+        });
+      }
+    }
+  }
+
+  void _disconnectTrezor() {
+    _trezor?.close();
+    setState(() {
+      _trezor = null;
+      _trezorServer = null;
+      _trezorAddress = null;
+      _trezorError = null;
+    });
+  }
+
   void _snack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -193,6 +278,7 @@ class _WalletScreenState extends State<WalletScreen> {
           'holdings.',
           style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
         ),
+        _trezorSection(t),
         const SizedBox(height: 24),
         FilledButton.icon(
           onPressed: _create,
@@ -213,6 +299,7 @@ class _WalletScreenState extends State<WalletScreen> {
     final balances = _balances;
     return ListView(
       children: [
+        _trezorSection(t),
         _sectionHeader(t, 'ADDRESS'),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -309,6 +396,105 @@ class _WalletScreenState extends State<WalletScreen> {
       ],
     );
   }
+
+  Widget _trezorSection(WiTokens t) {
+    final connected = _trezorAddress != null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeader(t, 'HARDWARE WALLET'),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            border: Border.all(color: t.line),
+            borderRadius: BorderRadius.circular(8),
+            color: t.ink2,
+          ),
+          child: connected
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.usb_rounded, color: t.signalOk, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Trezor Suite connected',
+                            style: TextStyle(color: t.bone, fontSize: 14),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Disconnect Trezor Suite',
+                          onPressed: _trezorBusy ? null : _disconnectTrezor,
+                          icon: Icon(Icons.close, color: t.ash, size: 18),
+                        ),
+                      ],
+                    ),
+                    if (_trezorServer?.version != null)
+                      Text(
+                        '${_trezorServer!.name ?? 'Trezor Suite'} ${_trezorServer!.version}',
+                        style: TextStyle(color: t.ash, fontSize: 11.5),
+                      ),
+                    const SizedBox(height: 10),
+                    SelectableText(
+                      _trezorAddress!,
+                      style: TextStyle(
+                        fontFamily: wiMonoFamily,
+                        fontFamilyFallback: wiMonoFallback,
+                        fontSize: 12,
+                        color: t.accent,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Read-only address check. W@tch has not moved upload payments to this device yet.',
+                      style: TextStyle(color: t.boneDim, fontSize: 11.5, height: 1.35),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _trezorBusy ? null : _verifyTrezorOnDevice,
+                      icon: const Icon(Icons.verified_user_outlined, size: 16),
+                      label: Text(_trezorBusy ? 'Waiting for Trezor…' : 'Verify on device'),
+                    ),
+                  ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.usb_rounded, color: t.accent, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Use Trezor Suite for a hardware-backed address',
+                            style: TextStyle(color: t.bone, fontSize: 14),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Keep the signing key on your Trezor. Enable Suite → Settings → Experimental Features → MCP Server, then connect with its local token.',
+                      style: TextStyle(color: t.boneDim, fontSize: 11.5, height: 1.35),
+                    ),
+                    const SizedBox(height: 10),
+                    FilledButton.icon(
+                      onPressed: _trezorBusy ? null : _connectTrezor,
+                      icon: const Icon(Icons.link, size: 16),
+                      label: Text(_trezorBusy ? 'Connecting…' : 'Connect Trezor Suite'),
+                    ),
+                    if (_trezorError != null) ...[
+                      const SizedBox(height: 8),
+                      Text(_trezorError!, style: TextStyle(color: t.rust, fontSize: 11.5)),
+                    ],
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
 }
 
 class _ErrorRetry extends StatelessWidget {
@@ -333,6 +519,66 @@ class _ErrorRetry extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _TrezorTokenDialog extends StatefulWidget {
+  const _TrezorTokenDialog();
+
+  @override
+  State<_TrezorTokenDialog> createState() => _TrezorTokenDialogState();
+}
+
+class _TrezorTokenDialogState extends State<_TrezorTokenDialog> {
+  final _controller = TextEditingController();
+  bool _obscured = true;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = WiTokens.of(context);
+    return AlertDialog(
+      backgroundColor: t.ink2,
+      title: Text('Connect Trezor Suite', style: TextStyle(color: t.bone, fontSize: 16)),
+      content: SizedBox(
+        width: 440,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Paste the local MCP token from Trezor Suite → Settings → Experimental Features → MCP Server. It stays in memory for this session and is never saved by W@tch.',
+              style: TextStyle(color: t.boneDim, fontSize: 12.5, height: 1.4),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              obscureText: _obscured,
+              style: TextStyle(color: t.bone, fontFamily: wiMonoFamily, fontSize: 12),
+              decoration: InputDecoration(
+                labelText: 'MCP token',
+                labelStyle: TextStyle(color: t.ash),
+                suffixIcon: IconButton(
+                  tooltip: _obscured ? 'Show token' : 'Hide token',
+                  onPressed: () => setState(() => _obscured = !_obscured),
+                  icon: Icon(_obscured ? Icons.visibility : Icons.visibility_off, color: t.ash),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: Text('Cancel', style: TextStyle(color: t.ash))),
+        FilledButton(onPressed: () => Navigator.of(context).pop(_controller.text), child: const Text('Connect')),
+      ],
     );
   }
 }
