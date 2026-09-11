@@ -86,6 +86,15 @@ class $MediaListsTable extends MediaLists
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -95,6 +104,7 @@ class $MediaListsTable extends MediaLists
     channelPubkey,
     channelAuthor,
     channelAvatar,
+    kind,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -162,6 +172,12 @@ class $MediaListsTable extends MediaLists
         ),
       );
     }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    }
     return context;
   }
 
@@ -199,6 +215,10 @@ class $MediaListsTable extends MediaLists
         DriftSqlType.string,
         data['${effectivePrefix}channel_avatar'],
       ),
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      ),
     );
   }
 
@@ -229,6 +249,12 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
   /// …and the avatar's member file name in the posters dir
   /// (`channel_avatar_<sha8>.img`; resolved to a path at render time).
   final String? channelAvatar;
+
+  /// `'playlist'` marks a PLAYLIST: an ordered set of individual tracks
+  /// rendered as track rows (never album-folded), living in the drawer's
+  /// own Playlists section instead of the home wall. Null = a normal
+  /// media list.
+  final String? kind;
   const MediaListRow({
     required this.id,
     required this.title,
@@ -237,6 +263,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     this.channelPubkey,
     this.channelAuthor,
     this.channelAvatar,
+    this.kind,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -253,6 +280,9 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     }
     if (!nullToAbsent || channelAvatar != null) {
       map['channel_avatar'] = Variable<String>(channelAvatar);
+    }
+    if (!nullToAbsent || kind != null) {
+      map['kind'] = Variable<String>(kind);
     }
     return map;
   }
@@ -272,6 +302,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       channelAvatar: channelAvatar == null && nullToAbsent
           ? const Value.absent()
           : Value(channelAvatar),
+      kind: kind == null && nullToAbsent ? const Value.absent() : Value(kind),
     );
   }
 
@@ -288,6 +319,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       channelPubkey: serializer.fromJson<String?>(json['channelPubkey']),
       channelAuthor: serializer.fromJson<String?>(json['channelAuthor']),
       channelAvatar: serializer.fromJson<String?>(json['channelAvatar']),
+      kind: serializer.fromJson<String?>(json['kind']),
     );
   }
   @override
@@ -301,6 +333,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       'channelPubkey': serializer.toJson<String?>(channelPubkey),
       'channelAuthor': serializer.toJson<String?>(channelAuthor),
       'channelAvatar': serializer.toJson<String?>(channelAvatar),
+      'kind': serializer.toJson<String?>(kind),
     };
   }
 
@@ -312,6 +345,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     Value<String?> channelPubkey = const Value.absent(),
     Value<String?> channelAuthor = const Value.absent(),
     Value<String?> channelAvatar = const Value.absent(),
+    Value<String?> kind = const Value.absent(),
   }) => MediaListRow(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -326,6 +360,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     channelAvatar: channelAvatar.present
         ? channelAvatar.value
         : this.channelAvatar,
+    kind: kind.present ? kind.value : this.kind,
   );
   MediaListRow copyWithCompanion(MediaListsCompanion data) {
     return MediaListRow(
@@ -342,6 +377,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       channelAvatar: data.channelAvatar.present
           ? data.channelAvatar.value
           : this.channelAvatar,
+      kind: data.kind.present ? data.kind.value : this.kind,
     );
   }
 
@@ -354,7 +390,8 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
           ..write('enabled: $enabled, ')
           ..write('channelPubkey: $channelPubkey, ')
           ..write('channelAuthor: $channelAuthor, ')
-          ..write('channelAvatar: $channelAvatar')
+          ..write('channelAvatar: $channelAvatar, ')
+          ..write('kind: $kind')
           ..write(')'))
         .toString();
   }
@@ -368,6 +405,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     channelPubkey,
     channelAuthor,
     channelAvatar,
+    kind,
   );
   @override
   bool operator ==(Object other) =>
@@ -379,7 +417,8 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
           other.enabled == this.enabled &&
           other.channelPubkey == this.channelPubkey &&
           other.channelAuthor == this.channelAuthor &&
-          other.channelAvatar == this.channelAvatar);
+          other.channelAvatar == this.channelAvatar &&
+          other.kind == this.kind);
 }
 
 class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
@@ -390,6 +429,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
   final Value<String?> channelPubkey;
   final Value<String?> channelAuthor;
   final Value<String?> channelAvatar;
+  final Value<String?> kind;
   final Value<int> rowid;
   const MediaListsCompanion({
     this.id = const Value.absent(),
@@ -399,6 +439,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     this.channelPubkey = const Value.absent(),
     this.channelAuthor = const Value.absent(),
     this.channelAvatar = const Value.absent(),
+    this.kind = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   MediaListsCompanion.insert({
@@ -409,6 +450,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     this.channelPubkey = const Value.absent(),
     this.channelAuthor = const Value.absent(),
     this.channelAvatar = const Value.absent(),
+    this.kind = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        title = Value(title),
@@ -421,6 +463,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     Expression<String>? channelPubkey,
     Expression<String>? channelAuthor,
     Expression<String>? channelAvatar,
+    Expression<String>? kind,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -431,6 +474,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
       if (channelPubkey != null) 'channel_pubkey': channelPubkey,
       if (channelAuthor != null) 'channel_author': channelAuthor,
       if (channelAvatar != null) 'channel_avatar': channelAvatar,
+      if (kind != null) 'kind': kind,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -443,6 +487,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     Value<String?>? channelPubkey,
     Value<String?>? channelAuthor,
     Value<String?>? channelAvatar,
+    Value<String?>? kind,
     Value<int>? rowid,
   }) {
     return MediaListsCompanion(
@@ -453,6 +498,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
       channelPubkey: channelPubkey ?? this.channelPubkey,
       channelAuthor: channelAuthor ?? this.channelAuthor,
       channelAvatar: channelAvatar ?? this.channelAvatar,
+      kind: kind ?? this.kind,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -481,6 +527,9 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     if (channelAvatar.present) {
       map['channel_avatar'] = Variable<String>(channelAvatar.value);
     }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -497,6 +546,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
           ..write('channelPubkey: $channelPubkey, ')
           ..write('channelAuthor: $channelAuthor, ')
           ..write('channelAvatar: $channelAvatar, ')
+          ..write('kind: $kind, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -601,6 +651,18 @@ class $MediaEntriesTable extends MediaEntries
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _renamedAtMeta = const VerificationMeta(
+    'renamedAt',
+  );
+  @override
+  late final GeneratedColumn<int> renamedAt = GeneratedColumn<int>(
+    'renamed_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     entryId,
@@ -611,6 +673,7 @@ class $MediaEntriesTable extends MediaEntries
     addedAt,
     sizeBytes,
     videoInfo,
+    renamedAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -680,6 +743,12 @@ class $MediaEntriesTable extends MediaEntries
         videoInfo.isAcceptableOrUnknown(data['video_info']!, _videoInfoMeta),
       );
     }
+    if (data.containsKey('renamed_at')) {
+      context.handle(
+        _renamedAtMeta,
+        renamedAt.isAcceptableOrUnknown(data['renamed_at']!, _renamedAtMeta),
+      );
+    }
     return context;
   }
 
@@ -721,6 +790,10 @@ class $MediaEntriesTable extends MediaEntries
         DriftSqlType.string,
         data['${effectivePrefix}video_info'],
       ),
+      renamedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}renamed_at'],
+      )!,
     );
   }
 
@@ -749,6 +822,11 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
   /// Short video-format label (`480p H.264`) — seeded for catalog
   /// entries, learned from playback for imports; null until known.
   final String? videoInfo;
+
+  /// When the entry was last RENAMED (epoch ms; 0 = never). Renames are
+  /// how music organizes (album folds read file names), and this stamp
+  /// lets My W@tch sync merge them newest-name-wins across devices.
+  final int renamedAt;
   const MediaEntryRow({
     required this.entryId,
     required this.listId,
@@ -758,6 +836,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
     required this.addedAt,
     this.sizeBytes,
     this.videoInfo,
+    required this.renamedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -774,6 +853,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
     if (!nullToAbsent || videoInfo != null) {
       map['video_info'] = Variable<String>(videoInfo);
     }
+    map['renamed_at'] = Variable<int>(renamedAt);
     return map;
   }
 
@@ -791,6 +871,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
       videoInfo: videoInfo == null && nullToAbsent
           ? const Value.absent()
           : Value(videoInfo),
+      renamedAt: Value(renamedAt),
     );
   }
 
@@ -808,6 +889,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
       addedAt: serializer.fromJson<int>(json['addedAt']),
       sizeBytes: serializer.fromJson<int?>(json['sizeBytes']),
       videoInfo: serializer.fromJson<String?>(json['videoInfo']),
+      renamedAt: serializer.fromJson<int>(json['renamedAt']),
     );
   }
   @override
@@ -822,6 +904,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
       'addedAt': serializer.toJson<int>(addedAt),
       'sizeBytes': serializer.toJson<int?>(sizeBytes),
       'videoInfo': serializer.toJson<String?>(videoInfo),
+      'renamedAt': serializer.toJson<int>(renamedAt),
     };
   }
 
@@ -834,6 +917,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
     int? addedAt,
     Value<int?> sizeBytes = const Value.absent(),
     Value<String?> videoInfo = const Value.absent(),
+    int? renamedAt,
   }) => MediaEntryRow(
     entryId: entryId ?? this.entryId,
     listId: listId ?? this.listId,
@@ -843,6 +927,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
     addedAt: addedAt ?? this.addedAt,
     sizeBytes: sizeBytes.present ? sizeBytes.value : this.sizeBytes,
     videoInfo: videoInfo.present ? videoInfo.value : this.videoInfo,
+    renamedAt: renamedAt ?? this.renamedAt,
   );
   MediaEntryRow copyWithCompanion(MediaEntriesCompanion data) {
     return MediaEntryRow(
@@ -854,6 +939,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
       addedAt: data.addedAt.present ? data.addedAt.value : this.addedAt,
       sizeBytes: data.sizeBytes.present ? data.sizeBytes.value : this.sizeBytes,
       videoInfo: data.videoInfo.present ? data.videoInfo.value : this.videoInfo,
+      renamedAt: data.renamedAt.present ? data.renamedAt.value : this.renamedAt,
     );
   }
 
@@ -867,7 +953,8 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
           ..write('position: $position, ')
           ..write('addedAt: $addedAt, ')
           ..write('sizeBytes: $sizeBytes, ')
-          ..write('videoInfo: $videoInfo')
+          ..write('videoInfo: $videoInfo, ')
+          ..write('renamedAt: $renamedAt')
           ..write(')'))
         .toString();
   }
@@ -882,6 +969,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
     addedAt,
     sizeBytes,
     videoInfo,
+    renamedAt,
   );
   @override
   bool operator ==(Object other) =>
@@ -894,7 +982,8 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
           other.position == this.position &&
           other.addedAt == this.addedAt &&
           other.sizeBytes == this.sizeBytes &&
-          other.videoInfo == this.videoInfo);
+          other.videoInfo == this.videoInfo &&
+          other.renamedAt == this.renamedAt);
 }
 
 class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
@@ -906,6 +995,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
   final Value<int> addedAt;
   final Value<int?> sizeBytes;
   final Value<String?> videoInfo;
+  final Value<int> renamedAt;
   const MediaEntriesCompanion({
     this.entryId = const Value.absent(),
     this.listId = const Value.absent(),
@@ -915,6 +1005,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     this.addedAt = const Value.absent(),
     this.sizeBytes = const Value.absent(),
     this.videoInfo = const Value.absent(),
+    this.renamedAt = const Value.absent(),
   });
   MediaEntriesCompanion.insert({
     this.entryId = const Value.absent(),
@@ -925,6 +1016,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     this.addedAt = const Value.absent(),
     this.sizeBytes = const Value.absent(),
     this.videoInfo = const Value.absent(),
+    this.renamedAt = const Value.absent(),
   }) : listId = Value(listId),
        name = Value(name),
        address = Value(address),
@@ -938,6 +1030,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     Expression<int>? addedAt,
     Expression<int>? sizeBytes,
     Expression<String>? videoInfo,
+    Expression<int>? renamedAt,
   }) {
     return RawValuesInsertable({
       if (entryId != null) 'entry_id': entryId,
@@ -948,6 +1041,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
       if (addedAt != null) 'added_at': addedAt,
       if (sizeBytes != null) 'size_bytes': sizeBytes,
       if (videoInfo != null) 'video_info': videoInfo,
+      if (renamedAt != null) 'renamed_at': renamedAt,
     });
   }
 
@@ -960,6 +1054,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     Value<int>? addedAt,
     Value<int?>? sizeBytes,
     Value<String?>? videoInfo,
+    Value<int>? renamedAt,
   }) {
     return MediaEntriesCompanion(
       entryId: entryId ?? this.entryId,
@@ -970,6 +1065,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
       addedAt: addedAt ?? this.addedAt,
       sizeBytes: sizeBytes ?? this.sizeBytes,
       videoInfo: videoInfo ?? this.videoInfo,
+      renamedAt: renamedAt ?? this.renamedAt,
     );
   }
 
@@ -1000,6 +1096,9 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     if (videoInfo.present) {
       map['video_info'] = Variable<String>(videoInfo.value);
     }
+    if (renamedAt.present) {
+      map['renamed_at'] = Variable<int>(renamedAt.value);
+    }
     return map;
   }
 
@@ -1013,7 +1112,8 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
           ..write('position: $position, ')
           ..write('addedAt: $addedAt, ')
           ..write('sizeBytes: $sizeBytes, ')
-          ..write('videoInfo: $videoInfo')
+          ..write('videoInfo: $videoInfo, ')
+          ..write('renamedAt: $renamedAt')
           ..write(')'))
         .toString();
   }
@@ -3904,6 +4004,7 @@ typedef $$MediaListsTableCreateCompanionBuilder =
       Value<String?> channelPubkey,
       Value<String?> channelAuthor,
       Value<String?> channelAvatar,
+      Value<String?> kind,
       Value<int> rowid,
     });
 typedef $$MediaListsTableUpdateCompanionBuilder =
@@ -3915,6 +4016,7 @@ typedef $$MediaListsTableUpdateCompanionBuilder =
       Value<String?> channelPubkey,
       Value<String?> channelAuthor,
       Value<String?> channelAvatar,
+      Value<String?> kind,
       Value<int> rowid,
     });
 
@@ -3982,6 +4084,11 @@ class $$MediaListsTableFilterComposer
 
   ColumnFilters<String> get channelAvatar => $composableBuilder(
     column: $table.channelAvatar,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4054,6 +4161,11 @@ class $$MediaListsTableOrderingComposer
     column: $table.channelAvatar,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$MediaListsTableAnnotationComposer
@@ -4091,6 +4203,9 @@ class $$MediaListsTableAnnotationComposer
     column: $table.channelAvatar,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
 
   Expression<T> mediaEntriesRefs<T extends Object>(
     Expression<T> Function($$MediaEntriesTableAnnotationComposer a) f,
@@ -4153,6 +4268,7 @@ class $$MediaListsTableTableManager
                 Value<String?> channelPubkey = const Value.absent(),
                 Value<String?> channelAuthor = const Value.absent(),
                 Value<String?> channelAvatar = const Value.absent(),
+                Value<String?> kind = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MediaListsCompanion(
                 id: id,
@@ -4162,6 +4278,7 @@ class $$MediaListsTableTableManager
                 channelPubkey: channelPubkey,
                 channelAuthor: channelAuthor,
                 channelAvatar: channelAvatar,
+                kind: kind,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4173,6 +4290,7 @@ class $$MediaListsTableTableManager
                 Value<String?> channelPubkey = const Value.absent(),
                 Value<String?> channelAuthor = const Value.absent(),
                 Value<String?> channelAvatar = const Value.absent(),
+                Value<String?> kind = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MediaListsCompanion.insert(
                 id: id,
@@ -4182,6 +4300,7 @@ class $$MediaListsTableTableManager
                 channelPubkey: channelPubkey,
                 channelAuthor: channelAuthor,
                 channelAvatar: channelAvatar,
+                kind: kind,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -4250,6 +4369,7 @@ typedef $$MediaEntriesTableCreateCompanionBuilder =
       Value<int> addedAt,
       Value<int?> sizeBytes,
       Value<String?> videoInfo,
+      Value<int> renamedAt,
     });
 typedef $$MediaEntriesTableUpdateCompanionBuilder =
     MediaEntriesCompanion Function({
@@ -4261,6 +4381,7 @@ typedef $$MediaEntriesTableUpdateCompanionBuilder =
       Value<int> addedAt,
       Value<int?> sizeBytes,
       Value<String?> videoInfo,
+      Value<int> renamedAt,
     });
 
 final class $$MediaEntriesTableReferences
@@ -4326,6 +4447,11 @@ class $$MediaEntriesTableFilterComposer
 
   ColumnFilters<String> get videoInfo => $composableBuilder(
     column: $table.videoInfo,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get renamedAt => $composableBuilder(
+    column: $table.renamedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4397,6 +4523,11 @@ class $$MediaEntriesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get renamedAt => $composableBuilder(
+    column: $table.renamedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$MediaListsTableOrderingComposer get listId {
     final $$MediaListsTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -4450,6 +4581,9 @@ class $$MediaEntriesTableAnnotationComposer
 
   GeneratedColumn<String> get videoInfo =>
       $composableBuilder(column: $table.videoInfo, builder: (column) => column);
+
+  GeneratedColumn<int> get renamedAt =>
+      $composableBuilder(column: $table.renamedAt, builder: (column) => column);
 
   $$MediaListsTableAnnotationComposer get listId {
     final $$MediaListsTableAnnotationComposer composer = $composerBuilder(
@@ -4511,6 +4645,7 @@ class $$MediaEntriesTableTableManager
                 Value<int> addedAt = const Value.absent(),
                 Value<int?> sizeBytes = const Value.absent(),
                 Value<String?> videoInfo = const Value.absent(),
+                Value<int> renamedAt = const Value.absent(),
               }) => MediaEntriesCompanion(
                 entryId: entryId,
                 listId: listId,
@@ -4520,6 +4655,7 @@ class $$MediaEntriesTableTableManager
                 addedAt: addedAt,
                 sizeBytes: sizeBytes,
                 videoInfo: videoInfo,
+                renamedAt: renamedAt,
               ),
           createCompanionCallback:
               ({
@@ -4531,6 +4667,7 @@ class $$MediaEntriesTableTableManager
                 Value<int> addedAt = const Value.absent(),
                 Value<int?> sizeBytes = const Value.absent(),
                 Value<String?> videoInfo = const Value.absent(),
+                Value<int> renamedAt = const Value.absent(),
               }) => MediaEntriesCompanion.insert(
                 entryId: entryId,
                 listId: listId,
@@ -4540,6 +4677,7 @@ class $$MediaEntriesTableTableManager
                 addedAt: addedAt,
                 sizeBytes: sizeBytes,
                 videoInfo: videoInfo,
+                renamedAt: renamedAt,
               ),
           withReferenceMapper: (p0) => p0
               .map(

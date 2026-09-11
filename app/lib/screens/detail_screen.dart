@@ -21,6 +21,7 @@ import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
 import '../widgets/messenger.dart' show wiMessengerKey;
+import '../widgets/playlist_picker.dart';
 import '../widgets/watch_progress.dart';
 import 'edit_details_screen.dart';
 import 'player_screen.dart';
@@ -39,11 +40,17 @@ class DetailScreen extends StatefulWidget {
 
 class _DetailScreenState extends State<DetailScreen> {
   /// The version currently shown: the picker's selection, else the entry
-  /// the navigation passed in. Everything on the page — play, resume
-  /// point, download, file info — keys off this.
-  MediaEntry get entry => _selected ?? widget.entry;
+  /// the navigation passed in (as later renamed by the editor — an
+  /// organize/album edit renames the FILE, so the passed-in snapshot
+  /// goes stale). Everything on the page — play, resume point,
+  /// download, file info — keys off this.
+  MediaEntry get entry => _selected ?? _renamed ?? widget.entry;
 
   MediaEntry? _selected;
+
+  /// The library's copy of [widget.entry] after an editor save renamed
+  /// it (matched by address).
+  MediaEntry? _renamed;
 
   /// Every upload of this title held in the library (same parsed lookup
   /// key, different addresses), in library order — the version picker's
@@ -80,6 +87,31 @@ class _DetailScreenState extends State<DetailScreen> {
 
   static String _normalize(String address) =>
       address.toLowerCase().replaceFirst('0x', '');
+
+  /// After an editor save: adopt the library's (possibly renamed) copy
+  /// of the shown entry so the page reflects the new name/parse.
+  Future<void> _refreshAfterEdit() async {
+    final lists = await LibraryStore.load();
+    final addr = _normalize(entry.address);
+    MediaEntry? found;
+    for (final l in lists) {
+      for (final e in l.entries) {
+        if (_normalize(e.address) == addr) {
+          found = e;
+          break;
+        }
+      }
+      if (found != null) break;
+    }
+    if (!mounted) return;
+    if (found != null && found.name != entry.name) {
+      setState(() {
+        _selected = null;
+        _renamed = found;
+      });
+    }
+    await _loadState();
+  }
 
   /// Load the entry's resume point and, for episodes, the show's next
   /// episode (needs the library to know the sibling files). On the first
@@ -454,15 +486,29 @@ class _DetailScreenState extends State<DetailScreen> {
           // metadata cache; MetadataService notifies and this page's
           // ListenableBuilder repaints with the new details. Hidden
           // from kid profiles (editing is curation, not viewing).
+          // Audio joins playlists from here (tracks, mixes, anything).
+          if (parseMediaName(entry.name).isAudio)
+            IconButton(
+              tooltip: 'Add to playlist',
+              icon: Icon(Icons.playlist_add, color: t.boneDim, size: 22),
+              onPressed: () =>
+                  unawaited(addToPlaylistFlow(context, [entry])),
+            ),
           if (!ProfileStore.instance.isKid)
             IconButton(
               tooltip: 'Edit details',
               icon: Icon(Icons.edit_outlined, color: t.boneDim, size: 20),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => EditDetailsScreen(entry: entry),
-                ),
-              ),
+              onPressed: () async {
+                // Awaited: an editor save can RENAME the entry (track
+                // number, album merge, organize-into-album), leaving
+                // this page's copy stale — re-resolve it by address.
+                final changed = await Navigator.of(context).push<bool>(
+                  MaterialPageRoute(
+                    builder: (_) => EditDetailsScreen(entry: entry),
+                  ),
+                );
+                if (changed == true) await _refreshAfterEdit();
+              },
             ),
         ],
       ),

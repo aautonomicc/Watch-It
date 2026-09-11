@@ -29,6 +29,12 @@ class MediaLists extends Table {
   /// (`channel_avatar_<sha8>.img`; resolved to a path at render time).
   TextColumn get channelAvatar => text().nullable()();
 
+  /// `'playlist'` marks a PLAYLIST: an ordered set of individual tracks
+  /// rendered as track rows (never album-folded), living in the drawer's
+  /// own Playlists section instead of the home wall. Null = a normal
+  /// media list.
+  TextColumn get kind => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -56,6 +62,11 @@ class MediaEntries extends Table {
   /// Short video-format label (`480p H.264`) — seeded for catalog
   /// entries, learned from playback for imports; null until known.
   TextColumn get videoInfo => text().nullable()();
+
+  /// When the entry was last RENAMED (epoch ms; 0 = never). Renames are
+  /// how music organizes (album folds read file names), and this stamp
+  /// lets My W@tch sync merge them newest-name-wins across devices.
+  IntColumn get renamedAt => integer().withDefault(const Constant(0))();
 }
 
 /// Playback progress for one file, keyed by its XOR address (content
@@ -235,7 +246,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -310,6 +321,23 @@ class AppDatabase extends _$AppDatabase {
             watchStates,
             newColumns: [watchStates.profileId],
           ));
+        }
+      }
+      if (from < 14) {
+        // Playlists + rename sync: list kind ('playlist') and the
+        // per-entry rename stamp for newest-name-wins merging.
+        // Existence-guarded like the v13 watch_states migration:
+        // partial fixture DBs may lack the tables.
+        Future<bool> hasTable(String name) => customSelect(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name='$name'")
+            .get()
+            .then((rows) => rows.isNotEmpty);
+        if (await hasTable('media_lists')) {
+          await m.addColumn(mediaLists, mediaLists.kind);
+        }
+        if (await hasTable('media_entries')) {
+          await m.addColumn(mediaEntries, mediaEntries.renamedAt);
         }
       }
       if (from >= 4 && from < 9) {

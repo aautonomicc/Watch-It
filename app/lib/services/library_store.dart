@@ -266,6 +266,7 @@ class LibraryStore {
             addedAt: row.addedAt,
             sizeBytes: row.sizeBytes,
             videoInfo: row.videoInfo,
+            renamedAt: row.renamedAt == 0 ? null : row.renamedAt,
           ));
     }
     return [
@@ -278,6 +279,7 @@ class LibraryStore {
           channelPubkey: row.channelPubkey,
           channelAuthor: row.channelAuthor,
           channelAvatar: row.channelAvatar,
+          kind: row.kind,
         ),
     ];
   }
@@ -304,6 +306,7 @@ class LibraryStore {
               channelPubkey: Value(list.channelPubkey),
               channelAuthor: Value(list.channelAuthor),
               channelAvatar: Value(list.channelAvatar),
+              kind: Value(list.kind),
             ));
         for (final (entryPos, entry) in list.entries.indexed) {
           await db.into(db.mediaEntries).insert(MediaEntriesCompanion.insert(
@@ -314,6 +317,7 @@ class LibraryStore {
                 addedAt: Value(entry.addedAt ?? now),
                 sizeBytes: Value(entry.sizeBytes),
                 videoInfo: Value(entry.videoInfo),
+                renamedAt: Value(entry.renamedAt ?? 0),
               ));
         }
       }
@@ -332,8 +336,13 @@ Future<void> addEntriesToLists(
   final updated = List<MediaList>.of(lists);
   var idBase = DateTime.now().microsecondsSinceEpoch;
   for (final title in chosen) {
+    // Playlists are excluded from the by-title match: they live in
+    // their own namespace (drawer Playlists section) and gain tracks
+    // only through the explicit Add-to-playlist actions.
     final i = updated.indexWhere((l) =>
-        !l.isChannel && l.title.toLowerCase() == title.toLowerCase());
+        !l.isChannel &&
+        !l.isPlaylist &&
+        l.title.toLowerCase() == title.toLowerCase());
     if (i < 0) {
       updated
           .add(MediaList(id: '${idBase++}', title: title, entries: entries));
@@ -350,4 +359,41 @@ Future<void> addEntriesToLists(
     }
   }
   await LibraryStore.save(updated);
+}
+
+/// Create a new (empty) playlist named [title] and return it. The title
+/// need not be unique — playlists are addressed by id.
+Future<MediaList> createPlaylist(String title) async {
+  final lists = await LibraryStore.load();
+  final playlist = MediaList(
+    id: '${DateTime.now().microsecondsSinceEpoch}',
+    title: title,
+    kind: kListKindPlaylist,
+  );
+  await LibraryStore.save([...lists, playlist]);
+  return playlist;
+}
+
+/// Append [entries] to the end of playlist [playlistId], deduplicating
+/// by address (a playlist holds each track once). Returns how many were
+/// actually added; -1 when the playlist no longer exists.
+Future<int> addTracksToPlaylist(
+    String playlistId, List<MediaEntry> entries) async {
+  final lists = await LibraryStore.load();
+  final i = lists.indexWhere((l) => l.id == playlistId && l.isPlaylist);
+  if (i < 0) return -1;
+  final held = {
+    for (final e in lists[i].entries)
+      e.address.toLowerCase().replaceFirst('0x', ''),
+  };
+  final fresh = [
+    for (final e in entries)
+      if (held.add(e.address.toLowerCase().replaceFirst('0x', ''))) e,
+  ];
+  if (fresh.isEmpty) return 0;
+  final updated = List<MediaList>.of(lists);
+  updated[i] =
+      updated[i].copyWith(entries: [...updated[i].entries, ...fresh]);
+  await LibraryStore.save(updated);
+  return fresh.length;
 }

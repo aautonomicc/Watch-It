@@ -217,6 +217,7 @@ class MyWatchSync {
     final parts = <String>[
       if (result.entriesAdded > 0) '${result.entriesAdded} added',
       if (result.entriesRemoved > 0) '${result.entriesRemoved} removed',
+      if (result.entriesRenamed > 0) '${result.entriesRenamed} renamed',
       if (result.watchStatesApplied > 0)
         '${result.watchStatesApplied} watch position(s) updated',
       if (result.mapsImported > 0) '${result.mapsImported} map(s) fetched',
@@ -351,6 +352,7 @@ class MyWatchSync {
     var result = SyncCycleResult(
       entriesAdded: merge.entriesAdded,
       entriesRemoved: merge.entriesRemoved,
+      entriesRenamed: merge.entriesRenamed,
     );
     if (merge.changed) {
       lists = merge.lists;
@@ -1279,6 +1281,9 @@ class MyWatchSync {
       }
       listDocs.add({
         'title': l.title,
+        // Old builds ignore the key and merge the playlist as a plain
+        // list; current builds recreate it as a playlist.
+        if (l.isPlaylist) 'kind': kListKindPlaylist,
         'entries': [
           for (final e in take)
             {
@@ -1288,6 +1293,9 @@ class MyWatchSync {
                   (e.addedAt == null || e.addedAt == 0) ? 1 : e.addedAt,
               if (e.sizeBytes != null) 'size': e.sizeBytes,
               if (e.videoInfo != null) 'video': e.videoInfo,
+              // Only renamed entries pay the bytes; old builds ignore
+              // the key (they read name/address/added_ms/size/video).
+              if ((e.renamedAt ?? 0) != 0) 'renamed_ms': e.renamedAt,
             },
         ],
         if (tombstones[title]?.isNotEmpty ?? false)
@@ -1540,6 +1548,7 @@ class MyWatchSync {
     var changed = false;
     var added = 0;
     var removed = 0;
+    var renamed = 0;
 
     int indexOf(String titleLower) =>
         out.indexWhere((l) => l.title.toLowerCase() == titleLower);
@@ -1574,21 +1583,54 @@ class MyWatchSync {
           // A channel list mirrors its manifest — remote personal lists
           // (e.g. an older build's badge-less copy) never merge into it.
           if (i != -1 && out[i].isChannel) continue;
-          final holds = i != -1 &&
-              out[i].entries.any((x) => x.address.toLowerCase() == addr);
-          if (holds) continue;
+          final j = i == -1
+              ? -1
+              : out[i]
+                  .entries
+                  .indexWhere((x) => x.address.toLowerCase() == addr);
+          final renamedMs = re['renamed_ms'] as int? ?? 0;
+          if (j != -1) {
+            // Already held: the row used to be skipped outright, which
+            // is why renames never synced. Newest-name-wins on the
+            // rename stamp; identical stamps tie-break on the name
+            // bytes (larger wins) so every device converges on one
+            // name. An unstamped remote row never renames anything.
+            final remoteName = re['name'] as String? ?? '';
+            final local = out[i].entries[j];
+            final localMs = local.renamedAt ?? 0;
+            if (renamedMs > 0 && remoteName.isNotEmpty) {
+              final adoptName = remoteName != local.name &&
+                  (renamedMs > localMs ||
+                      (renamedMs == localMs &&
+                          remoteName.compareTo(local.name) > 0));
+              if (adoptName || (renamedMs > localMs)) {
+                final entries = [...out[i].entries];
+                entries[j] = local.renamed(
+                    adoptName ? remoteName : local.name,
+                    at: renamedMs);
+                out[i] = out[i].copyWith(entries: entries);
+                changed = true;
+                if (adoptName) renamed++;
+              }
+            }
+            continue;
+          }
           final entry = MediaEntry(
             name: re['name'] as String? ?? addr,
             address: addr,
             addedAt: addedMs,
             sizeBytes: re['size'] as int?,
             videoInfo: re['video'] as String?,
+            renamedAt: renamedMs == 0 ? null : renamedMs,
           );
           if (i == -1) {
             out.add(MediaList(
               id: '${DateTime.now().microsecondsSinceEpoch}-$titleLower',
               title: title,
               entries: [entry],
+              kind: rl['kind'] == kListKindPlaylist
+                  ? kListKindPlaylist
+                  : null,
             ));
           } else {
             out[i] = out[i].copyWith(entries: [...out[i].entries, entry]);
@@ -1631,6 +1673,7 @@ class MyWatchSync {
       changed: changed,
       entriesAdded: added,
       entriesRemoved: removed,
+      entriesRenamed: renamed,
     );
   }
 
@@ -1786,6 +1829,7 @@ class SyncMergeResult {
     required this.changed,
     required this.entriesAdded,
     required this.entriesRemoved,
+    this.entriesRenamed = 0,
   });
 
   final List<MediaList> lists;
@@ -1793,6 +1837,10 @@ class SyncMergeResult {
   final bool changed;
   final int entriesAdded;
   final int entriesRemoved;
+
+  /// Held entries whose name was adopted from a remote rename
+  /// (newest-name-wins on the `renamed_ms` stamp).
+  final int entriesRenamed;
 }
 
 /// One remote device's user-edit row after the cross-device
@@ -1941,6 +1989,7 @@ class SyncCycleResult {
   const SyncCycleResult({
     this.entriesAdded = 0,
     this.entriesRemoved = 0,
+    this.entriesRenamed = 0,
     this.watchStatesApplied = 0,
     this.mapsImported = 0,
     this.detailsApplied = 0,
@@ -1951,6 +2000,7 @@ class SyncCycleResult {
 
   final int entriesAdded;
   final int entriesRemoved;
+  final int entriesRenamed;
   final int watchStatesApplied;
   final int mapsImported;
   final int detailsApplied;
@@ -1969,6 +2019,7 @@ class SyncCycleResult {
       SyncCycleResult(
         entriesAdded: entriesAdded,
         entriesRemoved: entriesRemoved,
+        entriesRenamed: entriesRenamed,
         watchStatesApplied: watchStatesApplied ?? this.watchStatesApplied,
         mapsImported: mapsImported ?? this.mapsImported,
         detailsApplied: detailsApplied ?? this.detailsApplied,

@@ -170,6 +170,7 @@ class _ListEditScreenState extends State<ListEditScreen> {
     final targetIndex = updated.indexWhere((l) =>
         l.id != list.id &&
         !l.isChannel &&
+        !l.isPlaylist &&
         l.title.toLowerCase() == trimmed.toLowerCase());
     var duplicates = 0;
     String targetTitle;
@@ -205,9 +206,12 @@ class _ListEditScreenState extends State<ListEditScreen> {
   Future<String?> _pickTransferTarget(String what,
       {required bool copy}) async {
     final t = WiTokens.of(context);
+    // Playlists are not targets here: they hold ordered TRACKS added
+    // through the dedicated Add-to-playlist actions, not whole
+    // shows/movies moved between shelves.
     final others = [
       for (final l in _lists ?? <MediaList>[])
-        if (l.id != widget.listId && !l.isChannel) l,
+        if (l.id != widget.listId && !l.isChannel && !l.isPlaylist) l,
     ];
     return showDialog<String>(
       context: context,

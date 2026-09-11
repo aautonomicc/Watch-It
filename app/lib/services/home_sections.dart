@@ -84,7 +84,13 @@ List<HomeSection> reconcileHomeSections(
   List<HomeSection> stored,
   List<MediaList> lists,
 ) {
-  final listsById = {for (final l in lists) listSectionId(l.id): l};
+  // Playlists never become home rows: they live in the drawer's own
+  // Playlists section (their id in a stale stored blob drops out here
+  // like a deleted list's).
+  final listsById = {
+    for (final l in lists)
+      if (!l.isPlaylist) listSectionId(l.id): l,
+  };
   final out = <HomeSection>[];
   final seen = <String>{};
   for (final s in stored) {
@@ -101,6 +107,7 @@ List<HomeSection> reconcileHomeSections(
   }
   final newChannels = <HomeSection>[];
   for (final l in lists) {
+    if (l.isPlaylist) continue;
     final id = listSectionId(l.id);
     if (!seen.add(id)) continue;
     final section = HomeSection(id: id, visible: l.enabled);
