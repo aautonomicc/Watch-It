@@ -31,6 +31,7 @@ import '../widgets/channel_avatar.dart';
 import '../widgets/channel_badge.dart';
 import '../widgets/experience_switch.dart';
 import '../widgets/receive_piece_dialog.dart';
+import '../widgets/skaists_bloom.dart';
 import 'import_review_screen.dart';
 import 'list_edit_screen.dart';
 import 'list_home_screen.dart';
@@ -269,7 +270,8 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     await _reload();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(experienceCopyOf().keptSnack)),
+        SnackBar(
+            content: Text(ExperienceCopy.of(context).keptSnack)),
       );
     }
   }
@@ -1364,7 +1366,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     return ValueListenableBuilder<ExperienceView>(
       valueListenable: wiExperienceView,
       builder: (context, view, _) {
-        final copy = ExperienceCopy(view);
+        final copy = ExperienceCopy.of(context, view);
         return Scaffold(
           appBar: AppBar(
             backgroundColor: t.ink,
@@ -1409,32 +1411,67 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     );
   }
 
+  /// Compact promise + view switch. Receive / Add-from-file stay in the
+  /// app bar once lists exist; the two invite cards only appear when the
+  /// page is empty so they don't stack under every list.
   Widget _header(WiTokens t, List<MediaList> lists) {
-    final copy = experienceCopyOf();
+    final copy = ExperienceCopy.of(context);
+    final empty = lists.isEmpty;
+    final soft = copy.view != ExperienceView.cypherpunk;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                kAdoptionPromise,
-                style: TextStyle(
-                  fontSize: 13.5,
-                  height: 1.4,
-                  color: t.boneDim,
-                  fontWeight: FontWeight.w600,
+              if (soft) ...[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    const SkaistsBloom(
+                      key: ValueKey('media-header-bloom'),
+                      moment: SkaistsBloomMoment.still,
+                      size: 26,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        copy.adoptionPromise,
+                        style: TextStyle(
+                          fontSize: 13,
+                          height: 1.35,
+                          color: t.boneDim,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 12),
-              const ExperienceSwitch(),
-              const SizedBox(height: 14),
-              AdoptionInvitePair(
-                onReceive: _importPublicAddress,
-                onAddFile: _importList,
-              ),
+                const SizedBox(height: 10),
+              ],
+              const ExperienceSwitch(compact: true),
+              if (empty) ...[
+                const SizedBox(height: 14),
+                AdoptionInvitePair(
+                  onReceive: _importPublicAddress,
+                  onAddFile: _importList,
+                ),
+              ],
+              if (copy.view == ExperienceView.cypherpunk &&
+                  !empty &&
+                  copy.fileDoorTechnical != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  copy.fileDoorTechnical!,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: t.ash,
+                    height: 1.35,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -1464,16 +1501,17 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
               },
             ),
           ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Text(
-            copy.libraryRowsHint,
-            style: TextStyle(fontSize: 11.5, color: t.ash),
-          ),
-        ),
-        if (lists.isEmpty)
+        if (!empty)
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Text(
+              copy.libraryRowsHint,
+              style: TextStyle(fontSize: 11.5, color: t.ash),
+            ),
+          ),
+        if (empty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: Text(
               copy.emptyListsHint,
               style: TextStyle(fontSize: 13, color: t.boneDim),
@@ -1555,7 +1593,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         '${list.entries.length} '
         '${list.entries.length == 1 ? 'entry' : 'entries'}'
         '${list.isChannel ? '  ·  read-only, updates automatically' : ''}'
-        '${experienceCopyOf().listSharedSubtitle(
+        '${ExperienceCopy.of(context).listSharedSubtitle(
           list.entries.where((e) => e.publicReference).length,
           list.entries.length,
         )}'

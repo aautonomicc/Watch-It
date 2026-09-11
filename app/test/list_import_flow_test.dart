@@ -24,6 +24,9 @@ import 'package:watchit/services/metadata.dart';
 import 'package:watchit/services/profiles.dart';
 import 'package:watchit/services/watch_state.dart';
 import 'package:watchit/theme/tokens.dart';
+import 'package:watchit/widgets/adoption_invite.dart';
+import 'package:watchit/widgets/experience_switch.dart';
+import 'package:watchit/widgets/skaists_bloom.dart';
 import 'package:watchit_upload/watchit_upload.dart' as cli;
 
 import 'fake_embedded_http.dart';
@@ -764,6 +767,9 @@ void main() {
     testWidgets('Media page invites Receive / Add from a file on New bee',
         (tester) async {
       await openMediaLists(tester);
+      expect(find.text(kAdoptionPromise), findsOneWidget);
+      expect(find.byType(ExperienceSwitch), findsOneWidget);
+      expect(find.byKey(const ValueKey('media-header-bloom')), findsOneWidget);
       expect(find.text('Receive a piece'), findsOneWidget);
       expect(find.text('Add from a file'), findsOneWidget);
       expect(
@@ -774,6 +780,31 @@ void main() {
           find.textContaining(
               'Add to library (the download button above) takes any mix'),
           findsNothing);
+      expect(find.byTooltip('Receive a piece'), findsOneWidget);
+    });
+
+    testWidgets('populated My Media keeps a compact header, no invite cards',
+        (tester) async {
+      await LibraryStore.save([
+        MediaList(id: '1', title: 'My Films', entries: [
+          MediaEntry(
+              name: 'First Movie (2024).mkv',
+              address: FakeEmbeddedHttp.addrForByte(5)),
+        ]),
+      ]);
+      await openMediaLists(tester);
+      expect(find.text(kAdoptionPromise), findsOneWidget);
+      expect(find.byType(ExperienceSwitch), findsOneWidget);
+      expect(
+        find.byWidgetPredicate((w) =>
+            w is SkaistsBloom && w.moment == SkaistsBloomMoment.still),
+        findsOneWidget,
+      );
+      expect(find.byType(AdoptionInvitePair), findsNothing);
+      expect(find.text('Add from a file'), findsNothing);
+      expect(find.byTooltip('Receive a piece'), findsOneWidget);
+      expect(find.textContaining('These rows are your home wall'),
+          findsOneWidget);
     });
 
     testWidgets('export dialog explains the ant upload share flow',
