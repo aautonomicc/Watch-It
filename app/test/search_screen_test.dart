@@ -1,6 +1,8 @@
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -20,18 +22,24 @@ import 'package:watchit/services/terms.dart';
 String _addr(int i) => i.toRadixString(16).padLeft(64, '0');
 
 List<MediaList> _library() => [
-      MediaList(id: 'l1', title: 'Library', entries: [
-        MediaEntry(
-            name: 'Night of the Living Dead (1968).mkv', address: _addr(1)),
-        MediaEntry(name: 'Show S01E01.mkv', address: _addr(2)),
-        MediaEntry(name: 'Show S01E02.mkv', address: _addr(3)),
-      ]),
-    ];
+  MediaList(
+    id: 'l1',
+    title: 'Library',
+    entries: [
+      MediaEntry(
+        name: 'Night of the Living Dead (1968).mkv',
+        address: _addr(1),
+      ),
+      MediaEntry(name: 'Show S01E01.mkv', address: _addr(2)),
+      MediaEntry(name: 'Show S01E02.mkv', address: _addr(3)),
+    ],
+  ),
+];
 
 Widget _page(List<MediaList> lists) => MaterialApp(
-      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
-      home: SearchScreen(lists: lists),
-    );
+  theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+  home: SearchScreen(lists: lists),
+);
 
 /// Type [text] and let the 150 ms debounce fire.
 Future<void> _search(WidgetTester tester, String text) async {
@@ -43,19 +51,87 @@ Future<void> _search(WidgetTester tester, String text) async {
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
+  const voice = MethodChannel('watchit/voice');
+  tearDown(() {
+    debugDefaultTargetPlatformOverride = null;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(voice, null);
+  });
+
+  testWidgets('voice result searches the library without opening media', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          voice,
+          (_) async => 'Night of the Living Dead',
+        );
+    await tester.pumpWidget(_page(_library()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Voice search'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      'Night of the Living Dead',
+    );
+    expect(find.text('Movies'), findsOneWidget);
+    expect(find.byType(DetailScreen), findsNothing);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('cancelled voice preserves the typed query', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(voice, (_) async => null);
+    await tester.pumpWidget(_page(_library()));
+    await _search(tester, 'Night');
+    await tester.tap(find.byTooltip('Voice search'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      'Night',
+    );
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('unavailable voice keeps keyboard search usable', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          voice,
+          (_) async => throw PlatformException(code: 'unavailable'),
+        );
+    await tester.pumpWidget(_page(_library()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Voice search'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Voice search is unavailable. Use the search keyboard.'),
+      findsOneWidget,
+    );
+    await _search(tester, 'Night');
+    expect(find.text('Movies'), findsOneWidget);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   setUp(() async {
-    SharedPreferences.setMockInitialValues({'defaults_seeded_v4': true,
-      'terms_accepted_version_v1': kTermsVersion});
+    SharedPreferences.setMockInitialValues({
+      'defaults_seeded_v4': true,
+      'terms_accepted_version_v1': kTermsVersion,
+    });
     await LibraryStore.useForTesting(
-        AppDatabase.forTesting(NativeDatabase.memory()));
+      AppDatabase.forTesting(NativeDatabase.memory()),
+    );
     // Offline: no API key, so tiles render from parsed file names.
     MetadataService.instance = MetadataService(apiKeyProvider: () async => '');
     WatchStateStore.instance = WatchStateStore();
     DownloadManager.instance = DownloadManager();
   });
 
-  testWidgets('home app bar search icon opens the search screen',
-      (tester) async {
+  testWidgets('home app bar search icon opens the search screen', (
+    tester,
+  ) async {
     await LibraryStore.save(_library());
     await tester.pumpWidget(const WatchItApp());
     await tester.pumpAndSettle();
@@ -67,8 +143,9 @@ void main() {
     expect(find.text('Search your library'), findsOneWidget);
   });
 
-  testWidgets('typing finds shows, movies, and episodes grouped',
-      (tester) async {
+  testWidgets('typing finds shows, movies, and episodes grouped', (
+    tester,
+  ) async {
     await tester.pumpWidget(_page(_library()));
     await tester.pumpAndSettle();
 
@@ -85,14 +162,17 @@ void main() {
     expect(find.text('Night of the Living Dead (1968)'), findsOneWidget);
   });
 
-  testWidgets('short and unmatched queries show the empty states',
-      (tester) async {
+  testWidgets('short and unmatched queries show the empty states', (
+    tester,
+  ) async {
     await tester.pumpWidget(_page(_library()));
     await tester.pumpAndSettle();
 
     await _search(tester, 'n');
-    expect(find.text('Search your library — titles, years, S01E02'),
-        findsOneWidget);
+    expect(
+      find.text('Search your library — titles, years, S01E02'),
+      findsOneWidget,
+    );
 
     await _search(tester, 'zzzzz');
     expect(find.text('No matches in your library'), findsOneWidget);
@@ -109,8 +189,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
     expect(find.text('Night of the Living Dead (1968)'), findsNothing);
-    expect(find.text('Search your library — titles, years, S01E02'),
-        findsOneWidget);
+    expect(
+      find.text('Search your library — titles, years, S01E02'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('tapping a movie result opens its detail page', (tester) async {
@@ -140,10 +222,14 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final many = [
-      MediaList(id: 'l1', title: 'Library', entries: [
-        for (var i = 1; i <= 25; i++)
-          MediaEntry(name: 'Movie $i (2000).mkv', address: _addr(i)),
-      ]),
+      MediaList(
+        id: 'l1',
+        title: 'Library',
+        entries: [
+          for (var i = 1; i <= 25; i++)
+            MediaEntry(name: 'Movie $i (2000).mkv', address: _addr(i)),
+        ],
+      ),
     ];
     await tester.pumpWidget(_page(many));
     await tester.pumpAndSettle();
