@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
@@ -7,6 +9,7 @@ import '../services/public_address_import.dart';
 import '../services/tv_settings.dart';
 import '../theme/tokens.dart';
 import 'experience_switch.dart';
+import 'skaists_bloom.dart';
 
 /// Result of a successful verify-then-Keep. Saving still happens in
 /// the caller (Luna's addEntriesToLists path) so the engineering
@@ -31,6 +34,7 @@ class _ReceivePieceDialogState extends State<ReceivePieceDialog> {
   final _name = TextEditingController();
   final _addressFocus = FocusNode();
   bool _checking = false;
+  bool _celebrating = false;
   PublicAddressInspection? _inspection;
   String? _error;
 
@@ -42,7 +46,23 @@ class _ReceivePieceDialogState extends State<ReceivePieceDialog> {
     super.dispose();
   }
 
-  ExperienceCopy get _copy => ExperienceCopy(wiExperienceView.value);
+  ExperienceCopy _copyOf(BuildContext context) => ExperienceCopy.of(context);
+
+  SkaistsBloomMoment _bloomMoment(ExperienceView view) {
+    if (_celebrating) return SkaistsBloomMoment.celebrate;
+    if (_inspection != null) {
+      return switch (view) {
+        ExperienceView.newBee => SkaistsBloomMoment.idle,
+        ExperienceView.raver => SkaistsBloomMoment.celebrate,
+        ExperienceView.cypherpunk => SkaistsBloomMoment.flash,
+      };
+    }
+    return switch (view) {
+      ExperienceView.newBee => SkaistsBloomMoment.idle,
+      ExperienceView.raver => SkaistsBloomMoment.still,
+      ExperienceView.cypherpunk => SkaistsBloomMoment.still,
+    };
+  }
 
   Future<void> _lookUp() async {
     setState(() {
@@ -57,7 +77,9 @@ class _ReceivePieceDialogState extends State<ReceivePieceDialog> {
       setState(() {
         _inspection = result;
         _address.text = result.address;
-        if (_name.text.trim().isEmpty) _name.text = _copy.defaultName;
+        if (_name.text.trim().isEmpty) {
+          _name.text = ExperienceCopy(wiExperienceView.value).defaultName;
+        }
       });
     } catch (e) {
       if (!mounted) return;
@@ -68,16 +90,22 @@ class _ReceivePieceDialogState extends State<ReceivePieceDialog> {
   }
 
   String _displayError(Object error) {
-    if (_copy.isCypherpunk && error is ListImportException) {
+    if (wiExperienceView.value == ExperienceView.cypherpunk &&
+        error is ListImportException) {
       return error.message;
     }
     return humanPublicAddressError(error);
   }
 
-  void _keep() {
+  Future<void> _keep() async {
     final inspection = _inspection;
     final name = _name.text.trim();
     if (inspection == null || name.isEmpty) return;
+    if (wiExperienceView.value == ExperienceView.raver && !_celebrating) {
+      setState(() => _celebrating = true);
+      await Future<void>.delayed(const Duration(milliseconds: 720));
+      if (!mounted) return;
+    }
     Navigator.of(context).pop<ReceivedPiece>(
       (address: inspection.address, name: name, size: inspection.sizeBytes),
     );
@@ -99,10 +127,11 @@ class _ReceivePieceDialogState extends State<ReceivePieceDialog> {
       valueListenable: wiExperienceView,
       builder: (context, view, _) {
         final t = WiTokens.of(context);
-        final copy = ExperienceCopy(view);
+        final copy = _copyOf(context);
         final tv = TvSettings.instance.enabled;
         final size = _inspection?.sizeBytes;
         final sizeLabel = size == null ? null : formatBytes(size);
+        final bloom = _bloomMoment(view);
         return AlertDialog(
           backgroundColor: t.ink2,
           insetPadding: EdgeInsets.symmetric(
@@ -112,13 +141,21 @@ class _ReceivePieceDialogState extends State<ReceivePieceDialog> {
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                copy.receiveTitle,
-                style: TextStyle(
-                  color: t.bone,
-                  fontSize: tv ? 20 : 17,
-                  fontWeight: FontWeight.w700,
-                ),
+              Row(
+                children: [
+                  SkaistsBloom(moment: bloom, size: tv ? 52 : 44),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      copy.receiveTitle,
+                      style: TextStyle(
+                        color: t.bone,
+                        fontSize: tv ? 20 : 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 10),
               const ExperienceSwitch(compact: true),
@@ -234,7 +271,27 @@ class _ReceivePieceDialogState extends State<ReceivePieceDialog> {
                                 fontFamilyFallback: wiMonoFallback,
                               ),
                             ),
+                            const SizedBox(height: 6),
+                            Text(
+                              copy.cypherpunkVerifyNote,
+                              style: TextStyle(
+                                color: t.ash,
+                                fontSize: 11,
+                                height: 1.35,
+                                fontFamily: wiMonoFamily,
+                                fontFamilyFallback: wiMonoFallback,
+                              ),
+                            ),
                           ],
+                          const SizedBox(height: 10),
+                          Text(
+                            copy.rightsLine,
+                            style: TextStyle(
+                              color: t.boneDim,
+                              fontSize: 12,
+                              height: 1.35,
+                            ),
+                          ),
                           const SizedBox(height: 12),
                           TextField(
                             controller: _name,
@@ -253,7 +310,9 @@ class _ReceivePieceDialogState extends State<ReceivePieceDialog> {
                     ),
                     const SizedBox(height: 14),
                     FilledButton(
-                      onPressed: _name.text.trim().isEmpty ? null : _keep,
+                      onPressed: _name.text.trim().isEmpty || _celebrating
+                        ? null
+                        : () => unawaited(_keep()),
                       style: FilledButton.styleFrom(
                         backgroundColor: t.accent,
                         foregroundColor: t.ink,

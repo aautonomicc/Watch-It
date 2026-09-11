@@ -1,6 +1,8 @@
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:watchit/l10n/eco_corpus.dart';
 import 'package:watchit/services/app_settings.dart';
 import 'package:watchit/services/experience_view.dart';
 import 'package:watchit/services/public_address_import.dart';
@@ -39,6 +41,26 @@ void main() {
     expect(copy.keepVerb, 'Keep it');
     expect(copy.badgeLabel, 'Shared');
     expect(copy.fileDoorTechnical, isNull);
+  });
+
+  test('eco corpus covers 26 languages and Latvian Keep', () {
+    expect(kEcoLanguageCodes, hasLength(26));
+    expect(kEcoLocales, hasLength(26));
+    expect(EcoCorpus.string('lv', 'keepVerb.newBee'), 'Paturi');
+    expect(EcoCorpus.string('lv', 'receiveTitle.newBee'), 'Kāda darba gabals');
+    final lv = ExperienceCopy(ExperienceView.newBee, locale: const Locale('lv'));
+    expect(lv.keepVerb, 'Paturi');
+    expect(lv.receiveTitle, 'Kāda darba gabals');
+    expect(lv.rightsLine, contains('izplatīt'));
+  });
+
+  test('rights line is explicit in every register', () {
+    expect(ExperienceCopy(ExperienceView.newBee).rightsLine,
+        contains('give it away'));
+    expect(ExperienceCopy(ExperienceView.raver).rightsLine,
+        contains('not permission to redistribute'));
+    expect(ExperienceCopy(ExperienceView.cypherpunk).rightsLine,
+        contains('public address ≠ redistribute permission'));
   });
 
   test('Cypherpunk copy keeps Luna\'s engineering contract visible', () {

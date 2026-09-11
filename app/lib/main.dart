@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -45,7 +46,9 @@ import 'services/terms.dart';
 import 'services/update_check.dart';
 import 'services/watch_state.dart';
 import 'services/x0x_cellular.dart';
+import 'l10n/eco_corpus.dart';
 import 'theme/tokens.dart';
+import 'widgets/skaists_bloom.dart';
 import 'widgets/brand_mark.dart';
 import 'widgets/tv_app_frame.dart';
 import 'widgets/download_badge.dart';
@@ -211,6 +214,12 @@ class WatchItApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
         themeMode: wiThemeMode.value,
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: kEcoLocales,
         builder: (context, child) => TvAppFrame(child: child!),
         home: const TermsGate(child: ProfileGate(child: HomeScreen())),
       ),
@@ -941,7 +950,7 @@ class _EmptyState extends StatelessWidget {
     return ValueListenableBuilder<ExperienceView>(
       valueListenable: wiExperienceView,
       builder: (context, view, _) {
-        final copy = ExperienceCopy(view);
+        final copy = ExperienceCopy.of(context, view);
         final hidden = variant == _EmptyVariant.allHidden;
         final title = hidden ? copy.allHiddenTitle : copy.emptyLibraryTitle;
         final hint = hidden ? copy.allHiddenHint : copy.emptyLibraryHint;
@@ -953,7 +962,13 @@ class _EmptyState extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.play_circle_outline, size: 64, color: t.accent),
+                  if (hidden || view == ExperienceView.cypherpunk)
+                    Icon(Icons.play_circle_outline, size: 64, color: t.accent)
+                  else
+                    const SkaistsBloom(
+                      moment: SkaistsBloomMoment.still,
+                      size: 64,
+                    ),
                   const SizedBox(height: 16),
                   Text(
                     title,

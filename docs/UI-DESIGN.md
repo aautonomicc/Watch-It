@@ -29,6 +29,20 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   “Make something beautiful. Give someone a piece of it. Stay
   connected to its maker.” Receiving a public address is Keep, not
   a devops paste-XOR chore.
+- **Skaists bloom** (beehive-nature family, green/yellow → purple)
+  breathes in three moments only: New bee soft idle after the
+  receive sheet arrives and after the piece is real; Raver
+  celebration pulse on Keep; Cypherpunk still, with a verify-flash.
+  Empty walls show a still hive — never a step list.
+- **bLanguage eco corpus** (26 living languages) localizes the
+  upgraded Keep / empty / badge / rights surfaces. Cypherpunk stays
+  English on purpose (protocol density). Register names are proper
+  names. The rest of the app remains on its historic English strings
+  until a full gen-l10n path exists.
+- **My Media header stays compact** once lists exist: quiet adoption
+  promise + still bloom + Viewing style switch. The Receive /
+  Add-from-file invite cards appear only on an empty library;
+  otherwise those doors stay in the app bar (gift + download).
 
 ## Screens
 

@@ -556,7 +556,7 @@ class _DetailScreenState extends State<DetailScreen> {
                   ValueListenableBuilder<ExperienceView>(
                     valueListenable: wiExperienceView,
                     builder: (context, view, _) => Text(
-                      ExperienceCopy(view).detailLine,
+                      ExperienceCopy.of(context, view).detailLine,
                       style: TextStyle(
                         fontSize: 12.5,
                         height: 1.35,

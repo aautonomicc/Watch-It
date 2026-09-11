@@ -83,7 +83,7 @@ class AdoptionInvitePair extends StatelessWidget {
     return ValueListenableBuilder<ExperienceView>(
       valueListenable: wiExperienceView,
       builder: (context, view, _) {
-        final copy = ExperienceCopy(view);
+        final copy = ExperienceCopy.of(context, view);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

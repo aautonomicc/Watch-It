@@ -750,7 +750,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                   child: Text(
-                    'Viewing style',
+                    ExperienceCopy.of(context).viewingStyle,
                     style: TextStyle(color: t.bone, fontSize: 15),
                   ),
                 ),

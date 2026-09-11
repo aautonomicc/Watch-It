@@ -1,12 +1,15 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:watchit/l10n/eco_corpus.dart';
 import 'package:watchit/services/experience_view.dart';
 import 'package:watchit/theme/tokens.dart';
 import 'package:watchit/widgets/receive_piece_dialog.dart';
+import 'package:watchit/widgets/skaists_bloom.dart';
 
 void main() {
   setUp(() {
@@ -42,6 +45,11 @@ void main() {
     expect(find.textContaining('Step 1'), findsNothing);
     expect(find.text('Add public Autonomi address'), findsNothing);
     expect(find.textContaining('64-character public XOR'), findsNothing);
+    expect(
+      find.byWidgetPredicate((w) =>
+          w is SkaistsBloom && w.moment == SkaistsBloomMoment.idle),
+      findsOneWidget,
+    );
   });
 
   testWidgets('New bee errors are human and recoverable', (tester) async {
@@ -83,6 +91,15 @@ void main() {
     expect(find.text('Not this one'), findsWidgets);
     expect(find.text('Add to library'), findsNothing);
     expect(find.text('Name this piece'), findsOneWidget);
+    expect(
+      find.textContaining('doesn’t let you give it away'),
+      findsOneWidget,
+    );
+    expect(
+      find.byWidgetPredicate((w) =>
+          w is SkaistsBloom && w.moment == SkaistsBloomMoment.idle),
+      findsOneWidget,
+    );
   });
 
   testWidgets('Keep pops the verified address and name', (tester) async {
@@ -140,5 +157,61 @@ void main() {
     expect(find.textContaining('HEAD /public/{address}'), findsOneWidget);
     expect(find.text('HEAD /public'), findsOneWidget);
     expect(find.text('Look it up'), findsNothing);
+    expect(
+      find.byWidgetPredicate((w) =>
+          w is SkaistsBloom && w.moment == SkaistsBloomMoment.still),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('Cypherpunk verify flashes and shows the rights boundary',
+      (tester) async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) async {
+      request.response.headers.contentLength = 1024;
+      await request.response.close();
+    });
+    addTearDown(() => server.close(force: true));
+
+    wiExperienceView.value = ExperienceView.cypherpunk;
+    await tester.pumpWidget(host(base: 'http://127.0.0.1:${server.port}'));
+    await tester.pump();
+
+    await tester.enterText(find.byType(TextField), 'ab' * 32);
+    await tester.tap(find.text('HEAD /public'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+
+    expect(find.textContaining('Verified public address'), findsOneWidget);
+    expect(find.textContaining('GET /public/{address}'), findsOneWidget);
+    expect(find.textContaining('public address ≠ redistribute permission'),
+        findsOneWidget);
+    expect(
+      find.byWidgetPredicate((w) =>
+          w is SkaistsBloom && w.moment == SkaistsBloomMoment.flash),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('New bee Latvian eco corpus reaches the receive sheet',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      locale: const Locale('lv'),
+      supportedLocales: kEcoLocales,
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: const Scaffold(
+        body: ReceivePieceDialog(base: 'http://127.0.0.1:1'),
+      ),
+    ));
+    await tester.pump();
+
+    expect(find.text('Kāda darba gabals'), findsOneWidget);
+    expect(find.text('Paskaties'), findsOneWidget);
+    expect(find.textContaining('1.'), findsNothing);
   });
 }

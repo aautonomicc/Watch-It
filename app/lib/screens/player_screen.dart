@@ -893,7 +893,7 @@ class _PublicPlaybackChrome extends StatelessWidget {
     return ValueListenableBuilder<ExperienceView>(
       valueListenable: wiExperienceView,
       builder: (context, view, _) {
-        final copy = ExperienceCopy(view);
+        final copy = ExperienceCopy.of(context, view);
         return DecoratedBox(
           decoration: BoxDecoration(
             color: Colors.black54,
