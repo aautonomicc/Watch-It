@@ -11,6 +11,7 @@ class MediaEntry {
     this.addedAt,
     this.sizeBytes,
     this.videoInfo,
+    this.renamedAt,
   });
 
   /// File name, preferably Plex/Jellyfin style
@@ -42,12 +43,30 @@ class MediaEntry {
   /// same title in different formats apart.
   final String? videoInfo;
 
+  /// When the entry was last renamed (epoch ms; null/0 = never). Every
+  /// rename — organize edits, album merges, track renumbers — stamps it
+  /// through [renamed] so My W@tch sync can merge renames
+  /// newest-name-wins across linked devices.
+  final int? renamedAt;
+
+  /// This entry under [newName], stamped as renamed at [at] (defaults to
+  /// now). Address, add time and file info carry through unchanged.
+  MediaEntry renamed(String newName, {int? at}) => MediaEntry(
+        name: newName,
+        address: address,
+        addedAt: addedAt,
+        sizeBytes: sizeBytes,
+        videoInfo: videoInfo,
+        renamedAt: at ?? DateTime.now().millisecondsSinceEpoch,
+      );
+
   Map<String, dynamic> toJson() => {
         'name': name,
         'address': address,
         if (addedAt != null) 'addedAt': addedAt,
         if (sizeBytes != null) 'sizeBytes': sizeBytes,
         if (videoInfo != null) 'videoInfo': videoInfo,
+        if (renamedAt != null && renamedAt != 0) 'renamedAt': renamedAt,
       };
 
   factory MediaEntry.fromJson(Map<String, dynamic> json) => MediaEntry(
@@ -56,8 +75,12 @@ class MediaEntry {
         addedAt: json['addedAt'] as int?,
         sizeBytes: json['sizeBytes'] as int?,
         videoInfo: json['videoInfo'] as String?,
+        renamedAt: json['renamedAt'] as int?,
       );
 }
+
+/// [MediaList.kind] value marking a playlist.
+const kListKindPlaylist = 'playlist';
 
 class MediaList {
   const MediaList({
@@ -68,6 +91,7 @@ class MediaList {
     this.channelPubkey,
     this.channelAuthor,
     this.channelAvatar,
+    this.kind,
   });
 
   final String id;
@@ -91,7 +115,14 @@ class MediaList {
   /// (`channel_avatar_<sha8>.img`), null when the channel has none.
   final String? channelAvatar;
 
+  /// [kListKindPlaylist] marks a playlist: an ordered set of individual
+  /// tracks rendered as track rows (never album-folded), listed in the
+  /// drawer's Playlists section instead of the home wall. Null = normal
+  /// media list.
+  final String? kind;
+
   bool get isChannel => channelPubkey != null;
+  bool get isPlaylist => kind == kListKindPlaylist;
 
   MediaList copyWith({
     String? title,
@@ -106,6 +137,7 @@ class MediaList {
         channelPubkey: channelPubkey,
         channelAuthor: channelAuthor,
         channelAvatar: channelAvatar,
+        kind: kind,
       );
 
   Map<String, dynamic> toJson() => {
@@ -116,6 +148,7 @@ class MediaList {
         if (channelPubkey != null) 'channelPubkey': channelPubkey,
         if (channelAuthor != null) 'channelAuthor': channelAuthor,
         if (channelAvatar != null) 'channelAvatar': channelAvatar,
+        if (kind != null) 'kind': kind,
       };
 
   factory MediaList.fromJson(Map<String, dynamic> json) => MediaList(
@@ -128,6 +161,7 @@ class MediaList {
         channelPubkey: json['channelPubkey'] as String?,
         channelAuthor: json['channelAuthor'] as String?,
         channelAvatar: json['channelAvatar'] as String?,
+        kind: json['kind'] as String?,
       );
 }
 

@@ -22,6 +22,7 @@ import '../services/import_review.dart';
 import '../services/library_store.dart';
 import '../services/list_import.dart';
 import '../services/metadata_service.dart';
+import '../services/organize.dart';
 import '../services/profile_transfer.dart';
 import '../theme/tokens.dart';
 import '../widgets/channel_avatar.dart';
@@ -29,6 +30,7 @@ import '../widgets/channel_badge.dart';
 import 'import_review_screen.dart';
 import 'list_edit_screen.dart';
 import 'list_home_screen.dart';
+import 'needs_sorting_screen.dart';
 import 'settings_screen.dart' show promptForText;
 
 /// Manage the whole home library in one place: every home row — the
@@ -1360,6 +1362,32 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
             style: TextStyle(fontSize: 11.5, color: t.ash),
           ),
         ),
+        // Unidentified/mis-named audio (the tester's "albums all over
+        // the place") gets its own bulk-sorting door, shown only while
+        // there is something to sort.
+        if (unsortedAudioEntries(lists) case final unsorted
+            when unsorted.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
+            child: ListTile(
+              leading: const Icon(Icons.rule_folder_outlined,
+                  color: WiTokens.channelAmber),
+              title: Text('Needs sorting',
+                  style: TextStyle(color: t.bone, fontSize: 14)),
+              subtitle: Text(
+                '${unsorted.length} audio '
+                '${unsorted.length == 1 ? 'file' : 'files'} outside any '
+                'album — move them into albums or playlists',
+                style: TextStyle(color: t.ash, fontSize: 11.5),
+              ),
+              trailing: Icon(Icons.chevron_right, color: t.ash),
+              onTap: () async {
+                await Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => const NeedsSortingScreen()));
+                await _reload();
+              },
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Text(

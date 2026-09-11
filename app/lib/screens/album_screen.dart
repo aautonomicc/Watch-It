@@ -1,33 +1,34 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:media_kit/media_kit.dart';
 
 import '../models/media_list.dart';
 import '../services/connectivity.dart';
 import '../services/download_manager.dart';
-import '../services/embedded_client.dart';
 import '../services/favourites.dart';
+import '../services/library_store.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
-import '../services/network_pause.dart';
-import '../services/network_policy.dart';
 import '../services/now_playing.dart';
+import '../services/play_queue.dart';
 import '../services/season_grouping.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
+import '../widgets/playlist_picker.dart';
 import 'detail_screen.dart';
 import 'edit_details_screen.dart';
+
+export '../services/play_queue.dart' show AlbumAudioPlayer;
 
 /// One album: big square cover art with the artist and track count, then
 /// the tracklist ordered by disc/track number.
 ///
 /// Tracks play RIGHT HERE — tapping a row starts inline audio playback
-/// with the cover art on show (a subtle glow pulse marks it playing) and
-/// a transport row: shuffle, previous, play/pause, next, favourite, and
-/// a seek bar. Finished tracks roll into the next automatically. The
+/// (a shared [PlayQueueController], also behind the playlist page) with
+/// the cover art on show (a subtle glow pulse marks it playing) and a
+/// transport row: shuffle, previous, play/pause, next, favourite, and a
+/// seek bar. Finished tracks roll into the next automatically. The
 /// per-track detail page (download, file info) stays reachable from
 /// each row's ⓘ button.
 class AlbumScreen extends StatefulWidget {
@@ -53,70 +54,22 @@ class AlbumScreen extends StatefulWidget {
   State<AlbumScreen> createState() => _AlbumScreenState();
 }
 
-/// The slice of media_kit's Player the album page uses — injectable so
-/// widget tests can fake playback.
-abstract class AlbumAudioPlayer {
-  Future<void> open(String url);
-  Future<void> playOrPause();
-  Future<void> seek(Duration position);
-  Stream<bool> get playingStream;
-  Stream<Duration> get positionStream;
-  Stream<Duration> get durationStream;
-
-  /// Emits true when the current track plays to its end.
-  Stream<bool> get completedStream;
-  Future<void> dispose();
-}
-
-class _MediaKitAlbumPlayer implements AlbumAudioPlayer {
-  final Player _player = Player();
-
-  @override
-  Future<void> open(String url) => _player.open(Media(url));
-  @override
-  Future<void> playOrPause() => _player.playOrPause();
-  @override
-  Future<void> seek(Duration position) => _player.seek(position);
-  @override
-  Stream<bool> get playingStream => _player.stream.playing;
-  @override
-  Stream<Duration> get positionStream => _player.stream.position;
-  @override
-  Stream<Duration> get durationStream => _player.stream.duration;
-  @override
-  Stream<bool> get completedStream => _player.stream.completed;
-  @override
-  Future<void> dispose() => _player.dispose();
-}
-
 class _AlbumScreenState extends State<AlbumScreen>
     with SingleTickerProviderStateMixin {
-  AlbumAudioPlayer? _player;
-  final List<StreamSubscription<Object?>> _subs = [];
+  late HomeAlbum _group = widget.group;
+  late final PlayQueueController _queue = PlayQueueController(
+    tracks: () => _group.tracks,
+    trackInfo: _trackInfo,
+    playerFactory: widget.playerFactory,
+    sourceOverride: widget.sourceOverride,
+    confirmCellular: () async =>
+        mounted && await confirmCellularStreaming(context) == true,
+    pauseDownloadsPrompt: () async =>
+        mounted && await maybePauseDownloadsForStreaming(context),
+    onMessage: _snack,
+  );
 
-  MediaEntry? _current;
-  bool _playing = false;
-  Duration _position = Duration.zero;
-  Duration _duration = Duration.zero;
-  bool _shuffle = false;
-
-  /// Addresses already played this shuffle pass — shuffle visits every
-  /// track once before the album ends.
-  final Set<String> _shuffled = {};
-
-  /// Play history for the previous button under shuffle.
-  final List<MediaEntry> _history = [];
-
-  /// Downloads paused for this page's streamed playback — resumed when
-  /// the page closes or playback stops at the album's end.
-  bool _pausedDownloads = false;
-
-  /// Throttle for the resume-point save, like PlayerScreen's.
-  DateTime _lastStateSave = DateTime.fromMillisecondsSinceEpoch(0);
-
-  /// The playing track already recorded as completed — the final
-  /// position save must not reopen it.
-  bool _trackCompleted = false;
+  bool _wasPlaying = false;
 
   late final AnimationController _glow = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 2200));
@@ -125,257 +78,79 @@ class _AlbumScreenState extends State<AlbumScreen>
   void initState() {
     super.initState();
     unawaited(FavouritesStore.instance.ensureLoaded());
+    _queue.addListener(_onQueue);
   }
 
   @override
   void dispose() {
-    _saveProgress();
     _glow.dispose();
-    for (final s in _subs) {
-      s.cancel();
-    }
-    unawaited(_player?.dispose());
-    NowPlaying.instance.clear(this);
-    NetworkPause.instance.setStreamingActive(this, false);
-    if (_pausedDownloads) {
-      unawaited(DownloadManager.instance.resumeAfterPlayback());
-    }
+    _queue.removeListener(_onQueue);
+    _queue.dispose();
     super.dispose();
   }
 
-  AlbumAudioPlayer _ensurePlayer() {
-    final existing = _player;
-    if (existing != null) return existing;
-    final player =
-        (widget.playerFactory ?? _MediaKitAlbumPlayer.new).call();
-    _player = player;
-    _subs.addAll([
-      player.playingStream.listen((playing) {
-        // Feeds the idle auto-pause (see NetworkPause): audio playing
-        // here counts as network activity like the video player's.
-        NetworkPause.instance.setStreamingActive(this, playing);
-        // …and the media notification's play/pause state.
-        NowPlaying.instance.updatePlayback(this, playing: playing);
-        if (!mounted) return;
-        setState(() => _playing = playing);
-        playing
-            ? _glow.repeat(reverse: true)
-            : _glow.animateBack(0, duration: const Duration(milliseconds: 400));
-      }),
-      player.positionStream.listen((pos) {
-        NowPlaying.instance.updatePlayback(this, position: pos);
-        if (mounted) setState(() => _position = pos);
-        // Throttled resume-point save — tracks played here reach
-        // Continue Watching like anything played in PlayerScreen; the
-        // final position is saved in dispose.
-        final now = DateTime.now();
-        if (pos > Duration.zero &&
-            now.difference(_lastStateSave) >= const Duration(seconds: 5)) {
-          _lastStateSave = now;
-          _saveProgress();
-        }
-      }),
-      player.durationStream.listen((dur) {
-        NowPlaying.instance.updatePlayback(this, duration: dur);
-        if (mounted) setState(() => _duration = dur);
-      }),
-      player.completedStream.listen((done) {
-        if (done) _onTrackCompleted();
-      }),
-    ]);
-    return player;
-  }
-
-  /// Record the playing track's resume point (skipped once its end was
-  /// recorded, and before any real progress — a tap-and-close must not
-  /// wipe an existing resume point).
-  void _saveProgress() {
-    final current = _current;
-    if (current == null || _trackCompleted || _position <= Duration.zero) {
-      return;
-    }
-    unawaited(WatchStateStore.instance
-        .record(current, position: _position, duration: _duration));
-  }
-
-  ({String url, bool local})? _sourceFor(MediaEntry e) {
-    final override = widget.sourceOverride;
-    if (override != null) return override(e);
-    final local = DownloadManager.instance.localPathIfDone(e);
-    if (local != null) return (url: local, local: true);
-    final url = streamUrl(EmbeddedClient.baseUrl(), e);
-    return url == null ? null : (url: url, local: false);
-  }
-
-  Future<void> _playTrack(MediaEntry entry) async {
-    final source = _sourceFor(entry);
-    if (source == null) {
-      _snack('The built-in Autonomi client is not available.');
-      return;
-    }
-    if (!source.local) {
-      // Mobile-data policy (Settings → Network), then the shared
-      // pause-downloads-while-streaming preference.
-      final gate = await streamingGateNow();
-      if (gate == StreamingGate.block) {
-        _snack("You're on mobile data — streaming is set to Wi-Fi only "
-            '(Settings → Network)');
-        return;
-      }
-      if (gate == StreamingGate.ask) {
-        if (!mounted) return;
-        if (await confirmCellularStreaming(context) != true) return;
-        CellularStreamingConsent.granted = true;
-      }
-      if (!mounted) return;
-      if (!_pausedDownloads && DownloadManager.instance.hasActive) {
-        _pausedDownloads = await maybePauseDownloadsForStreaming(context);
-      }
-    }
+  void _onQueue() {
     if (!mounted) return;
-    final player = _ensurePlayer();
-    setState(() {
-      _current = entry;
-      _position = Duration.zero;
-      _duration = Duration.zero;
-    });
-    _trackCompleted = false;
-    _shuffled.add(entry.address);
-    if (_history.isEmpty || _history.last.address != entry.address) {
-      _history.add(entry);
+    setState(() {});
+    if (_queue.playing != _wasPlaying) {
+      _wasPlaying = _queue.playing;
+      _queue.playing
+          ? _glow.repeat(reverse: true)
+          : _glow.animateBack(0,
+              duration: const Duration(milliseconds: 400));
     }
-    _feedNowPlaying(entry);
-    // Lift an idle auto-pause before the stream request hits the core.
-    await NetworkPause.instance.noteActivity();
-    await player.open(source.url);
   }
 
-  /// Hand the media notification (lock-screen controls, headset buttons)
-  /// this track's info and this page's transport as its handlers.
-  void _feedNowPlaying(MediaEntry entry) {
+  /// What the media notification shows for [entry].
+  NowPlayingTrack _trackInfo(MediaEntry entry) {
     final meta = MetadataService.instance.metadataFor(entry);
     final parsed = parseMediaName(entry.name);
     final albumMeta =
-        MetadataService.instance.metadataFor(widget.group.tracks.first);
+        MetadataService.instance.metadataFor(_group.tracks.first);
     final credit = albumMeta.albumArtist ??
-        (widget.group.isCompilation
-            ? widget.group.artist
-            : albumMeta.artist ?? widget.group.artist);
-    NowPlaying.instance.setTrack(
-      this,
-      NowPlayingTrack(
-        title: episodeNameFromLabel(meta.episodeLabel) ??
-            parsed.trackTitle ??
-            entry.name,
-        artist: meta.trackArtist ?? credit,
-        album: albumMeta.title.isEmpty ? widget.group.album : albumMeta.title,
-        // The playing track's own art beats the album cover, like the
-        // page's header.
-        artworkPath: meta.episodePosterFilePath ?? meta.posterFilePath,
-      ),
-      handlers: NowPlayingHandlers(
-        onPlay: () {
-          if (!_playing) unawaited(_player?.playOrPause());
-        },
-        onPause: () {
-          if (_playing) unawaited(_player?.playOrPause());
-        },
-        onNext: _skipNext,
-        onPrevious: _skipPrevious,
-        onSeek: (pos) => unawaited(_player?.seek(pos)),
-        onStop: () {
-          if (_playing) unawaited(_player?.playOrPause());
-        },
-      ),
-      canNext: true,
-      canPrev: true,
+        (_group.isCompilation
+            ? _group.artist
+            : albumMeta.artist ?? _group.artist);
+    return NowPlayingTrack(
+      title: episodeNameFromLabel(meta.episodeLabel) ??
+          parsed.trackTitle ??
+          entry.name,
+      artist: meta.trackArtist ?? credit,
+      album: albumMeta.title.isEmpty ? _group.album : albumMeta.title,
+      // The playing track's own art beats the album cover, like the
+      // page's header.
+      artworkPath: meta.episodePosterFilePath ?? meta.posterFilePath,
     );
   }
 
-  /// The track after [entry] in album order, or an unplayed random one
-  /// under shuffle; null when the album is done.
-  MediaEntry? _nextTrack() {
-    final tracks = widget.group.tracks;
-    if (_shuffle) {
-      final left = [
-        for (final e in tracks)
-          if (!_shuffled.contains(e.address)) e,
-      ];
-      if (left.isEmpty) return null;
-      return left[Random().nextInt(left.length)];
-    }
-    final current = _current;
-    if (current == null) return tracks.first;
-    final i = tracks.indexWhere((e) => e.address == current.address);
-    if (i < 0 || i + 1 >= tracks.length) return null;
-    return tracks[i + 1];
-  }
-
-  void _onTrackCompleted() {
-    // Reaching the end marks the track watched (completed music never
-    // clutters Continue Watching — only partial listens resume there).
-    final finished = _current;
-    if (finished != null && !_trackCompleted) {
-      _trackCompleted = true;
-      unawaited(WatchStateStore.instance
-          .markCompleted(finished, duration: _duration));
-    }
-    final next = _nextTrack();
-    if (next != null) {
-      unawaited(_playTrack(next));
-      return;
-    }
-    // Album finished: reset the shuffle pass and give downloads the
-    // network back.
-    _shuffled.clear();
-    if (_pausedDownloads) {
-      _pausedDownloads = false;
-      unawaited(DownloadManager.instance.resumeAfterPlayback());
-    }
-  }
-
-  void _skipNext() {
-    final next = _nextTrack();
-    if (next != null) unawaited(_playTrack(next));
-  }
-
-  /// Previous: restart the track a few seconds in, else step back —
-  /// through the play history under shuffle, by album order otherwise.
-  void _skipPrevious() {
-    if (_position > const Duration(seconds: 3)) {
-      unawaited(_player?.seek(Duration.zero));
-      return;
-    }
-    if (_shuffle) {
-      if (_history.length < 2) {
-        unawaited(_player?.seek(Duration.zero));
-        return;
+  /// Re-derive this album's fold from the library — after an edit the
+  /// album may have been renamed/merged (the fold reads file names), so
+  /// the page must not keep showing the stale pre-edit group. When the
+  /// album's tracks are nowhere to be found any more, back out.
+  Future<void> _reloadGroup() async {
+    final addresses = {
+      for (final e in _group.tracks) e.address.toLowerCase(),
+    };
+    final lists = await LibraryStore.load();
+    HomeAlbum? found;
+    for (final l in lists) {
+      if (l.isChannel || l.isPlaylist) continue;
+      for (final item in groupSeasons(l.entries)) {
+        if (item is! HomeAlbum) continue;
+        if (item.tracks
+            .any((e) => addresses.contains(e.address.toLowerCase()))) {
+          found = item;
+          break;
+        }
       }
-      _history.removeLast();
-      final prev = _history.removeLast();
-      _shuffled.remove(prev.address);
-      unawaited(_playTrack(prev));
+      if (found != null) break;
+    }
+    if (!mounted) return;
+    if (found == null) {
+      Navigator.of(context).pop();
       return;
     }
-    final tracks = widget.group.tracks;
-    final current = _current;
-    final i = current == null
-        ? -1
-        : tracks.indexWhere((e) => e.address == current.address);
-    if (i > 0) {
-      unawaited(_playTrack(tracks[i - 1]));
-    } else {
-      unawaited(_player?.seek(Duration.zero));
-    }
-  }
-
-  void _toggleShuffle() {
-    setState(() {
-      _shuffle = !_shuffle;
-      _shuffled
-        ..clear()
-        ..addAll(_current == null ? const [] : [_current!.address]);
-    });
+    setState(() => _group = found!);
   }
 
   void _snack(String message) {
@@ -414,7 +189,8 @@ class _AlbumScreenState extends State<AlbumScreen>
 
   Widget _build(BuildContext context) {
     final t = WiTokens.of(context);
-    final group = widget.group;
+    final group = _group;
+    final current = _queue.current;
     // Any track's match carries the album title, year, and cover art.
     final meta = MetadataService.instance.metadataFor(group.tracks.first);
     final title = meta.title.isEmpty ? group.album : meta.title;
@@ -444,19 +220,29 @@ class _AlbumScreenState extends State<AlbumScreen>
             overflow: TextOverflow.ellipsis),
         actions: [
           IconButton(
+            tooltip: 'Add album to playlist',
+            icon: Icon(Icons.playlist_add, color: t.boneDim, size: 22),
+            onPressed: () =>
+                unawaited(addToPlaylistFlow(context, group.tracks)),
+          ),
+          IconButton(
             tooltip: 'Edit album details',
             icon: Icon(Icons.edit_outlined, color: t.boneDim, size: 20),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                // Any track reaches the shared album row; an album/year
-                // rename refolds on the wall when this page is
-                // re-entered.
-                builder: (_) => EditDetailsScreen(
-                    entry: group.tracks.first,
-                    scope: EditDetailsScope.album,
-                    albumIsCompilation: group.isCompilation),
-              ),
-            ),
+            onPressed: () async {
+              // Awaited so a rename/merge refolds THIS page immediately
+              // (the fold reads file names; the old group is stale the
+              // moment Save renames anything).
+              await Navigator.of(context).push(
+                MaterialPageRoute(
+                  // Any track reaches the shared album row.
+                  builder: (_) => EditDetailsScreen(
+                      entry: group.tracks.first,
+                      scope: EditDetailsScope.album,
+                      albumIsCompilation: group.isCompilation),
+                ),
+              );
+              await _reloadGroup();
+            },
           ),
         ],
       ),
@@ -469,10 +255,10 @@ class _AlbumScreenState extends State<AlbumScreen>
             // album cover for tracks without any).
             poster: _cover(
                 t,
-                _current == null
+                current == null
                     ? posterImage(meta, fit: BoxFit.cover)
                     : entryPosterImage(
-                        MetadataService.instance.metadataFor(_current!),
+                        MetadataService.instance.metadataFor(current),
                         fit: BoxFit.cover)),
             info: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -495,14 +281,14 @@ class _AlbumScreenState extends State<AlbumScreen>
                   style: TextStyle(fontSize: 13, color: t.boneDim),
                 ),
                 const SizedBox(height: 16),
-                if (_current == null)
+                if (current == null)
                   FilledButton.icon(
-                    onPressed: () =>
-                        unawaited(_playTrack(_nextTrack() ?? group.tracks.first)),
+                    onPressed: () => unawaited(_queue
+                        .playTrack(_queue.nextTrack() ?? group.tracks.first)),
                     icon: const Icon(Icons.play_arrow, size: 20),
                     label: const Text('Play album'),
                   ),
-                if (_current == null) const SizedBox(height: 10),
+                if (current == null) const SizedBox(height: 10),
                 if (remaining.isEmpty)
                   OutlinedButton.icon(
                     onPressed: null,
@@ -529,7 +315,7 @@ class _AlbumScreenState extends State<AlbumScreen>
               ],
             ),
           ),
-          if (_current != null) ...[
+          if (current != null) ...[
             const SizedBox(height: 20),
             _nowPlaying(t),
           ],
@@ -591,7 +377,7 @@ class _AlbumScreenState extends State<AlbumScreen>
 
   /// Seek bar + transport controls for the playing track.
   Widget _nowPlaying(WiTokens t) {
-    final current = _current!;
+    final current = _queue.current!;
     final parsed = parseMediaName(current.name);
     // The playing track's own credit (per-track edit or file-name
     // artist), so compilation tracks and corrected credits show as
@@ -599,7 +385,9 @@ class _AlbumScreenState extends State<AlbumScreen>
     final currentMeta = MetadataService.instance.metadataFor(current);
     final artist = currentMeta.trackArtist;
     final fav = FavouritesStore.instance.isFavourite(current.address);
-    final maxMs = _duration.inMilliseconds;
+    final position = _queue.position;
+    final duration = _queue.duration;
+    final maxMs = duration.inMilliseconds;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -624,7 +412,7 @@ class _AlbumScreenState extends State<AlbumScreen>
         const SizedBox(height: 2),
         Row(
           children: [
-            Text(_clock(_position),
+            Text(_clock(position),
                 style: TextStyle(
                     fontSize: 11,
                     color: t.ash,
@@ -634,19 +422,17 @@ class _AlbumScreenState extends State<AlbumScreen>
               child: Slider(
                 value: maxMs == 0
                     ? 0
-                    : _position.inMilliseconds
-                        .clamp(0, maxMs)
-                        .toDouble(),
+                    : position.inMilliseconds.clamp(0, maxMs).toDouble(),
                 max: maxMs == 0 ? 1 : maxMs.toDouble(),
                 activeColor: t.accent,
                 inactiveColor: t.ink2,
                 onChanged: maxMs == 0
                     ? null
-                    : (v) => unawaited(_player
-                        ?.seek(Duration(milliseconds: v.round()))),
+                    : (v) => unawaited(
+                        _queue.seek(Duration(milliseconds: v.round()))),
               ),
             ),
-            Text(_clock(_duration),
+            Text(_clock(duration),
                 style: TextStyle(
                     fontSize: 11,
                     color: t.ash,
@@ -658,30 +444,30 @@ class _AlbumScreenState extends State<AlbumScreen>
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             IconButton(
-              tooltip: _shuffle ? 'Shuffle off' : 'Shuffle',
-              onPressed: _toggleShuffle,
+              tooltip: _queue.shuffle ? 'Shuffle off' : 'Shuffle',
+              onPressed: _queue.toggleShuffle,
               icon: Icon(Icons.shuffle,
-                  size: 22, color: _shuffle ? t.accent : t.ash),
+                  size: 22, color: _queue.shuffle ? t.accent : t.ash),
             ),
             const SizedBox(width: 4),
             IconButton(
               tooltip: 'Previous track',
-              onPressed: _skipPrevious,
+              onPressed: _queue.skipPrevious,
               icon: Icon(Icons.skip_previous, size: 30, color: t.bone),
             ),
             IconButton.filled(
-              tooltip: _playing ? 'Pause' : 'Play',
+              tooltip: _queue.playing ? 'Pause' : 'Play',
               style: IconButton.styleFrom(
                 backgroundColor: t.accent,
                 foregroundColor: t.ink,
               ),
-              onPressed: () => unawaited(_player?.playOrPause()),
-              icon: Icon(_playing ? Icons.pause : Icons.play_arrow,
+              onPressed: () => unawaited(_queue.playOrPause()),
+              icon: Icon(_queue.playing ? Icons.pause : Icons.play_arrow,
                   size: 30),
             ),
             IconButton(
               tooltip: 'Next track',
-              onPressed: _skipNext,
+              onPressed: _queue.skipNext,
               icon: Icon(Icons.skip_next, size: 30, color: t.bone),
             ),
             const SizedBox(width: 4),
@@ -716,9 +502,9 @@ class _AlbumScreenState extends State<AlbumScreen>
     final downloaded =
         DownloadManager.instance.taskFor(entry.address)?.status ==
             DownloadStatus.done;
-    final isCurrent = _current?.address == entry.address;
+    final isCurrent = _queue.current?.address == entry.address;
     return InkWell(
-      onTap: () => unawaited(_playTrack(entry)),
+      onTap: () => unawaited(_queue.playTrack(entry)),
       borderRadius: BorderRadius.circular(6),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
@@ -770,10 +556,14 @@ class _AlbumScreenState extends State<AlbumScreen>
             IconButton(
               tooltip: 'Track details',
               visualDensity: VisualDensity.compact,
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                    builder: (_) => DetailScreen(entry: entry)),
-              ),
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                      builder: (_) => DetailScreen(entry: entry)),
+                );
+                // A track edit can rename/refold this very album.
+                await _reloadGroup();
+              },
               icon: Icon(Icons.info_outline, size: 16, color: t.ash),
             ),
           ],

@@ -6,6 +6,7 @@ export 'package:watchit_naming/watchit_naming.dart'
     show
         ParsedName,
         parseMediaName,
+        musicFileName,
         renumberedMusicFileName,
         realbumedMusicFileName,
         sanitizeNamePart;

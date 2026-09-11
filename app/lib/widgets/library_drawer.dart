@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
 import '../screens/list_home_screen.dart';
+import '../screens/playlist_screen.dart';
 import '../screens/settings_screen.dart';
 import '../services/app_settings.dart';
 import '../services/home_sections.dart';
@@ -99,6 +100,30 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
     navigator.push(MaterialPageRoute<void>(builder: (_) => page));
   }
 
+  void _openPlaylist(MediaList list) {
+    final navigator = Navigator.of(context);
+    if (!widget.pinned) navigator.pop();
+    if (list.id == widget.currentListId) return;
+    final route = MaterialPageRoute<void>(
+        builder: (_) => PlaylistScreen(playlistId: list.id));
+    if (widget.currentListId != null) {
+      navigator.pushReplacement(route);
+    } else {
+      navigator.push(route);
+    }
+  }
+
+  Future<void> _newPlaylist() async {
+    final title = await promptForText(context,
+        title: 'New playlist', hint: 'Playlist name');
+    if (title == null || title.trim().isEmpty || !mounted) return;
+    final playlist = await createPlaylist(title.trim());
+    if (!mounted) return;
+    await _load();
+    if (!mounted) return;
+    _openPlaylist(playlist);
+  }
+
   /// Channel rows lead with the channel's mini avatar (podcasts-icon
   /// fallback keeps the old look); plain lists keep the library icon.
   Widget _leadingFor(MediaList list, WiTokens t) => list.isChannel
@@ -186,6 +211,51 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                       ),
                       onTap: () => _openList(list),
                     ),
+                // Playlists get their own section below Library: they
+                // are ordered track sets, not wall shelves, so they
+                // never appear on the home wall (2026-09-11 decision).
+                if (_lists != null) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Text(
+                      'Playlists',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.2,
+                        color: t.ash,
+                      ),
+                    ),
+                  ),
+                  for (final list in _lists!)
+                    if (list.isPlaylist)
+                      ListTile(
+                        dense: true,
+                        selected: list.id == widget.currentListId,
+                        selectedTileColor: t.ink2,
+                        leading: Icon(Icons.queue_music,
+                            color: list.id == widget.currentListId
+                                ? t.accent
+                                : t.boneDim,
+                            size: 20),
+                        title: Text(
+                          list.title,
+                          style: TextStyle(color: t.bone, fontSize: 14),
+                        ),
+                        trailing: Text(
+                          '${list.entries.length}',
+                          style: TextStyle(color: t.ash, fontSize: 12),
+                        ),
+                        onTap: () => _openPlaylist(list),
+                      ),
+                  ListTile(
+                    dense: true,
+                    leading: Icon(Icons.add, color: t.boneDim, size: 20),
+                    title: Text('New playlist',
+                        style: TextStyle(color: t.boneDim, fontSize: 14)),
+                    onTap: _newPlaylist,
+                  ),
+                ],
                 Divider(color: t.line, height: 24),
                 // My Media, Channels, My W@tch, Upload, and Downloads
                 // live under Settings → CONTENT — the drawer is slimmed

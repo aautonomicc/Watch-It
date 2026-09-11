@@ -14,6 +14,7 @@ import '../services/ffmpeg.dart';
 import '../services/library_store.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
+import '../services/organize.dart';
 import '../services/season_grouping.dart'
     show AlbumKeys, episodeNameFromLabel;
 import '../services/user_metadata.dart';
@@ -91,6 +92,11 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
   late final TextEditingController _track;
   late final TextEditingController _disc;
 
+  /// Unsorted-audio scope only: the target album of the organize move
+  /// (the Title field stays the track's own title there).
+  late final TextEditingController _organizeAlbum =
+      TextEditingController();
+
   /// The entry's current metadata at open time — prefills the fields.
   late final MediaMetadata _meta;
   late final ParsedName _parsed;
@@ -143,6 +149,15 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
   /// Either music editor — they share the Artist/Album/Year fields and
   /// the album/year rename semantics.
   bool get _musicScope => _trackScope || _albumScope;
+
+  /// An audio file whose name does NOT follow the track convention (an
+  /// unidentified track, a mix): it belongs to no album, and its editor
+  /// gains the organize fields — filling in artist + album renames the
+  /// file into `Artist - Album (Year) - NN Title` so it folds into that
+  /// album for real (fixes "renaming does nothing").
+  bool get _unsortedAudioScope => _scope == EditDetailsScope.entry &&
+      _parsed.isAudio &&
+      !_parsed.isTrack;
 
   @override
   void initState() {
@@ -226,6 +241,7 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     _trackTitle.dispose();
     _track.dispose();
     _disc.dispose();
+    _organizeAlbum.dispose();
     super.dispose();
   }
 
@@ -347,6 +363,23 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     var lookupKey = _lookupKey;
     var entry = widget.entry;
     String? carriedPoster;
+    if (_unsortedAudioScope) {
+      // Filling in artist + album moves the file into that album: Save
+      // RENAMES the entry into the track naming convention (the album
+      // fold reads file names, so this is the only edit that actually
+      // moves it). Left empty, the save below stays display-only.
+      final artistText = _artist.text.trim();
+      final albumText = _organizeAlbum.text.trim();
+      if (artistText.isEmpty != albumText.isEmpty) {
+        _failSave('To move this file into an album, fill in BOTH the '
+            'artist and the album (year and track number are optional).');
+        return;
+      }
+      if (artistText.isNotEmpty && albumText.isNotEmpty) {
+        await _saveOrganize(artistText, albumText, text);
+        return;
+      }
+    }
     if (_trackScope) {
       final track = int.tryParse(_track.text.trim());
       final disc = _disc.text.trim().isEmpty
@@ -474,6 +507,64 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
     setState(() => _saving = false);
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// The unsorted-audio organize save: rename the entry into
+  /// `Artist - Album (Year) - NN Title` (the typed Title is the track
+  /// title), then land the typed description on the album's shared row
+  /// and any staged artwork on the track's own row — the same rows the
+  /// track editor would write once the entry parses as a track.
+  Future<void> _saveOrganize(
+      String artist, String album, String title) async {
+    final yearText = _year.text.trim();
+    final year = yearText.isEmpty ? null : int.tryParse(yearText);
+    if (yearText.isNotEmpty && year == null) {
+      _failSave('Year must be a number.');
+      return;
+    }
+    final trackText = _track.text.trim();
+    final track = trackText.isEmpty ? null : int.tryParse(trackText);
+    if (trackText.isNotEmpty && track == null) {
+      _failSave('Track number must be a number.');
+      return;
+    }
+    final plan = await planOrganize(
+      [widget.entry],
+      artist: artist,
+      album: album,
+      year: year,
+      tracks: track == null ? null : [track],
+      titles: [title],
+    );
+    if (plan.error != null) {
+      _failSave(plan.error!);
+      return;
+    }
+    await applyOrganize(plan.items,
+        postersDirProvider: widget.postersDirProvider);
+    final newParsed = parseMediaName(plan.items.single.newName);
+    final overview = _overview.text.trim();
+    if (overview.isNotEmpty) {
+      await saveUserDetails(
+        lookupKey: albumLookupKey(newParsed)!,
+        title: newParsed.title,
+        year: newParsed.year,
+        overview: overview,
+        postersDirProvider: widget.postersDirProvider,
+      );
+    }
+    if (_newPosterBytes != null) {
+      final trackKey = trackLookupKey(newParsed)!;
+      final saved = await saveUserPoster(trackKey, _newPosterBytes!,
+          postersDirProvider: widget.postersDirProvider);
+      await saveUserDetails(
+        lookupKey: trackKey,
+        title: newParsed.title,
+        posterFile: Value(saved),
+        postersDirProvider: widget.postersDirProvider,
+      );
+    }
+    if (mounted) Navigator.of(context).pop(true);
   }
 
   /// Everything scoped to this one track — its own title, artist
@@ -808,7 +899,8 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
             TextField(
               controller: _title,
               style: TextStyle(color: t.bone, fontSize: 14),
-              decoration: _fieldDecoration(t, 'Title'),
+              decoration: _fieldDecoration(
+                  t, _unsortedAudioScope ? 'Track title' : 'Title'),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -818,6 +910,49 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
               decoration: _fieldDecoration(t, 'Year (optional)'),
             ),
             const SizedBox(height: 12),
+            if (_unsortedAudioScope) ...[
+              const SizedBox(height: 8),
+              Text('MOVE INTO AN ALBUM',
+                  style: TextStyle(
+                      fontSize: 11,
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.w700,
+                      color: t.ash)),
+              const SizedBox(height: 4),
+              Text(
+                'This audio file\'s name doesn\'t follow the track '
+                'pattern, so it belongs to no album. Fill in the artist '
+                'and album (year and track number are optional) and '
+                'Save renames the file to '
+                '"Artist - Album (Year) - NN Title" — it then appears '
+                'inside that album like any other track. Leave these '
+                'empty to keep it as a standalone file.',
+                style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _artist,
+                style: TextStyle(color: t.bone, fontSize: 14),
+                decoration: _fieldDecoration(t, 'Artist'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _organizeAlbum,
+                style: TextStyle(color: t.bone, fontSize: 14),
+                decoration: _fieldDecoration(t, 'Album'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _track,
+                keyboardType: TextInputType.number,
+                style: TextStyle(color: t.bone, fontSize: 14),
+                decoration: _fieldDecoration(
+                    t, 'Track number (optional)',
+                    helper: 'Empty = the next free number in that '
+                        'album.'),
+              ),
+              const SizedBox(height: 12),
+            ],
           ],
           TextField(
             controller: _overview,
@@ -919,16 +1054,7 @@ Future<RenumberResult> renumberTrackEntry(
   await LibraryStore.save([
     for (final l in lists)
       l.copyWith(entries: [
-        for (final e in l.entries)
-          isSelf(e)
-              ? MediaEntry(
-                  name: newName,
-                  address: e.address,
-                  addedAt: e.addedAt,
-                  sizeBytes: e.sizeBytes,
-                  videoInfo: e.videoInfo,
-                )
-              : e,
+        for (final e in l.entries) isSelf(e) ? e.renamed(newName) : e,
       ]),
   ]);
   // The per-track override row's key embeds the number — move it.
@@ -1103,15 +1229,7 @@ Future<AlbumRenameResult> renameTrackAlbum(
     for (final l in lists)
       l.copyWith(entries: [
         for (final e in l.entries)
-          isMoved(e)
-              ? MediaEntry(
-                  name: renames[e.name]!,
-                  address: e.address,
-                  addedAt: e.addedAt,
-                  sizeBytes: e.sizeBytes,
-                  videoInfo: e.videoInfo,
-                )
-              : e,
+          isMoved(e) ? e.renamed(renames[e.name]!) : e,
       ]),
   ]);
   // Per-track override rows key on the album — move them along, with
