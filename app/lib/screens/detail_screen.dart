@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'media_credits_screen.dart';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -699,6 +700,16 @@ class _DetailScreenState extends State<DetailScreen> {
             ),
           ),
           const SizedBox(height: 20),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.attribution_outlined),
+              label: const Text('Credits & source'),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => MediaCreditsScreen(entry: entry))),
+            ),
+          ),
+          const SizedBox(height: 16),
           if (meta.overview != null)
             Text(
               meta.overview!,

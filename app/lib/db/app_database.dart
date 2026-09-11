@@ -207,6 +207,16 @@ class Downloads extends Table {
   Set<Column> get primaryKey => {address};
 }
 
+/// Portable attribution, keyed by file identity independently of TMDB matches.
+@DataClassName('MediaCreditRecordRow')
+class MediaCreditRecords extends Table {
+  TextColumn get address => text()();
+  TextColumn get recordJson => text()();
+
+  @override
+  Set<Column> get primaryKey => {address};
+}
+
 @DriftDatabase(
   tables: [
     MediaLists,
@@ -216,6 +226,7 @@ class Downloads extends Table {
     Downloads,
     Profiles,
     ProfileListAccess,
+    MediaCreditRecords,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -235,11 +246,12 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onUpgrade: (m, from, to) async {
+      if (from < 14) await m.createTable(mediaCreditRecords);
       if (from < 2) await m.createTable(metadataCache); // alpha.23
       if (from < 3) {
         // alpha.25: per-list home-screen visibility toggle.

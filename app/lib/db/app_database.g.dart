@@ -3859,6 +3859,228 @@ class ProfileListAccessCompanion extends UpdateCompanion<ProfileListAccessRow> {
   }
 }
 
+class $MediaCreditRecordsTable extends MediaCreditRecords
+    with TableInfo<$MediaCreditRecordsTable, MediaCreditRecordRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $MediaCreditRecordsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _addressMeta = const VerificationMeta(
+    'address',
+  );
+  @override
+  late final GeneratedColumn<String> address = GeneratedColumn<String>(
+    'address',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _recordJsonMeta = const VerificationMeta(
+    'recordJson',
+  );
+  @override
+  late final GeneratedColumn<String> recordJson = GeneratedColumn<String>(
+    'record_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [address, recordJson];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'media_credit_records';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<MediaCreditRecordRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('address')) {
+      context.handle(
+        _addressMeta,
+        address.isAcceptableOrUnknown(data['address']!, _addressMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_addressMeta);
+    }
+    if (data.containsKey('record_json')) {
+      context.handle(
+        _recordJsonMeta,
+        recordJson.isAcceptableOrUnknown(data['record_json']!, _recordJsonMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_recordJsonMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {address};
+  @override
+  MediaCreditRecordRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return MediaCreditRecordRow(
+      address: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}address'],
+      )!,
+      recordJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}record_json'],
+      )!,
+    );
+  }
+
+  @override
+  $MediaCreditRecordsTable createAlias(String alias) {
+    return $MediaCreditRecordsTable(attachedDatabase, alias);
+  }
+}
+
+class MediaCreditRecordRow extends DataClass
+    implements Insertable<MediaCreditRecordRow> {
+  final String address;
+  final String recordJson;
+  const MediaCreditRecordRow({required this.address, required this.recordJson});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['address'] = Variable<String>(address);
+    map['record_json'] = Variable<String>(recordJson);
+    return map;
+  }
+
+  MediaCreditRecordsCompanion toCompanion(bool nullToAbsent) {
+    return MediaCreditRecordsCompanion(
+      address: Value(address),
+      recordJson: Value(recordJson),
+    );
+  }
+
+  factory MediaCreditRecordRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return MediaCreditRecordRow(
+      address: serializer.fromJson<String>(json['address']),
+      recordJson: serializer.fromJson<String>(json['recordJson']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'address': serializer.toJson<String>(address),
+      'recordJson': serializer.toJson<String>(recordJson),
+    };
+  }
+
+  MediaCreditRecordRow copyWith({String? address, String? recordJson}) =>
+      MediaCreditRecordRow(
+        address: address ?? this.address,
+        recordJson: recordJson ?? this.recordJson,
+      );
+  MediaCreditRecordRow copyWithCompanion(MediaCreditRecordsCompanion data) {
+    return MediaCreditRecordRow(
+      address: data.address.present ? data.address.value : this.address,
+      recordJson: data.recordJson.present
+          ? data.recordJson.value
+          : this.recordJson,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MediaCreditRecordRow(')
+          ..write('address: $address, ')
+          ..write('recordJson: $recordJson')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(address, recordJson);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is MediaCreditRecordRow &&
+          other.address == this.address &&
+          other.recordJson == this.recordJson);
+}
+
+class MediaCreditRecordsCompanion
+    extends UpdateCompanion<MediaCreditRecordRow> {
+  final Value<String> address;
+  final Value<String> recordJson;
+  final Value<int> rowid;
+  const MediaCreditRecordsCompanion({
+    this.address = const Value.absent(),
+    this.recordJson = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  MediaCreditRecordsCompanion.insert({
+    required String address,
+    required String recordJson,
+    this.rowid = const Value.absent(),
+  }) : address = Value(address),
+       recordJson = Value(recordJson);
+  static Insertable<MediaCreditRecordRow> custom({
+    Expression<String>? address,
+    Expression<String>? recordJson,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (address != null) 'address': address,
+      if (recordJson != null) 'record_json': recordJson,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  MediaCreditRecordsCompanion copyWith({
+    Value<String>? address,
+    Value<String>? recordJson,
+    Value<int>? rowid,
+  }) {
+    return MediaCreditRecordsCompanion(
+      address: address ?? this.address,
+      recordJson: recordJson ?? this.recordJson,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (address.present) {
+      map['address'] = Variable<String>(address.value);
+    }
+    if (recordJson.present) {
+      map['record_json'] = Variable<String>(recordJson.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MediaCreditRecordsCompanion(')
+          ..write('address: $address, ')
+          ..write('recordJson: $recordJson, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3870,6 +4092,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $ProfilesTable profiles = $ProfilesTable(this);
   late final $ProfileListAccessTable profileListAccess =
       $ProfileListAccessTable(this);
+  late final $MediaCreditRecordsTable mediaCreditRecords =
+      $MediaCreditRecordsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -3882,6 +4106,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     downloads,
     profiles,
     profileListAccess,
+    mediaCreditRecords,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -6005,6 +6230,164 @@ typedef $$ProfileListAccessTableProcessedTableManager =
       ProfileListAccessRow,
       PrefetchHooks Function()
     >;
+typedef $$MediaCreditRecordsTableCreateCompanionBuilder =
+    MediaCreditRecordsCompanion Function({
+      required String address,
+      required String recordJson,
+      Value<int> rowid,
+    });
+typedef $$MediaCreditRecordsTableUpdateCompanionBuilder =
+    MediaCreditRecordsCompanion Function({
+      Value<String> address,
+      Value<String> recordJson,
+      Value<int> rowid,
+    });
+
+class $$MediaCreditRecordsTableFilterComposer
+    extends Composer<_$AppDatabase, $MediaCreditRecordsTable> {
+  $$MediaCreditRecordsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get address => $composableBuilder(
+    column: $table.address,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get recordJson => $composableBuilder(
+    column: $table.recordJson,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$MediaCreditRecordsTableOrderingComposer
+    extends Composer<_$AppDatabase, $MediaCreditRecordsTable> {
+  $$MediaCreditRecordsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get address => $composableBuilder(
+    column: $table.address,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get recordJson => $composableBuilder(
+    column: $table.recordJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$MediaCreditRecordsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $MediaCreditRecordsTable> {
+  $$MediaCreditRecordsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get address =>
+      $composableBuilder(column: $table.address, builder: (column) => column);
+
+  GeneratedColumn<String> get recordJson => $composableBuilder(
+    column: $table.recordJson,
+    builder: (column) => column,
+  );
+}
+
+class $$MediaCreditRecordsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $MediaCreditRecordsTable,
+          MediaCreditRecordRow,
+          $$MediaCreditRecordsTableFilterComposer,
+          $$MediaCreditRecordsTableOrderingComposer,
+          $$MediaCreditRecordsTableAnnotationComposer,
+          $$MediaCreditRecordsTableCreateCompanionBuilder,
+          $$MediaCreditRecordsTableUpdateCompanionBuilder,
+          (
+            MediaCreditRecordRow,
+            BaseReferences<
+              _$AppDatabase,
+              $MediaCreditRecordsTable,
+              MediaCreditRecordRow
+            >,
+          ),
+          MediaCreditRecordRow,
+          PrefetchHooks Function()
+        > {
+  $$MediaCreditRecordsTableTableManager(
+    _$AppDatabase db,
+    $MediaCreditRecordsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$MediaCreditRecordsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$MediaCreditRecordsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$MediaCreditRecordsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> address = const Value.absent(),
+                Value<String> recordJson = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => MediaCreditRecordsCompanion(
+                address: address,
+                recordJson: recordJson,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String address,
+                required String recordJson,
+                Value<int> rowid = const Value.absent(),
+              }) => MediaCreditRecordsCompanion.insert(
+                address: address,
+                recordJson: recordJson,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$MediaCreditRecordsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $MediaCreditRecordsTable,
+      MediaCreditRecordRow,
+      $$MediaCreditRecordsTableFilterComposer,
+      $$MediaCreditRecordsTableOrderingComposer,
+      $$MediaCreditRecordsTableAnnotationComposer,
+      $$MediaCreditRecordsTableCreateCompanionBuilder,
+      $$MediaCreditRecordsTableUpdateCompanionBuilder,
+      (
+        MediaCreditRecordRow,
+        BaseReferences<
+          _$AppDatabase,
+          $MediaCreditRecordsTable,
+          MediaCreditRecordRow
+        >,
+      ),
+      MediaCreditRecordRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -6023,4 +6406,6 @@ class $AppDatabaseManager {
       $$ProfilesTableTableManager(_db, _db.profiles);
   $$ProfileListAccessTableTableManager get profileListAccess =>
       $$ProfileListAccessTableTableManager(_db, _db.profileListAccess);
+  $$MediaCreditRecordsTableTableManager get mediaCreditRecords =>
+      $$MediaCreditRecordsTableTableManager(_db, _db.mediaCreditRecords);
 }

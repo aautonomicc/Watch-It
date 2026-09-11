@@ -9,6 +9,8 @@ import 'package:path_provider/path_provider.dart';
 
 import '../db/app_database.dart';
 import '../models/media_list.dart';
+import '../models/media_credits.dart';
+import 'media_credits_store.dart';
 import 'datamap_import.dart';
 import 'embedded_client.dart';
 import 'library_store.dart';
@@ -41,6 +43,7 @@ const int kMaxHistoryJsonBytes = 20 * 1024 * 1024;
 const int kMaxProfilesJsonBytes = 5 * 1024 * 1024;
 const int kMaxPosterBytes = 10 * 1024 * 1024;
 const int kMaxRootMapBytes = 32 * 1024 * 1024;
+const int kMaxCreditsJsonBytes = 5 * 1024 * 1024;
 
 /// TMDB's required attribution, shown in Settings → About and carried in
 /// every exported bundle's metadata.json.
@@ -133,6 +136,7 @@ class ParsedBundle {
     this.historyByMember = const {},
     this.profilesData,
     this.profileAvatars = const {},
+    this.creditsByMember = const {},
   });
 
   /// The inner `list.txt` — optional since spec v2; null means every
@@ -167,12 +171,16 @@ class ParsedBundle {
   /// name.
   final Map<String, Uint8List> profileAvatars;
 
+  /// Optional per-file attribution, resolved through imported datamap members.
+  final Map<String, MediaCredits> creditsByMember;
+
   int get historyCount => historyByMember.length;
 
   bool get hasProfiles => profilesData != null;
 
   bool get hasSeedableExtras =>
-      metadataRows.isNotEmpty || posters.isNotEmpty || historyCount > 0;
+      metadataRows.isNotEmpty || posters.isNotEmpty || historyCount > 0 ||
+      creditsByMember.isNotEmpty;
 }
 
 /// What [seedBundle] actually applied (for the import snackbar).
@@ -322,6 +330,24 @@ Future<BundleBuildResult> buildBundle(
     httpClient.close(force: true);
   }
   archive.addFile(ArchiveFile.string('list.txt', listText.toString()));
+
+  // Only records for maps actually present in this export can travel. No
+  // library-wide dump, local paths or viewing history enter this member.
+  final credits = <Map<String, dynamic>>[];
+  for (final item in memberByAddr.entries) {
+    final record = await MediaCreditsStore.read(item.key);
+    if (record != null && !record.isEmpty) {
+      credits.add({'member': item.value, ...record.toJson()});
+    }
+  }
+  if (credits.isNotEmpty) {
+    final encoded = utf8.encode(jsonEncode({'version': 1, 'entries': credits}));
+    if (encoded.length > kMaxCreditsJsonBytes) {
+      throw const ListImportException(
+        'Credits exceed the bundle limit. Export a smaller collection.');
+    }
+    archive.addFile(ArchiveFile.bytes('credits.json', encoded));
+  }
 
   final entries = [for (final list in lists) ...list.entries];
 
@@ -581,10 +607,34 @@ ParsedBundle parseBundleMembers(List<BundleZipMember> members) {
   final historyByMember = <String, BundleHistoryRow>{};
   ParsedProfiles? profilesData;
   final profileAvatars = <String, Uint8List>{};
+  final creditsByMember = <String, MediaCredits>{};
 
   for (final file in members) {
     final name = file.name;
     switch (name) {
+      case 'credits.json':
+        final data = file.read(kMaxCreditsJsonBytes);
+        if (data == null) continue;
+        try {
+          final decoded = jsonDecode(utf8.decode(data));
+          if (decoded is! Map || decoded['version'] != 1 ||
+              decoded['entries'] is! List) {
+            continue;
+          }
+          for (final raw in decoded['entries'] as List) {
+            if (raw is! Map<String, dynamic>) continue;
+            final member = raw['member'];
+            if (member is! String || _datamapBaseName(member) != member) continue;
+            try {
+              final record = MediaCredits.fromJson(raw);
+              if (!record.isEmpty) creditsByMember.putIfAbsent(member, () => record);
+            } on FormatException {
+              // Drop this malformed optional row, preserving its neighbours.
+            }
+          }
+        } on FormatException {
+          // An unreadable optional credit file never prevents media import.
+        }
       case 'list.txt':
         final data = file.read(kMaxListFileBytes);
         if (data == null) {
@@ -717,6 +767,7 @@ ParsedBundle parseBundleMembers(List<BundleZipMember> members) {
     historyByMember: historyByMember,
     profilesData: profilesData,
     profileAvatars: profileAvatars,
+    creditsByMember: creditsByMember,
   );
 }
 
@@ -909,6 +960,11 @@ Future<BundleSeedSummary> seedBundle(
       postersDirProvider: postersDirProvider);
   summary.metadataSeeded = metadataSeeded;
   summary.postersSeeded = postersSeeded;
+
+  for (final row in bundle.creditsByMember.entries) {
+    final address = addressByMember[row.key];
+    if (address != null) await MediaCreditsStore.seed(address, row.value);
+  }
 
   // Watch history: newer-updatedAt-wins, never regresses local progress.
   if (importHistory) {

@@ -1166,6 +1166,11 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.textContaining('Episode 1'));
       await tester.pumpAndSettle();
+      // File details are below the credits action; scroll the lazy body to
+      // verify the original entry rather than depending on viewport height.
+      await tester.scrollUntilVisible(find.text('Show.S01E01.mkv'), 250,
+          scrollable: find.byType(Scrollable).first);
+      await tester.pumpAndSettle();
       expect(find.text('Show.S01E01.mkv'), findsOneWidget);
       expect(find.text('FILE'), findsOneWidget);
     });
