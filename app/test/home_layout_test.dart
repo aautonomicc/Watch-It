@@ -110,8 +110,9 @@ void main() {
   });
 
   testWidgets('Media screen toggles and reorders home rows', (tester) async {
-    // Tall surface: the Media page's header paragraphs push the rows
-    // down, and off-screen ListView children are never built.
+    // Extra-tall surface as a belt: gold UX keeps the header short so
+    // rows fit the default 800×600, but off-screen sliver children
+    // are still never built if something grows again.
     tester.view.physicalSize = const Size(900, 2000);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);

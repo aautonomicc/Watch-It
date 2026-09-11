@@ -26,7 +26,6 @@ import 'package:watchit/services/watch_state.dart';
 import 'package:watchit/theme/tokens.dart';
 import 'package:watchit/widgets/adoption_invite.dart';
 import 'package:watchit/widgets/experience_switch.dart';
-import 'package:watchit/widgets/skaists_bloom.dart';
 import 'package:watchit_upload/watchit_upload.dart' as cli;
 
 import 'fake_embedded_http.dart';
@@ -793,18 +792,25 @@ void main() {
         ]),
       ]);
       await openMediaLists(tester);
-      expect(find.text(kAdoptionPromise), findsOneWidget);
+      // Default 800×600: promise/bloom/invite cards must not eat the
+      // list — those belong on the empty library only.
+      expect(find.text(kAdoptionPromise), findsNothing);
+      expect(find.byKey(const ValueKey('media-header-bloom')), findsNothing);
       expect(find.byType(ExperienceSwitch), findsOneWidget);
-      expect(
-        find.byWidgetPredicate((w) =>
-            w is SkaistsBloom && w.moment == SkaistsBloomMoment.still),
-        findsOneWidget,
-      );
       expect(find.byType(AdoptionInvitePair), findsNothing);
       expect(find.text('Add from a file'), findsNothing);
       expect(find.byTooltip('Receive a piece'), findsOneWidget);
       expect(find.textContaining('These rows are your home wall'),
-          findsOneWidget);
+          findsNothing);
+
+      final row = find.widgetWithText(ListTile, 'My Films');
+      expect(row, findsOneWidget);
+      final viewH =
+          tester.view.physicalSize.height / tester.view.devicePixelRatio;
+      expect(tester.getRect(row).bottom, lessThanOrEqualTo(viewH));
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+      expect(find.text('My Films'), findsWidgets);
     });
 
     testWidgets('export dialog explains the ant upload share flow',

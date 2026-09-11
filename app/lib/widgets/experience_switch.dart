@@ -28,9 +28,11 @@ class ExperienceSwitch extends StatelessWidget {
           showSelectedIcon: false,
           style: ButtonStyle(
             visualDensity: compact
-                ? VisualDensity.compact
+                ? const VisualDensity(horizontal: -2, vertical: -2)
                 : VisualDensity.standard,
-            tapTargetSize: MaterialTapTargetSize.padded,
+            tapTargetSize: compact
+                ? MaterialTapTargetSize.shrinkWrap
+                : MaterialTapTargetSize.padded,
             backgroundColor: WidgetStateProperty.resolveWith((states) {
               if (states.contains(WidgetState.selected)) {
                 return t.accent.withValues(alpha: 0.18);

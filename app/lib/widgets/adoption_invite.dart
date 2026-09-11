@@ -33,11 +33,11 @@ class AdoptionInviteCard extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(10),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
           child: Row(
             children: [
-              Icon(icon, color: emphasized ? t.accent : t.boneDim, size: 28),
-              const SizedBox(width: 12),
+              Icon(icon, color: emphasized ? t.accent : t.boneDim, size: 22),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -46,19 +46,21 @@ class AdoptionInviteCard extends StatelessWidget {
                       title,
                       style: TextStyle(
                         color: t.bone,
-                        fontSize: 15,
+                        fontSize: 14,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     Text(
                       body,
-                      style: TextStyle(color: t.ash, fontSize: 12.5, height: 1.35),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: t.ash, fontSize: 12, height: 1.3),
                     ),
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right, color: t.ash),
+              Icon(Icons.chevron_right, color: t.ash, size: 20),
             ],
           ),
         ),

@@ -1411,9 +1411,10 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     );
   }
 
-  /// Compact promise + view switch. Receive / Add-from-file stay in the
-  /// app bar once lists exist; the two invite cards only appear when the
-  /// page is empty so they don't stack under every list.
+  /// New bee chrome stays short so list rows remain on the default
+  /// 800×600 test / phone viewport. Promise + bloom + invite cards
+  /// are empty-library only; once lists exist the app-bar gift /
+  /// download icons are the doors and the header is just the switch.
   Widget _header(WiTokens t, List<MediaList> lists) {
     final copy = ExperienceCopy.of(context);
     final empty = lists.isEmpty;
@@ -1422,26 +1423,28 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+          padding: EdgeInsets.fromLTRB(16, empty ? 8 : 6, 16, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (soft) ...[
+              if (empty && soft) ...[
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     const SkaistsBloom(
                       key: ValueKey('media-header-bloom'),
                       moment: SkaistsBloomMoment.still,
-                      size: 26,
+                      size: 22,
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         copy.adoptionPromise,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 13,
-                          height: 1.35,
+                          fontSize: 12.5,
+                          height: 1.3,
                           color: t.boneDim,
                           fontWeight: FontWeight.w600,
                         ),
@@ -1449,27 +1452,14 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
               ],
               const ExperienceSwitch(compact: true),
               if (empty) ...[
-                const SizedBox(height: 14),
+                const SizedBox(height: 10),
                 AdoptionInvitePair(
                   onReceive: _importPublicAddress,
                   onAddFile: _importList,
-                ),
-              ],
-              if (copy.view == ExperienceView.cypherpunk &&
-                  !empty &&
-                  copy.fileDoorTechnical != null) ...[
-                const SizedBox(height: 10),
-                Text(
-                  copy.fileDoorTechnical!,
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: t.ash,
-                    height: 1.35,
-                  ),
                 ),
               ],
             ],
@@ -1481,8 +1471,9 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         if (unsortedAudioEntries(lists) case final unsorted
             when unsorted.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
             child: ListTile(
+              dense: true,
               leading: const Icon(Icons.rule_folder_outlined,
                   color: WiTokens.channelAmber),
               title: Text('Needs sorting',
@@ -1499,22 +1490,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
                     builder: (_) => const NeedsSortingScreen()));
                 await _reload();
               },
-            ),
-          ),
-        if (!empty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: Text(
-              copy.libraryRowsHint,
-              style: TextStyle(fontSize: 11.5, color: t.ash),
-            ),
-          ),
-        if (empty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: Text(
-              copy.emptyListsHint,
-              style: TextStyle(fontSize: 13, color: t.boneDim),
             ),
           ),
       ],

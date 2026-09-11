@@ -39,10 +39,11 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   English on purpose (protocol density). Register names are proper
   names. The rest of the app remains on its historic English strings
   until a full gen-l10n path exists.
-- **My Media header stays compact** once lists exist: quiet adoption
-  promise + still bloom + Viewing style switch. The Receive /
-  Add-from-file invite cards appear only on an empty library;
-  otherwise those doors stay in the app bar (gift + download).
+- **My Media header stays short** so list rows stay on a phone /
+  default 800×600 viewport. Empty library: one promise line + still
+  bloom + Viewing style switch + slim Receive / Add-from-file cards.
+  Once lists exist the header is the switch only — gift + download
+  stay in the app bar; no stacked invite cards, no rows-hint essay.
 
 ## Screens
 

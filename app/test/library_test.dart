@@ -22,6 +22,21 @@ import 'package:watchit/services/terms.dart';
 const _addr =
     'a3f1c9e07b6d5a4f2e8c1b0d9f7a6e5c4b3a2d1e0f9c8b7a6d5e4f3c2b1a0d9e';
 
+/// My Media is a ReorderableListView — rows below the fold are not
+/// hit-testable. Height is fixed first; this is the belt.
+Future<void> _revealMediaRow(WidgetTester tester, Finder finder) async {
+  final scrollable = find.descendant(
+    of: find.byType(ReorderableListView),
+    matching: find.byType(Scrollable),
+  );
+  if (scrollable.evaluate().isNotEmpty) {
+    await tester.scrollUntilVisible(finder, 80, scrollable: scrollable.first);
+  } else {
+    await tester.ensureVisible(finder);
+  }
+  await tester.pump();
+}
+
 void main() {
   // Each test gets its own in-memory database, so the multiple-instance
   // race drift warns about cannot happen.
@@ -971,6 +986,7 @@ void main() {
 
       // The edit page only curates entries; its empty state points back
       // at the Media page import.
+      await _revealMediaRow(tester, find.text('My Films'));
       await tester.tap(find.text('My Films'));
       await tester.pumpAndSettle();
       expect(find.text('Add .datamap files'), findsNothing);
@@ -1025,6 +1041,7 @@ void main() {
 
       // The built-in home rows carry checkboxes here too — target the
       // Movies list row's own.
+      await _revealMediaRow(tester, find.widgetWithText(ListTile, 'Movies'));
       await tester.tap(find.descendant(
         of: find.widgetWithText(ListTile, 'Movies'),
         matching: find.byType(Checkbox),
@@ -1077,6 +1094,7 @@ void main() {
       await tester.tap(find.text('My Media'));
       await tester.pumpAndSettle();
 
+      await _revealMediaRow(tester, find.byTooltip('List options'));
       await tester.tap(find.byTooltip('List options'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Delete'));
@@ -1105,6 +1123,7 @@ void main() {
       await tester.tap(find.text('My Media'));
       await tester.pumpAndSettle();
 
+      await _revealMediaRow(tester, find.byTooltip('List options'));
       await tester.tap(find.byTooltip('List options'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Rename'));
