@@ -14,6 +14,21 @@ if (keystorePropertiesFile.exists()) {
     keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
 }
 
+// scripts/build_android.sh supplies one explicit selection to all three
+// toolchains. The default stays ARM64 for existing release commands.
+val supportedWatchAbis = listOf("armeabi-v7a", "arm64-v8a")
+val watchAbis = providers.environmentVariable("WATCHIT_ANDROID_ABIS")
+    .orElse("arm64-v8a").get().split(",")
+require(watchAbis.isNotEmpty() && watchAbis.all { it in supportedWatchAbis }
+    && watchAbis.distinct().size == watchAbis.size) {
+    "WATCHIT_ANDROID_ABIS must contain unique armeabi-v7a and/or arm64-v8a entries"
+}
+val watchTestSetting = providers.environmentVariable("WATCHIT_TEST_APP").orElse("0").get()
+require(watchTestSetting in listOf("0", "1")) { "WATCHIT_TEST_APP must be 0 or 1" }
+val watchTestApp = watchTestSetting == "1"
+val watchSplitPerAbi = providers.gradleProperty("split-per-abi")
+    .orElse("false").get().toBoolean()
+
 android {
     namespace = "io.github.aautonomicc.watchit"
     compileSdk = flutter.compileSdkVersion
@@ -33,21 +48,22 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        // watchit_core (embedded Autonomi client) is built for arm64 only —
-        // see native/build-android.sh. Keep the APK's ABI claim in sync so
-        // 32-bit devices don't install a build whose native client is missing.
+        manifestPlaceholders["watchitAppLabel"] = if (watchTestApp) "W@tch Test" else "W@tch"
         ndk {
-            abiFilters += listOf("arm64-v8a")
+            // Flutter configures splits for --split-per-abi; AGP rejects
+            // combining those splits with defaultConfig's ndk.abiFilters.
+            if (!watchSplitPerAbi) abiFilters += watchAbis
         }
     }
 
     packaging {
         jniLibs {
             // Plugin AARs (media_kit's libmpv etc.) ship other ABIs; the
-            // Flutter plugin ignores abiFilters for those, so strip them
-            // here — an APK claiming armeabi-v7a without libwatchit_core
-            // would install on 32-bit devices and fail to stream.
-            excludes += listOf("lib/armeabi-v7a/**", "lib/x86/**", "lib/x86_64/**")
+            // Flutter plugin ignores abiFilters for those, so strip
+            // unselected ABIs here as well. The artifact check then verifies
+            // the actual native library set, including watchit_core.
+            excludes += (supportedWatchAbis + listOf("x86", "x86_64"))
+                .filter { it !in watchAbis }.map { "lib/$it/**" }
         }
     }
 
@@ -64,7 +80,8 @@ android {
 
     buildTypes {
         release {
-            signingConfig = if (keystorePropertiesFile.exists()) {
+            if (watchTestApp) applicationIdSuffix = ".validation"
+            signingConfig = if (!watchTestApp && keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
                 signingConfigs.getByName("debug")

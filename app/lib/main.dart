@@ -17,6 +17,7 @@ import 'screens/settings_screen.dart';
 import 'screens/show_screen.dart';
 import 'screens/terms_screen.dart';
 import 'services/app_settings.dart';
+import 'services/tv_settings.dart';
 import 'services/connectivity.dart';
 import 'services/download_foreground.dart';
 import 'services/media_session.dart';
@@ -44,6 +45,7 @@ import 'services/watch_state.dart';
 import 'services/x0x_cellular.dart';
 import 'theme/tokens.dart';
 import 'widgets/brand_mark.dart';
+import 'widgets/tv_app_frame.dart';
 import 'widgets/download_badge.dart';
 import 'widgets/channel_avatar.dart';
 import 'widgets/channel_badge.dart';
@@ -57,6 +59,7 @@ import 'widgets/watch_progress.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await TvSettings.instance.initialize();
   MediaKit.ensureInitialized();
   // Statically linked Rust crates (self_encryption is GPL-3.0) and the
   // native media libs aren't in Flutter's registry — add them so the
@@ -187,9 +190,10 @@ class WatchItApp extends StatelessWidget {
     // themeMode picks between the pair: dark (default) keeps the app's
     // original look, light uses the light token set, system follows the
     // OS. The notifier flips live from Settings → Appearance.
-    return ValueListenableBuilder<ThemeMode>(
-      valueListenable: wiThemeMode,
-      builder: (context, mode, _) => MaterialApp(
+    final tv = TvSettings.instance;
+    return ListenableBuilder(
+      listenable: Listenable.merge([wiThemeMode, tv]),
+      builder: (context, _) => MaterialApp(
         title: 'W@tch',
         debugShowCheckedModeBanner: false,
         // App-wide messenger so background work (download auto-resume)
@@ -197,8 +201,12 @@ class WatchItApp extends StatelessWidget {
         scaffoldMessengerKey: wiMessengerKey,
         navigatorObservers: [wiRouteObserver],
         theme: wiTheme(WiTokens.light, brightness: Brightness.light),
-        darkTheme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
-        themeMode: mode,
+        darkTheme: wiTheme(
+          tv.enabled && tv.grove ? WiTokens.grove : WiTokens.dark,
+          brightness: Brightness.dark,
+        ),
+        themeMode: wiThemeMode.value,
+        builder: (context, child) => TvAppFrame(child: child!),
         home: const TermsGate(child: ProfileGate(child: HomeScreen())),
       ),
     );
@@ -294,11 +302,13 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   @override
   void initState() {
     super.initState();
-    unawaited(AppSettings.drawerPinned().then((pinned) {
-      if (mounted && pinned != _drawerPinned) {
-        setState(() => _drawerPinned = pinned);
-      }
-    }));
+    unawaited(
+      AppSettings.drawerPinned().then((pinned) {
+        if (mounted && pinned != _drawerPinned) {
+          setState(() => _drawerPinned = pinned);
+        }
+      }),
+    );
     // Watch states change while a player is open on top of this screen —
     // refresh the Continue Watching row as they land.
     WatchStateStore.instance.addListener(_reloadRows);
@@ -357,8 +367,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     // key is entered in Settings (returning from there reloads).
     // Admin only: the banner points at Settings → Metadata, which
     // restricted profiles can't reach.
-    final nudge =
-        ProfileStore.instance.isAdmin && await shouldShowTmdbNudge();
+    final nudge = ProfileStore.instance.isAdmin && await shouldShowTmdbNudge();
     final sections = reconcileHomeSections(
       await AppSettings.homeSections(),
       lists,
@@ -442,18 +451,24 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
         const SingleActivator(LogicalKeyboardKey.keyF, control: true):
             _openSearch,
       },
-      child: Focus(autofocus: true, child: _scaffold(t, visible)),
+      child: Focus(
+        autofocus: !TvSettings.instance.enabled,
+        skipTraversal: TvSettings.instance.enabled,
+        canRequestFocus: !TvSettings.instance.enabled,
+        child: _scaffold(t, visible)),
     );
   }
 
   Widget _scaffold(WiTokens t, List<MediaList> visible) {
+    final tv = TvSettings.instance.enabled;
     // Wide desktop windows pin the drawer open as a side panel with the
     // burger on the FAR LEFT toggling it (search moves into the
     // actions). Gated on window width, not just platform, so a squeezed
     // desktop window falls back to the modal layout: search in
     // `leading`, drawer from the menu action on the far right (same
     // pattern as ListHomeScreen).
-    final pinnable = isDesktopPlatform &&
+    final pinnable =
+        isDesktopPlatform &&
         MediaQuery.sizeOf(context).width >= kPinnedDrawerMinWindowWidth;
     final pinned = pinnable && _drawerPinned;
     final body = Column(
@@ -483,12 +498,22 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
       // drawer, so the two surfaces can never stack.
       drawer: pinnable ? null : const WiLibraryDrawer(),
       appBar: AppBar(
+        toolbarHeight: tv ? 72 : null,
+        leadingWidth: tv ? 156 : null,
         backgroundColor: t.ink,
         elevation: 0,
-        leading: pinnable
+        leading: tv
+            ? Builder(
+                builder: (context) => TextButton.icon(
+                  autofocus: true,
+                  onPressed: () => Scaffold.of(context).openDrawer(),
+                  icon: const Icon(Icons.menu),
+                  label: const Text('Library'),
+                ),
+              )
+            : pinnable
             ? IconButton(
-                tooltip:
-                    pinned ? 'Hide library panel' : 'Show library panel',
+                tooltip: pinned ? 'Hide library panel' : 'Show library panel',
                 icon: Icon(Icons.menu, color: t.boneDim),
                 onPressed: _togglePinnedDrawer,
               )
@@ -507,6 +532,19 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
           ],
         ),
         actions: [
+          if (tv) ...[
+            TextButton.icon(
+              onPressed: _openSearch,
+              icon: const Icon(Icons.search),
+              label: const Text('Search'),
+            ),
+            TextButton.icon(
+              onPressed: _openSettings,
+              icon: const Icon(Icons.settings_outlined),
+              label: const Text('Settings'),
+            ),
+            const SizedBox(width: 12),
+          ],
           if (pinnable)
             IconButton(
               tooltip: 'Search',
@@ -529,7 +567,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
               ),
               onPressed: () => unawaited(switchProfileFlow(context)),
             ),
-          if (!pinnable)
+          if (!pinnable && !tv)
             Builder(
               builder: (context) => IconButton(
                 tooltip: 'Browse lists',
@@ -586,7 +624,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   /// single card that opens the show's page.
   Widget _itemsRow(WiTokens t, List<HomeItem> items) {
     return SizedBox(
-      height: 232,
+      height: TvSettings.instance.enabled ? 258 : 232,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),

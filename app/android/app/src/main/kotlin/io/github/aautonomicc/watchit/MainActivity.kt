@@ -2,6 +2,8 @@ package io.github.aautonomicc.watchit
 
 import android.Manifest
 import android.app.ActivityManager
+import android.app.UiModeManager
+import android.content.res.Configuration
 import android.app.ApplicationExitInfo
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -32,6 +34,15 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "watchit/device")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "isTelevision") {
+                    val mode = getSystemService(UI_MODE_SERVICE) as UiModeManager
+                    result.success(mode.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION)
+                } else {
+                    result.notImplemented()
+                }
+            }
         val ch = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger, "watchit/downloads"
         )

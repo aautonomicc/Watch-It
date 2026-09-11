@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:drift/drift.dart' show Value;
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -20,6 +21,11 @@ import '../services/season_grouping.dart' show episodeNameFromLabel;
 import '../services/user_metadata.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
+import '../services/tv_settings.dart';
+import '../widgets/tv_player_controls.dart';
+import '../widgets/tv_track_menu.dart';
+import '../services/caption_file.dart';
+import '../widgets/caption_text_dialog.dart';
 
 /// Rewords a pre-first-frame streaming error when the real problem is
 /// connectivity, not the file. An unreachable network makes `/xor` fail
@@ -35,7 +41,7 @@ import '../theme/tokens.dart';
     message: health.state == 'paused'
         ? 'The network is paused — resume it in Settings, then try again.'
         : 'Wait for "Connected" with peers on the home screen, then try '
-            'again.\nUsing a VPN? Some VPNs block Autonomi.',
+              'again.\nUsing a VPN? Some VPNs block Autonomi.',
   );
 }
 
@@ -148,6 +154,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// The episode offered by the "Up next" overlay, when one exists.
   MediaEntry? _upNext;
   int _countdown = 0;
+  bool _trackMenuOpen = false;
 
   @override
   void initState() {
@@ -289,7 +296,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (pos <= Duration.zero) return;
     _position = pos;
     // The audio layout draws its own seek bar off _position.
-    if (_isAudio && mounted) setState(() {});
+    if ((_isAudio || TvSettings.instance.enabled) && mounted) setState(() {});
     NowPlaying.instance.updatePlayback(
       this,
       position: pos,
@@ -353,7 +360,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _countdown = 10;
       });
       _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (!mounted) return;
+        if (!mounted || _trackMenuOpen) return;
         if (_countdown <= 1) {
           _playNext();
         } else {
@@ -595,114 +602,226 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tv = TvSettings.instance.enabled;
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text(_title, style: const TextStyle(fontSize: 15)),
-      ),
+      appBar: tv
+          ? null
+          : AppBar(
+              backgroundColor: Colors.black,
+              foregroundColor: Colors.white,
+              title: Text(_title, style: const TextStyle(fontSize: 15)),
+            ),
       body: SafeArea(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // Music: artwork + transport instead of a black video surface
-            // (no frame-capture button — there are no frames).
-            if (_isAudio)
-              AudioPlayerView(
-                entry: _entry,
-                position: _position,
-                duration: _duration,
-                playing: _playing,
-                onPlayPause: () => unawaited(_player.playOrPause()),
-                onSeek: (pos) => unawaited(_player.seek(pos)),
-              )
-            else
-              // The stock controls draw their own grey buffering spinner in
-              // the centre of the video; our branded overlay already covers
-              // buffering, so blank out the built-in one on all platforms.
-              // The bottom controls default to zero bottom margin, which puts
-              // them on top of the Android navigation buttons — lift them
-              // clear, and draw the seek bar at twice the stock thickness.
-              MaterialVideoControlsTheme(
-                normal: kDefaultMaterialVideoControlsThemeData.copyWith(
-                  bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
-                  bottomButtonBarMargin: const EdgeInsets.only(
-                    left: 16,
-                    right: 8,
-                    bottom: 48,
+        child: _tvTransport(
+          Stack(
+            fit: StackFit.expand,
+            children: [
+              // Music: artwork + transport instead of a black video surface
+              // (no frame-capture button — there are no frames).
+              if (_isAudio)
+                AudioPlayerView(
+                  entry: _entry,
+                  position: _position,
+                  duration: _duration,
+                  playing: _playing,
+                  onPlayPause: () => unawaited(_player.playOrPause()),
+                  onSeek: (pos) => unawaited(_player.seek(pos)),
+                )
+              else if (tv)
+                Video(
+                  controller: _controller,
+                  controls: null,
+                  subtitleViewConfiguration: const SubtitleViewConfiguration(
+                    visible: false,
                   ),
-                  seekBarMargin: const EdgeInsets.only(
-                    left: 16,
-                    right: 16,
-                    bottom: 48,
+                )
+              else
+                // The stock controls draw their own grey buffering spinner in
+                // the centre of the video; our branded overlay already covers
+                // buffering, so blank out the built-in one on all platforms.
+                // The bottom controls default to zero bottom margin, which puts
+                // them on top of the Android navigation buttons — lift them
+                // clear, and draw the seek bar at twice the stock thickness.
+                MaterialVideoControlsTheme(
+                  normal: kDefaultMaterialVideoControlsThemeData.copyWith(
+                    bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
+                    bottomButtonBarMargin: const EdgeInsets.only(
+                      left: 16,
+                      right: 8,
+                      bottom: 48,
+                    ),
+                    seekBarMargin: const EdgeInsets.only(
+                      left: 16,
+                      right: 16,
+                      bottom: 48,
+                    ),
+                    seekBarHeight: 4.8,
+                    topButtonBar: [
+                      const Spacer(),
+                      if (!ProfileStore.instance.isKid)
+                        MaterialCustomButton(
+                          onPressed: () => unawaited(_useFrameAsPoster()),
+                          icon: const Icon(Icons.photo_camera_outlined),
+                        ),
+                    ],
                   ),
-                  seekBarHeight: 4.8,
-                  topButtonBar: [
-                    const Spacer(),
-                    if (!ProfileStore.instance.isKid)
-                      MaterialCustomButton(
-                        onPressed: () => unawaited(_useFrameAsPoster()),
-                        icon: const Icon(Icons.photo_camera_outlined),
+                  fullscreen: kDefaultMaterialVideoControlsThemeDataFullscreen
+                      .copyWith(
+                        bufferingIndicatorBuilder: (_) =>
+                            const SizedBox.shrink(),
+                        bottomButtonBarMargin: const EdgeInsets.only(
+                          left: 16,
+                          right: 8,
+                          bottom: 64,
+                        ),
+                        seekBarMargin: const EdgeInsets.only(
+                          left: 16,
+                          right: 16,
+                          bottom: 64,
+                        ),
+                        seekBarHeight: 4.8,
+                        topButtonBar: [
+                          const Spacer(),
+                          if (!ProfileStore.instance.isKid)
+                            MaterialCustomButton(
+                              onPressed: () => unawaited(_useFrameAsPoster()),
+                              icon: const Icon(Icons.photo_camera_outlined),
+                            ),
+                        ],
                       ),
-                  ],
-                ),
-                fullscreen: kDefaultMaterialVideoControlsThemeDataFullscreen
-                    .copyWith(
-                      bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
-                      bottomButtonBarMargin: const EdgeInsets.only(
-                        left: 16,
-                        right: 8,
-                        bottom: 64,
-                      ),
-                      seekBarMargin: const EdgeInsets.only(
-                        left: 16,
-                        right: 16,
-                        bottom: 64,
-                      ),
-                      seekBarHeight: 4.8,
+                  child: MaterialDesktopVideoControlsTheme(
+                    normal: desktopControlsTheme(
+                      kDefaultMaterialDesktopVideoControlsThemeData,
                       topButtonBar: [
                         const Spacer(),
                         if (!ProfileStore.instance.isKid)
-                          MaterialCustomButton(
+                          MaterialDesktopCustomButton(
                             onPressed: () => unawaited(_useFrameAsPoster()),
                             icon: const Icon(Icons.photo_camera_outlined),
                           ),
                       ],
                     ),
-                child: MaterialDesktopVideoControlsTheme(
-                  normal: desktopControlsTheme(
-                    kDefaultMaterialDesktopVideoControlsThemeData,
-                    topButtonBar: [
-                      const Spacer(),
-                      if (!ProfileStore.instance.isKid)
-                        MaterialDesktopCustomButton(
-                          onPressed: () => unawaited(_useFrameAsPoster()),
-                          icon: const Icon(Icons.photo_camera_outlined),
-                        ),
-                    ],
+                    fullscreen: desktopControlsTheme(
+                      kDefaultMaterialDesktopVideoControlsThemeDataFullscreen,
+                      topButtonBar: [
+                        const Spacer(),
+                        if (!ProfileStore.instance.isKid)
+                          MaterialDesktopCustomButton(
+                            onPressed: () => unawaited(_useFrameAsPoster()),
+                            icon: const Icon(Icons.photo_camera_outlined),
+                          ),
+                      ],
+                    ),
+                    child: Video(controller: _controller),
                   ),
-                  fullscreen: desktopControlsTheme(
-                    kDefaultMaterialDesktopVideoControlsThemeDataFullscreen,
-                    topButtonBar: [
-                      const Spacer(),
-                      if (!ProfileStore.instance.isKid)
-                        MaterialDesktopCustomButton(
-                          onPressed: () => unawaited(_useFrameAsPoster()),
-                          icon: const Icon(Icons.photo_camera_outlined),
-                        ),
-                    ],
-                  ),
-                  child: Video(controller: _controller),
                 ),
-              ),
-            if (_error != null)
-              _errorOverlay(context)
-            else if (_buffering)
-              _bufferingOverlay(context),
-            if (_upNext != null) _upNextOverlay(context, _upNext!),
-          ],
+              if (_error != null)
+                _errorOverlay(context)
+              else if (_buffering)
+                _bufferingOverlay(context),
+              if (_upNext != null) _upNextOverlay(context, _upNext!),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _tvTransport(Widget child) {
+    if (!TvSettings.instance.enabled) return child;
+    return TvPlayerControls(
+      title: _title,
+      position: _position,
+      duration: _duration,
+      playing: _playing,
+      onPlayPause: () => unawaited(_player.playOrPause()),
+      onSeek: (position) => unawaited(_player.seek(position)),
+      onExit: () => Navigator.of(context).pop(),
+      onNext: _upNext == null ? null : _playNext,
+      onTracks: _showTracks,
+      captions: SubtitleView(
+        controller: _controller,
+        configuration: SubtitleViewConfiguration(
+          textScaler: MediaQuery.textScalerOf(context),
+          style: const TextStyle(
+            fontSize: 24,
+            height: 1.4,
+            color: Colors.white,
+            backgroundColor: Color(0xbb000000),
+          ),
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+        ),
+      ),
+      child: child,
+    );
+  }
+
+  Future<void> _showTracks() async {
+    _trackMenuOpen = true;
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (_) => StreamBuilder<Tracks>(
+          stream: _player.stream.tracks,
+          initialData: _player.state.tracks,
+          builder: (_, available) => StreamBuilder<Track>(
+            stream: _player.stream.track,
+            initialData: _player.state.track,
+            builder: (_, selected) => TvTrackMenu(
+              tracks: available.data ?? const Tracks(),
+              selected: selected.data ?? const Track(),
+              onAudio: _player.setAudioTrack,
+              onCaption: _player.setSubtitleTrack,
+              onLoadCaptions: _loadCaptionFile,
+              onPasteCaptions: _pasteCaptionText,
+            ),
+          ),
+        ),
+      );
+    } finally {
+      _trackMenuOpen = false;
+    }
+  }
+
+  Future<void> _loadCaptionFile() async {
+    final entry = _entry;
+    final file = await openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(
+          label: 'Captions',
+          extensions: ['srt', 'vtt'],
+          mimeTypes: ['application/x-subrip', 'text/vtt', 'text/plain'],
+        ),
+      ],
+    );
+    if (file == null || !mounted || entry != _entry) return;
+    if (await file.length() > CaptionFile.maxBytes) {
+      throw const FormatException('Caption size');
+    }
+    final caption = CaptionFile.parse(file.name, await file.readAsBytes());
+    if (!mounted || entry != _entry) return;
+    await _player.setSubtitleTrack(
+      SubtitleTrack.data(
+        caption.text,
+        title: caption.name,
+        language: caption.language,
+      ),
+    );
+  }
+
+  Future<void> _pasteCaptionText() async {
+    final entry = _entry;
+    final caption = await showDialog<CaptionFile>(
+      context: context,
+      builder: (_) => const CaptionTextDialog(),
+    );
+    if (caption == null || !mounted || entry != _entry) return;
+    await _player.setSubtitleTrack(
+      SubtitleTrack.data(
+        caption.text,
+        title: caption.name,
+        language: caption.language,
       ),
     );
   }

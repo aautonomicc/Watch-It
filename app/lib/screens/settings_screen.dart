@@ -19,6 +19,8 @@ import '../services/profiles.dart';
 import '../services/storage_usage.dart';
 import '../services/update_check.dart';
 import '../theme/tokens.dart';
+import '../services/tv_settings.dart';
+import 'tv_display_screen.dart';
 import '../widgets/brand_mark.dart';
 import '../widgets/messenger.dart';
 import 'channels_screen.dart';
@@ -371,6 +373,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               children: [
+                if (TvSettings.instance.enabled)
+                  ListTile(
+                    autofocus: true,
+                    leading: Icon(Icons.tv, color: t.accent),
+                    title: const Text('TV display'),
+                    subtitle: const Text('Screen margins and Grove palette'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const TvDisplayScreen(),
+                      ),
+                    ),
+                  ),
                 // Profiles lead the page. The admin manages the family;
                 // everyone else gets only Switch profile here — the
                 // agreed non-admin settings scope is Appearance +

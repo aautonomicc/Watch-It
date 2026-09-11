@@ -65,6 +65,21 @@ class WiTokens extends ThemeExtension<WiTokens> {
     signalOk: Color(0xFF6AB04C),
   );
 
+  /// Optional TV palette: quiet woodland surfaces, W@tch's blue retained.
+  /// Channels keep their distinct amber identity in this palette too.
+  static const grove = WiTokens(
+    ink: Color(0xFF080E0C),
+    ink2: Color(0xFF132019),
+    line: Color(0xFF34463B),
+    bone: Color(0xFFEAF2E5),
+    boneDim: Color(0xFFCBD9CA),
+    ash: Color(0xFF97AC9C),
+    accent: Color(0xFF64B5F6),
+    accentBright: Color(0xFF9ACFFC),
+    rust: Color(0xFFFF8A7A),
+    signalOk: Color(0xFF86CC72),
+  );
+
   static const light = WiTokens(
     ink: Color(0xFFF5F2EB),
     ink2: Color(0xFFFAF7F2),
@@ -152,9 +167,9 @@ ThemeData wiTheme(WiTokens t, {required Brightness brightness}) {
       primary: t.accent,
       error: t.rust,
     ),
-    textTheme: Typography.material2021(platform: defaultTargetPlatform)
-        .black
-        .apply(bodyColor: t.bone, displayColor: t.bone),
+    textTheme: Typography.material2021(
+      platform: defaultTargetPlatform,
+    ).black.apply(bodyColor: t.bone, displayColor: t.bone),
     extensions: [t],
     useMaterial3: true,
   );
