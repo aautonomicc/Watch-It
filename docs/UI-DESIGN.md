@@ -19,12 +19,15 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   along the card bottom (accent fill), unwatched-count badge for shows.
 - **Download/offline state on every card**: small badge (ash outline = stream-only,
   green check = downloaded, accent progress ring = downloading).
-- **Three viewing registers** when a UI surfaces a choice: New bee
-  (default — view / emotion / choose-click, never numbered steps),
-  Raver (tighter, same doors), Cypherpunk (full technical density).
-  Public vs private provenance is a badge plus plain language
-  (New bee: “Shared”; Cypherpunk: “public XOR”) — amber like other
-  public surfaces, never a scare-label.
+- **Three viewing registers** when a UI surfaces a choice — same
+  facts, three voices. New bee (default) is commons-digestible
+  across 26 languages: calm short chrome, Keep, no jargon, never
+  numbered steps. Raver is ceremony — imagery, consciousness,
+  plant-medicine, celebration bloom. Cypherpunk is verify /
+  provenance / public XOR. Public vs private provenance is a badge
+  plus plain language (New bee: “Shared”; Raver: “Held · living”;
+  Cypherpunk: “public XOR”) — amber like other public surfaces,
+  never a scare-label.
 - **Adoption promise** is felt on empty walls and My Media:
   “Make something beautiful. Give someone a piece of it. Stay
   connected to its maker.” Receiving a public address is Keep, not
@@ -33,9 +36,10 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   geometry, wellness colorway: sovereign-purple `#9C6FD6` → blue
   `#6FA9E0` → teal `#45C2DC` → lime-biomass `#8FD14F`). It breathes
   in three moments only: New bee soft idle after the receive sheet
-  arrives and after the piece is real; Raver celebration pulse on
-  Keep; Cypherpunk still, with a verify-flash. Empty walls show a
-  still hive — never a step list. The wordmark stays separate.
+  arrives and after the piece is real; Raver celebration pulse from
+  arrival and on Hold; Cypherpunk still, with a verify-flash. Empty
+  walls show a still hive — never a step list. The wordmark stays
+  separate.
 - **Post-Keep estate connect** is soft and full-atlas: after Keep,
   a snack action opens https://skaists.dev/surfaces/ grouped by
   the eight families (beehive-nature / biomass / bnr / …) with
@@ -151,9 +155,10 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - Playback (hardware decode, default subtitle language, skip amounts)
 - Appearance (Colour scheme; sits below Metadata since 2026-08-30).
   **Viewing style** is the three-register chrome — New bee (default,
-  calm, never numbered steps), Raver, Cypherpunk — same doors, three
-  densities. Lives on My Media and the Receive sheet; persisted
-  per-profile like the colour scheme.
+  calm Keep, 26 languages), Raver (ceremony / bloom), Cypherpunk
+  (verify / public XOR) — same facts, three voices. Lives on My
+  Media and the Receive sheet; persisted per-profile like the
+  colour scheme.
 - About / licenses (incl. TMDB attribution notice + logo; the Terms of
   Use & Disclaimer page — also gated on first launch; update-check
   toggle + "Update available" row on desktop; since 2026-09-06 the

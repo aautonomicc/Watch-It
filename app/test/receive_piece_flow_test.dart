@@ -145,6 +145,28 @@ void main() {
     expect(kept?.size, 2048);
   });
 
+  testWidgets('Raver register is ceremony and celebration bloom',
+      (tester) async {
+    await tester.pumpWidget(host(base: 'http://127.0.0.1:1'));
+    await tester.pump();
+
+    await tester.tap(find.text('Raver'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('A bloom they offered'), findsOneWidget);
+    expect(find.textContaining('Hold it if it moves you'), findsOneWidget);
+    expect(find.text('Meet it'), findsOneWidget);
+    expect(find.text('Look it up'), findsNothing);
+    expect(find.text('HEAD /public'), findsNothing);
+    expect(find.textContaining('XOR'), findsNothing);
+    expect(
+      find.byWidgetPredicate((w) =>
+          w is SkaistsBloom && w.moment == SkaistsBloomMoment.celebrate),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('Cypherpunk register shows the technical door, same Keep',
       (tester) async {
     await tester.pumpWidget(host(base: 'http://127.0.0.1:1'));

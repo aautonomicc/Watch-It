@@ -59,7 +59,7 @@ class _ReceivePieceDialogState extends State<ReceivePieceDialog> {
     }
     return switch (view) {
       ExperienceView.newBee => SkaistsBloomMoment.idle,
-      ExperienceView.raver => SkaistsBloomMoment.still,
+      ExperienceView.raver => SkaistsBloomMoment.celebrate,
       ExperienceView.cypherpunk => SkaistsBloomMoment.still,
     };
   }

@@ -42,7 +42,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Stay connected'), findsOneWidget);
-    expect(find.text('Open the atlas'), findsOneWidget);
+    expect(find.text('See more'), findsOneWidget);
     expect(find.byKey(const ValueKey('estate-connect-bloom')), findsOneWidget);
     expect(
       find.byWidgetPredicate((w) =>
@@ -58,10 +58,10 @@ void main() {
     expect(find.text('bnr'), findsOneWidget);
   });
 
-  testWidgets('Open the atlas hits the documented hub URL', (tester) async {
+  testWidgets('See more hits the documented hub URL', (tester) async {
     await tester.pumpWidget(host());
     await tester.pump();
-    await tester.tap(find.text('Open the atlas'));
+    await tester.tap(find.text('See more'));
     await tester.pump();
     expect(launched, [Uri.parse(kSkaistsAtlasUrl)]);
   });

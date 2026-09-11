@@ -41,12 +41,14 @@ void main() {
     expect(copy.keepVerb, 'Keep it');
     expect(copy.badgeLabel, 'Shared');
     expect(copy.fileDoorTechnical, isNull);
+    expect(ExperienceView.newBee.hint, 'Calm and plain');
   });
 
   test('eco corpus covers 26 languages and Latvian Keep', () {
     expect(kEcoLanguageCodes, hasLength(26));
     expect(kEcoLocales, hasLength(26));
     expect(EcoCorpus.string('lv', 'keepVerb.newBee'), 'Paturi');
+    expect(EcoCorpus.string('lv', 'keepVerb.raver'), 'Turi');
     expect(EcoCorpus.string('lv', 'receiveTitle.newBee'), 'Kāda darba gabals');
     final lv = ExperienceCopy(ExperienceView.newBee, locale: const Locale('lv'));
     expect(lv.keepVerb, 'Paturi');
@@ -58,19 +60,56 @@ void main() {
     expect(ExperienceCopy(ExperienceView.newBee).rightsLine,
         contains('give it away'));
     expect(ExperienceCopy(ExperienceView.raver).rightsLine,
-        contains('not permission to redistribute'));
+        contains('not permission to pass it on'));
     expect(ExperienceCopy(ExperienceView.cypherpunk).rightsLine,
         contains('public address ≠ redistribute permission'));
   });
 
   test('estate connect copy points at the public atlas', () {
-    expect(ExperienceCopy(ExperienceView.newBee).estateSnackAction, 'Estate');
+    expect(ExperienceCopy(ExperienceView.newBee).estateSnackAction, 'More');
+    expect(ExperienceCopy(ExperienceView.newBee).estateAtlasVerb, 'See more');
+    expect(ExperienceCopy(ExperienceView.raver).estateTitle,
+        'The garden is still open');
     expect(ExperienceCopy(ExperienceView.raver).estateAtlasVerb,
-        'skaists.dev/surfaces');
+        'Walk the garden');
     expect(ExperienceCopy(ExperienceView.cypherpunk).estateTitle,
         'skaists.dev/surfaces');
     expect(ExperienceCopy(ExperienceView.cypherpunk).estateEmotion,
         contains('estate.json v1'));
+  });
+
+  test('three views share the same facts in three voices', () {
+    final bee = ExperienceCopy(ExperienceView.newBee);
+    final raver = ExperienceCopy(ExperienceView.raver);
+    final punk = ExperienceCopy(ExperienceView.cypherpunk);
+
+    expect(bee.keepVerb, 'Keep it');
+    expect(bee.lookUpVerb, 'Look it up');
+    expect(bee.badgeLabel, 'Shared');
+    expect(bee.receiveEmotion.toLowerCase().contains('xor'), isFalse);
+    expect(bee.receiveEmotion.contains('HEAD'), isFalse);
+    expect(bee.estateEmotion.toLowerCase().contains('atlas'), isFalse);
+    expect(bee.estateSnackAction, isNot(contains('Estate')));
+
+    expect(raver.keepVerb, 'Hold it');
+    expect(raver.lookUpVerb, 'Meet it');
+    expect(raver.badgeLabel, 'Held · living');
+    expect(raver.receiveTitle, 'A bloom they offered');
+    expect(raver.receiveEmotion, contains('grew it'));
+    expect(raver.receiveEmotion.contains('HEAD'), isFalse);
+    expect(raver.receiveEmotion.toLowerCase().contains('xor'), isFalse);
+    expect(ExperienceView.raver.hint, contains('ceremony'));
+
+    expect(punk.lookUpVerb, 'HEAD /public');
+    expect(punk.receiveTitle, 'Public XOR import');
+    expect(punk.receiveEmotion, contains('provenance'));
+    expect(punk.receiveEmotion, contains('public XOR'));
+    expect(punk.badgeLabel, 'public XOR');
+    expect(ExperienceView.cypherpunk.hint, contains('public XOR'));
+
+    expect(bee.keptSnack, contains('maker still holds'));
+    expect(raver.keptSnack, contains('who grew it'));
+    expect(punk.keptSnack, contains('stays on Autonomi'));
   });
 
   test('Cypherpunk copy keeps Luna\'s engineering contract visible', () {

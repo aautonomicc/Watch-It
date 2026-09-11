@@ -3,9 +3,11 @@ import 'package:flutter/widgets.dart';
 
 import '../l10n/eco_corpus.dart';
 
-/// Three registers for any UI that surfaces a choice. Same doors, three
-/// densities. New bee is the default and NEVER uses numbered steps —
-/// flow is view / emotion / choose-click.
+/// Three registers for any UI that surfaces a choice. Same facts,
+/// three voices. New bee is the default — commons-digestible across
+/// 26 languages, calm short chrome, Keep, no jargon, never numbered
+/// steps. Raver is ceremony: imagery, consciousness, plant-medicine,
+/// celebration bloom. Cypherpunk is verify / provenance / public XOR.
 enum ExperienceView {
   newBee,
   raver,
@@ -18,9 +20,9 @@ enum ExperienceView {
       };
 
   String get hint => switch (this) {
-        ExperienceView.newBee => 'Calm and readable',
-        ExperienceView.raver => 'Tighter, same doors',
-        ExperienceView.cypherpunk => 'Full technical density',
+        ExperienceView.newBee => 'Calm and plain',
+        ExperienceView.raver => 'Feeling, bloom, ceremony',
+        ExperienceView.cypherpunk => 'Verify, provenance, public XOR',
       };
 }
 
@@ -38,8 +40,10 @@ const kAdoptionPromise =
     'Make something beautiful. Give someone a piece of it. Stay connected to its maker.';
 
 /// Copy that changes with the register. Widgets read this instead of
-/// branching on raw developer strings. New bee / Raver resolve through
-/// the 26-language eco corpus; Cypherpunk stays English (protocol).
+/// branching on raw developer strings. Facts stay identical; only the
+/// voice changes. New bee resolves through the 26-language eco corpus;
+/// Raver is English ceremony with a few corpus keys; Cypherpunk stays
+/// English (protocol).
 class ExperienceCopy {
   const ExperienceCopy(this.view, {this.locale});
 
@@ -68,7 +72,7 @@ class ExperienceCopy {
         'receiveTitle.${view.name}',
         switch (view) {
           ExperienceView.newBee => 'A piece of someone’s work',
-          ExperienceView.raver => 'Catch a shared piece',
+          ExperienceView.raver => 'A bloom they offered',
           ExperienceView.cypherpunk => 'Public XOR import',
         },
       );
@@ -79,10 +83,12 @@ class ExperienceCopy {
           ExperienceView.newBee =>
             'They made something. They gave you a way to keep it.',
           ExperienceView.raver =>
-            'Verify it, Keep it. The maker still holds the original.',
+            'It arrived. Hold it if it moves you. The source stays '
+                'with the one who grew it.',
           ExperienceView.cypherpunk =>
-            'HEAD /public/{address} — read-only probe. Saving writes a '
-                'private library bookmark. Nothing is re-uploaded or published.',
+            'HEAD /public/{address} — read-only provenance probe of the '
+                'public XOR. Saving writes a private library bookmark. '
+                'Nothing is re-uploaded or published.',
         },
       );
 
@@ -90,14 +96,14 @@ class ExperienceCopy {
         'addressLabel.${view.name}',
         switch (view) {
           ExperienceView.newBee => 'The address they sent you',
-          ExperienceView.raver => 'Public address',
+          ExperienceView.raver => 'The thread they handed you',
           ExperienceView.cypherpunk => 'Public XOR (64 hex, optional 0x)',
         },
       );
 
   String get addressHint => switch (view) {
         ExperienceView.newBee => 'It looks like a long code',
-        ExperienceView.raver => '0x… or 64 hex characters',
+        ExperienceView.raver => 'A long shimmer of letters',
         ExperienceView.cypherpunk => '64 hexadecimal characters',
       };
 
@@ -105,7 +111,7 @@ class ExperienceCopy {
         'lookUpVerb.${view.name}',
         switch (view) {
           ExperienceView.newBee => 'Look it up',
-          ExperienceView.raver => 'Verify',
+          ExperienceView.raver => 'Meet it',
           ExperienceView.cypherpunk => 'HEAD /public',
         },
       );
@@ -114,7 +120,7 @@ class ExperienceCopy {
         'lookingUp.${view.name}',
         switch (view) {
           ExperienceView.newBee => 'Looking for that piece…',
-          ExperienceView.raver => 'Verifying…',
+          ExperienceView.raver => 'Listening for it…',
           ExperienceView.cypherpunk => 'Probing /public…',
         },
       );
@@ -123,20 +129,20 @@ class ExperienceCopy {
         'nameLabel.${view.name}',
         switch (view) {
           ExperienceView.newBee => 'Name this piece',
-          ExperienceView.raver => 'Title / credit',
+          ExperienceView.raver => 'Name the offering',
           ExperienceView.cypherpunk => 'Title / creator credit',
         },
       );
 
   String get nameHint => switch (view) {
         ExperienceView.newBee => 'What do you want to call it?',
-        ExperienceView.raver => 'Song and Dance — maker',
+        ExperienceView.raver => 'the night it opened — grower',
         ExperienceView.cypherpunk => 'e.g. Song and Dance Festival — LNKC',
       };
 
   String get defaultName => switch (view) {
         ExperienceView.newBee => 'A shared piece',
-        ExperienceView.raver => 'Shared piece',
+        ExperienceView.raver => 'A living share',
         ExperienceView.cypherpunk => 'Autonomi public file',
       };
 
@@ -145,7 +151,7 @@ class ExperienceCopy {
       'verified.${view.name}',
       switch (view) {
         ExperienceView.newBee => 'This piece is real.',
-        ExperienceView.raver => 'Verified. Keep it if it feels right.',
+        ExperienceView.raver => 'It landed. Hold it if it feels right.',
         ExperienceView.cypherpunk => 'Verified public address',
       },
     );
@@ -156,7 +162,7 @@ class ExperienceCopy {
         'keepVerb.${view.name}',
         switch (view) {
           ExperienceView.newBee => 'Keep it',
-          ExperienceView.raver => 'Keep',
+          ExperienceView.raver => 'Hold it',
           ExperienceView.cypherpunk => 'Save public reference',
         },
       );
@@ -165,7 +171,7 @@ class ExperienceCopy {
         'notThisVerb.${view.name}',
         switch (view) {
           ExperienceView.newBee => 'Not this one',
-          ExperienceView.raver => 'Dismiss',
+          ExperienceView.raver => 'Let it pass',
           ExperienceView.cypherpunk => 'Cancel',
         },
       );
@@ -180,7 +186,7 @@ class ExperienceCopy {
           ExperienceView.newBee =>
             'Kept. It’s in your library — the maker still holds the original.',
           ExperienceView.raver =>
-            'Kept on this device. Still lives on Autonomi.',
+            'Held. Still living with the one who grew it.',
           ExperienceView.cypherpunk =>
             'Public reference added — content stays on Autonomi.',
         },
@@ -188,29 +194,29 @@ class ExperienceCopy {
 
   String get estateTitle => switch (view) {
         ExperienceView.newBee => 'Stay connected',
-        ExperienceView.raver => 'The estate is still open',
+        ExperienceView.raver => 'The garden is still open',
         ExperienceView.cypherpunk => 'skaists.dev/surfaces',
       };
 
   String get estateEmotion => switch (view) {
         ExperienceView.newBee =>
-          'The garden they come from is still open — walk any door.',
+          'They’re still out there. You can visit the places this came from.',
         ExperienceView.raver =>
-          'Full atlas. Families, then every live card.',
+          'Walk every family. Every live door is still breathing.',
         ExperienceView.cypherpunk =>
           'estate.json v1 · 8 families · LIVE cards only · '
               'https://skaists.dev/{path}',
       };
 
   String get estateAtlasVerb => switch (view) {
-        ExperienceView.newBee => 'Open the atlas',
-        ExperienceView.raver => 'skaists.dev/surfaces',
+        ExperienceView.newBee => 'See more',
+        ExperienceView.raver => 'Walk the garden',
         ExperienceView.cypherpunk => 'GET /surfaces/',
       };
 
   String get estateSnackAction => switch (view) {
-        ExperienceView.newBee => 'Estate',
-        ExperienceView.raver => 'Estate',
+        ExperienceView.newBee => 'More',
+        ExperienceView.raver => 'Garden',
         ExperienceView.cypherpunk => 'atlas',
       };
 
@@ -218,7 +224,7 @@ class ExperienceCopy {
         'receiveDoorTitle.${view.name}',
         switch (view) {
           ExperienceView.newBee => 'Receive a piece',
-          ExperienceView.raver => 'Receive',
+          ExperienceView.raver => 'A share arrives',
           ExperienceView.cypherpunk => 'Import public address',
         },
       );
@@ -228,7 +234,8 @@ class ExperienceCopy {
         switch (view) {
           ExperienceView.newBee =>
             'Someone sent you their work. Keep it here.',
-          ExperienceView.raver => 'Verify a public piece, then Keep.',
+          ExperienceView.raver =>
+            'Someone offered a piece of their field. Hold it here.',
           ExperienceView.cypherpunk =>
             'Read-only /public probe, then save a publicReference bookmark.',
         },
@@ -238,7 +245,7 @@ class ExperienceCopy {
         'fileDoorTitle.${view.name}',
         switch (view) {
           ExperienceView.newBee => 'Add from a file',
-          ExperienceView.raver => 'Add a file',
+          ExperienceView.raver => 'A file you already hold',
           ExperienceView.cypherpunk => 'Import .datamap / .watch-list',
         },
       );
@@ -249,7 +256,7 @@ class ExperienceCopy {
           ExperienceView.newBee =>
             'A private copy you already have — W@tch works out the rest.',
           ExperienceView.raver =>
-            '.datamap or a W@tch bundle. Private, yours.',
+            'Private, already yours — the rest unfolds.',
           ExperienceView.cypherpunk =>
             '.datamap (ant upload), .watch-list bundle, or a bundle’s '
                 'own .watch-list.datamap on Autonomi.',
@@ -262,7 +269,7 @@ class ExperienceCopy {
           ExperienceView.newBee =>
             'Keeping it here doesn’t let you give it away.',
           ExperienceView.raver =>
-            'A public address is not permission to redistribute.',
+            'Holding this is not permission to pass it on.',
           ExperienceView.cypherpunk =>
             'public address ≠ redistribute permission — publicReference '
                 'is a source pointer, not a licence grant.',
@@ -288,7 +295,7 @@ class ExperienceCopy {
         ExperienceView.newBee =>
           'These rows are your home wall. Drag to reorder, untick to hide.',
         ExperienceView.raver =>
-          'Home order — drag to reorder, untick to hide. Lighter rows fill themselves.',
+          'Your wall. Drag to reorder, untick to hide.',
         ExperienceView.cypherpunk =>
           'Rows appear on your home screen in this order — drag the handle '
               'to reorder, untick to hide. The lighter rows are built-in '
@@ -299,7 +306,7 @@ class ExperienceCopy {
         ExperienceView.newBee =>
           'Nothing here yet. Receive a piece, or add from a file.',
         ExperienceView.raver =>
-          'Empty library. Receive or add a file to start a list.',
+          'The field is empty. Receive a share, or bring a file.',
         ExperienceView.cypherpunk =>
           'No lists yet. Use “Add to library” above — it creates lists '
               'as part of the import.',
@@ -309,7 +316,7 @@ class ExperienceCopy {
         'badgeLabel.${view.name}',
         switch (view) {
           ExperienceView.newBee => 'Shared',
-          ExperienceView.raver => 'Public · kept',
+          ExperienceView.raver => 'Held · living',
           ExperienceView.cypherpunk => 'public XOR',
         },
       );
@@ -318,7 +325,7 @@ class ExperienceCopy {
         ExperienceView.newBee =>
           'A piece someone shared. It stays on Autonomi with its maker.',
         ExperienceView.raver =>
-          'Public reference — fetched on demand, no licence grant.',
+          'A living share. The original stays with the one who grew it.',
         ExperienceView.cypherpunk =>
           'publicReference — streamed via GET /public/{address}, hash-verified.',
       };
@@ -327,14 +334,14 @@ class ExperienceCopy {
         ExperienceView.newBee =>
           'You’re keeping a shared piece. The maker still holds it.',
         ExperienceView.raver =>
-          'Public piece — kept here, lives on Autonomi.',
+          'You’re holding a living share. The grower still keeps the source.',
         ExperienceView.cypherpunk =>
           'Public reference. Playback uses /public and never re-uploads.',
       };
 
   String get playerChip => switch (view) {
         ExperienceView.newBee => 'Shared piece',
-        ExperienceView.raver => 'Public · kept',
+        ExperienceView.raver => 'Held · living',
         ExperienceView.cypherpunk => 'public XOR',
       };
 
@@ -342,7 +349,7 @@ class ExperienceCopy {
         'emptyLibraryTitle.${view.name}',
         switch (view) {
           ExperienceView.newBee => 'Make something beautiful.',
-          ExperienceView.raver => 'Your wall is waiting.',
+          ExperienceView.raver => 'The field is open.',
           ExperienceView.cypherpunk => 'Your library is empty',
         },
       );
@@ -353,7 +360,7 @@ class ExperienceCopy {
           ExperienceView.newBee =>
             'Give someone a piece of it. Stay connected to its maker.',
           ExperienceView.raver =>
-            'Receive a piece, or add a file you already hold.',
+            'Receive what they grew, or bring a file you already hold.',
           ExperienceView.cypherpunk =>
             'Use “Add to library” in Settings → My Media to get started.',
         },
@@ -372,7 +379,8 @@ class ExperienceCopy {
     return switch (view) {
       ExperienceView.newBee =>
         sharedCount == 1 ? ' · 1 shared piece' : ' · $sharedCount shared pieces',
-      ExperienceView.raver => ' · $sharedCount public',
+      ExperienceView.raver =>
+        sharedCount == 1 ? ' · 1 held' : ' · $sharedCount held',
       ExperienceView.cypherpunk => ' · $sharedCount publicReference',
     };
   }

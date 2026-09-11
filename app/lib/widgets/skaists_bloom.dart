@@ -12,7 +12,7 @@ const kSkaistsBloomMarkAsset = 'assets/skaists_bloom.png';
 /// Three moments the skaists bloom is allowed to breathe.
 ///
 /// New bee: [idle] — a few soft breaths after arrival, then rest.
-/// Raver: [celebrate] — a short pulse when the piece is real / Keep.
+/// Raver: [celebrate] — pulse from arrival and on Hold.
 /// Cypherpunk: [still] at rest, [flash] once on a successful verify.
 enum SkaistsBloomMoment { idle, celebrate, flash, still }
 
