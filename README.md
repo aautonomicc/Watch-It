@@ -25,10 +25,11 @@ QR code) and watch lists, viewing positions, and your own edits and artwork
 travel between them automatically — peer-to-peer and end-to-end encrypted,
 with no account and no cloud.
 
-![W@tch desktop home screen — pinned library panel, Continue Watching with resume bars, Recently Added and Movies shelves of poster cards](docs/screenshots/home-linux.jpg)
+![W@tch desktop home screen — pinned library panel with lists and playlists, Continue Watching with resume bars, Recently Added and Movies shelves of poster cards](docs/screenshots/home-linux.jpg)
 
 *The W@tch home screen on desktop: Continue Watching, Recently Added and your
-own lists, streamed straight from Autonomi — no key, no account, no server.
+own lists — with your playlists a click away in the library panel — streamed
+straight from Autonomi: no key, no account, no server.
 (Sample library — the titles shown are invented for the screenshot.)*
 
 Want a ready-made library? It's a one-file download:
@@ -56,6 +57,17 @@ per-album track counts. Right — an album playing: cover art, seek bar and
 transport controls above the track list, with downloaded tracks marked and the
 playing track highlighted. (As above, the titles shown are invented for the
 screenshots.)*
+
+<p>
+  <img src="docs/screenshots/playlist-linux.jpg" width="49%" alt="A playlist in W@tch — collage cover, Play all, Shuffle and Add tracks buttons, a playing track's transport, and drag-to-reorder track rows" />
+  <img src="docs/screenshots/needs-sorting-linux.jpg" width="49%" alt="The Needs sorting screen in W@tch — unidentified tracks selected with checkboxes and the Move to album dialog previewing the new file names" />
+</p>
+
+*Left — a playlist: your own ordered mix of tracks from any album, with
+play-through, shuffle and drag-to-reorder — the order on the page is the play
+order. Right — Needs sorting: tracks that arrived without album information
+can be selected and moved into an album in one step; W@tch renames the files
+for you. (As above, the titles shown are invented for the screenshots.)*
 
 ## How it works
 
