@@ -1293,6 +1293,7 @@ class MyWatchSync {
                   (e.addedAt == null || e.addedAt == 0) ? 1 : e.addedAt,
               if (e.sizeBytes != null) 'size': e.sizeBytes,
               if (e.videoInfo != null) 'video': e.videoInfo,
+              if (e.publicReference) 'public': true,
               // Only renamed entries pay the bytes; old builds ignore
               // the key (they read name/address/added_ms/size/video).
               if ((e.renamedAt ?? 0) != 0) 'renamed_ms': e.renamedAt,
@@ -1621,6 +1622,7 @@ class MyWatchSync {
             addedAt: addedMs,
             sizeBytes: re['size'] as int?,
             videoInfo: re['video'] as String?,
+            publicReference: re['public'] as bool? ?? false,
             renamedAt: renamedMs == 0 ? null : renamedMs,
           );
           if (i == -1) {

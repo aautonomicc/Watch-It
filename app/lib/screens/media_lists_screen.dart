@@ -24,6 +24,7 @@ import '../services/list_import.dart';
 import '../services/metadata_service.dart';
 import '../services/organize.dart';
 import '../services/profile_transfer.dart';
+import '../services/public_address_import.dart';
 import '../theme/tokens.dart';
 import '../widgets/channel_avatar.dart';
 import '../widgets/channel_badge.dart';
@@ -218,6 +219,31 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           listTitles: titles, extraNotes: skippedNotes);
     } else if (skippedNotes.isNotEmpty) {
       _showError('Done, but ${skippedNotes.single}.');
+    }
+  }
+
+  /// Add a public Autonomi address as a local library reference. The probe
+  /// is explicit and read-only; saving never re-uploads or publishes data.
+  Future<void> _importPublicAddress() async {
+    final result = await showDialog<({String address, String name, int? size})>(
+      context: context,
+      builder: (context) => _PublicAddressDialog(base: widget.importBase),
+    );
+    if (result == null || !mounted) return;
+    final titles = await _pickTargetLists(suggested: 'Public references');
+    if (titles == null || titles.isEmpty || !mounted) return;
+    await addEntriesToLists([
+      MediaEntry(
+        name: result.name,
+        address: result.address,
+        sizeBytes: result.size,
+        publicReference: true,
+      ),
+    ], titles);
+    await _reload();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Public reference added — content stays on Autonomi.')));
     }
   }
 
@@ -1315,6 +1341,11 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         title: Text('My Media', style: TextStyle(color: t.bone, fontSize: 18)),
         actions: [
           IconButton(
+            tooltip: 'Add public Autonomi address',
+            icon: Icon(Icons.link, color: t.bone),
+            onPressed: _importPublicAddress,
+          ),
+          IconButton(
             tooltip: 'Add to library',
             icon: Icon(Icons.download_outlined, color: t.bone),
             onPressed: _importList,
@@ -1544,6 +1575,147 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         ],
       ),
       onTap: () => _openList(list),
+    );
+  }
+}
+
+class _PublicAddressDialog extends StatefulWidget {
+  const _PublicAddressDialog({this.base});
+
+  final String? base;
+
+  @override
+  State<_PublicAddressDialog> createState() => _PublicAddressDialogState();
+}
+
+class _PublicAddressDialogState extends State<_PublicAddressDialog> {
+  final _address = TextEditingController();
+  final _name = TextEditingController();
+  bool _checking = false;
+  PublicAddressInspection? _inspection;
+  String? _error;
+
+  @override
+  void dispose() {
+    _address.dispose();
+    _name.dispose();
+    super.dispose();
+  }
+
+  Future<void> _check() async {
+    setState(() {
+      _checking = true;
+      _error = null;
+      _inspection = null;
+    });
+    try {
+      final result = await inspectPublicAddress(_address.text, base: widget.base);
+      if (!mounted) return;
+      setState(() {
+        _inspection = result;
+        _address.text = result.address;
+        if (_name.text.trim().isEmpty) _name.text = 'Autonomi public file';
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+  }
+
+  void _add() {
+    final inspection = _inspection;
+    final name = _name.text.trim();
+    if (inspection == null || name.isEmpty) return;
+    Navigator.of(context).pop(
+      (address: inspection.address, name: name, size: inspection.sizeBytes),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = WiTokens.of(context);
+    final size = _inspection?.sizeBytes;
+    return AlertDialog(
+      backgroundColor: t.ink2,
+      title: Text('Add public Autonomi address',
+          style: TextStyle(color: t.bone, fontSize: 16)),
+      content: SizedBox(
+        width: 460,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Paste a 64-character public XOR address. W@tch checks it '
+                'through your local Autonomi client, then stores a private '
+                'library bookmark. Nothing is re-uploaded or published.',
+                style: TextStyle(color: t.boneDim, fontSize: 12.5),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _address,
+                autofocus: true,
+                keyboardType: TextInputType.url,
+                style: TextStyle(color: t.bone, fontSize: 13),
+                decoration: InputDecoration(
+                  labelText: 'Public address',
+                  labelStyle: TextStyle(color: t.ash),
+                  hintText: '0x… or 64 hex characters',
+                  hintStyle: TextStyle(color: t.ash.withValues(alpha: .7)),
+                  suffixIcon: IconButton(
+                    tooltip: 'Verify address',
+                    onPressed: _checking ? null : _check,
+                    icon: _checking
+                        ? SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: t.accent))
+                        : Icon(Icons.verified_outlined, color: t.accent),
+                  ),
+                ),
+                onSubmitted: (_) => _checking ? null : _check(),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _name,
+                style: TextStyle(color: t.bone, fontSize: 13),
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  labelText: 'Title / creator credit',
+                  labelStyle: TextStyle(color: t.ash),
+                  hintText: 'e.g. Song and Dance Festival — LNKC',
+                  hintStyle: TextStyle(color: t.ash.withValues(alpha: .7)),
+                ),
+              ),
+              if (_inspection != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Verified public address${size == null ? '' : ' · ${formatBytes(size)}'}',
+                  style: TextStyle(color: t.accent, fontSize: 12),
+                ),
+              ],
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(_error!, style: TextStyle(color: t.rust, fontSize: 12)),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text('Cancel', style: TextStyle(color: t.ash)),
+        ),
+        TextButton(
+          onPressed: _inspection == null || _name.text.trim().isEmpty ? null : _add,
+          child: Text('Add to library',
+              style: TextStyle(color: _inspection == null ? t.ash : t.accent)),
+        ),
+      ],
     );
   }
 }

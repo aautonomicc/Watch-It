@@ -406,6 +406,7 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
           addedAt: entry.addedAt,
           sizeBytes: entry.sizeBytes,
           videoInfo: entry.videoInfo,
+          publicReference: entry.publicReference,
         );
       }
     }

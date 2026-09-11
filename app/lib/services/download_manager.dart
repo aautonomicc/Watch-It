@@ -124,7 +124,7 @@ class DownloadTask {
 }
 
 /// App-wide download queue: streams files from the embedded client's
-/// `/xor/` endpoint to disk, one at a time, persisting progress in the
+/// `/xor/` or explicit `/public/` endpoint to disk, one at a time, persisting progress in the
 /// downloads table so partial files resume across app restarts (the
 /// endpoint serves deterministic decrypted bytes, so `Range: bytes=N-`
 /// picks up exactly where the file on disk stops).
@@ -834,7 +834,13 @@ class DownloadManager extends ChangeNotifier {
         status: DownloadStatus.downloading, downloadedBytes: start));
     IOSink? sink;
     try {
-      final req = await client.getUrl(Uri.parse('$base/xor/$addr'));
+      // Public address references resolve their map on first use; ordinary
+      // datamap imports retain the local-map /xor fast path.
+      final lists = await _libraryLists();
+      final isPublic = lists.any((list) => list.entries.any((entry) =>
+          normalize(entry.address) == addr && entry.publicReference));
+      final req = await client.getUrl(Uri.parse(
+          '$base/${isPublic ? 'public' : 'xor'}/$addr'));
       if (start > 0) {
         req.headers.set(HttpHeaders.rangeHeader, 'bytes=$start-');
       }

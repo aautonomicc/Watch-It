@@ -654,6 +654,9 @@ class $MediaEntriesTable extends MediaEntries
   static const VerificationMeta _renamedAtMeta = const VerificationMeta(
     'renamedAt',
   );
+  static const VerificationMeta _publicReferenceMeta = const VerificationMeta(
+    'publicReference',
+  );
   @override
   late final GeneratedColumn<int> renamedAt = GeneratedColumn<int>(
     'renamed_at',
@@ -664,16 +667,14 @@ class $MediaEntriesTable extends MediaEntries
     defaultValue: const Constant(0),
   );
   @override
+  late final GeneratedColumn<bool> publicReference = GeneratedColumn<bool>(
+    'public_reference', aliasedName, false, type: DriftSqlType.bool,
+    requiredDuringInsert: false, defaultValue: const Constant(false),
+  );
+  @override
   List<GeneratedColumn> get $columns => [
-    entryId,
-    listId,
-    name,
-    address,
-    position,
-    addedAt,
-    sizeBytes,
-    videoInfo,
-    renamedAt,
+    entryId, listId, name, address, position, addedAt, sizeBytes,
+    videoInfo, renamedAt, publicReference,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -749,6 +750,9 @@ class $MediaEntriesTable extends MediaEntries
         renamedAt.isAcceptableOrUnknown(data['renamed_at']!, _renamedAtMeta),
       );
     }
+    if (data.containsKey('public_reference')) {
+      context.handle(_publicReferenceMeta, publicReference.isAcceptableOrUnknown(data['public_reference']!, _publicReferenceMeta));
+    }
     return context;
   }
 
@@ -794,6 +798,9 @@ class $MediaEntriesTable extends MediaEntries
         DriftSqlType.int,
         data['${effectivePrefix}renamed_at'],
       )!,
+      publicReference: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool, data['${effectivePrefix}public_reference'],
+      )!,
     );
   }
 
@@ -827,6 +834,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
   /// how music organizes (album folds read file names), and this stamp
   /// lets My W@tch sync merge them newest-name-wins across devices.
   final int renamedAt;
+  final bool publicReference;
   const MediaEntryRow({
     required this.entryId,
     required this.listId,
@@ -837,6 +845,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
     this.sizeBytes,
     this.videoInfo,
     required this.renamedAt,
+    required this.publicReference,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -854,6 +863,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
       map['video_info'] = Variable<String>(videoInfo);
     }
     map['renamed_at'] = Variable<int>(renamedAt);
+    map['public_reference'] = Variable<bool>(publicReference);
     return map;
   }
 
@@ -872,6 +882,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
           ? const Value.absent()
           : Value(videoInfo),
       renamedAt: Value(renamedAt),
+      publicReference: Value(publicReference),
     );
   }
 
@@ -890,6 +901,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
       sizeBytes: serializer.fromJson<int?>(json['sizeBytes']),
       videoInfo: serializer.fromJson<String?>(json['videoInfo']),
       renamedAt: serializer.fromJson<int>(json['renamedAt']),
+      publicReference: serializer.fromJson<bool>(json['publicReference']),
     );
   }
   @override
@@ -905,6 +917,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
       'sizeBytes': serializer.toJson<int?>(sizeBytes),
       'videoInfo': serializer.toJson<String?>(videoInfo),
       'renamedAt': serializer.toJson<int>(renamedAt),
+      'publicReference': serializer.toJson<bool>(publicReference),
     };
   }
 
@@ -918,6 +931,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
     Value<int?> sizeBytes = const Value.absent(),
     Value<String?> videoInfo = const Value.absent(),
     int? renamedAt,
+    bool? publicReference,
   }) => MediaEntryRow(
     entryId: entryId ?? this.entryId,
     listId: listId ?? this.listId,
@@ -928,6 +942,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
     sizeBytes: sizeBytes.present ? sizeBytes.value : this.sizeBytes,
     videoInfo: videoInfo.present ? videoInfo.value : this.videoInfo,
     renamedAt: renamedAt ?? this.renamedAt,
+    publicReference: publicReference ?? this.publicReference,
   );
   MediaEntryRow copyWithCompanion(MediaEntriesCompanion data) {
     return MediaEntryRow(
@@ -940,6 +955,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
       sizeBytes: data.sizeBytes.present ? data.sizeBytes.value : this.sizeBytes,
       videoInfo: data.videoInfo.present ? data.videoInfo.value : this.videoInfo,
       renamedAt: data.renamedAt.present ? data.renamedAt.value : this.renamedAt,
+      publicReference: data.publicReference.present ? data.publicReference.value : this.publicReference,
     );
   }
 
@@ -954,7 +970,8 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
           ..write('addedAt: $addedAt, ')
           ..write('sizeBytes: $sizeBytes, ')
           ..write('videoInfo: $videoInfo, ')
-          ..write('renamedAt: $renamedAt')
+          ..write('renamedAt: $renamedAt, ')
+          ..write('publicReference: $publicReference')
           ..write(')'))
         .toString();
   }
@@ -970,6 +987,7 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
     sizeBytes,
     videoInfo,
     renamedAt,
+    publicReference,
   );
   @override
   bool operator ==(Object other) =>
@@ -983,7 +1001,8 @@ class MediaEntryRow extends DataClass implements Insertable<MediaEntryRow> {
           other.addedAt == this.addedAt &&
           other.sizeBytes == this.sizeBytes &&
           other.videoInfo == this.videoInfo &&
-          other.renamedAt == this.renamedAt);
+          other.renamedAt == this.renamedAt &&
+          other.publicReference == this.publicReference);
 }
 
 class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
@@ -996,6 +1015,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
   final Value<int?> sizeBytes;
   final Value<String?> videoInfo;
   final Value<int> renamedAt;
+  final Value<bool> publicReference;
   const MediaEntriesCompanion({
     this.entryId = const Value.absent(),
     this.listId = const Value.absent(),
@@ -1006,6 +1026,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     this.sizeBytes = const Value.absent(),
     this.videoInfo = const Value.absent(),
     this.renamedAt = const Value.absent(),
+    this.publicReference = const Value.absent(),
   });
   MediaEntriesCompanion.insert({
     this.entryId = const Value.absent(),
@@ -1017,6 +1038,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     this.sizeBytes = const Value.absent(),
     this.videoInfo = const Value.absent(),
     this.renamedAt = const Value.absent(),
+    this.publicReference = const Value.absent(),
   }) : listId = Value(listId),
        name = Value(name),
        address = Value(address),
@@ -1031,6 +1053,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     Expression<int>? sizeBytes,
     Expression<String>? videoInfo,
     Expression<int>? renamedAt,
+    Expression<bool>? publicReference,
   }) {
     return RawValuesInsertable({
       if (entryId != null) 'entry_id': entryId,
@@ -1042,6 +1065,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
       if (sizeBytes != null) 'size_bytes': sizeBytes,
       if (videoInfo != null) 'video_info': videoInfo,
       if (renamedAt != null) 'renamed_at': renamedAt,
+      if (publicReference != null) 'public_reference': publicReference,
     });
   }
 
@@ -1055,6 +1079,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     Value<int?>? sizeBytes,
     Value<String?>? videoInfo,
     Value<int>? renamedAt,
+    Value<bool>? publicReference,
   }) {
     return MediaEntriesCompanion(
       entryId: entryId ?? this.entryId,
@@ -1066,6 +1091,7 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
       sizeBytes: sizeBytes ?? this.sizeBytes,
       videoInfo: videoInfo ?? this.videoInfo,
       renamedAt: renamedAt ?? this.renamedAt,
+      publicReference: publicReference ?? this.publicReference,
     );
   }
 
@@ -1099,6 +1125,9 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
     if (renamedAt.present) {
       map['renamed_at'] = Variable<int>(renamedAt.value);
     }
+    if (publicReference.present) {
+      map['public_reference'] = Variable<bool>(publicReference.value);
+    }
     return map;
   }
 
@@ -1113,7 +1142,8 @@ class MediaEntriesCompanion extends UpdateCompanion<MediaEntryRow> {
           ..write('addedAt: $addedAt, ')
           ..write('sizeBytes: $sizeBytes, ')
           ..write('videoInfo: $videoInfo, ')
-          ..write('renamedAt: $renamedAt')
+          ..write('renamedAt: $renamedAt, ')
+          ..write('publicReference: $publicReference')
           ..write(')'))
         .toString();
   }

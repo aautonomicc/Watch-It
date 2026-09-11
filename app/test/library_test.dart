@@ -793,6 +793,13 @@ void main() {
       expect(streamUrl('http://gw', upper), 'http://gw/xor/$_addr');
     });
 
+    test('uses the explicit public route for public references', () {
+      final publicEntry = MediaEntry(
+        name: 'Public.mkv', address: _addr, publicReference: true);
+      expect(streamUrl('http://gw///', publicEntry),
+          'http://gw/public/$_addr');
+    });
+
     test('missing server yields null', () {
       expect(streamUrl(null, entry), isNull);
       expect(streamUrl('', entry), isNull);

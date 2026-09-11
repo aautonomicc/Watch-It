@@ -180,6 +180,15 @@ class _DetailScreenState extends State<DetailScreen> {
     final base = EmbeddedClient.baseUrl();
     if (base == null) return;
     try {
+      if (entry.publicReference) {
+        final res = await http.head(Uri.parse('$base/public/${entry.address}'));
+        if (res.statusCode != 200) return;
+        final size = int.tryParse(res.headers['content-length'] ?? '');
+        if (size == null || size <= 0) return;
+        await LibraryStore.noteEntryInfo(entry.address, sizeBytes: size);
+        if (mounted) setState(() => _sizeBytes = size);
+        return;
+      }
       final res = await http.get(Uri.parse('$base/resolve/${entry.address}'));
       if (res.statusCode != 200) return;
       final size =

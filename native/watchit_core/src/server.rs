@@ -199,6 +199,16 @@ fn open_router(engine: &'static Engine) -> Router {
                 serve_xor(engine, method, path, headers)
             }),
         )
+        // Explicit public-address playback. Unlike /xor, a public address
+        // may resolve its data map on the Autonomi network on first use;
+        // the map is then cached and all subsequent playback is local-map
+        // plus chunk-cache based.
+        .route(
+            "/public/{addr}",
+            get(move |method: Method, path: Path<String>, headers: HeaderMap| {
+                serve_public(engine, method, path, headers)
+            }),
+        )
 }
 
 async fn health(engine: &'static Engine) -> Response {
@@ -1073,6 +1083,87 @@ async fn serve_xor(
                 "data map missing — re-import the list or bundle",
             )
                 .into_response();
+        }
+    };
+    serve_stored_map(engine, root, method, &headers)
+}
+
+/// Stream a public Autonomi file by its content address. This is opt-in at
+/// the URL layer so private/datamap imports keep their fail-fast semantics.
+/// The fetched map is verified against the requested address before it is
+/// cached, exactly as channel manifests are.
+async fn serve_public(
+    engine: &'static Engine,
+    method: Method,
+    Path(addr_hex): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    const MAX_PUBLIC_FILE_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+    let mut addr = [0u8; 32];
+    if hex::decode_to_slice(addr_hex.trim(), &mut addr).is_err() {
+        return (StatusCode::BAD_REQUEST, "address must be 64 hex chars").into_response();
+    }
+    let root = match engine.stored_root_map(&addr) {
+        Some(root) => root,
+        None => {
+            let client = match engine.client().await {
+                Ok(c) => c,
+                Err(e) => {
+                    return (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        format!("not connected to the network yet: {e}"),
+                    )
+                        .into_response()
+                }
+            };
+            let map = match client.data_map_fetch(&addr).await {
+                Ok(map) => map,
+                Err(e) => {
+                    return (StatusCode::BAD_GATEWAY, format!("public address lookup failed: {e}"))
+                        .into_response()
+                }
+            };
+            let (derived, root) = if map.is_child() {
+                let derived = match crate::verify::shrunk_map_address(&map) {
+                    Ok(a) => a,
+                    Err(e) => return (StatusCode::UNPROCESSABLE_ENTITY, e).into_response(),
+                };
+                let root = match engine.expand_child_map(map).await {
+                    Ok(root) => root,
+                    Err(e) => {
+                        return (
+                            StatusCode::BAD_GATEWAY,
+                            format!("public address lookup failed: {e}"),
+                        )
+                            .into_response()
+                    }
+                };
+                if let Err(e) = crate::verify::verify_root_map(&derived, &root) {
+                    return (StatusCode::UNPROCESSABLE_ENTITY, e).into_response();
+                }
+                (derived, root)
+            } else {
+                match crate::verify::derive_address(&map) {
+                    Ok(derived) => (derived, map),
+                    Err(e) => return (StatusCode::UNPROCESSABLE_ENTITY, e).into_response(),
+                }
+            };
+            if derived != addr {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "the fetched data map does not match its address",
+                )
+                    .into_response();
+            }
+            if root.original_file_size() as u64 > MAX_PUBLIC_FILE_BYTES {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "that public address points at a file larger than 64 GiB",
+                )
+                    .into_response();
+            }
+            engine.store_root_map(addr, &root);
+            root
         }
     };
     serve_stored_map(engine, root, method, &headers)
@@ -2002,6 +2093,13 @@ mod channel_api_tests {
         let (status, headers) = send_head(&app, &uri, None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(headers[header::ACCEPT_RANGES], "bytes");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn public_route_rejects_malformed_address_before_lookup() {
+        let app = router(test_engine("public-bad-address"));
+        let (status, _) = send_head(&app, "/public/nothex", None).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test(flavor = "multi_thread")]

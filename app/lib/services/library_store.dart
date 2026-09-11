@@ -267,6 +267,7 @@ class LibraryStore {
             sizeBytes: row.sizeBytes,
             videoInfo: row.videoInfo,
             renamedAt: row.renamedAt == 0 ? null : row.renamedAt,
+            publicReference: row.publicReference,
           ));
     }
     return [
@@ -318,6 +319,7 @@ class LibraryStore {
                 sizeBytes: Value(entry.sizeBytes),
                 videoInfo: Value(entry.videoInfo),
                 renamedAt: Value(entry.renamedAt ?? 0),
+                publicReference: Value(entry.publicReference),
               ));
         }
       }

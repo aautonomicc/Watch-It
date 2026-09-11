@@ -12,6 +12,7 @@ class MediaEntry {
     this.sizeBytes,
     this.videoInfo,
     this.renamedAt,
+    this.publicReference = false,
   });
 
   /// File name, preferably Plex/Jellyfin style
@@ -49,6 +50,12 @@ class MediaEntry {
   /// newest-name-wins across linked devices.
   final int? renamedAt;
 
+  /// True when this is a catalogued public XOR address rather than a
+  /// private upload whose data map was imported locally. Public references
+  /// are fetched on demand and carry no licence grant.
+  final bool publicReference;
+
+
   /// This entry under [newName], stamped as renamed at [at] (defaults to
   /// now). Address, add time and file info carry through unchanged.
   MediaEntry renamed(String newName, {int? at}) => MediaEntry(
@@ -58,6 +65,7 @@ class MediaEntry {
         sizeBytes: sizeBytes,
         videoInfo: videoInfo,
         renamedAt: at ?? DateTime.now().millisecondsSinceEpoch,
+        publicReference: publicReference,
       );
 
   Map<String, dynamic> toJson() => {
@@ -67,6 +75,7 @@ class MediaEntry {
         if (sizeBytes != null) 'sizeBytes': sizeBytes,
         if (videoInfo != null) 'videoInfo': videoInfo,
         if (renamedAt != null && renamedAt != 0) 'renamedAt': renamedAt,
+        if (publicReference) 'publicReference': true,
       };
 
   factory MediaEntry.fromJson(Map<String, dynamic> json) => MediaEntry(
@@ -76,6 +85,7 @@ class MediaEntry {
         sizeBytes: json['sizeBytes'] as int?,
         videoInfo: json['videoInfo'] as String?,
         renamedAt: json['renamedAt'] as int?,
+        publicReference: json['publicReference'] as bool? ?? false,
       );
 }
 

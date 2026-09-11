@@ -119,6 +119,15 @@ class PosterCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 11.5, color: t.boneDim),
             ),
+            if (entry.publicReference)
+              Row(
+                children: [
+                  Icon(Icons.public, size: 11, color: t.channelAmber),
+                  const SizedBox(width: 3),
+                  Text('Public reference',
+                      style: TextStyle(fontSize: 9.5, color: t.channelAmber)),
+                ],
+              ),
             // Format/size of this upload — or, when several uploads of
             // the title are folded into this one card, the version count.
             if (allVersions.length > 1

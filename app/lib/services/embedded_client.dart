@@ -11,7 +11,8 @@ import '../models/media_list.dart';
 ///
 /// The library runs an ant-core network client plus a localhost HTTP
 /// streaming server in-process; playback streams from
-/// `http://127.0.0.1:{port}/xor/{address}`. Fully self-contained — no
+/// `http://127.0.0.1:{port}/xor/{address}` (or `/public/{address}` for an
+/// explicitly catalogued public reference). Fully self-contained — no
 /// external gateway and nothing for the user to configure.
 class EmbeddedClient {
   static int _port = 0;
@@ -351,5 +352,5 @@ String? streamUrl(String? base, MediaEntry entry) {
   if (base == null || base.trim().isEmpty) return null;
   final b = base.trim().replaceFirst(RegExp(r'/+$'), '');
   final addr = entry.address.toLowerCase().replaceFirst('0x', '');
-  return '$b/xor/$addr';
+  return '$b/${entry.publicReference ? 'public' : 'xor'}/$addr';
 }

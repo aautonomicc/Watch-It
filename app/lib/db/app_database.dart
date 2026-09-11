@@ -67,6 +67,12 @@ class MediaEntries extends Table {
   /// how music organizes (album folds read file names), and this stamp
   /// lets My W@tch sync merge them newest-name-wins across devices.
   IntColumn get renamedAt => integer().withDefault(const Constant(0))();
+
+  /// Public XOR references resolve their map on demand; private entries
+  /// require a locally imported data map.
+  BoolColumn get publicReference =>
+      boolean().withDefault(const Constant(false))();
+
 }
 
 /// Playback progress for one file, keyed by its XOR address (content
@@ -246,7 +252,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 14;
+  int get schemaVersion => 15;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -339,6 +345,9 @@ class AppDatabase extends _$AppDatabase {
         if (await hasTable('media_entries')) {
           await m.addColumn(mediaEntries, mediaEntries.renamedAt);
         }
+      }
+      if (from < 15) {
+        await m.addColumn(mediaEntries, mediaEntries.publicReference);
       }
       if (from >= 4 && from < 9) {
         // alpha.57: Edit details — user-authored metadata rows are

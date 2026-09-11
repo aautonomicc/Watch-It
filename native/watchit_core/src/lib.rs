@@ -4,6 +4,8 @@
 //! brings up a tokio runtime, an ant-core client (connected lazily) and a
 //! localhost HTTP server, and returns the bound port. The player then
 //! streams `http://127.0.0.1:{port}/xor/{address}` like any HTTP source.
+//! Explicit public references use `/public/{address}`; their map is fetched
+//! and verified on first request, then cached for subsequent playback.
 
 pub mod cache;
 pub mod channel;
