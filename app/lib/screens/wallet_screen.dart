@@ -299,7 +299,6 @@ class _WalletScreenState extends State<WalletScreen> {
     final balances = _balances;
     return ListView(
       children: [
-        _trezorSection(t),
         _sectionHeader(t, 'ADDRESS'),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -392,6 +391,7 @@ class _WalletScreenState extends State<WalletScreen> {
           ),
           onTap: _remove,
         ),
+        _trezorSection(t),
         const SizedBox(height: 40),
       ],
     );
