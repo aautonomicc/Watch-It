@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../models/media_list.dart';
@@ -45,15 +46,19 @@ class _SearchScreenState extends State<SearchScreen> {
   /// Escape must close the screen even while the query field is focused
   /// (which is almost always) — the field's own focus node sees the key
   /// before the field can swallow it, unlike an ancestor shortcut.
-  late final _searchFocus = FocusNode(onKeyEvent: (node, event) {
-    if (event is KeyDownEvent &&
-        event.logicalKey == LogicalKeyboardKey.escape) {
-      Navigator.of(context).maybePop();
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
-  });
+  late final _searchFocus = FocusNode(
+    onKeyEvent: (node, event) {
+      if (event is KeyDownEvent &&
+          event.logicalKey == LogicalKeyboardKey.escape) {
+        Navigator.of(context).maybePop();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    },
+  );
 
+  static const _voiceChannel = MethodChannel('watchit/voice');
+  bool _listening = false;
   Timer? _debounceTimer;
   late SearchIndex _index;
   List<SearchResult> _results = const [];
@@ -80,10 +85,11 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   SearchIndex _buildIndex() => SearchIndex.build(
-        widget.lists,
-        episodeName: (e) => episodeNameFromLabel(
-            MetadataService.instance.metadataFor(e).episodeLabel),
-      );
+    widget.lists,
+    episodeName: (e) => episodeNameFromLabel(
+      MetadataService.instance.metadataFor(e).episodeLabel,
+    ),
+  );
 
   void _onMetadataChanged() {
     if (!mounted) return;
@@ -107,10 +113,43 @@ class _SearchScreenState extends State<SearchScreen> {
     });
   }
 
-  Future<void> _openEntry(MediaEntry entry) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => DetailScreen(entry: entry)),
+  Future<void> _voiceSearch() async {
+    if (_listening) return;
+    setState(() => _listening = true);
+    _searchFocus.unfocus();
+    try {
+      final words = await _voiceChannel.invokeMethod<String>('recognize');
+      if (!mounted) return;
+      if (words != null && words.trim().isNotEmpty) {
+        _controller.value = TextEditingValue(
+          text: words.trim(),
+          selection: TextSelection.collapsed(offset: words.trim().length),
+        );
+        _debounceTimer?.cancel();
+        _runQuery();
+      }
+    } on PlatformException {
+      _voiceUnavailable();
+    } on MissingPluginException {
+      _voiceUnavailable();
+    } finally {
+      if (mounted) setState(() => _listening = false);
+    }
+  }
+
+  void _voiceUnavailable() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Voice search is unavailable. Use the search keyboard.'),
+      ),
     );
+  }
+
+  Future<void> _openEntry(MediaEntry entry) async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => DetailScreen(entry: entry)));
   }
 
   Future<void> _openShow(HomeShow show) async {
@@ -131,11 +170,24 @@ class _SearchScreenState extends State<SearchScreen> {
         appBar: AppBar(
           backgroundColor: t.ink,
           elevation: 0,
+          actions: [
+            if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
+              IconButton(
+                tooltip: _listening ? 'Listening…' : 'Voice search',
+                icon: Icon(_listening ? Icons.mic : Icons.mic_none),
+                onPressed: _listening ? null : _voiceSearch,
+              ),
+          ],
           title: TextField(
             controller: _controller,
             focusNode: _searchFocus,
             autofocus: true,
             textInputAction: TextInputAction.search,
+            onSubmitted: (_) {
+              _debounceTimer?.cancel();
+              _runQuery();
+              _searchFocus.unfocus();
+            },
             style: TextStyle(fontSize: 16, color: t.bone),
             cursorColor: t.accent,
             decoration: InputDecoration(
@@ -155,8 +207,10 @@ class _SearchScreenState extends State<SearchScreen> {
         // Poster thumbs upgrade as TMDB matches land; badges/bars track
         // downloads and watch states live.
         body: ListenableBuilder(
-          listenable: Listenable.merge(
-              [DownloadManager.instance, WatchStateStore.instance]),
+          listenable: Listenable.merge([
+            DownloadManager.instance,
+            WatchStateStore.instance,
+          ]),
           builder: (context, _) => _body(t),
         ),
       ),
@@ -165,8 +219,11 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Widget _body(WiTokens t) {
     if (_query.length < _minChars) {
-      return _message(t, Icons.search,
-          'Search your library — titles, years, S01E02');
+      return _message(
+        t,
+        Icons.search,
+        'Search your library — titles, years, S01E02',
+      );
     }
     if (_results.isEmpty) {
       return _message(t, Icons.search_off, 'No matches in your library');
@@ -214,8 +271,12 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  List<Widget> _section<T extends SearchResult>(WiTokens t, String title,
-      List<T> items, Widget Function(WiTokens, T) tile) {
+  List<Widget> _section<T extends SearchResult>(
+    WiTokens t,
+    String title,
+    List<T> items,
+    Widget Function(WiTokens, T) tile,
+  ) {
     if (items.isEmpty) return const [];
     final expanded = _expanded.contains(title);
     final shown = expanded ? items : items.take(_groupCap).toList();
@@ -252,8 +313,9 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget _showTile(WiTokens t, ShowResult r) {
     final show = r.show;
     // Any episode's match carries the show title and show artwork.
-    final meta = MetadataService.instance
-        .metadataFor(show.seasons.first.episodes.first);
+    final meta = MetadataService.instance.metadataFor(
+      show.seasons.first.episodes.first,
+    );
     final seasons = show.seasons.length;
     return ListTile(
       leading: _thumb(
@@ -263,17 +325,19 @@ class _SearchScreenState extends State<SearchScreen> {
         // An episode counts as downloaded when ANY of its tiers is.
         badge: versionGroupDownloadBadge(t, [
           for (final s in show.seasons)
-            for (final e in s.episodes) s.versionsOf(e)
+            for (final e in s.episodes) s.versionsOf(e),
         ]),
       ),
-      title: Text(meta.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 13.5, color: t.bone)),
+      title: Text(
+        meta.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 13.5, color: t.bone),
+      ),
       subtitle: Text(
         seasons == 1
             ? 'Season ${show.seasons.single.season} · '
-                '${show.episodeCount} ep'
+                  '${show.episodeCount} ep'
             : '$seasons seasons · ${show.episodeCount} ep',
         style: TextStyle(fontSize: 11.5, color: t.ash),
       ),
@@ -317,10 +381,12 @@ class _SearchScreenState extends State<SearchScreen> {
       ),
       // The match's title is the show name; episodeLabel is the bare
       // marker until TMDB supplies `S01E02 · Name`.
-      title: Text(meta.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 13.5, color: t.bone)),
+      title: Text(
+        meta.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 13.5, color: t.bone),
+      ),
       subtitle: Text(
         meta.episodeLabel ?? '',
         maxLines: 1,
@@ -343,8 +409,13 @@ class _SearchScreenState extends State<SearchScreen> {
 
   /// Small poster thumbnail with the cards' download badge and watch bar
   /// overlaid, falling back to a placeholder icon.
-  Widget _thumb(WiTokens t, Widget? image, IconData placeholder,
-      {Widget? badge, Widget? bar}) {
+  Widget _thumb(
+    WiTokens t,
+    Widget? image,
+    IconData placeholder, {
+    Widget? badge,
+    Widget? bar,
+  }) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(4),
       child: SizedBox(
