@@ -23,10 +23,12 @@ import '../services/library_store.dart';
 import '../services/list_import.dart';
 import '../services/metadata_service.dart';
 import '../services/profile_transfer.dart';
+import '../services/profiles.dart';
 import '../theme/tokens.dart';
 import '../widgets/channel_avatar.dart';
 import '../widgets/channel_badge.dart';
 import 'import_review_screen.dart';
+import 'intake_screen.dart';
 import 'list_edit_screen.dart';
 import 'list_home_screen.dart';
 import 'settings_screen.dart' show promptForText;
@@ -1312,6 +1314,16 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         elevation: 0,
         title: Text('My Media', style: TextStyle(color: t.bone, fontSize: 18)),
         actions: [
+          // Intake for files and source links not on the network yet
+          // (Add to W@tch). Kids don't add media — the credits-edit law.
+          if (!ProfileStore.instance.isKid)
+            IconButton(
+              tooltip: 'Add to W@tch — files or a source link',
+              icon: Icon(Icons.add_circle_outline, color: t.bone),
+              onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                      builder: (_) => const IntakeScreen())),
+            ),
           IconButton(
             tooltip: 'Add to library',
             icon: Icon(Icons.download_outlined, color: t.bone),
@@ -1346,6 +1358,8 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // The media desk's front door (intake for files and source
+        // links) lives in the toolbar — see the Add to W@tch action.
         // Plain-English pointer at the point of import — the
         // picker itself can't explain what it accepts.
         Padding(

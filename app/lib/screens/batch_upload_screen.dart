@@ -38,6 +38,8 @@ class BatchUploadScreen extends StatefulWidget {
     this.batchRootProvider,
     this.resumeDir,
     this.ffmpegOverride,
+    this.initialPaths,
+    this.initialList,
   });
 
   /// Test overrides for the embedded server base URL / auth token.
@@ -62,6 +64,15 @@ class BatchUploadScreen extends StatefulWidget {
   /// Test override for the ffmpeg wrapper (a real one spawns processes
   /// that hang the fake-async zone).
   final FfmpegService? ffmpegOverride;
+
+  /// Paths pre-loaded into the picker list (the Add to W@tch handoff):
+  /// the user still sees and starts the batch here, keeping this
+  /// screen's price/wallet/resume/dedup behaviour untouched.
+  final List<String>? initialPaths;
+
+  /// Pre-chosen target list for a handoff batch (the intake draft's
+  /// collection); null/empty falls back to the type-derived default.
+  final String? initialList;
 
   @override
   State<BatchUploadScreen> createState() => _BatchUploadScreenState();
@@ -93,6 +104,18 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     _loadWallet();
     _loadLists();
     _loadAttention();
+    final handed = widget.initialPaths;
+    if (handed != null && handed.isNotEmpty) {
+      for (final path in handed) {
+        if (!_paths.contains(path)) _paths.add(path);
+      }
+      _updateDefaultList();
+    }
+    final handedList = widget.initialList?.trim();
+    if (handedList != null && handedList.isNotEmpty) {
+      _list = handedList;
+      _listChosen = true;
+    }
     final resume = widget.resumeDir;
     if (resume != null) {
       scheduleMicrotask(() => _resumeFromDir(resume));
