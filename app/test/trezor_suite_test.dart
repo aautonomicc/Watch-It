@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
-import '../lib/services/trezor_suite.dart';
+import 'package:watchit/services/trezor_suite.dart';
 
 class _FakeClient extends http.BaseClient {
   final requests = <http.BaseRequest>[];

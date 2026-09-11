@@ -37,7 +37,7 @@ class TrezorSuiteClient {
         'accept': 'application/json, text/event-stream',
         'authorization': 'Bearer $token',
         'mcp-protocol-version': '2025-03-26',
-        if (_sessionId != null) 'mcp-session-id': _sessionId!,
+        'mcp-session-id': ?_sessionId,
       };
 
   Future<TrezorSuiteServer> initialize() async {

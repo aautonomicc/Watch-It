@@ -181,7 +181,7 @@ class _WalletScreenState extends State<WalletScreen> {
       if (mounted) {
         setState(() {
           _trezorBusy = false;
-          _trezorError = '${e}';
+          _trezorError = '$e';
         });
       }
     }
@@ -207,7 +207,7 @@ class _WalletScreenState extends State<WalletScreen> {
       if (mounted) {
         setState(() {
           _trezorBusy = false;
-          _trezorError = '${e}';
+          _trezorError = '$e';
         });
       }
     }

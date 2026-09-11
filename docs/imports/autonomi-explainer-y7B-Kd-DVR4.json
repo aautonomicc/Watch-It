@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "kind": "youtube-video",
+  "sourceUrl": "https://youtu.be/y7B-Kd-DVR4",
+  "sourceTitle": "Store + Connect: The Decentralized Network Upgrade You Can’t Ignore",
+  "creator": "Autonomi",
+  "language": "en",
+  "intendedVisibility": "public",
+  "status": "public-candidate",
+  "rightsAttested": false,
+  "license": {
+    "name": "",
+    "url": "",
+    "attribution": "Autonomi"
+  },
+  "importPolicy": "link-reference-until-rights-attested",
+  "notes": "First public-media candidate for the W@tch Autonomi explainer lane. Capture provenance now; download, upload, and channel publication remain explicit steps."
+}
