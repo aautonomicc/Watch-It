@@ -373,7 +373,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               children: [
-                if (TvSettings.instance.enabled)
+                // Admin-only (#3): margins and palette are device-wide, so
+                // they sit outside the non-admin appearance scope.
+                if (TvSettings.instance.enabled && _isAdmin)
                   ListTile(
                     autofocus: true,
                     leading: Icon(Icons.tv, color: t.accent),
