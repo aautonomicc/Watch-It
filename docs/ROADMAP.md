@@ -1,5 +1,14 @@
 # Roadmap
 
+## Long-horizon scale and Music Jams
+
+The next build lane covers deterministic sharding, epoch-segmented manifests,
+quotas, cost accounting, snapshots, key rotation, algorithm migration, and
+load testing for large populations and long-lived archives. Music Jams are the
+stress case: x0x carries live room events while Autonomi stores recordings,
+stems, captions, dubbed audio, artwork, and signed creator/source records.
+See [PLAN-scale-and-music-jams.md](PLAN-scale-and-music-jams.md).
+
 **Status (2026-09-10):** latest release is **v0.1.0-alpha.95**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
 a release now ships **four artifacts**: a signed APK, a Linux AppImage,
