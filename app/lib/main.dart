@@ -11,6 +11,7 @@ import 'screens/artist_screen.dart';
 import 'screens/batch_upload_screen.dart' show offerBatchResume;
 import 'screens/publish_screen.dart' show isDesktopPlatform;
 import 'screens/detail_screen.dart';
+import 'screens/intake_screen.dart';
 import 'screens/profile_picker_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
@@ -406,6 +407,15 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     ).push(MaterialPageRoute(builder: (_) => SearchScreen(lists: _lists)));
   }
 
+  /// Add to W@tch: the intake desk for files and source links (not on
+  /// TV — intake is a keyboard/touch job; not for kid profiles — adding
+  /// media is an adult action, mirroring the credits-edit law).
+  Future<void> _openIntake() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const IntakeScreen()));
+  }
+
   Future<void> _openEntry(MediaEntry entry) async {
     await Navigator.of(
       context,
@@ -545,6 +555,14 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
             ),
             const SizedBox(width: 12),
           ],
+          // Add to W@tch — the one conspicuous way media enters the app
+          // on laptop and phone (TV keeps its watch-only layout).
+          if (!tv && !ProfileStore.instance.isKid)
+            IconButton(
+              tooltip: 'Add to W@tch',
+              icon: Icon(Icons.add_circle_outline, color: t.boneDim),
+              onPressed: _openIntake,
+            ),
           if (pinnable)
             IconButton(
               tooltip: 'Search',

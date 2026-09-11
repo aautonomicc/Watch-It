@@ -217,6 +217,61 @@ class MediaCreditRecords extends Table {
   Set<Column> get primaryKey => {address};
 }
 
+/// One Add to W@tch intake draft (see docs/INTAKE.md): media that is NOT
+/// on the network yet — a pasted source link (a reference record, never
+/// downloaded) or a local file waiting to be handed to the upload flow.
+/// Drafts are device-local records with no Autonomi address; they are
+/// not library entries, never playable, and never synced. Credits ride
+/// along as a validated [MediaCredits] JSON; when a real upload succeeds
+/// the record is re-keyed onto the resulting file address and the draft
+/// has served its purpose.
+@DataClassName('IntakeDraftRow')
+class IntakeDrafts extends Table {
+  /// `intake_<epoch-us>_<rand>` — stable across edits.
+  TextColumn get id => text()();
+
+  /// `file` | `link`.
+  TextColumn get kind => text()();
+
+  /// Display name: the picked file's name, or a typed/suggested title
+  /// for a link.
+  TextColumn get label => text()();
+
+  /// Reference URL — required for `link` drafts, optional extra provenance
+  /// for `file` drafts. HTTP(S) only, no embedded credentials.
+  TextColumn get sourceUrl => text().nullable()();
+
+  /// The picked file's original path. Desktop only: a mobile picker hands
+  /// out cache copies that vanish, so phone drafts record name/size and
+  /// leave this null (upload happens from a laptop).
+  TextColumn get localPath => text().nullable()();
+
+  /// Picked file's size in bytes, when the picker reported one.
+  IntColumn get sizeBytes => integer().nullable()();
+
+  /// Free-form language tag (`Latvian`, `lv`; bounded, not validated
+  /// against a registry).
+  TextColumn get language => text().nullable()();
+
+  /// Intended collection title (an existing list, or a new one) — the
+  /// default list when the draft is handed to the upload flow. Null =
+  /// decide at upload time.
+  TextColumn get listTitle => text().nullable()();
+
+  /// Artwork file name inside the app's posters dir (`intake_<sha8>.img`),
+  /// picked and cropped like Edit details artwork.
+  TextColumn get artworkFile => text().nullable()();
+
+  /// Validated `MediaCredits.toJson()`.
+  TextColumn get creditsJson => text()();
+
+  IntColumn get createdAt => integer()(); // epoch ms
+  IntColumn get updatedAt => integer()(); // epoch ms
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 @DriftDatabase(
   tables: [
     MediaLists,
@@ -227,6 +282,7 @@ class MediaCreditRecords extends Table {
     Profiles,
     ProfileListAccess,
     MediaCreditRecords,
+    IntakeDrafts,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -246,12 +302,13 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 14;
+  int get schemaVersion => 15;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onUpgrade: (m, from, to) async {
       if (from < 14) await m.createTable(mediaCreditRecords);
+      if (from < 15) await m.createTable(intakeDrafts);
       if (from < 2) await m.createTable(metadataCache); // alpha.23
       if (from < 3) {
         // alpha.25: per-list home-screen visibility toggle.

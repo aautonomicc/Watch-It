@@ -4081,6 +4081,749 @@ class MediaCreditRecordsCompanion
   }
 }
 
+class $IntakeDraftsTable extends IntakeDrafts
+    with TableInfo<$IntakeDraftsTable, IntakeDraftRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $IntakeDraftsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _labelMeta = const VerificationMeta('label');
+  @override
+  late final GeneratedColumn<String> label = GeneratedColumn<String>(
+    'label',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sourceUrlMeta = const VerificationMeta(
+    'sourceUrl',
+  );
+  @override
+  late final GeneratedColumn<String> sourceUrl = GeneratedColumn<String>(
+    'source_url',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _localPathMeta = const VerificationMeta(
+    'localPath',
+  );
+  @override
+  late final GeneratedColumn<String> localPath = GeneratedColumn<String>(
+    'local_path',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _sizeBytesMeta = const VerificationMeta(
+    'sizeBytes',
+  );
+  @override
+  late final GeneratedColumn<int> sizeBytes = GeneratedColumn<int>(
+    'size_bytes',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _languageMeta = const VerificationMeta(
+    'language',
+  );
+  @override
+  late final GeneratedColumn<String> language = GeneratedColumn<String>(
+    'language',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _listTitleMeta = const VerificationMeta(
+    'listTitle',
+  );
+  @override
+  late final GeneratedColumn<String> listTitle = GeneratedColumn<String>(
+    'list_title',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _artworkFileMeta = const VerificationMeta(
+    'artworkFile',
+  );
+  @override
+  late final GeneratedColumn<String> artworkFile = GeneratedColumn<String>(
+    'artwork_file',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _creditsJsonMeta = const VerificationMeta(
+    'creditsJson',
+  );
+  @override
+  late final GeneratedColumn<String> creditsJson = GeneratedColumn<String>(
+    'credits_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    kind,
+    label,
+    sourceUrl,
+    localPath,
+    sizeBytes,
+    language,
+    listTitle,
+    artworkFile,
+    creditsJson,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'intake_drafts';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<IntakeDraftRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_kindMeta);
+    }
+    if (data.containsKey('label')) {
+      context.handle(
+        _labelMeta,
+        label.isAcceptableOrUnknown(data['label']!, _labelMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_labelMeta);
+    }
+    if (data.containsKey('source_url')) {
+      context.handle(
+        _sourceUrlMeta,
+        sourceUrl.isAcceptableOrUnknown(data['source_url']!, _sourceUrlMeta),
+      );
+    }
+    if (data.containsKey('local_path')) {
+      context.handle(
+        _localPathMeta,
+        localPath.isAcceptableOrUnknown(data['local_path']!, _localPathMeta),
+      );
+    }
+    if (data.containsKey('size_bytes')) {
+      context.handle(
+        _sizeBytesMeta,
+        sizeBytes.isAcceptableOrUnknown(data['size_bytes']!, _sizeBytesMeta),
+      );
+    }
+    if (data.containsKey('language')) {
+      context.handle(
+        _languageMeta,
+        language.isAcceptableOrUnknown(data['language']!, _languageMeta),
+      );
+    }
+    if (data.containsKey('list_title')) {
+      context.handle(
+        _listTitleMeta,
+        listTitle.isAcceptableOrUnknown(data['list_title']!, _listTitleMeta),
+      );
+    }
+    if (data.containsKey('artwork_file')) {
+      context.handle(
+        _artworkFileMeta,
+        artworkFile.isAcceptableOrUnknown(
+          data['artwork_file']!,
+          _artworkFileMeta,
+        ),
+      );
+    }
+    if (data.containsKey('credits_json')) {
+      context.handle(
+        _creditsJsonMeta,
+        creditsJson.isAcceptableOrUnknown(
+          data['credits_json']!,
+          _creditsJsonMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_creditsJsonMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  IntakeDraftRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return IntakeDraftRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
+      label: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}label'],
+      )!,
+      sourceUrl: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}source_url'],
+      ),
+      localPath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}local_path'],
+      ),
+      sizeBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}size_bytes'],
+      ),
+      language: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}language'],
+      ),
+      listTitle: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}list_title'],
+      ),
+      artworkFile: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}artwork_file'],
+      ),
+      creditsJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}credits_json'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $IntakeDraftsTable createAlias(String alias) {
+    return $IntakeDraftsTable(attachedDatabase, alias);
+  }
+}
+
+class IntakeDraftRow extends DataClass implements Insertable<IntakeDraftRow> {
+  /// `intake_<epoch-us>_<rand>` — stable across edits.
+  final String id;
+
+  /// `file` | `link`.
+  final String kind;
+
+  /// Display name: the picked file's name, or a typed/suggested title
+  /// for a link.
+  final String label;
+
+  /// Reference URL — required for `link` drafts, optional extra provenance
+  /// for `file` drafts. HTTP(S) only, no embedded credentials.
+  final String? sourceUrl;
+
+  /// The picked file's original path. Desktop only: a mobile picker hands
+  /// out cache copies that vanish, so phone drafts record name/size and
+  /// leave this null (upload happens from a laptop).
+  final String? localPath;
+
+  /// Picked file's size in bytes, when the picker reported one.
+  final int? sizeBytes;
+
+  /// Free-form language tag (`Latvian`, `lv`; bounded, not validated
+  /// against a registry).
+  final String? language;
+
+  /// Intended collection title (an existing list, or a new one) — the
+  /// default list when the draft is handed to the upload flow. Null =
+  /// decide at upload time.
+  final String? listTitle;
+
+  /// Artwork file name inside the app's posters dir (`intake_<sha8>.img`),
+  /// picked and cropped like Edit details artwork.
+  final String? artworkFile;
+
+  /// Validated `MediaCredits.toJson()`.
+  final String creditsJson;
+  final int createdAt;
+  final int updatedAt;
+  const IntakeDraftRow({
+    required this.id,
+    required this.kind,
+    required this.label,
+    this.sourceUrl,
+    this.localPath,
+    this.sizeBytes,
+    this.language,
+    this.listTitle,
+    this.artworkFile,
+    required this.creditsJson,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['kind'] = Variable<String>(kind);
+    map['label'] = Variable<String>(label);
+    if (!nullToAbsent || sourceUrl != null) {
+      map['source_url'] = Variable<String>(sourceUrl);
+    }
+    if (!nullToAbsent || localPath != null) {
+      map['local_path'] = Variable<String>(localPath);
+    }
+    if (!nullToAbsent || sizeBytes != null) {
+      map['size_bytes'] = Variable<int>(sizeBytes);
+    }
+    if (!nullToAbsent || language != null) {
+      map['language'] = Variable<String>(language);
+    }
+    if (!nullToAbsent || listTitle != null) {
+      map['list_title'] = Variable<String>(listTitle);
+    }
+    if (!nullToAbsent || artworkFile != null) {
+      map['artwork_file'] = Variable<String>(artworkFile);
+    }
+    map['credits_json'] = Variable<String>(creditsJson);
+    map['created_at'] = Variable<int>(createdAt);
+    map['updated_at'] = Variable<int>(updatedAt);
+    return map;
+  }
+
+  IntakeDraftsCompanion toCompanion(bool nullToAbsent) {
+    return IntakeDraftsCompanion(
+      id: Value(id),
+      kind: Value(kind),
+      label: Value(label),
+      sourceUrl: sourceUrl == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sourceUrl),
+      localPath: localPath == null && nullToAbsent
+          ? const Value.absent()
+          : Value(localPath),
+      sizeBytes: sizeBytes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sizeBytes),
+      language: language == null && nullToAbsent
+          ? const Value.absent()
+          : Value(language),
+      listTitle: listTitle == null && nullToAbsent
+          ? const Value.absent()
+          : Value(listTitle),
+      artworkFile: artworkFile == null && nullToAbsent
+          ? const Value.absent()
+          : Value(artworkFile),
+      creditsJson: Value(creditsJson),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory IntakeDraftRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return IntakeDraftRow(
+      id: serializer.fromJson<String>(json['id']),
+      kind: serializer.fromJson<String>(json['kind']),
+      label: serializer.fromJson<String>(json['label']),
+      sourceUrl: serializer.fromJson<String?>(json['sourceUrl']),
+      localPath: serializer.fromJson<String?>(json['localPath']),
+      sizeBytes: serializer.fromJson<int?>(json['sizeBytes']),
+      language: serializer.fromJson<String?>(json['language']),
+      listTitle: serializer.fromJson<String?>(json['listTitle']),
+      artworkFile: serializer.fromJson<String?>(json['artworkFile']),
+      creditsJson: serializer.fromJson<String>(json['creditsJson']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'kind': serializer.toJson<String>(kind),
+      'label': serializer.toJson<String>(label),
+      'sourceUrl': serializer.toJson<String?>(sourceUrl),
+      'localPath': serializer.toJson<String?>(localPath),
+      'sizeBytes': serializer.toJson<int?>(sizeBytes),
+      'language': serializer.toJson<String?>(language),
+      'listTitle': serializer.toJson<String?>(listTitle),
+      'artworkFile': serializer.toJson<String?>(artworkFile),
+      'creditsJson': serializer.toJson<String>(creditsJson),
+      'createdAt': serializer.toJson<int>(createdAt),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+    };
+  }
+
+  IntakeDraftRow copyWith({
+    String? id,
+    String? kind,
+    String? label,
+    Value<String?> sourceUrl = const Value.absent(),
+    Value<String?> localPath = const Value.absent(),
+    Value<int?> sizeBytes = const Value.absent(),
+    Value<String?> language = const Value.absent(),
+    Value<String?> listTitle = const Value.absent(),
+    Value<String?> artworkFile = const Value.absent(),
+    String? creditsJson,
+    int? createdAt,
+    int? updatedAt,
+  }) => IntakeDraftRow(
+    id: id ?? this.id,
+    kind: kind ?? this.kind,
+    label: label ?? this.label,
+    sourceUrl: sourceUrl.present ? sourceUrl.value : this.sourceUrl,
+    localPath: localPath.present ? localPath.value : this.localPath,
+    sizeBytes: sizeBytes.present ? sizeBytes.value : this.sizeBytes,
+    language: language.present ? language.value : this.language,
+    listTitle: listTitle.present ? listTitle.value : this.listTitle,
+    artworkFile: artworkFile.present ? artworkFile.value : this.artworkFile,
+    creditsJson: creditsJson ?? this.creditsJson,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  IntakeDraftRow copyWithCompanion(IntakeDraftsCompanion data) {
+    return IntakeDraftRow(
+      id: data.id.present ? data.id.value : this.id,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      label: data.label.present ? data.label.value : this.label,
+      sourceUrl: data.sourceUrl.present ? data.sourceUrl.value : this.sourceUrl,
+      localPath: data.localPath.present ? data.localPath.value : this.localPath,
+      sizeBytes: data.sizeBytes.present ? data.sizeBytes.value : this.sizeBytes,
+      language: data.language.present ? data.language.value : this.language,
+      listTitle: data.listTitle.present ? data.listTitle.value : this.listTitle,
+      artworkFile: data.artworkFile.present
+          ? data.artworkFile.value
+          : this.artworkFile,
+      creditsJson: data.creditsJson.present
+          ? data.creditsJson.value
+          : this.creditsJson,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('IntakeDraftRow(')
+          ..write('id: $id, ')
+          ..write('kind: $kind, ')
+          ..write('label: $label, ')
+          ..write('sourceUrl: $sourceUrl, ')
+          ..write('localPath: $localPath, ')
+          ..write('sizeBytes: $sizeBytes, ')
+          ..write('language: $language, ')
+          ..write('listTitle: $listTitle, ')
+          ..write('artworkFile: $artworkFile, ')
+          ..write('creditsJson: $creditsJson, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    kind,
+    label,
+    sourceUrl,
+    localPath,
+    sizeBytes,
+    language,
+    listTitle,
+    artworkFile,
+    creditsJson,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is IntakeDraftRow &&
+          other.id == this.id &&
+          other.kind == this.kind &&
+          other.label == this.label &&
+          other.sourceUrl == this.sourceUrl &&
+          other.localPath == this.localPath &&
+          other.sizeBytes == this.sizeBytes &&
+          other.language == this.language &&
+          other.listTitle == this.listTitle &&
+          other.artworkFile == this.artworkFile &&
+          other.creditsJson == this.creditsJson &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class IntakeDraftsCompanion extends UpdateCompanion<IntakeDraftRow> {
+  final Value<String> id;
+  final Value<String> kind;
+  final Value<String> label;
+  final Value<String?> sourceUrl;
+  final Value<String?> localPath;
+  final Value<int?> sizeBytes;
+  final Value<String?> language;
+  final Value<String?> listTitle;
+  final Value<String?> artworkFile;
+  final Value<String> creditsJson;
+  final Value<int> createdAt;
+  final Value<int> updatedAt;
+  final Value<int> rowid;
+  const IntakeDraftsCompanion({
+    this.id = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.label = const Value.absent(),
+    this.sourceUrl = const Value.absent(),
+    this.localPath = const Value.absent(),
+    this.sizeBytes = const Value.absent(),
+    this.language = const Value.absent(),
+    this.listTitle = const Value.absent(),
+    this.artworkFile = const Value.absent(),
+    this.creditsJson = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  IntakeDraftsCompanion.insert({
+    required String id,
+    required String kind,
+    required String label,
+    this.sourceUrl = const Value.absent(),
+    this.localPath = const Value.absent(),
+    this.sizeBytes = const Value.absent(),
+    this.language = const Value.absent(),
+    this.listTitle = const Value.absent(),
+    this.artworkFile = const Value.absent(),
+    required String creditsJson,
+    required int createdAt,
+    required int updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       kind = Value(kind),
+       label = Value(label),
+       creditsJson = Value(creditsJson),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<IntakeDraftRow> custom({
+    Expression<String>? id,
+    Expression<String>? kind,
+    Expression<String>? label,
+    Expression<String>? sourceUrl,
+    Expression<String>? localPath,
+    Expression<int>? sizeBytes,
+    Expression<String>? language,
+    Expression<String>? listTitle,
+    Expression<String>? artworkFile,
+    Expression<String>? creditsJson,
+    Expression<int>? createdAt,
+    Expression<int>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (kind != null) 'kind': kind,
+      if (label != null) 'label': label,
+      if (sourceUrl != null) 'source_url': sourceUrl,
+      if (localPath != null) 'local_path': localPath,
+      if (sizeBytes != null) 'size_bytes': sizeBytes,
+      if (language != null) 'language': language,
+      if (listTitle != null) 'list_title': listTitle,
+      if (artworkFile != null) 'artwork_file': artworkFile,
+      if (creditsJson != null) 'credits_json': creditsJson,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  IntakeDraftsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? kind,
+    Value<String>? label,
+    Value<String?>? sourceUrl,
+    Value<String?>? localPath,
+    Value<int?>? sizeBytes,
+    Value<String?>? language,
+    Value<String?>? listTitle,
+    Value<String?>? artworkFile,
+    Value<String>? creditsJson,
+    Value<int>? createdAt,
+    Value<int>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return IntakeDraftsCompanion(
+      id: id ?? this.id,
+      kind: kind ?? this.kind,
+      label: label ?? this.label,
+      sourceUrl: sourceUrl ?? this.sourceUrl,
+      localPath: localPath ?? this.localPath,
+      sizeBytes: sizeBytes ?? this.sizeBytes,
+      language: language ?? this.language,
+      listTitle: listTitle ?? this.listTitle,
+      artworkFile: artworkFile ?? this.artworkFile,
+      creditsJson: creditsJson ?? this.creditsJson,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (label.present) {
+      map['label'] = Variable<String>(label.value);
+    }
+    if (sourceUrl.present) {
+      map['source_url'] = Variable<String>(sourceUrl.value);
+    }
+    if (localPath.present) {
+      map['local_path'] = Variable<String>(localPath.value);
+    }
+    if (sizeBytes.present) {
+      map['size_bytes'] = Variable<int>(sizeBytes.value);
+    }
+    if (language.present) {
+      map['language'] = Variable<String>(language.value);
+    }
+    if (listTitle.present) {
+      map['list_title'] = Variable<String>(listTitle.value);
+    }
+    if (artworkFile.present) {
+      map['artwork_file'] = Variable<String>(artworkFile.value);
+    }
+    if (creditsJson.present) {
+      map['credits_json'] = Variable<String>(creditsJson.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('IntakeDraftsCompanion(')
+          ..write('id: $id, ')
+          ..write('kind: $kind, ')
+          ..write('label: $label, ')
+          ..write('sourceUrl: $sourceUrl, ')
+          ..write('localPath: $localPath, ')
+          ..write('sizeBytes: $sizeBytes, ')
+          ..write('language: $language, ')
+          ..write('listTitle: $listTitle, ')
+          ..write('artworkFile: $artworkFile, ')
+          ..write('creditsJson: $creditsJson, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -4094,6 +4837,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $ProfileListAccessTable(this);
   late final $MediaCreditRecordsTable mediaCreditRecords =
       $MediaCreditRecordsTable(this);
+  late final $IntakeDraftsTable intakeDrafts = $IntakeDraftsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -4107,6 +4851,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     profiles,
     profileListAccess,
     mediaCreditRecords,
+    intakeDrafts,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -6388,6 +7133,343 @@ typedef $$MediaCreditRecordsTableProcessedTableManager =
       MediaCreditRecordRow,
       PrefetchHooks Function()
     >;
+typedef $$IntakeDraftsTableCreateCompanionBuilder =
+    IntakeDraftsCompanion Function({
+      required String id,
+      required String kind,
+      required String label,
+      Value<String?> sourceUrl,
+      Value<String?> localPath,
+      Value<int?> sizeBytes,
+      Value<String?> language,
+      Value<String?> listTitle,
+      Value<String?> artworkFile,
+      required String creditsJson,
+      required int createdAt,
+      required int updatedAt,
+      Value<int> rowid,
+    });
+typedef $$IntakeDraftsTableUpdateCompanionBuilder =
+    IntakeDraftsCompanion Function({
+      Value<String> id,
+      Value<String> kind,
+      Value<String> label,
+      Value<String?> sourceUrl,
+      Value<String?> localPath,
+      Value<int?> sizeBytes,
+      Value<String?> language,
+      Value<String?> listTitle,
+      Value<String?> artworkFile,
+      Value<String> creditsJson,
+      Value<int> createdAt,
+      Value<int> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$IntakeDraftsTableFilterComposer
+    extends Composer<_$AppDatabase, $IntakeDraftsTable> {
+  $$IntakeDraftsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get label => $composableBuilder(
+    column: $table.label,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sourceUrl => $composableBuilder(
+    column: $table.sourceUrl,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get localPath => $composableBuilder(
+    column: $table.localPath,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sizeBytes => $composableBuilder(
+    column: $table.sizeBytes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get language => $composableBuilder(
+    column: $table.language,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get listTitle => $composableBuilder(
+    column: $table.listTitle,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get artworkFile => $composableBuilder(
+    column: $table.artworkFile,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get creditsJson => $composableBuilder(
+    column: $table.creditsJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$IntakeDraftsTableOrderingComposer
+    extends Composer<_$AppDatabase, $IntakeDraftsTable> {
+  $$IntakeDraftsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get label => $composableBuilder(
+    column: $table.label,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sourceUrl => $composableBuilder(
+    column: $table.sourceUrl,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get localPath => $composableBuilder(
+    column: $table.localPath,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sizeBytes => $composableBuilder(
+    column: $table.sizeBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get language => $composableBuilder(
+    column: $table.language,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get listTitle => $composableBuilder(
+    column: $table.listTitle,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get artworkFile => $composableBuilder(
+    column: $table.artworkFile,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get creditsJson => $composableBuilder(
+    column: $table.creditsJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$IntakeDraftsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $IntakeDraftsTable> {
+  $$IntakeDraftsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<String> get label =>
+      $composableBuilder(column: $table.label, builder: (column) => column);
+
+  GeneratedColumn<String> get sourceUrl =>
+      $composableBuilder(column: $table.sourceUrl, builder: (column) => column);
+
+  GeneratedColumn<String> get localPath =>
+      $composableBuilder(column: $table.localPath, builder: (column) => column);
+
+  GeneratedColumn<int> get sizeBytes =>
+      $composableBuilder(column: $table.sizeBytes, builder: (column) => column);
+
+  GeneratedColumn<String> get language =>
+      $composableBuilder(column: $table.language, builder: (column) => column);
+
+  GeneratedColumn<String> get listTitle =>
+      $composableBuilder(column: $table.listTitle, builder: (column) => column);
+
+  GeneratedColumn<String> get artworkFile => $composableBuilder(
+    column: $table.artworkFile,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get creditsJson => $composableBuilder(
+    column: $table.creditsJson,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$IntakeDraftsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $IntakeDraftsTable,
+          IntakeDraftRow,
+          $$IntakeDraftsTableFilterComposer,
+          $$IntakeDraftsTableOrderingComposer,
+          $$IntakeDraftsTableAnnotationComposer,
+          $$IntakeDraftsTableCreateCompanionBuilder,
+          $$IntakeDraftsTableUpdateCompanionBuilder,
+          (
+            IntakeDraftRow,
+            BaseReferences<_$AppDatabase, $IntakeDraftsTable, IntakeDraftRow>,
+          ),
+          IntakeDraftRow,
+          PrefetchHooks Function()
+        > {
+  $$IntakeDraftsTableTableManager(_$AppDatabase db, $IntakeDraftsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$IntakeDraftsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$IntakeDraftsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$IntakeDraftsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                Value<String> label = const Value.absent(),
+                Value<String?> sourceUrl = const Value.absent(),
+                Value<String?> localPath = const Value.absent(),
+                Value<int?> sizeBytes = const Value.absent(),
+                Value<String?> language = const Value.absent(),
+                Value<String?> listTitle = const Value.absent(),
+                Value<String?> artworkFile = const Value.absent(),
+                Value<String> creditsJson = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => IntakeDraftsCompanion(
+                id: id,
+                kind: kind,
+                label: label,
+                sourceUrl: sourceUrl,
+                localPath: localPath,
+                sizeBytes: sizeBytes,
+                language: language,
+                listTitle: listTitle,
+                artworkFile: artworkFile,
+                creditsJson: creditsJson,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String kind,
+                required String label,
+                Value<String?> sourceUrl = const Value.absent(),
+                Value<String?> localPath = const Value.absent(),
+                Value<int?> sizeBytes = const Value.absent(),
+                Value<String?> language = const Value.absent(),
+                Value<String?> listTitle = const Value.absent(),
+                Value<String?> artworkFile = const Value.absent(),
+                required String creditsJson,
+                required int createdAt,
+                required int updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => IntakeDraftsCompanion.insert(
+                id: id,
+                kind: kind,
+                label: label,
+                sourceUrl: sourceUrl,
+                localPath: localPath,
+                sizeBytes: sizeBytes,
+                language: language,
+                listTitle: listTitle,
+                artworkFile: artworkFile,
+                creditsJson: creditsJson,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$IntakeDraftsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $IntakeDraftsTable,
+      IntakeDraftRow,
+      $$IntakeDraftsTableFilterComposer,
+      $$IntakeDraftsTableOrderingComposer,
+      $$IntakeDraftsTableAnnotationComposer,
+      $$IntakeDraftsTableCreateCompanionBuilder,
+      $$IntakeDraftsTableUpdateCompanionBuilder,
+      (
+        IntakeDraftRow,
+        BaseReferences<_$AppDatabase, $IntakeDraftsTable, IntakeDraftRow>,
+      ),
+      IntakeDraftRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -6408,4 +7490,6 @@ class $AppDatabaseManager {
       $$ProfileListAccessTableTableManager(_db, _db.profileListAccess);
   $$MediaCreditRecordsTableTableManager get mediaCreditRecords =>
       $$MediaCreditRecordsTableTableManager(_db, _db.mediaCreditRecords);
+  $$IntakeDraftsTableTableManager get intakeDrafts =>
+      $$IntakeDraftsTableTableManager(_db, _db.intakeDrafts);
 }
