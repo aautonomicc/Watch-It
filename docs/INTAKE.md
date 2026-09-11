@@ -7,7 +7,11 @@ see it — adding media is an adult action, the same law as editing credits.
 
 ## The flow
 
-1. **Choose**: pick media files from this device, or paste a source link.
+1. **Choose**: pick media files from this device, paste a source link, or
+   use Android's Share action from YouTube/another app. A shared URL opens
+   as the same review card as a pasted link, so the source and credits stay
+   attached from the first step. A playlist URL is kept as one source
+   reference; W@tch does not silently fetch every item in it.
    On desktop the picked file's path is kept; on a phone the picker hands
    out cache copies that vanish, so the draft records the name and size
    only and says to upload from a laptop.
@@ -24,7 +28,9 @@ see it — adding media is an adult action, the same law as editing credits.
 ## What a draft is — and is not
 
 - A **link draft** is a reference record. W@tch never downloads from
-  links; no YouTube downloader or transcription is added.
+  links; sharing a YouTube URL is a fast way to capture provenance, not an
+  automatic rip or publish operation. To upload media, bring an authorized
+  local file to the laptop and use *Upload this file…*.
 - A **file draft** remembers a local file and its details. It has **no
   Autonomi address**: it is not a library entry, never playable on TV,
   and never marked as available.
@@ -32,6 +38,27 @@ see it — adding media is an adult action, the same law as editing credits.
   after a real upload plus a `.watch-list` transfer (or a channel
   publication — a separate, public step; uploads themselves stay
   private to you and your linked devices).
+
+## Authorized YouTube import on the laptop
+
+For media you own or have permission to download, `tools/youtube-import.ps1`
+provides a repeatable laptop handoff for a video or playlist. It requires the
+explicit `-RightsAttested` switch, writes the source URL, title/description
+metadata, thumbnail and an import manifest beside the media, and keeps the
+result private for review in **Add to W@tch**. A playlist is bounded to 250
+items by default; pass `-MaxItems 0` only when the full playlist is intentionally
+wanted. Captions can be requested with `-IncludeSubtitles`.
+
+```powershell
+.\tools\youtube-import.ps1 `
+  -Url 'https://youtube.com/playlist?list=YOUR_PLAYLIST_ID' `
+  -RightsAttested -Creator 'Creator or channel' -Language lv
+```
+
+The helper does not publish, pay, or bypass a source's access controls. After
+review, use the existing upload flow for a private library copy; use **Channels
+→ Publish update** only for an intentional public release with the needed
+permission record.
 
 ## Upload handoff
 
@@ -47,8 +74,6 @@ uploads leave the draft in place.
 
 ## Limits
 
-- Android Share/`SEND` intake is not wired: there is no existing
-  receive route to reuse, so it is pending rather than bolted on.
 - Desktop drag-and-drop onto the window is pending (the picker covers
   files and folders today).
 - Credits live sync (`My W@tch`) does not cover drafts or the credits

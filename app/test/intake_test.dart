@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -48,6 +49,26 @@ void main() {
       );
 
   group('model', () {
+    test('shared text extracts a YouTube URL and trims share punctuation', () {
+      expect(
+        extractSharedHttpUrl(
+            'Dziesmu svētki https://youtu.be/G94Q8TbFnIA?si=abc).'),
+        'https://youtu.be/G94Q8TbFnIA?si=abc',
+      );
+      expect(
+        extractSharedHttpUrl('no link here'),
+        isNull,
+      );
+    });
+
+    test('shared text accepts a playlist URL', () {
+      expect(
+        extractSharedHttpUrl(
+            'https://youtube.com/playlist?list=PLkUQHd8CpZKngAYcM7R0Zy4d8cGfzzwL5'),
+        startsWith('https://youtube.com/playlist?list='),
+      );
+    });
+
     test('link suggestion derives a label from the URL path', () {
       expect(
         IntakeDraft.suggestLabel('https://video.example.org/watch/song-final'),
@@ -289,6 +310,45 @@ void main() {
       expect(saved.single.kind, IntakeDraft.kindFile);
       expect(find.text('SAVED ON THIS DEVICE'), findsOneWidget);
       expect(find.text('Festival — final cut'), findsOneWidget);
+    });
+
+    testWidgets('yt-dlp sidecar pre-fills title, creator and source',
+        (tester) async {
+      final path = '${temp.path}/G94Q8TbFnIA.mp4';
+      File(path).writeAsStringSync('x');
+      File('${temp.path}/G94Q8TbFnIA.info.json').writeAsStringSync(
+        jsonEncode({
+          'title': 'Latvian festival set',
+          'uploader': 'LSM info',
+          'webpage_url': 'https://www.youtube.com/watch?v=G94Q8TbFnIA',
+        }),
+      );
+      await pumpScreen(
+        tester,
+        picker: () async => [
+          (name: 'G94Q8TbFnIA.mp4', path: path, size: 1234),
+        ],
+      );
+      await tester.tap(find.text('Choose media files'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextFormField>(
+          find.byKey(const ValueKey('intake-title')),
+        ).controller!.text,
+        'Latvian festival set',
+      );
+      expect(
+        tester.widget<TextFormField>(
+          find.byKey(const ValueKey('intake-creator')),
+        ).controller!.text,
+        'LSM info',
+      );
+      expect(
+        tester.widget<TextFormField>(
+          find.byKey(const ValueKey('intake-url')),
+        ).controller!.text,
+        'https://www.youtube.com/watch?v=G94Q8TbFnIA',
+      );
     });
 
     testWidgets('paste: a valid link opens a card; a bad link is refused', (tester) async {

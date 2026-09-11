@@ -10,6 +10,7 @@ import android.content.ActivityNotFoundException
 import android.speech.RecognizerIntent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Bundle
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -35,6 +36,27 @@ class MainActivity : FlutterActivity() {
     private var pendingSave: MethodChannel.Result? = null
     private var pendingVoice: MethodChannel.Result? = null
     private var pendingSavePath: String? = null
+    // Android's share sheet delivers a YouTube/source URL here. Dart consumes
+    // it once the intake screen is ready; sharing a link never downloads or
+    // publishes anything by itself.
+    private var pendingSharedText: String? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        captureIncomingIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        captureIncomingIntent(intent)
+    }
+
+    private fun captureIncomingIntent(incoming: Intent?) {
+        if (incoming?.action != Intent.ACTION_SEND) return
+        val text = incoming.getStringExtra(Intent.EXTRA_TEXT)?.trim()
+        pendingSharedText = text?.takeIf { it.isNotEmpty() }
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -45,6 +67,17 @@ class MainActivity : FlutterActivity() {
                     result.success(mode.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION)
                 } else {
                     result.notImplemented()
+                }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "watchit/intake")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "consumeSharedText" -> {
+                        val shared = pendingSharedText
+                        pendingSharedText = null
+                        result.success(shared)
+                    }
+                    else -> result.notImplemented()
                 }
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "watchit/voice")
@@ -486,6 +519,7 @@ class MainActivity : FlutterActivity() {
         MediaPlaybackService.onEvent = null
         channel = null
         mediaChannel = null
+        pendingSharedText = null
         super.onDestroy()
     }
 }

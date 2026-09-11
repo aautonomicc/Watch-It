@@ -1,9 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show FilteringTextInputFormatter;
+import 'package:flutter/services.dart';
 
 import '../models/intake_draft.dart';
 import '../models/media_credits.dart';
@@ -45,6 +45,21 @@ Future<int?> _safeLength(XFile f) async {
   } catch (_) {
     return null;
   }
+}
+
+/// Pull the first web URL out of Android's Share-sheet text. YouTube shares
+/// often include a title or message around the URL; the intake card keeps
+/// that source intact for the user to review before saving.
+String? extractSharedHttpUrl(String text) {
+  final match = RegExp(r'https?://[^\s<>]+', caseSensitive: false)
+      .firstMatch(text);
+  if (match == null) return null;
+  final raw = match.group(0)!.replaceFirst(RegExp(r'[.,;!?)]*$'), '');
+  final uri = Uri.tryParse(raw);
+  if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
+    return null;
+  }
+  return uri.toString();
 }
 
 /// Add to W@tch: the intake desk for media that is not on the network
@@ -100,6 +115,7 @@ class IntakeScreen extends StatefulWidget {
 }
 
 class _IntakeScreenState extends State<IntakeScreen> {
+  static const _shareChannel = MethodChannel('watchit/intake');
   final _linkController = TextEditingController();
   String? _linkError;
   List<IntakeDraft> _drafts = [];
@@ -112,7 +128,12 @@ class _IntakeScreenState extends State<IntakeScreen> {
   @override
   void initState() {
     super.initState();
-    _reload();
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
+    await _reload();
+    await _consumeSharedText();
   }
 
   @override
@@ -134,6 +155,55 @@ class _IntakeScreenState extends State<IntakeScreen> {
     });
   }
 
+  Future<void> _consumeSharedText() async {
+    String? shared;
+    try {
+      shared = await _shareChannel.invokeMethod<String>('consumeSharedText');
+    } on MissingPluginException {
+      // Desktop and widget tests have no Android share channel.
+      return;
+    } on PlatformException {
+      return;
+    }
+    if (!mounted || shared == null || shared.trim().isEmpty) return;
+    final url = extractSharedHttpUrl(shared);
+    if (url == null) {
+      _snack('That shared item did not contain a web link.');
+      return;
+    }
+    if (_isKid) {
+      _snack('Adding media is available from an adult profile.');
+      return;
+    }
+    setState(() {
+      _pending.add(IntakeDraft(
+        id: IntakeDraft.newId(),
+        kind: IntakeDraft.kindLink,
+        label: _sharedLabel(url),
+        sourceUrl: url,
+      ));
+    });
+    _snack('Link ready for review — nothing downloaded.');
+  }
+
+  String _sharedLabel(String url) {
+    final uri = Uri.tryParse(url);
+    final host = uri?.host.toLowerCase() ?? '';
+    if (host == 'youtu.be' || host.endsWith('.youtube.com') ||
+        host == 'youtube.com') {
+      final videoId = uri?.queryParameters['v'];
+      final playlistId = uri?.queryParameters['list'];
+      if (videoId != null && videoId.isNotEmpty) {
+        return 'YouTube video · $videoId';
+      }
+      if (playlistId != null && playlistId.isNotEmpty) {
+        return 'YouTube playlist · $playlistId';
+      }
+      return 'YouTube source';
+    }
+    return IntakeDraft.suggestLabel(url) ?? 'Source link';
+  }
+
   Future<void> _pickFiles() async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -144,22 +214,71 @@ class _IntakeScreenState extends State<IntakeScreen> {
       picks = const [];
     }
     if (!mounted) return;
-    setState(() => _busy = false);
-    if (picks.isEmpty) return;
+    if (picks.isEmpty) {
+      setState(() => _busy = false);
+      return;
+    }
+    final drafts = [
+      for (final pick in picks) _draftFromPick(pick),
+    ];
+    if (!mounted) return;
     setState(() {
-      for (final pick in picks) {
-        // Desktop paths are durable; a mobile picker hands out cache
-        // copies that vanish, so phones record the name/size only.
-        final keepPath = isDesktopPlatform && pick.path.trim().isNotEmpty;
-        _pending.add(IntakeDraft(
-          id: IntakeDraft.newId(),
-          kind: IntakeDraft.kindFile,
-          label: pick.name,
-          localPath: keepPath ? pick.path : null,
-          sizeBytes: pick.size,
-        ));
-      }
+      _busy = false;
+      _pending.addAll(drafts);
     });
+  }
+
+  IntakeDraft _draftFromPick(
+      ({String name, String path, int? size}) pick) {
+    // yt-dlp writes <video-id>.info.json beside the media. Reading that
+    // sidecar turns an authorized laptop import into a nearly complete
+    // review card while still requiring the user to confirm every field.
+    final keepPath = isDesktopPlatform && pick.path.trim().isNotEmpty;
+    var label = pick.name;
+    String? sourceUrl;
+    String? creator;
+    var sourceTitle = '';
+    if (keepPath) {
+      final file = File(pick.path);
+      final dot = file.path.lastIndexOf('.');
+      final stem = dot > file.path.lastIndexOf(Platform.pathSeparator)
+          ? file.path.substring(0, dot)
+          : file.path;
+      final info = File('$stem.info.json');
+      if (info.existsSync()) {
+        try {
+          final decoded = jsonDecode(info.readAsStringSync());
+          if (decoded is Map) {
+            String? text(String key) {
+              final value = decoded[key];
+              return value is String && value.trim().isNotEmpty
+                  ? value.trim()
+                  : null;
+            }
+
+            sourceTitle = text('title') ?? '';
+            label = sourceTitle.isEmpty ? label : sourceTitle;
+            creator = text('uploader') ?? text('channel') ?? text('artist');
+            sourceUrl = text('webpage_url') ?? text('original_url');
+          }
+        } catch (_) {
+          // A malformed sidecar must not block a perfectly valid media pick.
+        }
+      }
+    }
+    return IntakeDraft(
+      id: IntakeDraft.newId(),
+      kind: IntakeDraft.kindFile,
+      label: label,
+      localPath: keepPath ? pick.path : null,
+      sizeBytes: pick.size,
+      sourceUrl: sourceUrl,
+      credits: MediaCredits(
+        title: sourceTitle,
+        creator: creator ?? '',
+        sourceUrl: sourceUrl ?? '',
+      ),
+    );
   }
 
   void _addLink() {
@@ -302,8 +421,9 @@ class _IntakeScreenState extends State<IntakeScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              'A pasted link is a reference record. W@tch does not '
-              'download from links.',
+              'A pasted or shared link is a reference record. W@tch does '
+              'not download from links; choose an authorized local file '
+              'when you are ready to upload.',
               style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
             ),
             const SizedBox(height: 16),
