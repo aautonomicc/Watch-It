@@ -122,10 +122,10 @@ class PosterCard extends StatelessWidget {
             if (entry.publicReference)
               Row(
                 children: [
-                  Icon(Icons.public, size: 11, color: t.channelAmber),
+                  Icon(Icons.public, size: 11, color: WiTokens.channelAmber),
                   const SizedBox(width: 3),
                   Text('Public reference',
-                      style: TextStyle(fontSize: 9.5, color: t.channelAmber)),
+                      style: TextStyle(fontSize: 9.5, color: WiTokens.channelAmber)),
                 ],
               ),
             // Format/size of this upload — or, when several uploads of
