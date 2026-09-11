@@ -13,6 +13,7 @@ import 'screens/publish_screen.dart' show isDesktopPlatform;
 import 'screens/detail_screen.dart';
 import 'screens/profile_picker_screen.dart';
 import 'screens/search_screen.dart';
+import 'screens/media_lists_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/show_screen.dart';
 import 'screens/terms_screen.dart';
@@ -24,6 +25,7 @@ import 'services/media_session.dart';
 import 'services/now_playing.dart';
 import 'services/download_manager.dart';
 import 'services/embedded_client.dart';
+import 'services/experience_view.dart';
 import 'services/channel_service.dart';
 import 'services/favourites.dart';
 import 'services/home_rows.dart';
@@ -50,6 +52,7 @@ import 'widgets/download_badge.dart';
 import 'widgets/channel_avatar.dart';
 import 'widgets/channel_badge.dart';
 import 'widgets/downloads_indicator.dart';
+import 'widgets/adoption_invite.dart';
 import 'widgets/library_drawer.dart';
 import 'widgets/messenger.dart';
 import 'widgets/poster_cards.dart';
@@ -152,12 +155,14 @@ Future<void> main() async {
     WatchStateStore.instance.onProfileSwitched();
     await FavouritesStore.instance.onProfileSwitched();
     wiThemeMode.value = await AppSettings.themeMode();
+    wiExperienceView.value = await AppSettings.experienceView();
   };
   await ProfileStore.instance.ensureLoaded();
   // Colour scheme (dark default / light / system) before the first frame
   // so the app never flashes the wrong theme. Per-profile — read after
   // the profile store picked the launch profile.
   wiThemeMode.value = await AppSettings.themeMode();
+  wiExperienceView.value = await AppSettings.experienceView();
   runApp(const WatchItApp());
 }
 
@@ -394,6 +399,24 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   }
 
   // Reloading on return is didPopNext's job — no _reload() here.
+  Future<void> _openReceive() async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => const MediaListsScreen(
+        initialAction: MediaListsEntryAction.receive,
+      ),
+    ));
+    await _reload();
+  }
+
+  Future<void> _openAddFile() async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => const MediaListsScreen(
+        initialAction: MediaListsEntryAction.import,
+      ),
+    ));
+    await _reload();
+  }
+
   Future<void> _openSettings() async {
     await Navigator.of(
       context,
@@ -488,6 +511,12 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
                   variant: _lists.isNotEmpty
                       ? _EmptyVariant.allHidden
                       : _EmptyVariant.empty,
+                  onReceive: ProfileStore.instance.isAdmin
+                      ? () => unawaited(_openReceive())
+                      : null,
+                  onAddFile: ProfileStore.instance.isAdmin
+                      ? () => unawaited(_openAddFile())
+                      : null,
                 )
               : _libraryView(t, visible),
         ),
@@ -894,42 +923,75 @@ enum _EmptyVariant {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.tokens, this.variant = _EmptyVariant.empty});
+  const _EmptyState({
+    required this.tokens,
+    this.variant = _EmptyVariant.empty,
+    this.onReceive,
+    this.onAddFile,
+  });
 
   final WiTokens tokens;
   final _EmptyVariant variant;
+  final VoidCallback? onReceive;
+  final VoidCallback? onAddFile;
 
   @override
   Widget build(BuildContext context) {
     final t = tokens;
-    final (title, hint) = switch (variant) {
-      _EmptyVariant.empty => (
-        'Your library is empty',
-        'Use "Add to library" in Settings → My Media to get started.',
-      ),
-      _EmptyVariant.allHidden => (
-        'All your lists are hidden',
-        'Enable a list in Settings → My Media to show it here.',
-      ),
-    };
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.play_circle_outline, size: 64, color: t.accent),
-          const SizedBox(height: 16),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: t.bone,
+    return ValueListenableBuilder<ExperienceView>(
+      valueListenable: wiExperienceView,
+      builder: (context, view, _) {
+        final copy = ExperienceCopy(view);
+        final hidden = variant == _EmptyVariant.allHidden;
+        final title = hidden ? copy.allHiddenTitle : copy.emptyLibraryTitle;
+        final hint = hidden ? copy.allHiddenHint : copy.emptyLibraryHint;
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.play_circle_outline, size: 64, color: t.accent),
+                  const SizedBox(height: 16),
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: hidden ? 15 : 20,
+                      fontWeight: FontWeight.w700,
+                      color: t.bone,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    hint,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 13, height: 1.4, color: t.ash),
+                  ),
+                  if (!hidden &&
+                      copy.emptyLibraryTitle != copy.emptyLibraryQuiet) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      copy.emptyLibraryQuiet,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12, color: t.ash),
+                    ),
+                  ],
+                  if (!hidden && onReceive != null && onAddFile != null) ...[
+                    const SizedBox(height: 20),
+                    AdoptionInvitePair(
+                      onReceive: onReceive!,
+                      onAddFile: onAddFile!,
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
-          const SizedBox(height: 8),
-          Text(hint, style: TextStyle(fontSize: 12, color: t.ash)),
-        ],
-      ),
+        );
+      },
     );
   }
 }

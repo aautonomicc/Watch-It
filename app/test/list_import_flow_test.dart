@@ -17,6 +17,7 @@ import 'package:watchit/screens/media_lists_screen.dart';
 import 'package:watchit/services/bundle.dart';
 import 'package:watchit/services/connectivity.dart';
 import 'package:watchit/services/embedded_client.dart';
+import 'package:watchit/services/experience_view.dart';
 import 'package:watchit/services/import_review.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata.dart';
@@ -73,6 +74,7 @@ void main() {
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    wiExperienceView.value = ExperienceView.newBee;
     await LibraryStore.useForTesting(
         AppDatabase.forTesting(NativeDatabase.memory()));
     WatchStateStore.instance = WatchStateStore();
@@ -759,14 +761,19 @@ void main() {
   });
 
   group('Plain-English flow info', () {
-    testWidgets('Media page explains what Add to library accepts',
+    testWidgets('Media page invites Receive / Add from a file on New bee',
         (tester) async {
       await openMediaLists(tester);
-      final hint = tester.widget<Text>(find.textContaining(
-          'Add to library (the download button above) takes any mix'));
-      expect(hint.data, contains('.datamap files'));
-      expect(hint.data, contains('.watch-list bundles'));
-      expect(hint.data, contains('.watch-list.datamap'));
+      expect(find.text('Receive a piece'), findsOneWidget);
+      expect(find.text('Add from a file'), findsOneWidget);
+      expect(
+          find.textContaining(
+              'Someone sent you their work. Keep it here.'),
+          findsOneWidget);
+      expect(
+          find.textContaining(
+              'Add to library (the download button above) takes any mix'),
+          findsNothing);
     });
 
     testWidgets('export dialog explains the ant upload share flow',

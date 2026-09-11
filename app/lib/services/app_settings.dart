@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart' show ThemeMode;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'experience_view.dart';
 import 'home_sections.dart';
 import 'profiles.dart';
 
@@ -267,6 +268,23 @@ class AppSettings {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
         ProfileStore.instance.prefKey(_themeModeKey), mode.name);
+  }
+
+  static const _experienceViewKey = 'experience_view_v1';
+
+  /// Viewing register (Settings → Appearance / in-flow chrome).
+  /// Per-profile like the colour scheme; New bee is the default.
+  static Future<ExperienceView> experienceView() async {
+    final prefs = await SharedPreferences.getInstance();
+    final name =
+        prefs.getString(ProfileStore.instance.prefKey(_experienceViewKey));
+    return ExperienceView.values.asNameMap()[name] ?? ExperienceView.newBee;
+  }
+
+  static Future<void> setExperienceView(ExperienceView view) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        ProfileStore.instance.prefKey(_experienceViewKey), view.name);
   }
 
   static const _drawerPinnedKey = 'drawer_pinned_v1';

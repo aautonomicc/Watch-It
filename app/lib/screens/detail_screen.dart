@@ -15,6 +15,7 @@ import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/embedded_client.dart';
 import '../services/network_policy.dart';
+import '../services/experience_view.dart';
 import '../services/profiles.dart';
 import '../services/version_choice.dart';
 import '../services/watch_state.dart';
@@ -22,6 +23,7 @@ import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
 import '../widgets/messenger.dart' show wiMessengerKey;
 import '../widgets/playlist_picker.dart';
+import '../widgets/public_reference_badge.dart';
 import '../widgets/watch_progress.dart';
 import 'edit_details_screen.dart';
 import 'player_screen.dart';
@@ -547,6 +549,22 @@ class _DetailScreenState extends State<DetailScreen> {
                     color: t.bone,
                   ),
                 ),
+                if (entry.publicReference) ...[
+                  const SizedBox(height: 8),
+                  const PublicReferenceBadge(),
+                  const SizedBox(height: 6),
+                  ValueListenableBuilder<ExperienceView>(
+                    valueListenable: wiExperienceView,
+                    builder: (context, view, _) => Text(
+                      ExperienceCopy(view).detailLine,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.35,
+                        color: t.boneDim,
+                      ),
+                    ),
+                  ),
+                ],
                 if (meta.episodeLabel != null) ...[
                   const SizedBox(height: 4),
                   Text(

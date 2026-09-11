@@ -22,6 +22,7 @@ import '../theme/tokens.dart';
 import '../services/tv_settings.dart';
 import 'tv_display_screen.dart';
 import '../widgets/brand_mark.dart';
+import '../widgets/experience_switch.dart';
 import '../widgets/messenger.dart';
 import 'channels_screen.dart';
 import 'data_screen.dart';
@@ -745,6 +746,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   trailing: Icon(Icons.chevron_right, color: t.ash),
                   onTap: _pickThemeMode,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  child: Text(
+                    'Viewing style',
+                    style: TextStyle(color: t.bone, fontSize: 15),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text(
+                    'Same doors, three densities. New bee is calm and '
+                    'never uses numbered steps.',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: ExperienceSwitch(),
                 ),
                 // Desktop-only this edition (Upload is): see
                 // docs/PLAN-alpha55.md. Section named WALLET (not

@@ -24,10 +24,13 @@ import '../services/list_import.dart';
 import '../services/metadata_service.dart';
 import '../services/organize.dart';
 import '../services/profile_transfer.dart';
-import '../services/public_address_import.dart';
+import '../services/experience_view.dart';
 import '../theme/tokens.dart';
+import '../widgets/adoption_invite.dart';
 import '../widgets/channel_avatar.dart';
 import '../widgets/channel_badge.dart';
+import '../widgets/experience_switch.dart';
+import '../widgets/receive_piece_dialog.dart';
 import 'import_review_screen.dart';
 import 'list_edit_screen.dart';
 import 'list_home_screen.dart';
@@ -41,12 +44,23 @@ import 'settings_screen.dart' show promptForText;
 /// checkboxes, and per-list open/rename/export/delete. Lists are created
 /// inside the import flow ("Add to library" → "Create new list") — the
 /// one place media enters the app.
+/// Optional first action when My Media opens from an empty-wall invite.
+enum MediaListsEntryAction { receive, import }
+
 class MediaListsScreen extends StatefulWidget {
-  const MediaListsScreen({super.key, this.importBase, this.importConfigDir});
+  const MediaListsScreen({
+    super.key,
+    this.importBase,
+    this.importConfigDir,
+    this.initialAction,
+  });
 
   /// Embedded-server URL override for datamap/bundle imports (tests);
   /// null means the real embedded client.
   final String? importBase;
+
+  /// Home empty-state cards jump straight into Receive or Add-from-file.
+  final MediaListsEntryAction? initialAction;
 
   /// Override for the import matcher's config/cache directory (tests,
   /// and platforms without a HOME); null means `~/.watchit-upload` —
@@ -70,6 +84,17 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
   void initState() {
     super.initState();
     _reload();
+    if (widget.initialAction != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        switch (widget.initialAction!) {
+          case MediaListsEntryAction.receive:
+            unawaited(_importPublicAddress());
+          case MediaListsEntryAction.import:
+            unawaited(_importList());
+        }
+      });
+    }
   }
 
   Future<void> _reload() async {
@@ -224,13 +249,14 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
 
   /// Add a public Autonomi address as a local library reference. The probe
   /// is explicit and read-only; saving never re-uploads or publishes data.
+  /// UI is the receive / Keep sheet; storage path is unchanged.
   Future<void> _importPublicAddress() async {
-    final result = await showDialog<({String address, String name, int? size})>(
-      context: context,
-      builder: (context) => _PublicAddressDialog(base: widget.importBase),
+    final result = await showReceivePieceFlow(
+      context,
+      base: widget.importBase,
     );
     if (result == null || !mounted) return;
-    final titles = await _pickTargetLists(suggested: 'Public references');
+    final titles = await _pickTargetLists(suggested: kSharedPiecesListTitle);
     if (titles == null || titles.isEmpty || !mounted) return;
     await addEntriesToLists([
       MediaEntry(
@@ -242,8 +268,9 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
     ], titles);
     await _reload();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Public reference added — content stays on Autonomi.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(experienceCopyOf().keptSnack)),
+      );
     }
   }
 
@@ -1334,63 +1361,81 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
     final lists = _lists;
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: t.ink,
-        elevation: 0,
-        title: Text('My Media', style: TextStyle(color: t.bone, fontSize: 18)),
-        actions: [
-          IconButton(
-            tooltip: 'Add public Autonomi address',
-            icon: Icon(Icons.link, color: t.bone),
-            onPressed: _importPublicAddress,
+    return ValueListenableBuilder<ExperienceView>(
+      valueListenable: wiExperienceView,
+      builder: (context, view, _) {
+        final copy = ExperienceCopy(view);
+        return Scaffold(
+          appBar: AppBar(
+            backgroundColor: t.ink,
+            elevation: 0,
+            title:
+                Text('My Media', style: TextStyle(color: t.bone, fontSize: 18)),
+            actions: [
+              IconButton(
+                tooltip: copy.receiveDoorTitle,
+                icon: Icon(Icons.card_giftcard_outlined, color: t.bone),
+                onPressed: _importPublicAddress,
+              ),
+              IconButton(
+                tooltip: 'Add to library',
+                icon: Icon(Icons.download_outlined, color: t.bone),
+                onPressed: _importList,
+              ),
+              IconButton(
+                tooltip: 'Export library',
+                icon: Icon(Icons.upload_outlined, color: t.bone),
+                onPressed: _exportLibrary,
+              ),
+            ],
           ),
-          IconButton(
-            tooltip: 'Add to library',
-            icon: Icon(Icons.download_outlined, color: t.bone),
-            onPressed: _importList,
-          ),
-          IconButton(
-            tooltip: 'Export library',
-            icon: Icon(Icons.upload_outlined, color: t.bone),
-            onPressed: _exportLibrary,
-          ),
-        ],
-      ),
-      body: lists == null
-          ? const Center(child: CircularProgressIndicator())
-          : ReorderableListView(
-              buildDefaultDragHandles: false,
-              onReorderItem: _reorder,
-              padding: const EdgeInsets.only(bottom: 24),
-              header: _header(t, lists),
-              children: [
-                for (final (i, section)
-                    in reconcileHomeSections(_stored, lists).indexed)
-                  section.isSpecial
-                      ? _specialRow(t, i, section)
-                      : _listRow(t, i, section, lists),
-              ],
-            ),
+          body: lists == null
+              ? const Center(child: CircularProgressIndicator())
+              : ReorderableListView(
+                  buildDefaultDragHandles: false,
+                  onReorderItem: _reorder,
+                  padding: const EdgeInsets.only(bottom: 24),
+                  header: _header(t, lists),
+                  children: [
+                    for (final (i, section)
+                        in reconcileHomeSections(_stored, lists).indexed)
+                      section.isSpecial
+                          ? _specialRow(t, i, section)
+                          : _listRow(t, i, section, lists),
+                  ],
+                ),
+        );
+      },
     );
   }
 
   Widget _header(WiTokens t, List<MediaList> lists) {
+    final copy = experienceCopyOf();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Plain-English pointer at the point of import — the
-        // picker itself can't explain what it accepts.
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: Text(
-            'Add to library (the download button above) takes '
-            'any mix of: .datamap files made by uploading a '
-            'video with the ant app, .watch-list bundles '
-            'exported from W@tch, and a bundle\'s own '
-            '.watch-list.datamap when the bundle is stored on '
-            'Autonomi. The app works out which is which.',
-            style: TextStyle(fontSize: 11.5, color: t.ash),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                kAdoptionPromise,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  height: 1.4,
+                  color: t.boneDim,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const ExperienceSwitch(),
+              const SizedBox(height: 14),
+              AdoptionInvitePair(
+                onReceive: _importPublicAddress,
+                onAddFile: _importList,
+              ),
+            ],
           ),
         ),
         // Unidentified/mis-named audio (the tester's "albums all over
@@ -1422,10 +1467,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Text(
-            'Rows appear on your home screen in this order — drag the '
-            'handle to reorder, untick to hide. The lighter rows are '
-            'built-in (they fill themselves); tap a list to edit its '
-            'entries.',
+            copy.libraryRowsHint,
             style: TextStyle(fontSize: 11.5, color: t.ash),
           ),
         ),
@@ -1433,8 +1475,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text(
-              'No lists yet. Use "Add to library" above — it creates '
-              'lists as part of the import.',
+              copy.emptyListsHint,
               style: TextStyle(fontSize: 13, color: t.boneDim),
             ),
           ),
@@ -1514,6 +1555,10 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         '${list.entries.length} '
         '${list.entries.length == 1 ? 'entry' : 'entries'}'
         '${list.isChannel ? '  ·  read-only, updates automatically' : ''}'
+        '${experienceCopyOf().listSharedSubtitle(
+          list.entries.where((e) => e.publicReference).length,
+          list.entries.length,
+        )}'
         '${list.enabled ? '' : '  ·  hidden from home'}',
         style: TextStyle(color: t.ash, fontSize: 12),
       ),
@@ -1575,147 +1620,6 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         ],
       ),
       onTap: () => _openList(list),
-    );
-  }
-}
-
-class _PublicAddressDialog extends StatefulWidget {
-  const _PublicAddressDialog({this.base});
-
-  final String? base;
-
-  @override
-  State<_PublicAddressDialog> createState() => _PublicAddressDialogState();
-}
-
-class _PublicAddressDialogState extends State<_PublicAddressDialog> {
-  final _address = TextEditingController();
-  final _name = TextEditingController();
-  bool _checking = false;
-  PublicAddressInspection? _inspection;
-  String? _error;
-
-  @override
-  void dispose() {
-    _address.dispose();
-    _name.dispose();
-    super.dispose();
-  }
-
-  Future<void> _check() async {
-    setState(() {
-      _checking = true;
-      _error = null;
-      _inspection = null;
-    });
-    try {
-      final result = await inspectPublicAddress(_address.text, base: widget.base);
-      if (!mounted) return;
-      setState(() {
-        _inspection = result;
-        _address.text = result.address;
-        if (_name.text.trim().isEmpty) _name.text = 'Autonomi public file';
-      });
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
-    } finally {
-      if (mounted) setState(() => _checking = false);
-    }
-  }
-
-  void _add() {
-    final inspection = _inspection;
-    final name = _name.text.trim();
-    if (inspection == null || name.isEmpty) return;
-    Navigator.of(context).pop(
-      (address: inspection.address, name: name, size: inspection.sizeBytes),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = WiTokens.of(context);
-    final size = _inspection?.sizeBytes;
-    return AlertDialog(
-      backgroundColor: t.ink2,
-      title: Text('Add public Autonomi address',
-          style: TextStyle(color: t.bone, fontSize: 16)),
-      content: SizedBox(
-        width: 460,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Paste a 64-character public XOR address. W@tch checks it '
-                'through your local Autonomi client, then stores a private '
-                'library bookmark. Nothing is re-uploaded or published.',
-                style: TextStyle(color: t.boneDim, fontSize: 12.5),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: _address,
-                autofocus: true,
-                keyboardType: TextInputType.url,
-                style: TextStyle(color: t.bone, fontSize: 13),
-                decoration: InputDecoration(
-                  labelText: 'Public address',
-                  labelStyle: TextStyle(color: t.ash),
-                  hintText: '0x… or 64 hex characters',
-                  hintStyle: TextStyle(color: t.ash.withValues(alpha: .7)),
-                  suffixIcon: IconButton(
-                    tooltip: 'Verify address',
-                    onPressed: _checking ? null : _check,
-                    icon: _checking
-                        ? SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: t.accent))
-                        : Icon(Icons.verified_outlined, color: t.accent),
-                  ),
-                ),
-                onSubmitted: (_) => _checking ? null : _check(),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _name,
-                style: TextStyle(color: t.bone, fontSize: 13),
-                onChanged: (_) => setState(() {}),
-                decoration: InputDecoration(
-                  labelText: 'Title / creator credit',
-                  labelStyle: TextStyle(color: t.ash),
-                  hintText: 'e.g. Song and Dance Festival — LNKC',
-                  hintStyle: TextStyle(color: t.ash.withValues(alpha: .7)),
-                ),
-              ),
-              if (_inspection != null) ...[
-                const SizedBox(height: 12),
-                Text(
-                  'Verified public address${size == null ? '' : ' · ${formatBytes(size)}'}',
-                  style: TextStyle(color: t.accent, fontSize: 12),
-                ),
-              ],
-              if (_error != null) ...[
-                const SizedBox(height: 10),
-                Text(_error!, style: TextStyle(color: t.rust, fontSize: 12)),
-              ],
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text('Cancel', style: TextStyle(color: t.ash)),
-        ),
-        TextButton(
-          onPressed: _inspection == null || _name.text.trim().isEmpty ? null : _add,
-          child: Text('Add to library',
-              style: TextStyle(color: _inspection == null ? t.ash : t.accent)),
-        ),
-      ],
     );
   }
 }

@@ -20,8 +20,10 @@ import '../services/screen_wake.dart';
 import '../services/season_grouping.dart' show episodeNameFromLabel;
 import '../services/user_metadata.dart';
 import '../services/watch_state.dart';
+import '../services/experience_view.dart';
 import '../theme/tokens.dart';
 import '../services/tv_settings.dart';
+import '../widgets/public_reference_badge.dart';
 import '../widgets/tv_player_controls.dart';
 import '../widgets/tv_track_menu.dart';
 import '../services/caption_file.dart';
@@ -751,6 +753,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
               // The dim scrims stay full-bleed (their content is centered,
               // overscan-safe); only the bottom-anchored banner insets.
+              if (_entry.publicReference)
+                Padding(
+                  padding: overlayInset + const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: _PublicPlaybackChrome(entry: _entry),
+                  ),
+                ),
               if (_error != null)
                 _errorOverlay(context)
               else if (_buffering)
@@ -773,6 +783,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return TvPlayerControls(
       inset: inset,
       title: _title,
+      provenance: _entry.publicReference
+          ? const PublicReferenceBadge(onDark: true)
+          : null,
       position: _position,
       duration: _duration,
       playing: _playing,
@@ -864,6 +877,46 @@ class _PlayerScreenState extends State<PlayerScreen> {
         title: caption.name,
         language: caption.language,
       ),
+    );
+  }
+}
+
+/// Quiet provenance chip on public playback. Sits top-left so it never
+/// covers the transport; TV also mirrors it in the remote top bar.
+class _PublicPlaybackChrome extends StatelessWidget {
+  const _PublicPlaybackChrome({required this.entry});
+
+  final MediaEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<ExperienceView>(
+      valueListenable: wiExperienceView,
+      builder: (context, view, _) {
+        final copy = ExperienceCopy(view);
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const PublicReferenceBadge(dense: true, onDark: true),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    copy.playerChip,
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -970,6 +1023,10 @@ class AudioPlayerView extends StatelessWidget {
                   color: t.bone,
                 ),
               ),
+              if (entry.publicReference) ...[
+                const SizedBox(height: 8),
+                const PublicReferenceBadge(),
+              ],
               if (artist != null || album != null) ...[
                 const SizedBox(height: 4),
                 Text(

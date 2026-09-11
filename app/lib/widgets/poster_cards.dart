@@ -5,6 +5,7 @@ import '../services/metadata_service.dart';
 import '../services/season_grouping.dart';
 import '../theme/tokens.dart';
 import 'download_badge.dart';
+import 'public_reference_badge.dart';
 import 'watch_progress.dart';
 
 /// InkWell for wall cards that draws its own focus ring. Ink highlights
@@ -119,15 +120,10 @@ class PosterCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 11.5, color: t.boneDim),
             ),
-            if (entry.publicReference)
-              Row(
-                children: [
-                  Icon(Icons.public, size: 11, color: WiTokens.channelAmber),
-                  const SizedBox(width: 3),
-                  Text('Public reference',
-                      style: TextStyle(fontSize: 9.5, color: WiTokens.channelAmber)),
-                ],
-              ),
+            if (entry.publicReference) ...[
+              const SizedBox(height: 3),
+              const PublicReferenceBadge(dense: true),
+            ],
             // Format/size of this upload — or, when several uploads of
             // the title are folded into this one card, the version count.
             if (allVersions.length > 1

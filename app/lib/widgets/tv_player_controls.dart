@@ -19,10 +19,14 @@ class TvPlayerControls extends StatefulWidget {
     this.onNext,
     this.onTracks,
     this.captions,
+    this.provenance,
     this.inset = EdgeInsets.zero,
   });
   final Widget child;
   final String title;
+
+  /// Optional public-piece chip in the top bar — never covers transport.
+  final Widget? provenance;
   final Duration position;
   final Duration duration;
   final bool playing;
@@ -290,6 +294,10 @@ class _TvPlayerControlsState extends State<TvPlayerControls> {
                           ),
                         ),
                       ),
+                      if (widget.provenance != null) ...[
+                        const SizedBox(width: 12),
+                        widget.provenance!,
+                      ],
                     ],
                   ),
                 ),

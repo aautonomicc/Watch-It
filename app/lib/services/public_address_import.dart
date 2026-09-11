@@ -53,8 +53,42 @@ Future<PublicAddressInspection> inspectPublicAddress(
   } on ListImportException {
     rethrow;
   } catch (e) {
-    throw ListImportException('Public address check failed: $e');
+    throw ListImportException(humanPublicAddressError(e));
   } finally {
     client.close();
   }
+}
+
+/// New-bee / Raver error line. Never dumps a stack or exception type.
+/// Cypherpunk surfaces the original [ListImportException] at the dialog.
+String humanPublicAddressError(Object error) {
+  final raw = error is ListImportException ? error.message : error.toString();
+  final lower = raw.toLowerCase();
+  if (lower.contains('64 hexadecimal') ||
+      lower.contains('hexadecimal character')) {
+    return 'That doesn’t look like an address yet. Paste the whole code they sent.';
+  }
+  if (lower.contains('not available on this platform') ||
+      lower.contains('client is not available')) {
+    return 'W@tch isn’t connected on this device yet.';
+  }
+  if (lower.contains('not connected') ||
+      lower.contains('network is paused') ||
+      lower.contains('503')) {
+    return 'W@tch can’t reach Autonomi right now. Wait until it says Connected, then try again.';
+  }
+  if (lower.contains('could not be resolved') ||
+      lower.contains('not found') ||
+      lower.contains('404')) {
+    return 'We couldn’t find that piece. Try again, or paste a different address.';
+  }
+  if (lower.contains('timeout') || lower.contains('timed out')) {
+    return 'That took too long. Try again when you’re connected.';
+  }
+  if (lower.contains('exception') ||
+      lower.contains('error:') ||
+      lower.contains('failed:')) {
+    return 'We couldn’t look that up. Try again, or paste a different address.';
+  }
+  return raw;
 }
