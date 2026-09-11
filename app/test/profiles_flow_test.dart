@@ -17,8 +17,10 @@ import 'package:watchit/services/embedded_client.dart';
 import 'package:watchit/services/favourites.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata_service.dart';
+import 'package:watchit/screens/settings_screen.dart';
 import 'package:watchit/services/profiles.dart';
 import 'package:watchit/services/terms.dart';
+import 'package:watchit/services/tv_settings.dart';
 import 'package:watchit/services/watch_state.dart';
 import 'package:watchit/theme/tokens.dart';
 
@@ -181,6 +183,36 @@ void main() {
         scrollable: find.byType(Scrollable).first);
     expect(find.text('Size on disk'), findsOneWidget);
     expect(find.text('Clear all data'), findsNothing);
+  });
+
+  testWidgets(
+      'TV display tile is admin-only: device-wide margins/palette (#3)',
+      (tester) async {
+    await boot();
+    TvSettings.instance = TvSettings(enabled: true);
+    addTearDown(() {
+      TvSettings.instance.dispose();
+      TvSettings.instance = TvSettings();
+    });
+
+    Future<void> pumpSettings() async {
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: const SettingsScreen(),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    await pumpSettings();
+    expect(find.text('TV display'), findsOneWidget);
+
+    final store = ProfileStore.instance;
+    final kid = await store.create(
+        name: 'Kiddo', kind: ProfileKind.kid, allowedLists: {'kids'});
+    await store.selectProfile(kid.id);
+    await tester.pumpWidget(const SizedBox());
+    await pumpSettings();
+    expect(find.text('TV display'), findsNothing);
   });
 
   testWidgets('adult (non-admin) settings are restricted too',
