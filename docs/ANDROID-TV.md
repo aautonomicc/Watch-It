@@ -70,6 +70,27 @@ open so a picked file is not inadvertently attached to the next item.
 See [the language and playback pilot](LANGUAGE-PLAYBACK-PILOT.md) for labelled
 test captions and the distinction between playback tests and speech assessment.
 
+## Voice search
+
+The Search screen's app bar shows a microphone action on Android only —
+phones, tablets and TV alike; other platforms are unchanged. Pressing it
+starts the system speech recognizer (`RecognizerIntent` over the
+`watchit/voice` channel). The app requests no microphone permission and
+never records audio itself: the system dialog owns the microphone. On
+Google TV devices the system recognizer is Google's, which may process
+speech through Google's servers — that is a property of the device, not
+of W@tch.
+
+The single best transcription fills the query field and runs the search
+immediately, skipping the usual typing debounce. Cancelling the dialog or
+an empty result leaves any typed query untouched. A device with no
+recognizer, or one that refuses to start, shows a snackbar pointing at
+the keyboard; a second press while the dialog is already open is refused
+rather than stacking recognizers. Recognized words only ever fill the
+query — a result never opens media directly, so a misheard phrase costs
+nothing. Keyboard Enter/Search likewise submits immediately and
+unfocuses the field.
+
 ## Verification
 
 `flutter test test/tv_experience_test.dart test/home_layout_test.dart test/tv_seek_test.dart`
@@ -82,6 +103,9 @@ Timeline tests cover remote preview/commit, cancellation with Android Back,
 focus departure, bounds, hidden-control timing, dragging and unknown duration.
 `flutter test test/tv_tracks_test.dart` covers remote track selection, failure
 state, menu return focus, bounded layout, caption placement and local-file input.
+`flutter test test/search_screen_test.dart` covers voice search: a result fills
+the query and searches without opening media, a cancelled dialog preserves the
+typed query, and an unavailable recognizer leaves keyboard search usable.
 
 The tests caught an invisible page-sized focus target that trapped directional
 navigation, and an overflowing transport row when Next was present. The page
