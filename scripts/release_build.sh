@@ -36,14 +36,20 @@ export PATH="$HOME/flutter/bin:$HOME/.cargo/bin:$PATH"
 source "$HOME/Android/env.sh"
 
 echo "=== APK build start $(date) ==="
-"$REPO/native/build-android.sh"
+# Release APKs are dual-ABI (armeabi-v7a + arm64-v8a) since alpha.98: Fire TV
+# Sticks and the Google TV Streamer expose only 32-bit app ABIs, so the single
+# fat APK replaces the per-release -armeabi-v7a-tvtest side assets. The device
+# picks its own ABI at install; arm64 devices are unaffected.
+RELEASE_ABIS="armeabi-v7a,arm64-v8a"
+IFS=, read -r -a release_abi_list <<< "$RELEASE_ABIS"
+"$REPO/native/build-android.sh" "${release_abi_list[@]}"
 cd "$REPO/app"
 # Release builds always start clean: a corrupt incremental cache once made
 # Gradle package the PREVIOUS release's Dart snapshot into a fresh-versioned
 # APK ("Invalid depfile: ... kernel_snapshot_program.d" in the log, alpha.70/.71).
 flutter clean
 flutter pub get
-flutter build apk --release
+WATCHIT_ANDROID_ABIS="$RELEASE_ABIS" flutter build apk --release
 if grep -q "Invalid depfile" "$LOG"; then
   echo "FATAL: Invalid depfile during APK build — stale-snapshot risk, aborting" >&2
   exit 1
