@@ -22,6 +22,7 @@ import '../services/user_metadata.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../services/tv_settings.dart';
+import '../widgets/seek_slider.dart';
 import '../widgets/tv_player_controls.dart';
 import '../widgets/tv_track_menu.dart';
 import '../services/caption_file.dart';
@@ -993,7 +994,7 @@ class AudioPlayerView extends StatelessWidget {
                     ),
                   ),
                   Expanded(
-                    child: Slider(
+                    child: WiSeekSlider(
                       value: maxMs == 0
                           ? 0
                           : position.inMilliseconds.clamp(0, maxMs).toDouble(),

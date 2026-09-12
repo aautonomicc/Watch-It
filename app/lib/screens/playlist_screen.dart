@@ -13,6 +13,7 @@ import '../services/play_queue.dart';
 import '../services/season_grouping.dart' show episodeNameFromLabel;
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
+import '../widgets/seek_slider.dart';
 import 'detail_screen.dart';
 import 'settings_screen.dart' show promptForText;
 
@@ -520,7 +521,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                     fontFamily: wiMonoFamily,
                     fontFamilyFallback: wiMonoFallback)),
             Expanded(
-              child: Slider(
+              child: WiSeekSlider(
                 value: maxMs == 0
                     ? 0
                     : position.inMilliseconds.clamp(0, maxMs).toDouble(),
