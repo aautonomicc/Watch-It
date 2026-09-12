@@ -18,6 +18,21 @@ import 'library_store.dart';
 /// exists.
 const kAdminProfileId = 'admin';
 
+/// Fresh profile id: creation time (base36 epoch ms, roughly sortable)
+/// plus 4 secure-random base36 chars. The entropy suffix matters: the
+/// clock alone collides when two profiles are created in the same
+/// millisecond — back-to-back creates in tests, and the family-import
+/// merge loop creating several profiles in production — and a duplicate
+/// id violates the profiles primary key AND would silently merge two
+/// profiles' watch histories.
+String newProfileId() {
+  const alphabet = '0123456789abcdefghijklmnopqrstuvwxyz';
+  final rng = Random.secure();
+  final suffix =
+      List.generate(4, (_) => alphabet[rng.nextInt(alphabet.length)]).join();
+  return 'p${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}$suffix';
+}
+
 /// What a profile is allowed to do. Exactly one admin exists (the
 /// migrated original install); adults see the whole library but only
 /// essential settings; kids additionally see only allow-listed lists
@@ -259,7 +274,7 @@ class ProfileStore extends ChangeNotifier {
   }) async {
     assert(kind != ProfileKind.admin, 'only the migrated admin is admin');
     final db = await LibraryStore.database();
-    final id = 'p${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
+    final id = newProfileId();
     final position = _profiles.isEmpty
         ? 0
         : _profiles.map((p) => p.position).reduce(max) + 1;
