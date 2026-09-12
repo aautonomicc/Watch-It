@@ -520,16 +520,29 @@ void main() {
     /// progress dialog. The manifest build does real file IO, which the
     /// fake-async test zone never completes on its own — alternating
     /// runAsync (real event loop turns) with pumps (fake-zone microtask
-    /// drains) carries it through.
+    /// drains) carries it through. The wait is CONDITION-driven, not a
+    /// fixed round budget: on a loaded CI runner a single fsync can eat
+    /// a whole 20ms round, and a fixed budget then taps before the cost
+    /// preview exists ("Found 0 widgets" flake) or while its confirm
+    /// button is still estimate-disabled (silent no-op tap).
     Future<void> startPublishUpdate(WidgetTester tester) async {
       await tester.tap(find.textContaining('Publish update'));
-      for (var i = 0; i < 10; i++) {
+      final confirm = find.text('Publish · public & permanent');
+      var enabled = false;
+      for (var i = 0; i < 200 && !enabled; i++) {
         await tester.runAsync(
             () => Future<void>.delayed(const Duration(milliseconds: 20)));
         await tester.pump(const Duration(milliseconds: 50));
+        if (confirm.evaluate().isEmpty) continue;
+        final button = tester.widget<TextButton>(
+            find.ancestor(of: confirm, matching: find.byType(TextButton)));
+        enabled = button.onPressed != null;
       }
-      // Cost preview → confirm.
-      await tester.tap(find.text('Publish · public & permanent'));
+      // Fail HERE with a meaningful message if the dialog never came up.
+      expect(confirm, findsOneWidget);
+      expect(enabled, isTrue,
+          reason: 'cost-preview confirm never became enabled');
+      await tester.tap(confirm);
       await tester.pump();
       await tester.pump();
     }
