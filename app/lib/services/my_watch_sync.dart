@@ -121,9 +121,17 @@ class MyWatchSync {
   static const maxDocEntries = 400;
   static const maxDocWatchStates = 300;
 
-  /// UTF-8 byte budget for the whole published doc (the server refuses
-  /// at 60 000); [buildDocWithinBudget] trims sections until it fits.
+  /// UTF-8 byte budget for one published doc part (the server refuses
+  /// a part at 60 000); [buildDocWithinBudget] trims sections until it
+  /// fits.
   static const maxDocBytes = 56000;
+
+  /// A library too big for one doc shards into up to this many parts
+  /// (`<agent>/sync` plus `<agent>/sync/N` store keys — must match the
+  /// native MAX_SYNC_PARTS). Old builds read only the first part, a
+  /// safe partial view; what still does not fit rotates through later
+  /// cycles (see [buildDocParts]).
+  static const maxSyncParts = 3;
 
   /// A synced description is capped here — the doc has to share its
   /// byte budget with the library itself.
@@ -508,7 +516,7 @@ class MyWatchSync {
     // Newest-first from the store, so a budget trim drops the stalest.
     final ourWatchStates =
         await WatchStateStore.instance.all(profileId: kAdminProfileId);
-    final built = buildDocWithinBudget(
+    final built = buildDocParts(
       lists: lists,
       tombstones: state.tombstones,
       watchStates: ourWatchStates,
@@ -524,17 +532,20 @@ class MyWatchSync {
         ),
       },
       channelStones: channelView?.stones ?? const {},
+      entryRotation: state.entryRot,
+      metaRotation: state.metaRot,
     );
-    final doc = built.doc;
+    final parts = built.parts;
     if (built.metaDropped > 0) {
       _problems.add('${built.metaDropped} detail edit(s) did not fit in the '
-          'sync document this cycle');
+          'sync document this cycle — the edits take turns, all of them '
+          'reach your devices over the coming cycles');
     }
     if (built.entriesDropped > 0) {
       _problems.add('${built.entriesDropped} list entr'
           '${built.entriesDropped == 1 ? 'y' : 'ies'} did not fit in the '
-          'sync document — they stay on this device, the rest of the '
-          'library still syncs');
+          'sync document this cycle — entries take turns, the whole '
+          'library reaches your devices over the coming cycles');
     }
     if (built.tmdbDropped > 0) {
       // Self-healing: applied rows join the receivers' `have` lists,
@@ -543,12 +554,35 @@ class MyWatchSync {
           'budget wait for a later cycle');
     }
     await _publishArtIndex();
-    final fingerprint = jsonEncode(doc..remove('updated_ms'));
+    for (final p in parts) {
+      p.remove('updated_ms');
+    }
+    final fingerprint = jsonEncode(parts);
     if (fingerprint != state.lastPublished) {
-      doc['updated_ms'] = now;
+      for (final p in parts) {
+        p['updated_ms'] = now;
+      }
       try {
-        await _api.publishSync(doc);
-        state.lastPublished = fingerprint;
+        final res = await _api.publishSync(parts);
+        // Entry maps over the store quota rotate through publishes on
+        // the native side — an unchanged-library skip would freeze that
+        // rotation, so force a republish next cycle until all fit.
+        state.lastPublished = res.dropped > 0 ? null : fingerprint;
+        // Advance the rotations only after a successful publish: the
+        // next cycle leads with what was dropped this time, so an
+        // over-budget library syncs everything in turns instead of
+        // starving the same tail forever.
+        final totalE = built.entriesKept + built.entriesDropped;
+        if (built.entriesDropped > 0 && totalE > 0) {
+          state.entryRot =
+              (state.entryRot + built.entriesKept.clamp(1, totalE)) % totalE;
+        }
+        final totalM = metaRows.length;
+        if (built.metaDropped > 0 && totalM > 0) {
+          final metaKept = totalM - built.metaDropped;
+          state.metaRot =
+              (state.metaRot + metaKept.clamp(1, totalM)) % totalM;
+        }
         var entries = 0;
         for (final l in lists) {
           entries += l.entries.length;
@@ -1174,7 +1208,25 @@ class MyWatchSync {
     final keep =
         rows.length - (rows.length / 4).ceil().clamp(1, rows.length);
     if (keep <= 0) return null;
-    final kept = rows.sublist(0, keep);
+    return _tmdbSectionForRows(tmdb, rows.sublist(0, keep));
+  }
+
+  /// The TMDB section left over after its first [skip] rows went into
+  /// an earlier doc part — the remainder [buildDocParts] hands to the
+  /// next part; null once nothing is left.
+  static Map<String, dynamic>? tmdbSectionTail(
+      Map<String, dynamic>? tmdb, int skip) {
+    if (tmdb == null) return null;
+    final rows = (tmdb['rows'] as List? ?? const []).cast<Map<String, dynamic>>();
+    if (skip >= rows.length) return null;
+    return _tmdbSectionForRows(tmdb, rows.sublist(skip));
+  }
+
+  /// A TMDB doc section holding exactly [kept] rows, with the shared
+  /// shows/seasons texts and file manifests pruned to what those rows
+  /// still reference.
+  static Map<String, dynamic> _tmdbSectionForRows(
+      Map<String, dynamic> tmdb, List<Map<String, dynamic>> kept) {
     final srcShows = tmdb['shows'] as Map<String, dynamic>? ?? const {};
     final srcSeasons = tmdb['seasons'] as Map<String, dynamic>? ?? const {};
     final srcFiles = tmdb['files'] as Map<String, dynamic>? ?? const {};
@@ -1253,6 +1305,13 @@ class MyWatchSync {
   /// The published document. Lists match across devices by title;
   /// entries carry their add time for the LWW merge; `removed` carries
   /// this device's tombstones so deletions propagate.
+  ///
+  /// Entry selection is a window of [entryCap] entries starting at
+  /// [entryOffset] in the library's flattened (list-order) entry
+  /// sequence, wrapping around — with offset 0 that is simply the
+  /// first [entryCap] entries, the historic behaviour. The offset lets
+  /// an over-budget library rotate a different window into each cycle
+  /// ([buildDocParts]) instead of starving the same tail forever.
   static Map<String, dynamic> buildDoc({
     required List<MediaList> lists,
     required Map<String, Map<String, int>> tombstones,
@@ -1264,20 +1323,29 @@ class MyWatchSync {
     Map<String, ChannelSyncSub> channelSubs = const {},
     Map<String, int> channelStones = const {},
     int entryCap = maxDocEntries,
+    int entryOffset = 0,
   }) {
-    var entryBudget = entryCap;
+    var totalEntries = 0;
+    for (final l in lists) {
+      if (!l.isChannel) totalEntries += l.entries.length;
+    }
+    final cap = entryCap.clamp(0, totalEntries);
+    final offset = totalEntries == 0 ? 0 : entryOffset % totalEntries;
+    var globalIdx = 0;
+    // Dart's % is non-negative for a positive divisor, so the rank is
+    // the entry's distance after the offset, wrapping.
+    bool inWindow() =>
+        cap > 0 && (globalIdx - offset) % totalEntries < cap;
     final listDocs = <Map<String, dynamic>>[];
     for (final l in lists) {
       // Channel lists sync as subscriptions (`channels` below), never as
       // copies of their content.
       if (l.isChannel) continue;
       final title = l.title.toLowerCase();
-      final take = l.entries.take(entryBudget).toList();
-      entryBudget -= take.length;
-      if (take.length < l.entries.length) {
-        debugPrint(
-            'mywatch sync: list "${l.title}" truncated in the sync doc '
-            '(${l.entries.length - take.length} entries over the cap)');
+      final take = <MediaEntry>[];
+      for (final e in l.entries) {
+        if (inWindow()) take.add(e);
+        globalIdx++;
       }
       listDocs.add({
         'title': l.title,
@@ -1378,6 +1446,8 @@ class MyWatchSync {
     Map<String, dynamic>? tmdbSection,
     Map<String, ChannelSyncSub> channelSubs = const {},
     Map<String, int> channelStones = const {},
+    int entryOffset = 0,
+    int? entryLimit,
   }) {
     final tmdbRows = (tmdbSection?['rows'] as List?)?.length ?? 0;
     var totalEntries = 0;
@@ -1388,7 +1458,8 @@ class MyWatchSync {
     var have = haveHashes;
     var meta = metaRows;
     var tmdb = tmdbSection;
-    var entryCap = totalEntries.clamp(0, maxDocEntries);
+    final wanted = (entryLimit ?? totalEntries).clamp(0, totalEntries);
+    var entryCap = wanted.clamp(0, maxDocEntries);
     Map<String, dynamic> build() => buildDoc(
           lists: lists,
           tombstones: tombstones,
@@ -1400,14 +1471,8 @@ class MyWatchSync {
           channelSubs: channelSubs,
           channelStones: channelStones,
           entryCap: entryCap,
+          entryOffset: entryOffset,
         );
-    int docEntries(Map<String, dynamic> doc) {
-      var n = 0;
-      for (final l in doc['lists'] as List) {
-        n += ((l as Map)['entries'] as List).length;
-      }
-      return n;
-    }
 
     var doc = build();
     while (utf8.encode(jsonEncode(doc)).length > maxDocBytes) {
@@ -1437,7 +1502,128 @@ class MyWatchSync {
       watchDropped: watchStates.length - watch.length,
       metaDropped: metaRows.length - meta.length,
       tmdbDropped: tmdbRows - ((tmdb?['rows'] as List?)?.length ?? 0),
-      entriesDropped: totalEntries - docEntries(doc),
+      entriesDropped: wanted - docEntryCount(doc),
+    );
+  }
+
+  /// How many list entries a built doc carries.
+  static int docEntryCount(Map<String, dynamic> doc) {
+    var n = 0;
+    for (final l in doc['lists'] as List? ?? const []) {
+      n += ((l as Map)['entries'] as List? ?? const []).length;
+    }
+    return n;
+  }
+
+  /// The library sync state sharded into up to [maxParts] value-capped
+  /// doc parts (fix for large libraries that can never fit one doc):
+  /// part 0 is the main `<agent>/sync` doc — it alone carries the
+  /// tombstones and channel subscriptions and is what old builds read —
+  /// and each further part carries what the previous parts could not
+  /// fit (later windows of list entries, staler watch states, older
+  /// detail edits, the TMDB tail). Whatever still does not fit after
+  /// [maxParts] parts is reported dropped, and the caller advances
+  /// [entryRotation]/[metaRotation] (persisted between cycles) by the
+  /// kept counts so the dropped tail takes its turn in later cycles —
+  /// nothing starves forever; receivers merge by union, so the rotating
+  /// window only ever adds.
+  static ({
+    List<Map<String, dynamic>> parts,
+    int watchDropped,
+    int metaDropped,
+    int tmdbDropped,
+    int entriesDropped,
+    int entriesKept,
+  }) buildDocParts({
+    required List<MediaList> lists,
+    required Map<String, Map<String, int>> tombstones,
+    required List<WatchState> watchStates,
+    required int nowMs,
+    List<Map<String, dynamic>> metaRows = const [],
+    List<String> haveHashes = const [],
+    Map<String, dynamic>? tmdbSection,
+    Map<String, ChannelSyncSub> channelSubs = const {},
+    Map<String, int> channelStones = const {},
+    int entryRotation = 0,
+    int metaRotation = 0,
+    int maxParts = maxSyncParts,
+  }) {
+    var totalEntries = 0;
+    for (final l in lists) {
+      if (!l.isChannel) totalEntries += l.entries.length;
+    }
+    var meta = metaRows;
+    if (meta.isNotEmpty && metaRotation != 0) {
+      final r = metaRotation % meta.length;
+      if (r != 0) meta = [...meta.sublist(r), ...meta.sublist(0, r)];
+    }
+    var watch = watchStates;
+    var have = haveHashes;
+    var tmdb = tmdbSection;
+    final totalTmdbRows = (tmdb?['rows'] as List?)?.length ?? 0;
+    final parts = <Map<String, dynamic>>[];
+    var offset = totalEntries == 0 ? 0 : entryRotation % totalEntries;
+    var entriesLeft = totalEntries;
+    while (parts.length < maxParts) {
+      final first = parts.isEmpty;
+      final built = buildDocWithinBudget(
+        lists: lists,
+        // Tombstones and channels ride only the main doc — that is the
+        // part old builds read, and repeating them would waste bytes.
+        tombstones: first ? tombstones : const {},
+        watchStates: watch,
+        nowMs: nowMs,
+        metaRows: meta,
+        haveHashes: have,
+        tmdbSection: tmdb,
+        channelSubs: first ? channelSubs : const {},
+        channelStones: first ? channelStones : const {},
+        entryOffset: offset,
+        entryLimit: entriesLeft,
+      );
+      final doc = built.doc;
+      // What this part actually carried — each section keeps its head,
+      // so the remainder for the next part is a plain tail slice.
+      final gotEntries = docEntryCount(doc);
+      final gotWatch = (doc['watch'] as List? ?? const []).length;
+      final gotHave = (doc['have'] as List? ?? const []).length;
+      final gotMeta =
+          ((doc['meta'] as Map?)?['rows'] as List? ?? const []).length;
+      final gotTmdb =
+          ((doc['tmdb'] as Map?)?['rows'] as List? ?? const []).length;
+      if (!first &&
+          gotEntries == 0 &&
+          gotWatch == 0 &&
+          gotHave == 0 &&
+          gotMeta == 0 &&
+          gotTmdb == 0) {
+        // A part that fits nothing new cannot make progress (a single
+        // oversized item); what is left counts as dropped this cycle.
+        break;
+      }
+      parts.add(doc);
+      if (totalEntries > 0) offset = (offset + gotEntries) % totalEntries;
+      entriesLeft -= gotEntries;
+      watch = watch.sublist(gotWatch.clamp(0, watch.length));
+      have = have.sublist(gotHave.clamp(0, have.length));
+      meta = meta.sublist(gotMeta.clamp(0, meta.length));
+      tmdb = tmdbSectionTail(tmdb, gotTmdb);
+      if (entriesLeft <= 0 &&
+          watch.isEmpty &&
+          have.isEmpty &&
+          meta.isEmpty &&
+          tmdb == null) {
+        break;
+      }
+    }
+    return (
+      parts: parts,
+      watchDropped: watch.length,
+      metaDropped: meta.length,
+      tmdbDropped:
+          totalTmdbRows == 0 ? 0 : (tmdb?['rows'] as List?)?.length ?? 0,
+      entriesDropped: entriesLeft,
+      entriesKept: totalEntries - entriesLeft,
     );
   }
 
@@ -1781,7 +1967,9 @@ class MyWatchSync {
       return _SyncState()
         ..snapshot = _nestedIntMap(json['snapshot'])
         ..tombstones = _nestedIntMap(json['tombstones'])
-        ..lastPublished = json['last_published'] as String?;
+        ..lastPublished = json['last_published'] as String?
+        ..entryRot = json['entry_rot'] as int? ?? 0
+        ..metaRot = json['meta_rot'] as int? ?? 0;
     } catch (_) {
       return _SyncState();
     }
@@ -1794,6 +1982,8 @@ class MyWatchSync {
         'snapshot': state.snapshot,
         'tombstones': state.tombstones,
         'last_published': state.lastPublished,
+        'entry_rot': state.entryRot,
+        'meta_rot': state.metaRot,
       }));
     } catch (e) {
       debugPrint('mywatch sync: state save failed: $e');
@@ -1817,9 +2007,16 @@ class _SyncState {
   /// `title(lower) → address → removed_ms`.
   Map<String, Map<String, int>> tombstones = {};
 
-  /// Fingerprint of the last published doc (minus its timestamp), so an
-  /// unchanged library publishes nothing.
+  /// Fingerprint of the last published doc parts (minus timestamps),
+  /// so an unchanged library publishes nothing.
   String? lastPublished;
+
+  /// Rotation offsets into the flattened entry sequence / detail-edit
+  /// rows for a library too big to sync whole even across all doc
+  /// parts: they advance by the kept counts after each publish that
+  /// dropped something, so the dropped tail leads the next cycle.
+  int entryRot = 0;
+  int metaRot = 0;
 }
 
 class SyncMergeResult {

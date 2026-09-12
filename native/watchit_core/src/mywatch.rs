@@ -11,8 +11,11 @@
 //!
 //! Besides the presence records, each device publishes a library sync
 //! document and its entries' shrunk data maps under its bound
-//! `<agent>/sync` and `<agent>/maps/N` keys (see `publish_sync`); the
-//! app's `MyWatchSync` service merges the remote documents. User-made
+//! `<agent>/sync` and `<agent>/maps/N` keys (see `publish_sync`); a
+//! library too big for one value-capped doc shards its overflow into
+//! `<agent>/sync/N` parts (old builds read only the main doc — a safe
+//! partial view). The app's `MyWatchSync` service merges the remote
+//! documents. User-made
 //! artwork syncs at full quality outside the store: the sync doc only
 //! carries a manifest (sha256/size), and a device missing the bytes
 //! pulls them from the owning device over x0x direct messages while it
@@ -53,10 +56,18 @@ mod imp {
     /// Ceiling for one published KV value; the store's hard cap is
     /// 64 KiB (`MAX_INLINE_SIZE`), this leaves protocol headroom.
     const MAX_VALUE_BYTES: usize = 60_000;
-    /// How many `<agent>/maps/N` part keys a device may publish. Bounded
-    /// by the store's 256 KiB per-agent byte quota: presence record +
-    /// sync doc + 3 map parts stays under it with margin.
+    /// How many `<agent>/sync` document parts a device may publish
+    /// (the main `<agent>/sync` doc plus `<agent>/sync/N` overflow
+    /// parts). Old builds read only the main doc — a safe partial view,
+    /// because the receiving merge is union-based.
+    const MAX_SYNC_PARTS: usize = 3;
+    /// How many `<agent>/maps/N` part keys a device may publish at most.
     const MAX_MAP_PARTS: usize = 3;
+    /// Combined ceiling on sync-doc parts + map parts, bounded by the
+    /// store's 256 KiB per-agent byte quota: presence record + 4 value-
+    /// capped parts stays under it with margin. Sync parts take
+    /// priority; the maps get whatever slots remain (at least one).
+    const MAX_CONTENT_PARTS: usize = 4;
     /// Raw bytes per artwork chunk DM. Base64 in a small JSON wrapper
     /// lands around 40 KB — inside the DM envelope cap (x0x's own file
     /// protocol uses 32 KiB chunks the same way).
@@ -132,6 +143,12 @@ mod imp {
         /// sha256(hex) → local file path of user artwork this device can
         /// serve to its linked peers (set by the app each sync cycle).
         art_index: std::sync::Mutex<std::collections::HashMap<String, PathBuf>>,
+        /// Rotation offset into the entry-map list for publishes whose
+        /// maps overflow the store quota: advancing it each such publish
+        /// lets every map take a turn instead of the same tail being
+        /// dropped forever. In-memory only — a restart just restarts the
+        /// rotation, which is harmless.
+        map_rot: AtomicU64,
     }
 
     impl Shared {
@@ -177,6 +194,7 @@ mod imp {
                     entries: AtomicU64::new(0),
                     state_path: dir.as_ref().map(|d| d.join("state.json")),
                     art_index: std::sync::Mutex::new(Default::default()),
+                    map_rot: AtomicU64::new(0),
                 }),
                 dir,
                 off_path,
@@ -385,24 +403,38 @@ mod imp {
         }
 
         /// Publish this device's library sync document (lists, entries,
-        /// tombstones, watch states — built by the app) plus the shrunk
-        /// data maps for the entries it holds (collected by the server
-        /// route from the local map store), under this device's bound
-        /// keys `<agent>/sync` and `<agent>/maps/N`. Maps that do not
-        /// fit the per-agent byte quota are dropped, most-recent first
-        /// kept — membership and progress still sync, the dropped maps
-        /// just cannot make the entry playable remotely.
+        /// tombstones, watch states — built by the app; a large library
+        /// arrives sharded into up to [`MAX_SYNC_PARTS`] value-capped
+        /// parts) plus the shrunk data maps for the entries it holds
+        /// (collected by the server route from the local map store),
+        /// under this device's bound keys `<agent>/sync`,
+        /// `<agent>/sync/N` and `<agent>/maps/N`. Old builds read only
+        /// `<agent>/sync` — a safe partial view, the merge is union-
+        /// based. Maps that do not fit the remaining per-agent byte
+        /// quota rotate through later publishes ([`Shared::map_rot`]) —
+        /// membership and progress still sync, a dropped map just makes
+        /// the entry unplayable remotely until its turn comes.
         pub async fn publish_sync(
             &self,
-            doc: Value,
+            docs: Vec<Value>,
             maps: Vec<(String, String)>,
         ) -> Result<Value, String> {
-            let doc_bytes = doc.to_string();
-            if doc_bytes.len() > MAX_VALUE_BYTES {
+            if docs.is_empty() || docs.len() > MAX_SYNC_PARTS {
                 return Err(format!(
-                    "sync document too large ({} bytes > {MAX_VALUE_BYTES})",
-                    doc_bytes.len()
+                    "expected 1..={MAX_SYNC_PARTS} sync document parts, got {}",
+                    docs.len()
                 ));
+            }
+            let mut doc_parts = Vec::with_capacity(docs.len());
+            for (i, doc) in docs.iter().enumerate() {
+                let bytes = doc.to_string();
+                if bytes.len() > MAX_VALUE_BYTES {
+                    return Err(format!(
+                        "sync document part {i} too large ({} bytes > {MAX_VALUE_BYTES})",
+                        bytes.len()
+                    ));
+                }
+                doc_parts.push(bytes);
             }
             let phase = self.phase.lock().await;
             let Phase::Ready(running) = &*phase else {
@@ -412,25 +444,43 @@ mod imp {
                 });
             };
             let own = hex::encode(running.agent.agent_id().as_bytes());
-            running
-                .store
-                .put(
-                    format!("{own}/sync"),
-                    doc_bytes.into_bytes(),
-                    "application/json".into(),
-                )
-                .await
-                .map_err(|e| format!("sync publish failed: {e}"))?;
-            // Greedy-pack the maps into value-capped parts.
+            for (i, bytes) in doc_parts.iter().enumerate() {
+                let key = if i == 0 {
+                    format!("{own}/sync")
+                } else {
+                    format!("{own}/sync/{i}")
+                };
+                running
+                    .store
+                    .put(key, bytes.clone().into_bytes(), "application/json".into())
+                    .await
+                    .map_err(|e| format!("sync publish failed: {e}"))?;
+            }
+            // A shrinking doc frees stale overflow keys.
+            for i in doc_parts.len().max(1)..MAX_SYNC_PARTS {
+                let _ = running.store.remove(&format!("{own}/sync/{i}")).await;
+            }
+            // The maps get whatever value slots the sync parts left
+            // over (at least one). When the maps overflow that, the
+            // rotation offset lets a different window publish each
+            // cycle so every map eventually reaches the other devices.
+            let map_parts_cap = (MAX_CONTENT_PARTS - doc_parts.len()).clamp(1, MAX_MAP_PARTS);
+            let rot = if maps.is_empty() {
+                0
+            } else {
+                self.shared.map_rot.load(Ordering::SeqCst) as usize % maps.len()
+            };
+            // Greedy-pack the maps into value-capped parts, starting at
+            // the rotation offset and wrapping around.
             let mut parts: Vec<serde_json::Map<String, Value>> = vec![Default::default()];
             let mut part_bytes = 2usize;
             let mut attached = 0usize;
             let mut dropped = 0usize;
-            for (addr, b64) in maps {
+            for (addr, b64) in maps[rot..].iter().chain(maps[..rot].iter()) {
                 // `"addr":"b64",` — 8 bytes of JSON punctuation.
                 let cost = addr.len() + b64.len() + 8;
                 if part_bytes + cost > MAX_VALUE_BYTES {
-                    if parts.len() >= MAX_MAP_PARTS {
+                    if parts.len() >= map_parts_cap {
                         dropped += 1;
                         continue;
                     }
@@ -438,12 +488,21 @@ mod imp {
                     part_bytes = 2;
                 }
                 part_bytes += cost;
-                parts.last_mut().unwrap().insert(addr, Value::String(b64));
+                parts
+                    .last_mut()
+                    .unwrap()
+                    .insert(addr.clone(), Value::String(b64.clone()));
                 attached += 1;
             }
             if dropped > 0 {
+                // Advance the rotation so the next publish starts where
+                // this one left off and the dropped tail gets its turn.
+                self.shared
+                    .map_rot
+                    .fetch_add(attached.max(1) as u64, Ordering::SeqCst);
                 tracing::warn!(
-                    "mywatch sync: {dropped} entry maps over the store quota were not published"
+                    "mywatch sync: {dropped} entry maps over the store quota wait \
+                     for a later publish (rotating)"
                 );
             }
             for (i, part) in parts.iter().enumerate() {
@@ -462,7 +521,7 @@ mod imp {
             for i in parts.len()..MAX_MAP_PARTS {
                 let _ = running.store.remove(&format!("{own}/maps/{i}")).await;
             }
-            Ok(json!({ "published": true, "maps": attached, "dropped": dropped }))
+            Ok(json!({ "published": true, "parts": doc_parts.len(), "maps": attached, "dropped": dropped }))
         }
 
         /// Every *remote* device's sync document and entry maps, for the
@@ -483,6 +542,8 @@ mod imp {
                 .await
                 .map_err(|e| format!("store read failed: {e}"))?;
             let mut docs: std::collections::HashMap<String, Value> = Default::default();
+            let mut parts: std::collections::HashMap<String, Vec<(usize, Value)>> =
+                Default::default();
             let mut maps: std::collections::HashMap<String, serde_json::Map<String, Value>> =
                 Default::default();
             for entry in entries {
@@ -496,6 +557,15 @@ mod imp {
                     if let Ok(doc) = serde_json::from_slice::<Value>(&entry.value) {
                         docs.insert(agent.to_string(), doc);
                     }
+                } else if let Some(idx) = suffix
+                    .strip_prefix("sync/")
+                    .and_then(|s| s.parse::<usize>().ok())
+                {
+                    // Overflow parts of a sharded sync doc (large
+                    // libraries) — the app merges them with the main doc.
+                    if let Ok(doc) = serde_json::from_slice::<Value>(&entry.value) {
+                        parts.entry(agent.to_string()).or_default().push((idx, doc));
+                    }
                 } else if suffix.starts_with("maps/") {
                     if let Ok(Value::Object(part)) =
                         serde_json::from_slice::<Value>(&entry.value)
@@ -508,7 +578,15 @@ mod imp {
                 .into_iter()
                 .map(|(agent, doc)| {
                     let m = maps.remove(&agent).unwrap_or_default();
-                    json!({ "agent_id": agent, "doc": doc, "maps": m })
+                    let mut extra = parts.remove(&agent).unwrap_or_default();
+                    extra.sort_by_key(|(idx, _)| *idx);
+                    let extra: Vec<Value> = extra.into_iter().map(|(_, d)| d).collect();
+                    json!({
+                        "agent_id": agent,
+                        "doc": doc,
+                        "doc_parts": extra,
+                        "maps": m,
+                    })
                 })
                 .collect();
             Ok(json!({
@@ -1238,7 +1316,7 @@ mod imp {
         }
         pub async fn publish_sync(
             &self,
-            _doc: Value,
+            _docs: Vec<Value>,
             _maps: Vec<(String, String)>,
         ) -> Result<Value, String> {
             Err(UNSUPPORTED.into())

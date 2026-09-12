@@ -559,7 +559,10 @@ class FakeEmbeddedHttp extends HttpOverrides {
         return (400, utf8.encode('this device is not linked'));
       }
       myWatchSyncPublishes.add(utf8.decode(body));
-      return (200, utf8.encode(jsonEncode({'published': true, 'maps': 0})));
+      return (
+        200,
+        utf8.encode(jsonEncode({'published': true, 'maps': 0, 'dropped': 0}))
+      );
     }
     if (method == 'POST' && path == '/mywatch/art/index') {
       myWatchArtIndexPosts.add(utf8.decode(body));

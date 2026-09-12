@@ -104,11 +104,24 @@ class MyWatchApi {
   Future<void> setEnabled(bool enabled) =>
       _request('POST', '/mywatch/enabled', body: {'enabled': enabled});
 
-  /// Publish this device's library sync document. The embedded client
+  /// Publish this device's library sync document — sharded into up to
+  /// `MyWatchSync.maxSyncParts` value-capped parts for large libraries
+  /// (old builds read only the first part). The embedded client
   /// attaches the shrunk data maps for the entries it holds locally
-  /// before putting both into the link store.
-  Future<void> publishSync(Map<String, dynamic> doc) =>
-      _request('POST', '/mywatch/sync', body: {'doc': doc});
+  /// before putting everything into the link store. Returns how many
+  /// maps were attached and how many wait for a later publish (the
+  /// store quota rotates them in over the coming cycles).
+  Future<({int maps, int dropped})> publishSync(
+      List<Map<String, dynamic>> parts) async {
+    final json = await _request('POST', '/mywatch/sync', body: {
+      'doc': parts.first,
+      if (parts.length > 1) 'parts': parts.sublist(1),
+    });
+    return (
+      maps: json['maps'] as int? ?? 0,
+      dropped: json['dropped'] as int? ?? 0,
+    );
+  }
 
   /// Every remote device's sync document and entry maps, for the merge
   /// pass. Fails while the link is off or still starting.
@@ -143,7 +156,127 @@ class MyWatchApi {
   }
 }
 
-/// One remote device's published sync state: its document plus the
+/// One logical sync document from a device's main doc plus its
+/// `sync/N` overflow parts — large libraries shard across value-capped
+/// store keys; every section merges by union, so folding the parts
+/// back into one doc up front lets the rest of the sync code stay
+/// part-blind. Tolerant of malformed parts (they are remote input).
+Map<String, dynamic> combinedSyncDoc(
+    Map<String, dynamic> doc, List<dynamic> parts) {
+  if (parts.isEmpty) return doc;
+  final out = <String, dynamic>{...doc};
+  // Lists keyed by lowercase title: entries concatenate, removal
+  // stones union on the newest stamp, a `kind` from any part sticks.
+  final lists = <String, Map<String, dynamic>>{};
+  final order = <String>[];
+  void addList(dynamic raw) {
+    if (raw is! Map) return;
+    final title = (raw['title'] as String? ?? '').toLowerCase();
+    final existing = lists[title];
+    if (existing == null) {
+      final copy = <String, dynamic>{
+        for (final e in raw.entries) '${e.key}': e.value,
+      };
+      copy['entries'] = [...(raw['entries'] as List? ?? const [])];
+      if (raw['removed'] is Map) {
+        copy['removed'] = {
+          for (final e in (raw['removed'] as Map).entries)
+            '${e.key}': e.value,
+        };
+      }
+      lists[title] = copy;
+      order.add(title);
+      return;
+    }
+    (existing['entries'] as List).addAll(raw['entries'] as List? ?? const []);
+    if (raw['removed'] is Map) {
+      final dst =
+          (existing['removed'] as Map?)?.cast<String, dynamic>() ??
+              <String, dynamic>{};
+      for (final e in (raw['removed'] as Map).entries) {
+        final cur = dst['${e.key}'];
+        final next = e.value;
+        if (cur is! num || (next is num && next > cur)) {
+          dst['${e.key}'] = next;
+        }
+      }
+      existing['removed'] = dst;
+    }
+    if (existing['kind'] == null && raw['kind'] != null) {
+      existing['kind'] = raw['kind'];
+    }
+  }
+
+  for (final l in doc['lists'] as List? ?? const []) {
+    addList(l);
+  }
+  final watch = [...(doc['watch'] as List? ?? const [])];
+  final have = <dynamic>[...(doc['have'] as List? ?? const [])];
+  final haveSeen = have.toSet();
+  final metaRows = [
+    ...((doc['meta'] as Map?)?['rows'] as List? ?? const []),
+  ];
+  final baseTmdb = (doc['tmdb'] as Map?)?.cast<String, dynamic>();
+  var hasTmdb = baseTmdb != null;
+  final tmdbRows = [...(baseTmdb?['rows'] as List? ?? const [])];
+  final tmdbShows = <String, dynamic>{
+    ...(baseTmdb?['shows'] as Map? ?? const {}),
+  };
+  final tmdbSeasons = <String, dynamic>{
+    ...(baseTmdb?['seasons'] as Map? ?? const {}),
+  };
+  final tmdbFiles = <String, dynamic>{
+    ...(baseTmdb?['files'] as Map? ?? const {}),
+  };
+  var updated = doc['updated_ms'] as int? ?? 0;
+  for (final p in parts) {
+    if (p is! Map) continue;
+    for (final l in p['lists'] as List? ?? const []) {
+      addList(l);
+    }
+    watch.addAll(p['watch'] as List? ?? const []);
+    for (final h in p['have'] as List? ?? const []) {
+      if (haveSeen.add(h)) have.add(h);
+    }
+    metaRows.addAll((p['meta'] as Map?)?['rows'] as List? ?? const []);
+    final pt = p['tmdb'];
+    if (pt is Map) {
+      hasTmdb = true;
+      tmdbRows.addAll(pt['rows'] as List? ?? const []);
+      (pt['shows'] as Map? ?? const {})
+          .forEach((k, v) => tmdbShows['$k'] = v);
+      (pt['seasons'] as Map? ?? const {})
+          .forEach((k, v) => tmdbSeasons['$k'] = v);
+      (pt['files'] as Map? ?? const {})
+          .forEach((k, v) => tmdbFiles['$k'] = v);
+    }
+    // The builder only puts `channels` in the main doc; tolerate a
+    // part carrying it (main doc wins).
+    if (out['channels'] == null && p['channels'] is Map) {
+      out['channels'] = p['channels'];
+    }
+    final u = p['updated_ms'];
+    if (u is int && u > updated) updated = u;
+  }
+  out['lists'] = [for (final t in order) lists[t]];
+  out['watch'] = watch;
+  out['have'] = have;
+  if (metaRows.isNotEmpty) out['meta'] = {'v': 1, 'rows': metaRows};
+  if (hasTmdb) {
+    out['tmdb'] = {
+      'v': 1,
+      'rows': tmdbRows,
+      if (tmdbShows.isNotEmpty) 'shows': tmdbShows,
+      if (tmdbSeasons.isNotEmpty) 'seasons': tmdbSeasons,
+      if (tmdbFiles.isNotEmpty) 'files': tmdbFiles,
+    };
+  }
+  if (updated > 0) out['updated_ms'] = updated;
+  return out;
+}
+
+/// One remote device's published sync state: its document (overflow
+/// parts already folded back in — see [combinedSyncDoc]) plus the
 /// base64 shrunk data maps for the entries it holds.
 class RemoteSyncDoc {
   const RemoteSyncDoc({
@@ -154,7 +287,10 @@ class RemoteSyncDoc {
 
   factory RemoteSyncDoc.fromJson(Map<String, dynamic> json) => RemoteSyncDoc(
         agentId: json['agent_id'] as String? ?? '',
-        doc: json['doc'] as Map<String, dynamic>? ?? const {},
+        doc: combinedSyncDoc(
+          json['doc'] as Map<String, dynamic>? ?? const {},
+          json['doc_parts'] as List? ?? const [],
+        ),
         maps: {
           for (final e in (json['maps'] as Map<String, dynamic>? ?? const {})
               .entries)
