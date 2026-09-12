@@ -6,6 +6,7 @@ import 'package:drift/drift.dart' show Value;
 import '../models/media_list.dart';
 import 'library_store.dart';
 import 'metadata.dart';
+import 'season_grouping.dart' show episodeNameFromLabel;
 import 'user_metadata.dart';
 
 /// Organizing music: renaming audio entries into the
@@ -162,10 +163,19 @@ Future<OrganizePlan> planOrganize(
     final override = titles?[i]?.trim();
     if (override != null && override.isNotEmpty) {
       trackTitle = override;
+    } else if (parsed.isTrack) {
+      // An albumed track being moved: its custom per-track display
+      // title (Edit details) becomes the real title in the new album.
+      final trackRow = await metadataRowFor(trackLookupKey(parsed)!);
+      final custom = episodeNameFromLabel(trackRow?.episodeLabel);
+      if ((trackRow?.userEdited ?? false) &&
+          custom != null &&
+          custom.trim().isNotEmpty) {
+        trackTitle = custom.trim();
+      }
     } else {
       final row = await metadataRowFor(parsed.lookupKey);
-      if (!parsed.isTrack &&
-          (row?.userEdited ?? false) &&
+      if ((row?.userEdited ?? false) &&
           (row!.title ?? '').trim().isNotEmpty) {
         trackTitle = row.title!.trim();
       }
@@ -191,17 +201,10 @@ Future<OrganizePlan> planOrganize(
   return (items: items, error: null);
 }
 
-/// Execute [items]: rename each entry everywhere the library holds it
-/// (same name + address, in any list — playlists included, so playlist
-/// rows follow the rename), stamping the rename for My W@tch sync, and
-/// migrate each entry's old user-edited metadata row (description /
-/// artwork saved while the file was unsorted) onto its new track key.
-/// Returns how many entries were renamed.
-Future<int> applyOrganize(
-  List<OrganizePlanItem> items, {
-  Future<Directory> Function()? postersDirProvider,
-}) async {
-  if (items.isEmpty) return 0;
+/// Rename every library occurrence (same address + name, in any list —
+/// playlists included, so playlist rows follow) of each planned entry,
+/// stamping the rename for My W@tch sync. Returns how many rows changed.
+Future<int> _renameEverywhere(List<OrganizePlanItem> items) async {
   final renames = <(String, String), String>{
     for (final it in items)
       (it.entry.address.toLowerCase(), it.entry.name): it.newName,
@@ -222,16 +225,258 @@ Future<int> applyOrganize(
       ]),
   ];
   await LibraryStore.save(updated);
+  return renamedCount;
+}
+
+/// Execute [items]: rename each entry everywhere the library holds it
+/// and migrate its user-edited metadata onto the renamed keys — an
+/// unsorted file's row (description/artwork saved under its old
+/// `movie:`-style key) moves onto its new track key; a track moved from
+/// another album carries its per-track override row (custom title
+/// consumed into the new file name by [planOrganize]; artist and
+/// artwork follow here). Returns how many entries were renamed.
+Future<int> applyOrganize(
+  List<OrganizePlanItem> items, {
+  Future<Directory> Function()? postersDirProvider,
+}) async {
+  if (items.isEmpty) return 0;
+  final renamedCount = await _renameEverywhere(items);
   for (final it in items) {
     final oldParsed = parseMediaName(it.entry.name);
     final newParsed = parseMediaName(it.newName);
-    await _migrateUnsortedRow(
-      oldKey: oldParsed.lookupKey,
-      newParsed: newParsed,
+    if (oldParsed.isTrack) {
+      // Never touch oldParsed.lookupKey here — for a track that is the
+      // album's SHARED row, and clearing it would strip the old album's
+      // description/credit off its remaining tracks.
+      await migrateTrackRow(
+        oldKey: trackLookupKey(oldParsed)!,
+        newParsed: newParsed,
+        rowTitle: newParsed.title,
+        postersDirProvider: postersDirProvider,
+      );
+    } else {
+      await _migrateUnsortedRow(
+        oldKey: oldParsed.lookupKey,
+        newParsed: newParsed,
+        postersDirProvider: postersDirProvider,
+      );
+    }
+  }
+  return renamedCount;
+}
+
+/// Plan renaming [selection] (album tracks) OUT of their albums: each
+/// file becomes plain `Title.ext` — standalone audio that folds into no
+/// album (the inverse of [planOrganize]). A custom per-track display
+/// title becomes the real title. Nothing is written; [applyUnalbum]
+/// executes the plan.
+Future<OrganizePlan> planUnalbum(List<MediaEntry> selection) async {
+  if (selection.isEmpty) {
+    return (items: const <OrganizePlanItem>[], error: 'Nothing selected.');
+  }
+  final items = <OrganizePlanItem>[];
+  for (final entry in selection) {
+    final parsed = parseMediaName(entry.name);
+    if (!parsed.isTrack) {
+      return (
+        items: const <OrganizePlanItem>[],
+        error: '"${entry.name}" is not an album track.'
+      );
+    }
+    final trackRow = await metadataRowFor(trackLookupKey(parsed)!);
+    final custom = (trackRow?.userEdited ?? false)
+        ? episodeNameFromLabel(trackRow?.episodeLabel)?.trim()
+        : null;
+    final newName = unalbumedMusicFileName(entry.name,
+        title: (custom?.isEmpty ?? true) ? null : custom);
+    if (newName == null) {
+      return (
+        items: const <OrganizePlanItem>[],
+        error: '"${entry.name}" cannot be renamed out of its album.'
+      );
+    }
+    items.add((entry: entry, newName: newName));
+  }
+  return (items: items, error: null);
+}
+
+/// Execute a [planUnalbum] plan: rename each track everywhere, then
+/// carry its per-track override row (artist credit, artwork — the
+/// custom title is already the new file name) onto the standalone
+/// file's own key. The album's shared row is untouched: it belongs to
+/// the tracks staying behind. Returns how many entries were renamed.
+Future<int> applyUnalbum(
+  List<OrganizePlanItem> items, {
+  Future<Directory> Function()? postersDirProvider,
+}) async {
+  if (items.isEmpty) return 0;
+  final renamedCount = await _renameEverywhere(items);
+  for (final it in items) {
+    final oldParsed = parseMediaName(it.entry.name);
+    final newParsed = parseMediaName(it.newName);
+    final oldKey = trackLookupKey(oldParsed)!;
+    final row = await metadataRowFor(oldKey);
+    if (row == null || !row.userEdited) continue;
+    final artist = row.artist;
+    Uint8List? posterBytes;
+    if (row.posterFile != null) {
+      final dir = await (postersDirProvider ?? defaultPostersDir)();
+      final f = File('${dir.path}/${row.posterFile}');
+      if (f.existsSync()) posterBytes = f.readAsBytesSync();
+    }
+    await clearUserEdits(oldKey, postersDirProvider: postersDirProvider);
+    if (artist == null && posterBytes == null) continue;
+    Value<String?> poster = const Value.absent();
+    if (posterBytes != null) {
+      poster = Value(await saveUserPoster(newParsed.lookupKey, posterBytes,
+          postersDirProvider: postersDirProvider));
+    }
+    await saveUserDetails(
+      lookupKey: newParsed.lookupKey,
+      title: newParsed.title,
+      posterFile: poster,
+      artist: Value(artist),
       postersDirProvider: postersDirProvider,
     );
   }
   return renamedCount;
+}
+
+/// What a per-track override row must carry across a rename.
+typedef _TrackRowSnapshot = ({
+  String? customName,
+  String? artist,
+  Uint8List? posterBytes,
+});
+
+Future<_TrackRowSnapshot?> _readTrackRow(String key,
+    {Future<Directory> Function()? postersDirProvider}) async {
+  final row = await metadataRowFor(key);
+  if (row == null) return null;
+  Uint8List? posterBytes;
+  if (row.posterFile != null) {
+    final dir = await (postersDirProvider ?? defaultPostersDir)();
+    final f = File('${dir.path}/${row.posterFile}');
+    if (f.existsSync()) posterBytes = f.readAsBytesSync();
+  }
+  return (
+    customName: episodeNameFromLabel(row.episodeLabel),
+    artist: row.artist,
+    posterBytes: posterBytes,
+  );
+}
+
+Future<void> _writeTrackRow(
+  ParsedName newParsed,
+  String rowTitle,
+  _TrackRowSnapshot snap, {
+  Future<Directory> Function()? postersDirProvider,
+}) async {
+  if (snap.customName == null &&
+      snap.artist == null &&
+      snap.posterBytes == null) {
+    return;
+  }
+  final newKey = trackLookupKey(newParsed)!;
+  Value<String?> poster = const Value.absent();
+  if (snap.posterBytes != null) {
+    poster = Value(await saveUserPoster(newKey, snap.posterBytes!,
+        postersDirProvider: postersDirProvider));
+  }
+  await saveUserDetails(
+    lookupKey: newKey,
+    title: rowTitle,
+    episodeLabel: Value(snap.customName == null
+        ? null
+        : '${newParsed.trackMarker} · ${snap.customName}'),
+    posterFile: poster,
+    artist: Value(snap.artist),
+    postersDirProvider: postersDirProvider,
+  );
+}
+
+/// Move a per-track override row (custom display title, artist credit,
+/// artwork) from [oldKey] to the renamed track's key — a track's own
+/// state must survive a rename. [rowTitle] is the row's stored album
+/// title. Shared by the track editor's renumber/re-album paths and the
+/// organize moves.
+Future<void> migrateTrackRow({
+  required String oldKey,
+  required ParsedName newParsed,
+  required String rowTitle,
+  Future<Directory> Function()? postersDirProvider,
+}) async {
+  if (oldKey == trackLookupKey(newParsed)) return;
+  final snap =
+      await _readTrackRow(oldKey, postersDirProvider: postersDirProvider);
+  if (snap == null) return;
+  await clearUserEdits(oldKey, postersDirProvider: postersDirProvider);
+  await _writeTrackRow(newParsed, rowTitle, snap,
+      postersDirProvider: postersDirProvider);
+}
+
+/// Renumber a whole (single-disc) album to 1..N in the order of
+/// [orderedTracks] — the Edit-tracks drag-reorder / "Renumber 1..N"
+/// action. The numbering is computed WHOLE, so swaps that the
+/// one-at-a-time renumber refuses (collision) just work; per-track
+/// override rows migrate in two phases (snapshot all, clear all, write
+/// all) so swapped rows can't clobber each other. Returns the error
+/// message, or null on success (including "nothing to change").
+Future<String?> renumberAlbumTracks(
+  List<MediaEntry> orderedTracks, {
+  Future<Directory> Function()? postersDirProvider,
+}) async {
+  final items = <OrganizePlanItem>[];
+  for (final (i, entry) in orderedTracks.indexed) {
+    final parsed = parseMediaName(entry.name);
+    if (!parsed.isTrack) {
+      return '"${entry.name}" is not an album track.';
+    }
+    if (parsed.disc != null) {
+      return 'Multi-disc albums cannot be renumbered as one sequence.';
+    }
+    if (parsed.track == i + 1) continue;
+    final newName = renumberedMusicFileName(entry.name, track: i + 1);
+    if (newName == null) {
+      return '"${entry.name}" cannot be renumbered.';
+    }
+    items.add((entry: entry, newName: newName));
+  }
+  if (items.isEmpty) return null;
+  await _renameEverywhere(items);
+  // Two-phase row migration: a 01↔02 swap means each old key is another
+  // item's new key — snapshot everything before clearing anything.
+  final moves = <({ParsedName newParsed, String rowTitle, String oldKey})>[];
+  for (final it in items) {
+    final oldParsed = parseMediaName(it.entry.name);
+    final newParsed = parseMediaName(it.newName);
+    final oldKey = trackLookupKey(oldParsed)!;
+    if (oldKey == trackLookupKey(newParsed)) continue;
+    moves.add((
+      newParsed: newParsed,
+      rowTitle: oldParsed.title,
+      oldKey: oldKey,
+    ));
+  }
+  final snaps = <_TrackRowSnapshot?>[];
+  for (final m in moves) {
+    snaps.add(await _readTrackRow(m.oldKey,
+        postersDirProvider: postersDirProvider));
+  }
+  for (final (i, m) in moves.indexed) {
+    if (snaps[i] != null) {
+      await clearUserEdits(m.oldKey,
+          postersDirProvider: postersDirProvider);
+    }
+  }
+  for (final (i, m) in moves.indexed) {
+    final snap = snaps[i];
+    if (snap != null) {
+      await _writeTrackRow(m.newParsed, m.rowTitle, snap,
+          postersDirProvider: postersDirProvider);
+    }
+  }
+  return null;
 }
 
 /// Carry an unsorted entry's user row (custom description/artwork under

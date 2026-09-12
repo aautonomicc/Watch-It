@@ -422,4 +422,150 @@ void main() {
       expect(reconcileHomeSections(const [], merge.lists), hasLength(4));
     });
   });
+
+  group('planUnalbum / applyUnalbum (remove from album)', () {
+    test('track renames to plain Title.ext everywhere (playlist rows '
+        'included), custom title made real, per-track artist/artwork '
+        'migrate to the standalone key, album shared row untouched',
+        () async {
+      final leaving = track(1, 2, 'Wrong Name');
+      final staying = track(2, 1, 'One');
+      await LibraryStore.save([
+        MediaList(id: 'm', title: 'Music', entries: [staying, leaving]),
+        MediaList(
+            id: 'p',
+            title: 'Faves',
+            kind: kListKindPlaylist,
+            entries: [leaving]),
+      ]);
+      // Per-track override row: custom display title + artist + art.
+      final parsed = parseMediaName(leaving.name);
+      final trackKey = trackLookupKey(parsed)!;
+      final poster = await saveUserPoster(
+          trackKey, Uint8List.fromList([9, 9, 9]),
+          postersDirProvider: () async => postersDir);
+      await saveUserDetails(
+        lookupKey: trackKey,
+        title: parsed.title,
+        episodeLabel: const Value('02 · Right Name'),
+        artist: const Value('Solo Singer'),
+        posterFile: Value(poster),
+        postersDirProvider: () async => postersDir,
+      );
+      // The album's shared row (description) must survive for the
+      // track staying behind.
+      final albumKey = albumLookupKey(parsed)!;
+      await saveUserDetails(
+        lookupKey: albumKey,
+        title: parsed.title,
+        overview: 'Album blurb.',
+        postersDirProvider: () async => postersDir,
+      );
+
+      final plan = await planUnalbum([leaving]);
+      expect(plan.error, isNull);
+      expect(plan.items.single.newName, 'Right Name.mp3');
+      final n = await applyUnalbum(plan.items,
+          postersDirProvider: () async => postersDir);
+      expect(n, 2); // regular list + playlist row
+      final lists = await LibraryStore.load();
+      final music = lists.firstWhere((l) => l.id == 'm');
+      expect(music.entries.map((e) => e.name),
+          containsAll([staying.name, 'Right Name.mp3']));
+      final faves = lists.firstWhere((l) => l.id == 'p');
+      expect(faves.entries.single.name, 'Right Name.mp3');
+      expect(faves.entries.single.renamedAt, isNotNull);
+      // Old per-track row cleared, standalone row carries artist + art.
+      expect(await metadataRowFor(trackKey), isNull);
+      final newRow = await metadataRowFor(
+          parseMediaName('Right Name.mp3').lookupKey);
+      expect(newRow, isNotNull);
+      expect(newRow!.artist, 'Solo Singer');
+      expect(newRow.posterFile, isNotNull);
+      expect(File('${postersDir.path}/${newRow.posterFile}').existsSync(),
+          isTrue);
+      // Album shared row untouched.
+      expect((await metadataRowFor(albumKey))?.overview, 'Album blurb.');
+      // The removed file is now unsorted audio.
+      expect(unsortedAudioEntries(lists).single.name, 'Right Name.mp3');
+    });
+
+    test('non-track selection refuses', () async {
+      final plan = await planUnalbum([unsorted(1, 'loose.mp3')]);
+      expect(plan.error, contains('not an album track'));
+    });
+  });
+
+  group('renumberAlbumTracks (Edit tracks reorder / gap close)', () {
+    test('a swap the one-at-a-time renumber refuses just works, and '
+        'per-track rows swap without clobbering each other', () async {
+      final one = track(1, 1, 'First');
+      final two = track(2, 2, 'Second');
+      await LibraryStore.save([
+        MediaList(id: 'm', title: 'Music', entries: [one, two]),
+      ]);
+      // Both tracks carry per-track custom titles — the swap must not
+      // let one row overwrite the other mid-migration.
+      for (final (e, label) in [(one, '01 · Custom A'), (two, '02 · Custom B')]) {
+        await saveUserDetails(
+          lookupKey: trackLookupKey(parseMediaName(e.name))!,
+          title: 'Neat Album',
+          episodeLabel: Value(label),
+          postersDirProvider: () async => postersDir,
+        );
+      }
+      // New order: two first, one second → 2↔1 swap.
+      final error = await renumberAlbumTracks([two, one],
+          postersDirProvider: () async => postersDir);
+      expect(error, isNull);
+      final entries = (await LibraryStore.load()).single.entries;
+      expect(entries.map((e) => e.name).toSet(), {
+        'Neat Artist - Neat Album (2020) - 02 First.mp3',
+        'Neat Artist - Neat Album (2020) - 01 Second.mp3',
+      });
+      // Rows followed their tracks (with re-marked labels).
+      final rowA = await metadataRowFor(trackLookupKey(
+          parseMediaName('Neat Artist - Neat Album (2020) - 02 First.mp3'))!);
+      expect(rowA?.episodeLabel, '02 · Custom A');
+      final rowB = await metadataRowFor(trackLookupKey(
+          parseMediaName('Neat Artist - Neat Album (2020) - 01 Second.mp3'))!);
+      expect(rowB?.episodeLabel, '01 · Custom B');
+    });
+
+    test('gap close renumbers 1..N in the given order; no-op when '
+        'already 1..N', () async {
+      final five = track(1, 5, 'Alpha');
+      final nine = track(2, 9, 'Beta');
+      await LibraryStore.save([
+        MediaList(id: 'm', title: 'Music', entries: [five, nine]),
+      ]);
+      expect(await renumberAlbumTracks([five, nine]), isNull);
+      final entries = (await LibraryStore.load()).single.entries;
+      expect(entries.map((e) => e.name).toSet(), {
+        'Neat Artist - Neat Album (2020) - 01 Alpha.mp3',
+        'Neat Artist - Neat Album (2020) - 02 Beta.mp3',
+      });
+      // Already 1..N: nothing renamed (no fresh rename stamps).
+      final before = [
+        for (final e in (await LibraryStore.load()).single.entries) e,
+      ];
+      before.sort((a, b) => a.name.compareTo(b.name));
+      expect(await renumberAlbumTracks(before), isNull);
+      final after = (await LibraryStore.load()).single.entries.toList()
+        ..sort((a, b) => a.name.compareTo(b.name));
+      for (final (i, e) in after.indexed) {
+        expect(e.name, before[i].name);
+      }
+    });
+
+    test('multi-disc albums are refused', () async {
+      final disc = MediaEntry(
+          name: 'A - B (2000) - 2-01 Song.mp3', address: addr(1));
+      await LibraryStore.save([
+        MediaList(id: 'm', title: 'Music', entries: [disc]),
+      ]);
+      expect(await renumberAlbumTracks([disc]),
+          contains('Multi-disc'));
+    });
+  });
 }

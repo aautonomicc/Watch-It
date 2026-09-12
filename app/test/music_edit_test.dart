@@ -865,4 +865,92 @@ void main() {
     expect(find.textContaining('pages show the album cover'),
         findsNothing);
   });
+
+  Future<void> pumpTrackEditor(WidgetTester tester, MediaEntry entry) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: EditDetailsScreen(
+        entry: entry,
+        ffmpeg: _NoFfmpeg(),
+        postersDirProvider: () async => postersDir,
+      ),
+    ));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets(
+      'clearing the album name is an ERROR, never a silent no-op save '
+      '(2026-09-12 report)', (tester) async {
+    final t1 = track(1, 'First Song');
+    await seedAlbum([t1, track(2, 'Second Song')]);
+    await pumpTrackEditor(tester, t1);
+
+    await tester.enterText(find.widgetWithText(TextField, 'Album'), '');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('An album name is needed'), findsOneWidget);
+    // Still on the editor, nothing renamed.
+    expect(find.byType(EditDetailsScreen), findsOneWidget);
+    final names = [
+      for (final e in (await LibraryStore.load()).single.entries) e.name,
+    ];
+    expect(names, contains(t1.name));
+  });
+
+  testWidgets(
+      'Remove from album renames just this track to Title.ext; the '
+      'sibling keeps its album', (tester) async {
+    final t1 = track(1, 'First Song');
+    await seedAlbum([t1, track(2, 'Second Song')]);
+    await pumpTrackEditor(tester, t1);
+
+    await tester.tap(find.text('Remove from album'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove track'));
+    await tester.pumpAndSettle();
+
+    final names = [
+      for (final e in (await LibraryStore.load()).single.entries) e.name,
+    ];
+    expect(names,
+        containsAll(['First Song.mp3', track(2, 'Second Song').name]));
+  });
+
+  testWidgets(
+      'Move only this track to another album leaves the rest of the '
+      'album alone (unlike the Album field)', (tester) async {
+    final t1 = track(1, 'First Song');
+    await seedAlbum([t1, track(2, 'Second Song')]);
+    await pumpTrackEditor(tester, t1);
+
+    await tester.tap(
+        find.textContaining('Move only this track to another album'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Artist'), 'Other Artist');
+    // The dialog's own Album field (the editor has one too).
+    await tester.enterText(
+        find.descendant(
+            of: find.byType(AlertDialog),
+            matching: find.widgetWithText(TextField, 'Album')),
+        'Elsewhere');
+    await tester.tap(find.text('Preview new names'));
+    await tester.pumpAndSettle();
+    expect(find.text('→  Other Artist - Elsewhere - 01 First Song.mp3'),
+        findsOneWidget);
+    await tester.tap(find.text('Apply'));
+    await tester.pumpAndSettle();
+
+    final names = [
+      for (final e in (await LibraryStore.load()).single.entries) e.name,
+    ];
+    expect(names, containsAll([
+      'Other Artist - Elsewhere - 01 First Song.mp3',
+      track(2, 'Second Song').name,
+    ]));
+  });
 }

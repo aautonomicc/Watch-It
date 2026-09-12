@@ -10,11 +10,13 @@ import '../services/library_store.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/now_playing.dart';
+import '../services/organize.dart';
 import '../services/play_queue.dart';
 import '../services/season_grouping.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
+import '../widgets/organize_dialogs.dart';
 import '../widgets/playlist_picker.dart';
 import '../widgets/seek_slider.dart';
 import 'detail_screen.dart';
@@ -71,6 +73,17 @@ class _AlbumScreenState extends State<AlbumScreen>
   );
 
   bool _wasPlaying = false;
+
+  /// Edit-tracks mode: rows become checkbox rows with drag handles —
+  /// drag to reorder = the whole album renumbered 1..N in the new
+  /// order, checkboxes feed the bulk Move-to-album / Remove-from-album
+  /// actions.
+  bool _editMode = false;
+
+  /// Selected rows in edit mode, keyed `address|name` (names change on
+  /// rename — cleared after every bulk action).
+  final Set<String> _selected = {};
+  bool _working = false;
 
   late final AnimationController _glow = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 2200));
@@ -219,35 +232,61 @@ class _AlbumScreenState extends State<AlbumScreen>
         title: Text(title,
             style: TextStyle(color: t.bone, fontSize: 16),
             overflow: TextOverflow.ellipsis),
-        actions: [
-          IconButton(
-            tooltip: 'Add album to playlist',
-            icon: Icon(Icons.playlist_add, color: t.boneDim, size: 22),
-            onPressed: () =>
-                unawaited(addToPlaylistFlow(context, group.tracks)),
-          ),
-          IconButton(
-            tooltip: 'Edit album details',
-            icon: Icon(Icons.edit_outlined, color: t.boneDim, size: 20),
-            onPressed: () async {
-              // Awaited so a rename/merge refolds THIS page immediately
-              // (the fold reads file names; the old group is stale the
-              // moment Save renames anything).
-              await Navigator.of(context).push(
-                MaterialPageRoute(
-                  // Any track reaches the shared album row.
-                  builder: (_) => EditDetailsScreen(
-                      entry: group.tracks.first,
-                      scope: EditDetailsScope.album,
-                      albumIsCompilation: group.isCompilation),
+        actions: _editMode
+            ? [
+                if (_canReorder)
+                  TextButton(
+                    onPressed: _working
+                        ? null
+                        : () => unawaited(_renumberGapClose()),
+                    child: Text('Renumber 1..${group.tracks.length}',
+                        style: TextStyle(color: t.accent)),
+                  ),
+                IconButton(
+                  tooltip: 'Done editing',
+                  icon: Icon(Icons.check, color: t.accent, size: 22),
+                  onPressed: () => setState(() {
+                    _editMode = false;
+                    _selected.clear();
+                  }),
                 ),
-              );
-              await _reloadGroup();
-            },
-          ),
-        ],
+              ]
+            : [
+                IconButton(
+                  tooltip: 'Add album to playlist',
+                  icon:
+                      Icon(Icons.playlist_add, color: t.boneDim, size: 22),
+                  onPressed: () =>
+                      unawaited(addToPlaylistFlow(context, group.tracks)),
+                ),
+                IconButton(
+                  tooltip: 'Edit tracks',
+                  icon: Icon(Icons.checklist, color: t.boneDim, size: 20),
+                  onPressed: () => setState(() => _editMode = true),
+                ),
+                IconButton(
+                  tooltip: 'Edit album details',
+                  icon:
+                      Icon(Icons.edit_outlined, color: t.boneDim, size: 20),
+                  onPressed: () async {
+                    // Awaited so a rename/merge refolds THIS page
+                    // immediately (the fold reads file names; the old
+                    // group is stale the moment Save renames anything).
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        // Any track reaches the shared album row.
+                        builder: (_) => EditDetailsScreen(
+                            entry: group.tracks.first,
+                            scope: EditDetailsScope.album,
+                            albumIsCompilation: group.isCompilation),
+                      ),
+                    );
+                    await _reloadGroup();
+                  },
+                ),
+              ],
       ),
-      body: ListView(
+      body: _editMode ? _editBody(t, group) : ListView(
         padding: const EdgeInsets.all(16),
         children: [
           DetailHeader(
@@ -327,6 +366,217 @@ class _AlbumScreenState extends State<AlbumScreen>
             _trackRow(context, t, entry, credit),
         ],
       ),
+    );
+  }
+
+  /// Drag-renumbering treats the album as ONE 1..N sequence, which has
+  /// no meaning across disc boundaries — multi-disc albums keep their
+  /// numbers and only get the checkbox actions.
+  bool get _canReorder =>
+      _group.tracks.every((e) => parseMediaName(e.name).disc == null);
+
+  String _rowKey(MediaEntry e) => '${e.address}|${e.name}';
+
+  List<MediaEntry> get _selection => [
+        for (final e in _group.tracks)
+          if (_selected.contains(_rowKey(e))) e,
+      ];
+
+  /// After any bulk edit: renames changed the file names, so the
+  /// selection keys are stale and the fold must be re-derived (the page
+  /// pops itself if the album dissolved).
+  Future<void> _afterBulk() async {
+    _selected.clear();
+    await _reloadGroup();
+    if (mounted) setState(() => _working = false);
+  }
+
+  /// Drop-reorder: renumber the WHOLE album 1..N in the new order —
+  /// computed wholesale, so swaps the one-at-a-time renumber refuses
+  /// (number collisions) just work.
+  Future<void> _reorderTracks(int oldIndex, int newIndex) async {
+    if (_working) return;
+    final list = [..._group.tracks];
+    final moved = list.removeAt(oldIndex);
+    list.insert(newIndex, moved);
+    setState(() => _working = true);
+    final error = await renumberAlbumTracks(list);
+    if (!mounted) return;
+    if (error != null) _snack(error);
+    await _afterBulk();
+  }
+
+  /// "Renumber 1..N": close numbering gaps in the current order.
+  Future<void> _renumberGapClose() async {
+    setState(() => _working = true);
+    final error = await renumberAlbumTracks(_group.tracks);
+    if (!mounted) return;
+    if (error != null) _snack(error);
+    await _afterBulk();
+  }
+
+  Future<void> _moveSelectedToAlbum() async {
+    final selection = _selection;
+    final input =
+        await askAlbumDialog(context, count: selection.length);
+    if (input == null || !mounted) return;
+    setState(() => _working = true);
+    final plan = await planOrganize(selection,
+        artist: input.artist, album: input.album, year: input.year);
+    if (!mounted) return;
+    setState(() => _working = false);
+    if (plan.error != null) {
+      _snack(plan.error!);
+      return;
+    }
+    final confirmed = await confirmOrganizePlanDialog(context, plan.items);
+    if (confirmed != true || !mounted) return;
+    setState(() => _working = true);
+    final n = await applyOrganize(plan.items);
+    if (!mounted) return;
+    _snack(n == 1
+        ? '1 track moved into "${input.album}".'
+        : '$n tracks moved into "${input.album}".');
+    await _afterBulk();
+  }
+
+  Future<void> _removeSelectedFromAlbum() async {
+    final selection = _selection;
+    final confirmed = await confirmUnalbumDialog(context, selection.length);
+    if (confirmed != true || !mounted) return;
+    setState(() => _working = true);
+    final plan = await planUnalbum(selection);
+    if (!mounted) return;
+    if (plan.error != null) {
+      setState(() => _working = false);
+      _snack(plan.error!);
+      return;
+    }
+    final n = await applyUnalbum(plan.items);
+    if (!mounted) return;
+    _snack(n == 1
+        ? '1 track removed from the album.'
+        : '$n tracks removed from the album.');
+    await _afterBulk();
+  }
+
+  /// The Edit-tracks body: hint, reorderable checkbox rows, and the
+  /// bulk-action bar.
+  Widget _editBody(WiTokens t, HomeAlbum group) {
+    final tracks = group.tracks;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Text(
+            _canReorder
+                ? 'Drag rows to reorder — the whole album is renumbered '
+                    '1..N in the new order. Tick tracks to move them to '
+                    'another album, or to take them out of this one '
+                    '(they become standalone files).'
+                : 'Tick tracks to move them to another album, or to '
+                    'take them out of this one (they become standalone '
+                    'files). Multi-disc albums cannot be '
+                    'drag-renumbered.',
+            style: TextStyle(fontSize: 12, color: t.ash, height: 1.4),
+          ),
+        ),
+        Expanded(
+          child: ReorderableListView.builder(
+            buildDefaultDragHandles: false,
+            padding: const EdgeInsets.only(bottom: 12),
+            itemCount: tracks.length,
+            onReorderItem: (oldIndex, newIndex) =>
+                unawaited(_reorderTracks(oldIndex, newIndex)),
+            itemBuilder: (context, i) => _editRow(t, tracks[i], i),
+          ),
+        ),
+        SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: _selected.isEmpty || _working
+                        ? null
+                        : () => unawaited(_moveSelectedToAlbum()),
+                    icon: const Icon(Icons.album_outlined, size: 18),
+                    label: Text(_selected.isEmpty
+                        ? 'Move to album…'
+                        : 'Move ${_selected.length} to album…'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _selected.isEmpty || _working
+                        ? null
+                        : () => unawaited(_removeSelectedFromAlbum()),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: t.bone,
+                      side: BorderSide(color: t.ash),
+                    ),
+                    icon: const Icon(Icons.playlist_remove, size: 18),
+                    label: Text(_selected.isEmpty
+                        ? 'Remove from album'
+                        : 'Remove ${_selected.length} from album'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _editRow(WiTokens t, MediaEntry entry, int index) {
+    final parsed = parseMediaName(entry.name);
+    final trackMeta = MetadataService.instance.metadataFor(entry);
+    final trackName = episodeNameFromLabel(trackMeta.episodeLabel) ??
+        parsed.trackTitle ??
+        entry.name;
+    final key = _rowKey(entry);
+    return CheckboxListTile(
+      key: ValueKey(key),
+      value: _selected.contains(key),
+      dense: true,
+      controlAffinity: ListTileControlAffinity.leading,
+      activeColor: t.accent,
+      onChanged: (on) => setState(() {
+        on == true ? _selected.add(key) : _selected.remove(key);
+      }),
+      title: Row(
+        children: [
+          SizedBox(
+            width: 36,
+            child: Text(
+              parsed.trackMarker ?? '',
+              style: TextStyle(
+                fontFamily: wiMonoFamily,
+                fontFamilyFallback: wiMonoFallback,
+                fontSize: 12,
+                color: t.accent,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              trackName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13.5, color: t.bone),
+            ),
+          ),
+        ],
+      ),
+      secondary: _canReorder
+          ? ReorderableDragStartListener(
+              index: index,
+              child: Icon(Icons.drag_indicator, size: 18, color: t.ash),
+            )
+          : null,
     );
   }
 

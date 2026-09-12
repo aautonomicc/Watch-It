@@ -11,6 +11,7 @@ import 'package:watchit/db/app_database.dart';
 import 'package:watchit/main.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/screens/album_screen.dart' show AlbumAudioPlayer;
+import 'package:watchit/screens/detail_screen.dart';
 import 'package:watchit/screens/edit_details_screen.dart';
 import 'package:watchit/screens/needs_sorting_screen.dart';
 import 'package:watchit/screens/playlist_screen.dart';
@@ -219,12 +220,12 @@ void main() {
     expect(lists.any((l) => l.isPlaylist), isFalse);
   });
 
-  testWidgets('Add tracks offers only library audio not already here',
+  testWidgets('Add media offers library titles not already here',
       (tester) async {
     await seed();
     await pumpPlaylist(tester);
 
-    await tester.tap(find.text('Add tracks'));
+    await tester.tap(find.text('Add media'));
     await tester.pumpAndSettle();
     // Tracks One and Two are already in the playlist — only Three left.
     expect(find.byType(CheckboxListTile), findsOneWidget);
@@ -344,7 +345,7 @@ void main() {
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Added 1 track to "Mixes".'), findsOneWidget);
+    expect(find.text('Added 1 item to "Mixes".'), findsOneWidget);
     final lists = await LibraryStore.load();
     final playlist = lists.firstWhere((l) => l.isPlaylist);
     expect(playlist.title, 'Mixes');
@@ -386,6 +387,184 @@ void main() {
     expect(entry.name,
         'Neat Artist - Neat Album (2020) - 01 mystery tune.mp3');
     expect(entry.renamedAt, isNotNull);
+  });
+
+  group('movie playlists (2026-09-12)', () {
+    MediaEntry movie(int n, String title) =>
+        MediaEntry(name: '$title (2021).mp4', address: _addr(n));
+
+    Future<void> seedMixed() => LibraryStore.save([
+          MediaList(id: 'm', title: 'Music', entries: [_track(1, 'One')]),
+          MediaList(
+              id: 'v',
+              title: 'Movies',
+              entries: [movie(21, 'Midnight Ferry'), movie(22, 'Dust County')]),
+          MediaList(
+              id: 'p',
+              title: 'Marathon',
+              kind: kListKindPlaylist,
+              entries: [movie(21, 'Midnight Ferry'), _track(1, 'One')]),
+        ]);
+
+    Future<({List<MediaEntry?> firsts, List<List<MediaEntry>> orders})>
+        pumpMixed(WidgetTester tester) async {
+      final firsts = <MediaEntry?>[];
+      final orders = <List<MediaEntry>>[];
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: PlaylistScreen(
+          playlistId: 'p',
+          playerFactory: () => player,
+          sourceOverride: (e) => (url: 'fake://${e.address}', local: true),
+          videoLauncherOverride: (first, order) {
+            firsts.add(first);
+            orders.add(order);
+          },
+        ),
+      ));
+      await tester.pumpAndSettle();
+      return (firsts: firsts, orders: orders);
+    }
+
+    testWidgets(
+        'mixed playlist: items wording, video row poster thumb, tap '
+        'launches the PlayerScreen marathon from that row', (tester) async {
+      await seedMixed();
+      final launches = await pumpMixed(tester);
+
+      expect(find.text('Playlist · 2 items'), findsOneWidget);
+      // The video row's placeholder thumb carries the movie icon.
+      expect(find.byIcon(Icons.movie_outlined), findsWidgets);
+
+      await tester.tap(find.text('Midnight Ferry'));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(launches.firsts.single!.address, _addr(21));
+      // The whole playlist order rides along for Up-next chaining.
+      expect(launches.orders.single.map((e) => e.address),
+          [_addr(21), _addr(1)]);
+      // The inline audio queue stayed out of it.
+      expect(player.opened, isEmpty);
+    });
+
+    testWidgets(
+        'mixed playlist: an AUDIO row also goes through the marathon '
+        '(the inline queue would play the following movie sound-only)',
+        (tester) async {
+      await seedMixed();
+      final launches = await pumpMixed(tester);
+
+      await tester.tap(find.text('One'));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(launches.firsts.single!.address, _addr(1));
+      expect(player.opened, isEmpty);
+    });
+
+    testWidgets('Play all and Shuffle launch the marathon over the '
+        'playlist', (tester) async {
+      await seedMixed();
+      final launches = await pumpMixed(tester);
+
+      await tester.tap(find.text('Play all'));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(launches.firsts.single!.address, _addr(21));
+      expect(launches.orders.single.map((e) => e.address),
+          [_addr(21), _addr(1)]);
+
+      await tester.tap(find.text('Shuffle'));
+      await tester.pump(const Duration(milliseconds: 100));
+      // A shuffled full pass: both entries, any order.
+      expect(launches.orders.last.map((e) => e.address).toSet(),
+          {_addr(21), _addr(1)});
+      expect(launches.firsts.last!.address,
+          launches.orders.last.first.address);
+    });
+
+    testWidgets(
+        'Add media picker offers video with type chips; adding a movie '
+        'flips an audio playlist to items wording', (tester) async {
+      await LibraryStore.save([
+        MediaList(id: 'm', title: 'Music', entries: [_track(1, 'One')]),
+        MediaList(
+            id: 'v', title: 'Movies', entries: [movie(21, 'Midnight Ferry')]),
+        MediaList(
+            id: 'p',
+            title: 'Good Energy',
+            kind: kListKindPlaylist,
+            entries: const []),
+      ]);
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: PlaylistScreen(
+          playlistId: 'p',
+          playerFactory: () => player,
+          sourceOverride: (e) => (url: 'fake://${e.address}', local: true),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Add media'));
+      await tester.pumpAndSettle();
+      // Mixed pool → chips; Movies narrows to the movie.
+      expect(find.text('Music'), findsOneWidget);
+      await tester.tap(find.text('Movies'));
+      await tester.pumpAndSettle();
+      expect(find.byType(CheckboxListTile), findsOneWidget);
+      expect(find.text('Midnight Ferry'), findsOneWidget);
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.pump();
+      await tester.tap(find.text('Add'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Playlist · 1 item'), findsOneWidget);
+      final lists = await LibraryStore.load();
+      expect(lists.firstWhere((l) => l.id == 'p').entries.single.address,
+          _addr(21));
+    });
+
+    testWidgets('detail page: Add to playlist is offered on video too',
+        (tester) async {
+      await seedMixed();
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: DetailScreen(entry: movie(22, 'Dust County')),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Add to playlist'), findsOneWidget);
+      await tester.tap(find.byTooltip('Add to playlist'));
+      await tester.pumpAndSettle();
+      // The picker lists the mixed playlist with its content icon.
+      expect(find.text('Marathon'), findsOneWidget);
+      expect(find.byIcon(Icons.playlist_play), findsOneWidget);
+      await tester.tap(find.text('Marathon'));
+      await tester.pumpAndSettle();
+      expect(find.text('Added 1 item to "Marathon".'), findsOneWidget);
+      final lists = await LibraryStore.load();
+      expect(
+          lists
+              .firstWhere((l) => l.id == 'p')
+              .entries
+              .map((e) => e.address),
+          contains(_addr(22)));
+    });
+
+    testWidgets('drawer: playlist icons derive from content',
+        (tester) async {
+      await seedMixed();
+      await tester.pumpWidget(const WatchItApp());
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Browse lists'));
+      await tester.pumpAndSettle();
+      final drawer = find.byType(WiLibraryDrawer);
+      // Mixed playlist → playlist_play icon on its row.
+      final row = find.ancestor(
+          of: find.descendant(
+              of: drawer, matching: find.text('Marathon')),
+          matching: find.byType(ListTile));
+      expect(
+          find.descendant(
+              of: row, matching: find.byIcon(Icons.playlist_play)),
+          findsOneWidget);
+    });
   });
 
   testWidgets('editor: artist without album refuses with a clear message',
