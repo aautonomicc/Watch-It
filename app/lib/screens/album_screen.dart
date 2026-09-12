@@ -16,6 +16,7 @@ import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
 import '../widgets/playlist_picker.dart';
+import '../widgets/seek_slider.dart';
 import 'detail_screen.dart';
 import 'edit_details_screen.dart';
 
@@ -419,7 +420,7 @@ class _AlbumScreenState extends State<AlbumScreen>
                     fontFamily: wiMonoFamily,
                     fontFamilyFallback: wiMonoFallback)),
             Expanded(
-              child: Slider(
+              child: WiSeekSlider(
                 value: maxMs == 0
                     ? 0
                     : position.inMilliseconds.clamp(0, maxMs).toDouble(),
