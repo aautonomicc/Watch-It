@@ -74,13 +74,15 @@ tracing-android = "0.2"
 # ant-quic, post-quantum, mDNS LAN discovery) syncs lists/viewpoints
 # through a self-keyed CRDT KV store on a secret invite topic. Android
 # included since the NDK cross-build of the x0x tree was proven.
-# 0.41.x carries the issue-#380 idle-bandwidth campaign (leaf mode
-# enforced, V3 slim announces, replay-storm validators via saorsa-gossip
-# 0.5.75) plus the ADR-0036–43 Home wave with its mixed-fleet regressions
-# (#448/#450/#451) fixed in-release; pin a release, never git main.
-# 0.41.3 = the blank-GUI fix on the 0.41 Home Suite wave (0.41.2 added
-# the NetworkConfig.mdns_enabled embedder knob; no bandwidth work).
-x0x = "0.41.3"
+# 0.42.x rolls up ~240 commits over 0.41.3: ADR-0061 supervised
+# upgrades, ADR-0064 owner-anchored fork authority, /health decoupled
+# from transport locks (#605), daemon single-instance guard (#629),
+# encrypted KvStore (#341-B); 0.42.1 adds saorsa-gossip 0.5.77
+# stranded-publish recovery (#613/#611/#336) and the P2P-bind advert
+# fix (#638). Idle-bandwidth note: only leaf-egress slice 1 shipped
+# (#622 slices 2-5 still open), so no idle-traffic change expected.
+# Pin a release, never git main.
+x0x = "0.42.1"
 # CancellationToken for the mywatch heartbeat/watch task (already in the
 # x0x tree, so free on desktop).
 tokio-util = "0.7"

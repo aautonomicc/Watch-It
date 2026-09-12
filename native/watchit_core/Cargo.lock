@@ -900,9 +900,9 @@ dependencies = [
 
 [[package]]
 name = "ant-quic"
-version = "0.27.48"
+version = "0.27.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f64c7ba1185b1e1d0328c706a9b32ff85b4f2c880d1639a81b5cfa211cd8440"
+checksum = "2f00d502a872558022f3bc5a169c2468da7a76f967ad4fca6b63de19fe168ec2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5959,9 +5959,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-coordinator"
-version = "0.5.75"
+version = "0.5.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1be016e00b506e4f6d1ecf35ecc9c295784056c813b6403df5c6a5718726f14f"
+checksum = "07d0306ab9df8bdae18fcb1b8e2aed12004929a1d2a526c29134f706416e4100"
 dependencies = [
  "ant-quic",
  "anyhow",
@@ -5982,9 +5982,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-crdt-sync"
-version = "0.5.75"
+version = "0.5.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9212037bd21085c16d0b83e61d429b5832c1a044b19477d2810c2f4e6850a77a"
+checksum = "1c80cdd0b346f054632ebba4d03bff51417c8e62cbb39fa3f91fe2b9d822b702"
 dependencies = [
  "anyhow",
  "blake3",
@@ -5997,9 +5997,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-groups"
-version = "0.5.75"
+version = "0.5.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa482efd17cd1e91372380130ddffff283ab343984c9472fec1a874f4922b238"
+checksum = "2a27129082770e62ab105f27724cb419f7983d000829abcd453709185f968936"
 dependencies = [
  "anyhow",
  "blake3",
@@ -6010,9 +6010,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-identity"
-version = "0.5.75"
+version = "0.5.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b2732d292de0525aefbfc8f78f1ffb814659d1c5dbb737a0d872a2cb34153eb"
+checksum = "e8028f9a135cf84c215b7a3f90b4660b3753108a71f2201a31268e4dd7c7eceb"
 dependencies = [
  "anyhow",
  "blake3",
@@ -6025,9 +6025,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-membership"
-version = "0.5.75"
+version = "0.5.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7441d3f3027e95b8ce7e775abf405e5ffc2cd2eab6313a42756c1ed366bc676"
+checksum = "12743f4abff0c9dbe8a22251f7c4b7c03fc972c96fa3c4ebf0d0ca3b94028a54"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6043,9 +6043,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-presence"
-version = "0.5.75"
+version = "0.5.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7007c681601c74c8ed1cf9a55fe883eece7492dbd15b3bdcbd658abfd45e788f"
+checksum = "4dd7fcf55a67e30a0c8b729db904fc9baeadc1a7d9e796331ab5d76bd8dc549e"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6065,9 +6065,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-pubsub"
-version = "0.5.75"
+version = "0.5.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08fe2b4ba3376719d85909c7491379455258193b8940ac3737f6be7231bd1ae5"
+checksum = "a4003d64b7d2edbea274e14a30d5997aa8fd316a5b1cc9634310982f0287a863"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6083,13 +6083,14 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "saorsa-gossip-rendezvous"
-version = "0.5.75"
+version = "0.5.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71d734d65d48080f4016104af5a644e42d50972a0be33fc2c604fb6a97f1cbf3"
+checksum = "52bb64fcc7adebc1e638c36e82d413358156dae81fc67235a1e6f4cf8bc41ce3"
 dependencies = [
  "anyhow",
  "blake3",
@@ -6103,9 +6104,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-runtime"
-version = "0.5.75"
+version = "0.5.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6df1127022424155923d06ffedfb859a08100899d647d98c82312773c5a779e4"
+checksum = "5998cfe78cd48bca17622eb7f2aea10cb50c24a59aa7365ed59253c0f87d35ca"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6129,9 +6130,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-transport"
-version = "0.5.75"
+version = "0.5.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44e6207b2160526bb8c1a78ed0068dec44f099d4a446e47075a10c34db68ad27"
+checksum = "fd79dc1db4aac76ef5cd7e6d726f885151d2a2c0bf19bc6dee2201d59b7f21fa"
 dependencies = [
  "ant-quic",
  "anyhow",
@@ -6151,9 +6152,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-types"
-version = "0.5.75"
+version = "0.5.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "330783ab0bb5b98c086ca0b8b4635c33e4679e025a8b5a37143881c3c4a9dc4c"
+checksum = "233cbc1e89e6e0101e0a05a6911ef4afc8a123370ea155969d74d203a2085169"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6903,6 +6904,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
+name = "symlink"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7973cce6668464ea31f176d85b13c7ab3bba2cb3b77a2ed26abd7801688010a"
+
+[[package]]
 name = "syn"
 version = "1.0.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7416,6 +7423,19 @@ checksum = "12612be8f868a09c0ceae7113ff26afe79d81a24473a393cb9120ece162e86c0"
 dependencies = [
  "android_log-sys",
  "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "tracing-appender"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "050686193eb999b4bb3bc2acfa891a13da00f79734704c4b8b4ef1a10b368a3c"
+dependencies = [
+ "crossbeam-channel",
+ "symlink",
+ "thiserror 2.0.19",
+ "time",
  "tracing-subscriber",
 ]
 
@@ -8535,9 +8555,9 @@ dependencies = [
 
 [[package]]
 name = "x0x"
-version = "0.41.3"
+version = "0.42.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "651e552b5188dc4950b04e5158c159106f7bdf5512c9e8e231c008be289470b2"
+checksum = "95cb13d3fb3f8729f14df68c3ff34f6dbdbbcd88422143101d0d0aa4dd812357"
 dependencies = [
  "ant-quic",
  "anyhow",
@@ -8595,6 +8615,7 @@ dependencies = [
  "toml",
  "tower-http",
  "tracing",
+ "tracing-appender",
  "tracing-subscriber",
  "uuid",
  "which",
