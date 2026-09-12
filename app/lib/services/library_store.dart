@@ -280,6 +280,7 @@ class LibraryStore {
           channelAuthor: row.channelAuthor,
           channelAvatar: row.channelAvatar,
           kind: row.kind,
+          orderedAt: row.orderedAt == 0 ? null : row.orderedAt,
         ),
     ];
   }
@@ -307,6 +308,7 @@ class LibraryStore {
               channelAuthor: Value(list.channelAuthor),
               channelAvatar: Value(list.channelAvatar),
               kind: Value(list.kind),
+              orderedAt: Value(list.orderedAt ?? 0),
             ));
         for (final (entryPos, entry) in list.entries.indexed) {
           await db.into(db.mediaEntries).insert(MediaEntriesCompanion.insert(

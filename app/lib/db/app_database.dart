@@ -35,6 +35,12 @@ class MediaLists extends Table {
   /// media list.
   TextColumn get kind => text().nullable()();
 
+  /// When the user last reordered this list (epoch ms; 0 = never).
+  /// Stamped by the playlist page's drag-reorder so My W@tch sync can
+  /// merge play order newest-stamp-wins across linked devices (the
+  /// order itself travels as per-entry indices in the sync doc).
+  IntColumn get orderedAt => integer().withDefault(const Constant(0))();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -246,7 +252,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 14;
+  int get schemaVersion => 15;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -338,6 +344,18 @@ class AppDatabase extends _$AppDatabase {
         }
         if (await hasTable('media_entries')) {
           await m.addColumn(mediaEntries, mediaEntries.renamedAt);
+        }
+      }
+      if (from < 15) {
+        // Playlist order sync: per-list reorder stamp for
+        // newest-order-wins merging. Existence-guarded like v13/v14.
+        final hasMediaLists = await customSelect(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name='media_lists'")
+            .get()
+            .then((rows) => rows.isNotEmpty);
+        if (hasMediaLists) {
+          await m.addColumn(mediaLists, mediaLists.orderedAt);
         }
       }
       if (from >= 4 && from < 9) {

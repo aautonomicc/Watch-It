@@ -95,6 +95,18 @@ class $MediaListsTable extends MediaLists
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _orderedAtMeta = const VerificationMeta(
+    'orderedAt',
+  );
+  @override
+  late final GeneratedColumn<int> orderedAt = GeneratedColumn<int>(
+    'ordered_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -105,6 +117,7 @@ class $MediaListsTable extends MediaLists
     channelAuthor,
     channelAvatar,
     kind,
+    orderedAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -178,6 +191,12 @@ class $MediaListsTable extends MediaLists
         kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
       );
     }
+    if (data.containsKey('ordered_at')) {
+      context.handle(
+        _orderedAtMeta,
+        orderedAt.isAcceptableOrUnknown(data['ordered_at']!, _orderedAtMeta),
+      );
+    }
     return context;
   }
 
@@ -219,6 +238,10 @@ class $MediaListsTable extends MediaLists
         DriftSqlType.string,
         data['${effectivePrefix}kind'],
       ),
+      orderedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}ordered_at'],
+      )!,
     );
   }
 
@@ -255,6 +278,12 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
   /// own Playlists section instead of the home wall. Null = a normal
   /// media list.
   final String? kind;
+
+  /// When the user last reordered this list (epoch ms; 0 = never).
+  /// Stamped by the playlist page's drag-reorder so My W@tch sync can
+  /// merge play order newest-stamp-wins across linked devices (the
+  /// order itself travels as per-entry indices in the sync doc).
+  final int orderedAt;
   const MediaListRow({
     required this.id,
     required this.title,
@@ -264,6 +293,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     this.channelAuthor,
     this.channelAvatar,
     this.kind,
+    required this.orderedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -284,6 +314,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     if (!nullToAbsent || kind != null) {
       map['kind'] = Variable<String>(kind);
     }
+    map['ordered_at'] = Variable<int>(orderedAt);
     return map;
   }
 
@@ -303,6 +334,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
           ? const Value.absent()
           : Value(channelAvatar),
       kind: kind == null && nullToAbsent ? const Value.absent() : Value(kind),
+      orderedAt: Value(orderedAt),
     );
   }
 
@@ -320,6 +352,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       channelAuthor: serializer.fromJson<String?>(json['channelAuthor']),
       channelAvatar: serializer.fromJson<String?>(json['channelAvatar']),
       kind: serializer.fromJson<String?>(json['kind']),
+      orderedAt: serializer.fromJson<int>(json['orderedAt']),
     );
   }
   @override
@@ -334,6 +367,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       'channelAuthor': serializer.toJson<String?>(channelAuthor),
       'channelAvatar': serializer.toJson<String?>(channelAvatar),
       'kind': serializer.toJson<String?>(kind),
+      'orderedAt': serializer.toJson<int>(orderedAt),
     };
   }
 
@@ -346,6 +380,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     Value<String?> channelAuthor = const Value.absent(),
     Value<String?> channelAvatar = const Value.absent(),
     Value<String?> kind = const Value.absent(),
+    int? orderedAt,
   }) => MediaListRow(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -361,6 +396,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
         ? channelAvatar.value
         : this.channelAvatar,
     kind: kind.present ? kind.value : this.kind,
+    orderedAt: orderedAt ?? this.orderedAt,
   );
   MediaListRow copyWithCompanion(MediaListsCompanion data) {
     return MediaListRow(
@@ -378,6 +414,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
           ? data.channelAvatar.value
           : this.channelAvatar,
       kind: data.kind.present ? data.kind.value : this.kind,
+      orderedAt: data.orderedAt.present ? data.orderedAt.value : this.orderedAt,
     );
   }
 
@@ -391,7 +428,8 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
           ..write('channelPubkey: $channelPubkey, ')
           ..write('channelAuthor: $channelAuthor, ')
           ..write('channelAvatar: $channelAvatar, ')
-          ..write('kind: $kind')
+          ..write('kind: $kind, ')
+          ..write('orderedAt: $orderedAt')
           ..write(')'))
         .toString();
   }
@@ -406,6 +444,7 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     channelAuthor,
     channelAvatar,
     kind,
+    orderedAt,
   );
   @override
   bool operator ==(Object other) =>
@@ -418,7 +457,8 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
           other.channelPubkey == this.channelPubkey &&
           other.channelAuthor == this.channelAuthor &&
           other.channelAvatar == this.channelAvatar &&
-          other.kind == this.kind);
+          other.kind == this.kind &&
+          other.orderedAt == this.orderedAt);
 }
 
 class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
@@ -430,6 +470,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
   final Value<String?> channelAuthor;
   final Value<String?> channelAvatar;
   final Value<String?> kind;
+  final Value<int> orderedAt;
   final Value<int> rowid;
   const MediaListsCompanion({
     this.id = const Value.absent(),
@@ -440,6 +481,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     this.channelAuthor = const Value.absent(),
     this.channelAvatar = const Value.absent(),
     this.kind = const Value.absent(),
+    this.orderedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   MediaListsCompanion.insert({
@@ -451,6 +493,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     this.channelAuthor = const Value.absent(),
     this.channelAvatar = const Value.absent(),
     this.kind = const Value.absent(),
+    this.orderedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        title = Value(title),
@@ -464,6 +507,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     Expression<String>? channelAuthor,
     Expression<String>? channelAvatar,
     Expression<String>? kind,
+    Expression<int>? orderedAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -475,6 +519,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
       if (channelAuthor != null) 'channel_author': channelAuthor,
       if (channelAvatar != null) 'channel_avatar': channelAvatar,
       if (kind != null) 'kind': kind,
+      if (orderedAt != null) 'ordered_at': orderedAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -488,6 +533,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     Value<String?>? channelAuthor,
     Value<String?>? channelAvatar,
     Value<String?>? kind,
+    Value<int>? orderedAt,
     Value<int>? rowid,
   }) {
     return MediaListsCompanion(
@@ -499,6 +545,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
       channelAuthor: channelAuthor ?? this.channelAuthor,
       channelAvatar: channelAvatar ?? this.channelAvatar,
       kind: kind ?? this.kind,
+      orderedAt: orderedAt ?? this.orderedAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -530,6 +577,9 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     if (kind.present) {
       map['kind'] = Variable<String>(kind.value);
     }
+    if (orderedAt.present) {
+      map['ordered_at'] = Variable<int>(orderedAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -547,6 +597,7 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
           ..write('channelAuthor: $channelAuthor, ')
           ..write('channelAvatar: $channelAvatar, ')
           ..write('kind: $kind, ')
+          ..write('orderedAt: $orderedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4005,6 +4056,7 @@ typedef $$MediaListsTableCreateCompanionBuilder =
       Value<String?> channelAuthor,
       Value<String?> channelAvatar,
       Value<String?> kind,
+      Value<int> orderedAt,
       Value<int> rowid,
     });
 typedef $$MediaListsTableUpdateCompanionBuilder =
@@ -4017,6 +4069,7 @@ typedef $$MediaListsTableUpdateCompanionBuilder =
       Value<String?> channelAuthor,
       Value<String?> channelAvatar,
       Value<String?> kind,
+      Value<int> orderedAt,
       Value<int> rowid,
     });
 
@@ -4089,6 +4142,11 @@ class $$MediaListsTableFilterComposer
 
   ColumnFilters<String> get kind => $composableBuilder(
     column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get orderedAt => $composableBuilder(
+    column: $table.orderedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4166,6 +4224,11 @@ class $$MediaListsTableOrderingComposer
     column: $table.kind,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get orderedAt => $composableBuilder(
+    column: $table.orderedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$MediaListsTableAnnotationComposer
@@ -4206,6 +4269,9 @@ class $$MediaListsTableAnnotationComposer
 
   GeneratedColumn<String> get kind =>
       $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<int> get orderedAt =>
+      $composableBuilder(column: $table.orderedAt, builder: (column) => column);
 
   Expression<T> mediaEntriesRefs<T extends Object>(
     Expression<T> Function($$MediaEntriesTableAnnotationComposer a) f,
@@ -4269,6 +4335,7 @@ class $$MediaListsTableTableManager
                 Value<String?> channelAuthor = const Value.absent(),
                 Value<String?> channelAvatar = const Value.absent(),
                 Value<String?> kind = const Value.absent(),
+                Value<int> orderedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MediaListsCompanion(
                 id: id,
@@ -4279,6 +4346,7 @@ class $$MediaListsTableTableManager
                 channelAuthor: channelAuthor,
                 channelAvatar: channelAvatar,
                 kind: kind,
+                orderedAt: orderedAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4291,6 +4359,7 @@ class $$MediaListsTableTableManager
                 Value<String?> channelAuthor = const Value.absent(),
                 Value<String?> channelAvatar = const Value.absent(),
                 Value<String?> kind = const Value.absent(),
+                Value<int> orderedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MediaListsCompanion.insert(
                 id: id,
@@ -4301,6 +4370,7 @@ class $$MediaListsTableTableManager
                 channelAuthor: channelAuthor,
                 channelAvatar: channelAvatar,
                 kind: kind,
+                orderedAt: orderedAt,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

@@ -5,6 +5,7 @@ import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqlite3/sqlite3.dart' hide Row;
 
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/models/media_list.dart';
@@ -13,6 +14,7 @@ import 'package:watchit/services/library_arrangement.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata.dart';
 import 'package:watchit/services/metadata_service.dart';
+import 'package:watchit/services/my_watch_api.dart' show combinedSyncDoc;
 import 'package:watchit/services/my_watch_sync.dart';
 import 'package:watchit/services/organize.dart';
 import 'package:watchit/services/user_metadata.dart';
@@ -420,6 +422,248 @@ void main() {
       expect(created.isPlaylist, isTrue);
       expect(created.entries.single.renamedAt, 9);
       expect(reconcileHomeSections(const [], merge.lists), hasLength(4));
+    });
+  });
+
+  group('order sync', () {
+    MediaEntry plain(int n) =>
+        MediaEntry(name: 'T$n.mp3', address: addr(n), addedAt: 5);
+
+    Map<String, dynamic> orderDoc(int orderMs, Map<int, int> posByN,
+            {String title = 'Faves'}) =>
+        {
+          'v': 1,
+          'updated_ms': 1,
+          'lists': [
+            {
+              'title': title,
+              'kind': kListKindPlaylist,
+              'order_ms': orderMs,
+              'entries': [
+                for (final e in posByN.entries)
+                  {
+                    'name': 'T${e.key}.mp3',
+                    'address': addr(e.key),
+                    'added_ms': 5,
+                    'pos': e.value,
+                  },
+              ],
+            },
+          ],
+        };
+
+    test('buildDoc: a reordered playlist carries order_ms + per-entry '
+        'pos (full-playlist indices, surviving a trimmed window); '
+        'unstamped playlists and plain lists carry neither', () {
+      final faves = MediaList(
+          id: 'p',
+          title: 'Faves',
+          kind: kListKindPlaylist,
+          orderedAt: 77,
+          entries: [plain(1), plain(2), plain(3)]);
+      final doc = MyWatchSync.buildDoc(
+        lists: [
+          faves,
+          // A plain list never emits order keys, reorder stamp or not.
+          MediaList(id: 'm', title: 'Music', orderedAt: 88, entries: [
+            plain(8),
+          ]),
+          MediaList(
+              id: 'q',
+              title: 'Quiet',
+              kind: kListKindPlaylist,
+              entries: [plain(9)]),
+        ],
+        tombstones: const {},
+        watchStates: const [],
+        nowMs: 10,
+      );
+      final lists = doc['lists'] as List;
+      final favesDoc = lists[0] as Map<String, dynamic>;
+      expect(favesDoc['order_ms'], 77);
+      expect(
+          [for (final e in favesDoc['entries'] as List) (e as Map)['pos']],
+          [0, 1, 2]);
+      final musicDoc = lists[1] as Map<String, dynamic>;
+      expect(musicDoc.containsKey('order_ms'), isFalse);
+      expect(
+          (musicDoc['entries'] as List).single, isNot(contains('pos')));
+      expect((lists[2] as Map).containsKey('order_ms'), isFalse);
+
+      // A rotation window keeps the FULL-playlist indices: cap 2 at
+      // offset 1 ships T2/T3 still marked pos 1/2.
+      final windowed = MyWatchSync.buildDoc(
+        lists: [faves],
+        tombstones: const {},
+        watchStates: const [],
+        nowMs: 10,
+        entryCap: 2,
+        entryOffset: 1,
+      );
+      final w = (windowed['lists'] as List)[0] as Map<String, dynamic>;
+      expect(
+          [for (final e in w['entries'] as List) (e as Map)['pos']], [1, 2]);
+    });
+
+    test('a remote order with a newer stamp reorders the held playlist; '
+        'an older one never does', () {
+      final local = MediaList(
+          id: 'p',
+          title: 'Faves',
+          kind: kListKindPlaylist,
+          entries: [plain(1), plain(2), plain(3)]);
+      var merge = MyWatchSync.mergeRemoteDocs(
+        lists: [local],
+        tombstones: const {},
+        remoteDocs: [
+          orderDoc(50, {3: 0, 1: 1, 2: 2}),
+        ],
+      );
+      expect(merge.changed, isTrue);
+      expect(merge.listsReordered, 1);
+      expect([for (final e in merge.lists.single.entries) e.address],
+          [addr(3), addr(1), addr(2)]);
+      expect(merge.lists.single.orderedAt, 50);
+
+      // Local reorder is newer: the remote order is ignored.
+      merge = MyWatchSync.mergeRemoteDocs(
+        lists: [local.copyWith(orderedAt: 60)],
+        tombstones: const {},
+        remoteDocs: [
+          orderDoc(50, {3: 0, 1: 1, 2: 2}),
+        ],
+      );
+      expect(merge.changed, isFalse);
+      expect(merge.listsReordered, 0);
+      expect([for (final e in merge.lists.single.entries) e.address],
+          [addr(1), addr(2), addr(3)]);
+    });
+
+    test('identical stamps tie-break on the ordered address bytes — '
+        'both devices converge on one order', () {
+      MediaList held(List<int> order) => MediaList(
+          id: 'p',
+          title: 'Faves',
+          kind: kListKindPlaylist,
+          orderedAt: 70,
+          entries: [for (final n in order) plain(n)]);
+      // Device A holds [1,2]; B's [2,1] joins to the larger key → adopts.
+      final a = MyWatchSync.mergeRemoteDocs(
+          lists: [held([1, 2])],
+          tombstones: const {},
+          remoteDocs: [orderDoc(70, {2: 0, 1: 1})]);
+      expect([for (final e in a.lists.single.entries) e.address],
+          [addr(2), addr(1)]);
+      // Device B holds [2,1]; A's [1,2] joins smaller → keeps its own.
+      final b = MyWatchSync.mergeRemoteDocs(
+          lists: [held([2, 1])],
+          tombstones: const {},
+          remoteDocs: [orderDoc(70, {1: 0, 2: 1})]);
+      expect([for (final e in b.lists.single.entries) e.address],
+          [addr(2), addr(1)]);
+    });
+
+    test('a partial remote doc orders the entries it mentions (new ones '
+        'included); unmentioned entries keep their relative order after '
+        'them', () {
+      final local = MediaList(
+          id: 'p',
+          title: 'Faves',
+          kind: kListKindPlaylist,
+          entries: [plain(1), plain(2), plain(3)]);
+      // addr(4) is new here — it lands via the membership merge, then
+      // the order pass slots it by pos.
+      final merge = MyWatchSync.mergeRemoteDocs(
+        lists: [local],
+        tombstones: const {},
+        remoteDocs: [
+          orderDoc(50, {4: 0, 2: 1}),
+        ],
+      );
+      expect(merge.entriesAdded, 1);
+      expect(merge.listsReordered, 1);
+      expect([for (final e in merge.lists.single.entries) e.address],
+          [addr(4), addr(2), addr(1), addr(3)]);
+      expect(merge.lists.single.orderedAt, 50);
+    });
+
+    test('a plain list never adopts remote order keys', () {
+      final local = MediaList(
+          id: 'm', title: 'Faves', entries: [plain(1), plain(2)]);
+      final doc = orderDoc(50, {2: 0, 1: 1});
+      ((doc['lists'] as List)[0] as Map).remove('kind');
+      final merge = MyWatchSync.mergeRemoteDocs(
+          lists: [local], tombstones: const {}, remoteDocs: [doc]);
+      expect(merge.listsReordered, 0);
+      expect([for (final e in merge.lists.single.entries) e.address],
+          [addr(1), addr(2)]);
+    });
+
+    test('combinedSyncDoc folds order_ms across parts (newest wins)',
+        () {
+      final main = orderDoc(50, {1: 0});
+      final part = orderDoc(60, {2: 1});
+      final folded = combinedSyncDoc(main, [part]);
+      final list = (folded['lists'] as List).single as Map<String, dynamic>;
+      expect(list['order_ms'], 60);
+      expect((list['entries'] as List), hasLength(2));
+    });
+
+    test('v14 → v15 migration adds the order stamp to existing lists',
+        () async {
+      final dir = Directory.systemTemp.createTempSync('wi-order-mig');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final file = File('${dir.path}/watchit.sqlite');
+      // Hand-build the alpha.97-era (schema v14) list tables.
+      final raw = sqlite3.open(file.path);
+      raw.execute('''
+        CREATE TABLE media_lists (
+          id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          position INTEGER NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          channel_pubkey TEXT,
+          channel_author TEXT,
+          channel_avatar TEXT,
+          kind TEXT,
+          PRIMARY KEY (id));
+        CREATE TABLE media_entries (
+          entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          list_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          address TEXT NOT NULL,
+          position INTEGER NOT NULL,
+          added_at INTEGER NOT NULL DEFAULT 0,
+          size_bytes INTEGER,
+          video_info TEXT,
+          renamed_at INTEGER NOT NULL DEFAULT 0);
+        INSERT INTO media_lists
+          VALUES ('p', 'Faves', 0, 1, NULL, NULL, NULL, 'playlist');
+        PRAGMA user_version = 14;
+      ''');
+      raw.close();
+      await LibraryStore.useForTesting(
+          AppDatabase.forTesting(NativeDatabase(file)));
+      final loaded = await LibraryStore.load();
+      expect(loaded.single.isPlaylist, isTrue);
+      expect(loaded.single.orderedAt, isNull);
+      await LibraryStore.save([loaded.single.copyWith(orderedAt: 5)]);
+      expect((await LibraryStore.load()).single.orderedAt, 5);
+    });
+
+    test('orderedAt round-trips through the store', () async {
+      await LibraryStore.save([
+        MediaList(
+            id: 'p',
+            title: 'Faves',
+            kind: kListKindPlaylist,
+            orderedAt: 123,
+            entries: [plain(1)]),
+        MediaList(id: 'm', title: 'Music', entries: [plain(2)]),
+      ]);
+      final loaded = await LibraryStore.load();
+      expect(loaded[0].orderedAt, 123);
+      expect(loaded[1].orderedAt, isNull);
     });
   });
 
