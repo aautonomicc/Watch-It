@@ -176,6 +176,42 @@ void main() {
     expect(find.byIcon(Icons.skip_next), findsOneWidget);
   });
 
+  testWidgets('drag-reorder persists the order AND stamps orderedAt for '
+      'order sync; removal keeps the stamp', (tester) async {
+    await seed();
+    await pumpPlaylist(tester);
+
+    // Drag the first row (Two) below the second (One) by its handle —
+    // stepped moves with pumps in between so the reorder logic sees the
+    // crossing; total distance = 1.5× the real row spacing.
+    final rowGap = tester.getTopLeft(find.text('One')).dy -
+        tester.getTopLeft(find.text('Two')).dy;
+    final handle = find.byIcon(Icons.drag_indicator).first;
+    final gesture = await tester.startGesture(tester.getCenter(handle));
+    await tester.pump(const Duration(milliseconds: 100));
+    for (var i = 0; i < 3; i++) {
+      await gesture.moveBy(Offset(0, rowGap / 2));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    var pl = (await LibraryStore.load()).firstWhere((l) => l.id == 'p');
+    expect([for (final e in pl.entries) e.address], [_addr(1), _addr(2)]);
+    final stamp = pl.orderedAt;
+    expect(stamp, isNotNull);
+
+    // Removing a track never re-stamps — the remaining rows' relative
+    // order is unchanged and a newer remote reorder must stay adoptable.
+    await tester.tap(find.byTooltip('Track menu').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove from playlist'));
+    await tester.pumpAndSettle();
+    pl = (await LibraryStore.load()).firstWhere((l) => l.id == 'p');
+    expect(pl.entries, hasLength(1));
+    expect(pl.orderedAt, stamp);
+  });
+
   testWidgets('row menu: Remove from playlist keeps the track in the '
       'library', (tester) async {
     await seed();

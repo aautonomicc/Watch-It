@@ -233,11 +233,23 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     await _playFrom(entry, playlist.entries);
   }
 
-  Future<void> _persistOrder(List<MediaEntry> entries) async {
+  /// [stampOrder] marks a deliberate reorder (drag) so My W@tch sync can
+  /// merge play order newest-stamp-wins. Removal keeps the old stamp —
+  /// the remaining rows' relative order is unchanged, and stamping there
+  /// could clobber a newer reorder arriving from a linked device.
+  Future<void> _persistOrder(List<MediaEntry> entries,
+      {bool stampOrder = false}) async {
     final lists = await LibraryStore.load();
     final updated = [
       for (final l in lists)
-        l.id == widget.playlistId ? l.copyWith(entries: entries) : l,
+        l.id == widget.playlistId
+            ? l.copyWith(
+                entries: entries,
+                orderedAt: stampOrder
+                    ? DateTime.now().millisecondsSinceEpoch
+                    : null,
+              )
+            : l,
     ];
     await LibraryStore.save(updated);
     await _reload();
@@ -663,7 +675,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                     final list = [...entries];
                     final moved = list.removeAt(oldIndex);
                     list.insert(newIndex, moved);
-                    unawaited(_persistOrder(list));
+                    unawaited(_persistOrder(list, stampOrder: true));
                   },
                   itemBuilder: (context, i) =>
                       _trackRow(t, entries[i], i),

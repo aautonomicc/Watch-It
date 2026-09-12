@@ -226,6 +226,8 @@ class MyWatchSync {
       if (result.entriesAdded > 0) '${result.entriesAdded} added',
       if (result.entriesRemoved > 0) '${result.entriesRemoved} removed',
       if (result.entriesRenamed > 0) '${result.entriesRenamed} renamed',
+      if (result.listsReordered > 0)
+        '${result.listsReordered} playlist(s) reordered',
       if (result.watchStatesApplied > 0)
         '${result.watchStatesApplied} watch position(s) updated',
       if (result.mapsImported > 0) '${result.mapsImported} map(s) fetched',
@@ -361,6 +363,7 @@ class MyWatchSync {
       entriesAdded: merge.entriesAdded,
       entriesRemoved: merge.entriesRemoved,
       entriesRenamed: merge.entriesRenamed,
+      listsReordered: merge.listsReordered,
     );
     if (merge.changed) {
       lists = merge.lists;
@@ -1342,18 +1345,25 @@ class MyWatchSync {
       // copies of their content.
       if (l.isChannel) continue;
       final title = l.title.toLowerCase();
-      final take = <MediaEntry>[];
-      for (final e in l.entries) {
-        if (inWindow()) take.add(e);
+      final take = <(int, MediaEntry)>[];
+      for (final (idx, e) in l.entries.indexed) {
+        if (inWindow()) take.add((idx, e));
         globalIdx++;
       }
+      // A playlist the user has deliberately reordered carries its play
+      // order: order_ms (the reorder stamp, merged newest-wins) plus
+      // each entry's index in the FULL playlist — the doc's array order
+      // is not authoritative (rotation windows and part folding both
+      // reshuffle it). Old builds ignore both keys.
+      final orderMs = l.isPlaylist ? (l.orderedAt ?? 0) : 0;
       listDocs.add({
         'title': l.title,
         // Old builds ignore the key and merge the playlist as a plain
         // list; current builds recreate it as a playlist.
         if (l.isPlaylist) 'kind': kListKindPlaylist,
+        if (orderMs != 0) 'order_ms': orderMs,
         'entries': [
-          for (final e in take)
+          for (final (idx, e) in take)
             {
               'name': e.name,
               'address': e.address.toLowerCase(),
@@ -1364,6 +1374,7 @@ class MyWatchSync {
               // Only renamed entries pay the bytes; old builds ignore
               // the key (they read name/address/added_ms/size/video).
               if ((e.renamedAt ?? 0) != 0) 'renamed_ms': e.renamedAt,
+              if (orderMs != 0) 'pos': idx,
             },
         ],
         if (tombstones[title]?.isNotEmpty ?? false)
@@ -1735,6 +1746,7 @@ class MyWatchSync {
     var added = 0;
     var removed = 0;
     var renamed = 0;
+    var reordered = 0;
 
     int indexOf(String titleLower) =>
         out.indexWhere((l) => l.title.toLowerCase() == titleLower);
@@ -1824,6 +1836,58 @@ class MyWatchSync {
           changed = true;
           added++;
         }
+
+        // Play order: a reordered playlist's doc carries order_ms (the
+        // reorder stamp) + per-entry `pos` (index in the sender's full
+        // playlist). Newest stamp wins, mirroring the rename merge;
+        // identical stamps tie-break on the ordered address bytes
+        // (larger wins) so devices converge on one order. Entries the
+        // remote doc doesn't mention (dropped by a rotation window, or
+        // added here since) keep their relative order after the
+        // remote-ordered block.
+        final orderMs = rl['order_ms'] as int? ?? 0;
+        if (orderMs > 0) {
+          final i = indexOf(titleLower);
+          if (i != -1 && out[i].isPlaylist && !out[i].isChannel) {
+            final posByAddr = <String, int>{};
+            for (final re in rl['entries'] as List? ?? const []) {
+              if (re is! Map<String, dynamic>) continue;
+              final addr = (re['address'] as String? ?? '').toLowerCase();
+              final pos = re['pos'];
+              if (pos is int && RegExp(r'^[0-9a-f]{64}$').hasMatch(addr)) {
+                posByAddr[addr] = pos;
+              }
+            }
+            final localMs = out[i].orderedAt ?? 0;
+            if (posByAddr.isNotEmpty && orderMs >= localMs) {
+              final inRemote = <MediaEntry>[];
+              final rest = <MediaEntry>[];
+              for (final e in out[i].entries) {
+                (posByAddr.containsKey(e.address.toLowerCase())
+                        ? inRemote
+                        : rest)
+                    .add(e);
+              }
+              inRemote.sort((a, b) => posByAddr[a.address.toLowerCase()]!
+                  .compareTo(posByAddr[b.address.toLowerCase()]!));
+              final proposed = [...inRemote, ...rest];
+              String key(List<MediaEntry> es) =>
+                  es.map((e) => e.address.toLowerCase()).join(',');
+              final orderDiffers = key(proposed) != key(out[i].entries);
+              final adopt = orderMs > localMs ||
+                  (orderDiffers &&
+                      key(proposed).compareTo(key(out[i].entries)) > 0);
+              if (adopt && (orderDiffers || orderMs > localMs)) {
+                out[i] = out[i].copyWith(
+                  entries: orderDiffers ? proposed : null,
+                  orderedAt: orderMs,
+                );
+                changed = true;
+                if (orderDiffers) reordered++;
+              }
+            }
+          }
+        }
       }
     }
 
@@ -1860,6 +1924,7 @@ class MyWatchSync {
       entriesAdded: added,
       entriesRemoved: removed,
       entriesRenamed: renamed,
+      listsReordered: reordered,
     );
   }
 
@@ -2027,6 +2092,7 @@ class SyncMergeResult {
     required this.entriesAdded,
     required this.entriesRemoved,
     this.entriesRenamed = 0,
+    this.listsReordered = 0,
   });
 
   final List<MediaList> lists;
@@ -2038,6 +2104,10 @@ class SyncMergeResult {
   /// Held entries whose name was adopted from a remote rename
   /// (newest-name-wins on the `renamed_ms` stamp).
   final int entriesRenamed;
+
+  /// Playlists whose play order was adopted from a remote reorder
+  /// (newest-order-wins on the `order_ms` stamp).
+  final int listsReordered;
 }
 
 /// One remote device's user-edit row after the cross-device
@@ -2187,6 +2257,7 @@ class SyncCycleResult {
     this.entriesAdded = 0,
     this.entriesRemoved = 0,
     this.entriesRenamed = 0,
+    this.listsReordered = 0,
     this.watchStatesApplied = 0,
     this.mapsImported = 0,
     this.detailsApplied = 0,
@@ -2198,6 +2269,7 @@ class SyncCycleResult {
   final int entriesAdded;
   final int entriesRemoved;
   final int entriesRenamed;
+  final int listsReordered;
   final int watchStatesApplied;
   final int mapsImported;
   final int detailsApplied;
@@ -2217,6 +2289,7 @@ class SyncCycleResult {
         entriesAdded: entriesAdded,
         entriesRemoved: entriesRemoved,
         entriesRenamed: entriesRenamed,
+        listsReordered: listsReordered,
         watchStatesApplied: watchStatesApplied ?? this.watchStatesApplied,
         mapsImported: mapsImported ?? this.mapsImported,
         detailsApplied: detailsApplied ?? this.detailsApplied,

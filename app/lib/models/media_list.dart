@@ -92,6 +92,7 @@ class MediaList {
     this.channelAuthor,
     this.channelAvatar,
     this.kind,
+    this.orderedAt,
   });
 
   final String id;
@@ -121,6 +122,11 @@ class MediaList {
   /// media list.
   final String? kind;
 
+  /// When the user last reordered this list (epoch ms; null/0 = never).
+  /// Stamped by the playlist page's drag-reorder; My W@tch sync merges
+  /// play order newest-stamp-wins across linked devices.
+  final int? orderedAt;
+
   bool get isChannel => channelPubkey != null;
   bool get isPlaylist => kind == kListKindPlaylist;
 
@@ -128,6 +134,7 @@ class MediaList {
     String? title,
     List<MediaEntry>? entries,
     bool? enabled,
+    int? orderedAt,
   }) =>
       MediaList(
         id: id,
@@ -138,6 +145,7 @@ class MediaList {
         channelAuthor: channelAuthor,
         channelAvatar: channelAvatar,
         kind: kind,
+        orderedAt: orderedAt ?? this.orderedAt,
       );
 
   Map<String, dynamic> toJson() => {
@@ -149,6 +157,7 @@ class MediaList {
         if (channelAuthor != null) 'channelAuthor': channelAuthor,
         if (channelAvatar != null) 'channelAvatar': channelAvatar,
         if (kind != null) 'kind': kind,
+        if (orderedAt != null && orderedAt != 0) 'orderedAt': orderedAt,
       };
 
   factory MediaList.fromJson(Map<String, dynamic> json) => MediaList(
@@ -162,6 +171,7 @@ class MediaList {
         channelAuthor: json['channelAuthor'] as String?,
         channelAvatar: json['channelAvatar'] as String?,
         kind: json['kind'] as String?,
+        orderedAt: json['orderedAt'] as int?,
       );
 }
 

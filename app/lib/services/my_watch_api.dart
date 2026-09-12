@@ -205,6 +205,13 @@ Map<String, dynamic> combinedSyncDoc(
     if (existing['kind'] == null && raw['kind'] != null) {
       existing['kind'] = raw['kind'];
     }
+    // Playlist play-order stamp: parts of one publish share the same
+    // stamp, but tolerate drift by keeping the newest.
+    final rawOrder = raw['order_ms'];
+    final curOrder = existing['order_ms'];
+    if (rawOrder is int && (curOrder is! int || rawOrder > curOrder)) {
+      existing['order_ms'] = rawOrder;
+    }
   }
 
   for (final l in doc['lists'] as List? ?? const []) {
