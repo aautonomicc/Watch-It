@@ -65,6 +65,28 @@ void main() {
       expect(store.profiles, hasLength(1));
     });
 
+    test('profile ids never collide, even minted in the same millisecond',
+        () async {
+      // The clock-only id ('p' + epoch-ms base36) collided whenever two
+      // profiles were created inside one millisecond — back-to-back
+      // creates in tests, several profiles in one family import — and a
+      // duplicate id violates the primary key AND merges watch
+      // histories. The entropy suffix makes that impossible.
+      final ids = {for (var i = 0; i < 500; i++) newProfileId()};
+      expect(ids, hasLength(500));
+      expect(ids.every((id) => RegExp(r'^p[0-9a-z]+$').hasMatch(id)),
+          isTrue);
+
+      // And the store level: rapid back-to-back creates all land.
+      final store = ProfileStore.instance;
+      await store.ensureLoaded();
+      for (var i = 0; i < 4; i++) {
+        await store.create(name: 'Kid $i', kind: ProfileKind.kid);
+      }
+      expect(store.profiles, hasLength(5)); // admin + 4
+      expect(store.profiles.map((p) => p.id).toSet(), hasLength(5));
+    });
+
     test('auto-login profile signs in at launch; else the picker asks',
         () async {
       final store = ProfileStore.instance;
