@@ -40,8 +40,6 @@ TV text scaling is at least 1.15; larger accessibility text scaling is retained.
 The optional Grove palette uses soft green surfaces and retains W@tch blue,
 its wordmark and the separate amber identity for public channels. It applies
 in dark mode and is off by default; phone/profile appearance is unchanged.
-The palette was developed with feedback from the BNR/skaists independent
-validator, rather than replacing the upstream product identity.
 
 ## Audio and captions
 
@@ -66,9 +64,6 @@ Captions sit above the transport while controls are visible, then return toward
 the bottom of the picture when controls hide. Back closes the menu and returns
 focus to Play/Pause. An existing next-episode countdown waits while the menu is
 open so a picked file is not inadvertently attached to the next item.
-
-See [the language and playback pilot](LANGUAGE-PLAYBACK-PILOT.md) for labelled
-test captions and the distinction between playback tests and speech assessment.
 
 ## Voice search
 
