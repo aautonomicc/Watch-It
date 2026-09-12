@@ -5,6 +5,11 @@ Linux AppImage. Its default is the existing ARM64 release. It selects the same
 ABI for the embedded Rust client, Flutter and Gradle packaging, then checks the
 resulting APK rather than relying on its filename.
 
+The official release pipeline (`scripts/release_build.sh`) builds a single fat
+APK containing both `armeabi-v7a` and `arm64-v8a` since alpha.98, so release
+APKs install on devices that expose only 32-bit app ABIs (Fire TV Sticks, the
+Google TV Streamer). The device picks its own ABI at install time.
+
 ## Toolchain
 
 Use Flutter 3.44.6 (Dart 3.12.2), JDK 17, Android platform 36, build-tools 36.0.0,
