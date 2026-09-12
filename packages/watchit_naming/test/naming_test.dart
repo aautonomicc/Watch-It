@@ -442,4 +442,56 @@ void main() {
           isNull);
     });
   });
+
+  group('unalbumedMusicFileName (remove-from-album edit)', () {
+    test('track becomes plain Title.ext', () {
+      expect(
+          unalbumedMusicFileName(
+              'The Rolling Stones - Let It Bleed (1969) - 01 Gimme Shelter.mp3'),
+          'Gimme Shelter.mp3');
+    });
+
+    test('mbid tag is dropped with the album identity', () {
+      final n = unalbumedMusicFileName(
+          'A - B (2001) - 03 Song {mbid-499485cb-a0e4-3a91-8beb-6d8836d61ce9}.flac')!;
+      expect(n, 'Song.flac');
+      final p = parseMediaName(n);
+      expect(p.isTrack, isFalse);
+      expect(p.isAudio, isTrue);
+      expect(p.releaseMbid, isNull);
+    });
+
+    test('title override wins (custom display title made real)', () {
+      expect(
+          unalbumedMusicFileName('A - B - 05 Wrong Name.mp3',
+              title: 'Right Name'),
+          'Right Name.mp3');
+    });
+
+    test('multi-disc marker and extension survive', () {
+      expect(unalbumedMusicFileName('A - B (1999) - 2-03 Song.opus'),
+          'Song.opus');
+    });
+
+    test('result parses as unsorted audio (never a track again)', () {
+      final n = unalbumedMusicFileName('A - B - 07 05 Loving Cup.mp3')!;
+      final p = parseMediaName(n);
+      expect(p.isAudio, isTrue);
+      expect(p.isTrack, isFalse);
+    });
+
+    test('non-track, empty title, and track-shaped title refuse', () {
+      expect(unalbumedMusicFileName('Loose Song.mp3'), isNull);
+      expect(
+          unalbumedMusicFileName('The.Movie.2024.1080p.mkv'), isNull);
+      expect(
+          unalbumedMusicFileName('A - B - 01 Song.mp3', title: '  ??  '),
+          isNull);
+      // A pathological title that would re-create the track shape.
+      expect(
+          unalbumedMusicFileName('A - B - 01 Song.mp3',
+              title: 'X - Y - 01 Z'),
+          isNull);
+    });
+  });
 }

@@ -7,6 +7,7 @@ import '../services/library_store.dart';
 import '../services/metadata.dart';
 import '../services/organize.dart';
 import '../theme/tokens.dart';
+import '../widgets/organize_dialogs.dart';
 import '../widgets/playlist_picker.dart';
 import 'detail_screen.dart';
 
@@ -49,7 +50,7 @@ class _NeedsSortingScreenState extends State<NeedsSortingScreen> {
       [for (final i in _selected.toList()..sort()) _entries[i]];
 
   Future<void> _moveToAlbum() async {
-    final input = await _askAlbum();
+    final input = await askAlbumDialog(context, count: _selected.length);
     if (input == null || !mounted) return;
     setState(() => _working = true);
     final plan = await planOrganize(
@@ -64,7 +65,7 @@ class _NeedsSortingScreenState extends State<NeedsSortingScreen> {
       _snack(plan.error!);
       return;
     }
-    final confirmed = await _confirmPlan(plan.items);
+    final confirmed = await confirmOrganizePlanDialog(context, plan.items);
     if (confirmed != true || !mounted) return;
     setState(() => _working = true);
     final n = await applyOrganize(plan.items);
@@ -77,146 +78,6 @@ class _NeedsSortingScreenState extends State<NeedsSortingScreen> {
         ? '1 track moved into "${input.album}".'
         : '$n tracks moved into "${input.album}".');
     await _reload();
-  }
-
-  /// Artist / Album / Year, asked once for the whole selection.
-  Future<({String artist, String album, int? year})?> _askAlbum() {
-    final artist = TextEditingController();
-    final album = TextEditingController();
-    final year = TextEditingController();
-    final n = _selected.length;
-    return showDialog<({String artist, String album, int? year})>(
-      context: context,
-      builder: (context) {
-        final t = WiTokens.of(context);
-        String? error;
-        return StatefulBuilder(builder: (context, setDialogState) {
-          return AlertDialog(
-            backgroundColor: t.ink2,
-            title: Text('Move ${n == 1 ? '1 file' : '$n files'} to album',
-                style: TextStyle(color: t.bone, fontSize: 16)),
-            content: SizedBox(
-              width: 380,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'The files are renamed into the album, numbered '
-                    'after its existing tracks. You\'ll see the new '
-                    'names before anything changes.',
-                    style:
-                        TextStyle(color: t.ash, fontSize: 12, height: 1.4),
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: artist,
-                    autofocus: true,
-                    style: TextStyle(color: t.bone, fontSize: 14),
-                    decoration: const InputDecoration(labelText: 'Artist'),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: album,
-                    style: TextStyle(color: t.bone, fontSize: 14),
-                    decoration: const InputDecoration(labelText: 'Album'),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: year,
-                    keyboardType: TextInputType.number,
-                    style: TextStyle(color: t.bone, fontSize: 14),
-                    decoration: const InputDecoration(
-                        labelText: 'Year (optional)'),
-                  ),
-                  if (error != null) ...[
-                    const SizedBox(height: 10),
-                    Text(error!,
-                        style: TextStyle(color: t.rust, fontSize: 12)),
-                  ],
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: Text('Cancel', style: TextStyle(color: t.ash)),
-              ),
-              FilledButton(
-                onPressed: () {
-                  final a = artist.text.trim();
-                  final b = album.text.trim();
-                  final yText = year.text.trim();
-                  final y = yText.isEmpty ? null : int.tryParse(yText);
-                  if (a.isEmpty || b.isEmpty) {
-                    setDialogState(
-                        () => error = 'Artist and album are both needed.');
-                    return;
-                  }
-                  if (yText.isNotEmpty && y == null) {
-                    setDialogState(() => error = 'Year must be a number.');
-                    return;
-                  }
-                  Navigator.of(context)
-                      .pop((artist: a, album: b, year: y));
-                },
-                child: const Text('Preview new names'),
-              ),
-            ],
-          );
-        });
-      },
-    );
-  }
-
-  /// The before → after preview — nothing is renamed until Apply.
-  Future<bool?> _confirmPlan(List<OrganizePlanItem> items) {
-    return showDialog<bool>(
-      context: context,
-      builder: (context) {
-        final t = WiTokens.of(context);
-        return AlertDialog(
-          backgroundColor: t.ink2,
-          title: Text('Rename ${items.length == 1 ? '1 file' : '${items.length} files'}?',
-              style: TextStyle(color: t.bone, fontSize: 16)),
-          content: SizedBox(
-            width: 480,
-            child: ListView(
-              shrinkWrap: true,
-              children: [
-                for (final it in items) ...[
-                  Text(it.entry.name,
-                      style: TextStyle(
-                          color: t.ash,
-                          fontSize: 11.5,
-                          fontFamily: wiMonoFamily,
-                          fontFamilyFallback: wiMonoFallback)),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 1, bottom: 8),
-                    child: Text('→  ${it.newName}',
-                        style: TextStyle(
-                            color: t.bone,
-                            fontSize: 11.5,
-                            fontFamily: wiMonoFamily,
-                            fontFamilyFallback: wiMonoFallback)),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: Text('Cancel', style: TextStyle(color: t.ash)),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Apply'),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   Future<void> _addToPlaylist() async {

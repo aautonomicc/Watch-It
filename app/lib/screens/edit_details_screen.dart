@@ -20,6 +20,7 @@ import '../services/season_grouping.dart'
 import '../services/user_metadata.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
+import '../widgets/organize_dialogs.dart';
 import '../widgets/poster_crop_dialog.dart';
 
 /// What one Edit details page edits — which cache key it writes and
@@ -353,7 +354,17 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
 
   Future<void> _save() async {
     final text = _title.text.trim();
-    if (_saving || (_hasTitleField && text.isEmpty)) return;
+    if (_saving) return;
+    // An empty required field is an ERROR, never a silent no-op — the
+    // old bail here made "I cleared the album name" look like a save
+    // that did nothing (2026-09-12 report).
+    if (_hasTitleField && text.isEmpty) {
+      _failSave(_musicScope
+          ? 'An album name is needed. To take a track OUT of its album, '
+              'use "Remove from album" instead.'
+          : 'A title is needed.');
+      return;
+    }
     setState(() => _saving = true);
     // Track/disc numbers are identity — they live in the file name, not
     // a metadata row — so changing them renames the library entry (and
@@ -612,6 +623,49 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
       artist: Value(customArtist),
       postersDirProvider: widget.postersDirProvider,
     );
+  }
+
+  /// "Move just this track to another album" — a single-track organize
+  /// move ([planOrganize]), unlike the Album field above which renames
+  /// the WHOLE album. The track is renamed into the target album,
+  /// numbered after its existing tracks (or at the typed number).
+  Future<void> _moveTrackToAlbum() async {
+    final input = await askAlbumDialog(context,
+        count: 1, initialArtist: _parsed.artist, askTrackNumber: true);
+    if (input == null || !mounted) return;
+    final plan = await planOrganize(
+      [widget.entry],
+      artist: input.artist,
+      album: input.album,
+      year: input.year,
+      tracks: input.track == null ? null : [input.track!],
+    );
+    if (plan.error != null) {
+      _failSave(plan.error!);
+      return;
+    }
+    if (!mounted) return;
+    final confirmed = await confirmOrganizePlanDialog(context, plan.items);
+    if (confirmed != true || !mounted) return;
+    await applyOrganize(plan.items,
+        postersDirProvider: widget.postersDirProvider);
+    if (mounted) Navigator.of(context).pop(true);
+  }
+
+  /// Take this one track OUT of its album: the file is renamed to just
+  /// its title (standalone audio, findable under Needs sorting) — the
+  /// inverse of the organize move. The rest of the album is untouched.
+  Future<void> _removeFromAlbum() async {
+    final confirmed = await confirmUnalbumDialog(context, 1);
+    if (confirmed != true || !mounted) return;
+    final plan = await planUnalbum([widget.entry]);
+    if (plan.error != null) {
+      _failSave(plan.error!);
+      return;
+    }
+    await applyUnalbum(plan.items,
+        postersDirProvider: widget.postersDirProvider);
+    if (mounted) Navigator.of(context).pop(true);
   }
 
   Future<void> _clearEdits() async {
@@ -884,6 +938,37 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
                       'into one).',
               style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
             ),
+            if (_trackScope) ...[
+              const SizedBox(height: 10),
+              // Single-track moves — the fields above act on the whole
+              // album; these two act on just this track.
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () => unawaited(_moveTrackToAlbum()),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: t.bone,
+                      side: BorderSide(color: t.ash),
+                    ),
+                    icon: const Icon(Icons.drive_file_move_outline,
+                        size: 18),
+                    label: const Text('Move only this track to '
+                        'another album…'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => unawaited(_removeFromAlbum()),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: t.bone,
+                      side: BorderSide(color: t.ash),
+                    ),
+                    icon: const Icon(Icons.playlist_remove, size: 18),
+                    label: const Text('Remove from album'),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 12),
           ] else if (_episodeScope) ...[
             // The show's title is edited from the show page; here the
@@ -1060,7 +1145,7 @@ Future<RenumberResult> renumberTrackEntry(
   // The per-track override row's key embeds the number — move it.
   final oldKey = trackLookupKey(parsed)!;
   if (oldKey != trackLookupKey(newParsed)) {
-    await _migrateTrackRow(
+    await migrateTrackRow(
         oldKey: oldKey,
         newParsed: newParsed,
         rowTitle: parsed.title,
@@ -1069,47 +1154,9 @@ Future<RenumberResult> renumberTrackEntry(
   return (newName: newName, error: null);
 }
 
-/// Move a per-track override row from [oldKey] to the renamed track's
-/// key, relabelling its `NN · Title` marker and carrying its artist
-/// credit and artwork — the row holds this track's own state, which
-/// must survive a rename.
-Future<void> _migrateTrackRow({
-  required String oldKey,
-  required ParsedName newParsed,
-  required String rowTitle,
-  Future<Directory> Function()? postersDirProvider,
-}) async {
-  final row = await metadataRowFor(oldKey);
-  if (row == null) return;
-  final customName = episodeNameFromLabel(row.episodeLabel);
-  final artist = row.artist;
-  // Read the artwork bytes BEFORE clearUserEdits deletes the old key's
-  // `user_` files.
-  Uint8List? posterBytes;
-  if (row.posterFile != null) {
-    final dir = await (postersDirProvider ?? defaultPostersDir)();
-    final f = File('${dir.path}/${row.posterFile}');
-    if (f.existsSync()) posterBytes = f.readAsBytesSync();
-  }
-  await clearUserEdits(oldKey, postersDirProvider: postersDirProvider);
-  if (customName == null && artist == null && posterBytes == null) return;
-  final newKey = trackLookupKey(newParsed)!;
-  Value<String?> poster = const Value.absent();
-  if (posterBytes != null) {
-    poster = Value(await saveUserPoster(newKey, posterBytes,
-        postersDirProvider: postersDirProvider));
-  }
-  await saveUserDetails(
-    lookupKey: newKey,
-    title: rowTitle,
-    episodeLabel: Value(customName == null
-        ? null
-        : '${newParsed.trackMarker} · $customName'),
-    posterFile: poster,
-    artist: Value(artist),
-    postersDirProvider: postersDirProvider,
-  );
-}
+// Per-track override rows migrate across renames via
+// [migrateTrackRow] (services/organize.dart) — shared with the
+// organize moves and the Edit-tracks renumber.
 
 /// An album-identity edit's outcome: the edited entry's renamed name,
 /// the album artwork file carried to the new album key (if any), or the
@@ -1239,7 +1286,7 @@ Future<AlbumRenameResult> renameTrackAlbum(
     final np = parseMediaName(r.value);
     final oldKey = trackLookupKey(op);
     if (oldKey == null || oldKey == trackLookupKey(np)) continue;
-    await _migrateTrackRow(
+    await migrateTrackRow(
         oldKey: oldKey,
         newParsed: np,
         rowTitle: np.title,

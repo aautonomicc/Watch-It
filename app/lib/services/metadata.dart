@@ -9,6 +9,7 @@ export 'package:watchit_naming/watchit_naming.dart'
         musicFileName,
         renumberedMusicFileName,
         realbumedMusicFileName,
+        unalbumedMusicFileName,
         sanitizeNamePart;
 
 /// Display metadata for a media entry: artwork, description, year,

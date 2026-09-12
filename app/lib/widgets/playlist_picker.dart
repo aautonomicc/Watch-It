@@ -2,15 +2,32 @@ import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
 import '../services/library_store.dart';
+import '../services/metadata.dart';
 import '../services/profiles.dart';
 import '../theme/tokens.dart';
 import '../screens/settings_screen.dart' show promptForText;
 
+/// A playlist's icon, derived from what it holds (2026-09-12 decision —
+/// content-derived, never typed at creation, so mixed playlists stay
+/// legal with no schema change): all-audio = the classic queue-music,
+/// all-video = the movie symbol, mixed = playlist-play. Empty playlists
+/// read as music until something video joins.
+IconData playlistContentIcon(MediaList playlist) {
+  var hasAudio = false;
+  var hasVideo = false;
+  for (final e in playlist.entries) {
+    parseMediaName(e.name).isAudio ? hasAudio = true : hasVideo = true;
+  }
+  if (hasVideo && !hasAudio) return Icons.movie_outlined;
+  if (hasVideo && hasAudio) return Icons.playlist_play;
+  return Icons.queue_music;
+}
+
 /// The shared "Add to playlist" flow: pick one of the user's playlists
-/// (or create a new one), then append [tracks] to it (deduplicated by
-/// address — a playlist holds each track once). Reports the outcome in
-/// a snackbar. Used by track/album/detail actions and the Needs-sorting
-/// screen.
+/// (or create a new one), then append [tracks] — audio or video, any
+/// mix — to it (deduplicated by address — a playlist holds each title
+/// once). Reports the outcome in a snackbar. Used by track/album/detail
+/// actions and the Needs-sorting screen.
 Future<void> addToPlaylistFlow(
     BuildContext context, List<MediaEntry> tracks) async {
   if (tracks.isEmpty) return;
@@ -31,7 +48,7 @@ Future<void> addToPlaylistFlow(
               onPressed: () => Navigator.of(context).pop(p),
               child: Row(
                 children: [
-                  Icon(Icons.queue_music, size: 18, color: t.accent),
+                  Icon(playlistContentIcon(p), size: 18, color: t.accent),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(p.title,
@@ -73,9 +90,9 @@ Future<void> addToPlaylistFlow(
     -1 => 'That playlist no longer exists.',
     0 => tracks.length == 1
         ? 'Already in "${playlist.title}".'
-        : 'All of those tracks are already in "${playlist.title}".',
-    1 => 'Added 1 track to "${playlist.title}".',
-    _ => 'Added $added tracks to "${playlist.title}".',
+        : 'All of those are already in "${playlist.title}".',
+    1 => 'Added 1 item to "${playlist.title}".',
+    _ => 'Added $added items to "${playlist.title}".',
   };
   ScaffoldMessenger.of(context)
       .showSnackBar(SnackBar(content: Text(message)));

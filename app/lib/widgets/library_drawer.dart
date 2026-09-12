@@ -15,6 +15,7 @@ import '../services/embedded_client.dart';
 import '../theme/tokens.dart';
 import 'channel_avatar.dart';
 import 'drawer_status.dart';
+import 'playlist_picker.dart' show playlistContentIcon;
 
 /// Width of the pinned side-panel variant of the drawer (a touch
 /// narrower than the modal drawer's 304 default — it shares the window
@@ -233,7 +234,10 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                         dense: true,
                         selected: list.id == widget.currentListId,
                         selectedTileColor: t.ink2,
-                        leading: Icon(Icons.queue_music,
+                        // Content-derived icon: queue-music for audio,
+                        // the movie symbol for all-video playlists,
+                        // playlist-play for mixed (2026-09-12).
+                        leading: Icon(playlistContentIcon(list),
                             color: list.id == widget.currentListId
                                 ? t.accent
                                 : t.boneDim,

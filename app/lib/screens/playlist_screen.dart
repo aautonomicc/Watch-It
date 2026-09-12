@@ -1,34 +1,46 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
+import '../services/app_settings.dart';
 import '../services/download_manager.dart';
+import '../services/embedded_client.dart';
 import '../services/favourites.dart';
 import '../services/library_store.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
+import '../services/network_policy.dart';
 import '../services/now_playing.dart';
 import '../services/play_queue.dart';
 import '../services/season_grouping.dart' show episodeNameFromLabel;
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
+import '../widgets/playlist_picker.dart' show playlistContentIcon;
 import '../widgets/seek_slider.dart';
 import 'detail_screen.dart';
+import 'player_screen.dart';
 import 'settings_screen.dart' show promptForText;
 
 /// A playlist's own page: collage cover, Play all / Shuffle / Add
-/// tracks, then the ordered track rows — drag to reorder (the order IS
-/// the play order), swipe the row menu to remove, ⓘ for the track's
-/// detail page. Playback runs inline through the same shared queue as
-/// the album page; mixes and standalone audio are first-class rows
-/// here. Renaming/deleting the playlist lives in the app-bar menu.
+/// media, then the ordered rows — drag to reorder (the order IS the
+/// play order), the row menu to remove, ⓘ/details for an item's own
+/// page. Playlists hold ANY library title (2026-09-12): audio-only
+/// playlists play inline through the same shared queue as the album
+/// page; a playlist holding any video plays through the full-screen
+/// [PlayerScreen] instead — each finished title rolls into the next via
+/// the Up-next flow (marathon playback), audio rows included, since
+/// PlayerScreen plays music too. Video rows show a poster thumb with
+/// the watch bar and resume where they left off.
+/// Renaming/deleting the playlist lives in the app-bar menu.
 class PlaylistScreen extends StatefulWidget {
   const PlaylistScreen({
     super.key,
     required this.playlistId,
     this.playerFactory,
     this.sourceOverride,
+    this.videoLauncherOverride,
   });
 
   final String playlistId;
@@ -37,6 +49,11 @@ class PlaylistScreen extends StatefulWidget {
   final AlbumAudioPlayer Function()? playerFactory;
   final ({String url, bool local})? Function(MediaEntry entry)?
       sourceOverride;
+
+  /// Test override replacing the [PlayerScreen] push (widget tests have
+  /// no native libmpv): receives the first entry and the play order.
+  final void Function(MediaEntry first, List<MediaEntry> order)?
+      videoLauncherOverride;
 
   @override
   State<PlaylistScreen> createState() => _PlaylistScreenState();
@@ -109,6 +126,113 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
+  /// Any video in the playlist flips the whole page to PlayerScreen
+  /// playback (marathon mode) — the inline audio queue would play a
+  /// movie sound-only.
+  bool get _hasVideo =>
+      _playlist?.entries.any((e) => !parseMediaName(e.name).isAudio) ??
+      false;
+
+  /// Playback source for [e]: the downloaded file when complete on
+  /// disk, else the embedded client's stream URL (the test override
+  /// wins).
+  ({String url, bool local})? _sourceFor(MediaEntry e) {
+    final override = widget.sourceOverride;
+    if (override != null) return override(e);
+    final local = DownloadManager.instance.localPathIfDone(e);
+    if (local != null) return (url: local, local: true);
+    final url = streamUrl(EmbeddedClient.baseUrl(), e);
+    return url == null ? null : (url: url, local: false);
+  }
+
+  /// The playlist entry after [current] in [order]; null at the end —
+  /// PlayerScreen's Up-next flow turns this into marathon playback.
+  static MediaEntry? _nextInOrder(
+      List<MediaEntry> order, MediaEntry current) {
+    final i = order.indexWhere(
+        (e) => e.address == current.address && e.name == current.name);
+    if (i < 0 || i + 1 >= order.length) return null;
+    return order[i + 1];
+  }
+
+  /// A row tap / Play all on a playlist with video: open [first] in the
+  /// full-screen PlayerScreen (resuming its saved position) with the
+  /// rest of [order] chained behind it via Up-next. Same streaming
+  /// gates as the detail page.
+  Future<void> _playFrom(MediaEntry first, List<MediaEntry> order) async {
+    final source = _sourceFor(first);
+    if (source == null) {
+      _snack('The built-in Autonomi client is not available.');
+      return;
+    }
+    if (!source.local) {
+      final gate = await streamingGateNow();
+      if (gate == StreamingGate.block) {
+        _snack("You're on mobile data — streaming is set to Wi-Fi only "
+            '(Settings → Network)');
+        return;
+      }
+      if (gate == StreamingGate.ask) {
+        if (!mounted ||
+            await confirmCellularStreaming(context) != true) {
+          return;
+        }
+        CellularStreamingConsent.granted = true;
+      }
+    }
+    var pausedForPlayback = false;
+    if (!source.local && DownloadManager.instance.hasActive) {
+      if (!mounted) return;
+      pausedForPlayback = await maybePauseDownloadsForStreaming(context);
+    }
+    // The inline audio queue must not keep playing under the player.
+    if (_queue.playing) unawaited(_queue.playOrPause());
+    final state = await WatchStateStore.instance.newestFor([first]);
+    final resumeFrom = state != null && state.resumable
+        ? Duration(milliseconds: state.positionMs)
+        : Duration.zero;
+    final meta = MetadataService.instance.metadataFor(first);
+    final bufferSizeMb = await AppSettings.bufferSizeMb();
+    if (!mounted) return;
+    final launcher = widget.videoLauncherOverride;
+    if (launcher != null) {
+      launcher(first, order);
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PlayerScreen(
+          url: source.url,
+          title: playerTitle(meta),
+          entry: first,
+          isLocal: source.local,
+          resumeFrom: resumeFrom,
+          nextFor: (e) => _nextInOrder(order, e),
+          sourceFor: _sourceFor,
+          bufferSizeMb: bufferSizeMb,
+        ),
+      ),
+    );
+    if (pausedForPlayback) {
+      final resumed =
+          await DownloadManager.instance.resumeAfterPlayback();
+      if (resumed) _snack('Downloads resumed');
+    }
+    await _reload();
+  }
+
+  /// Row tap: audio-only playlists play inline; anything else goes
+  /// through the PlayerScreen marathon starting at this row.
+  Future<void> _playRow(MediaEntry entry) async {
+    final playlist = _playlist;
+    if (playlist == null) return;
+    if (!_hasVideo) {
+      await _queue.playTrack(entry);
+      return;
+    }
+    await _playFrom(entry, playlist.entries);
+  }
+
   Future<void> _persistOrder(List<MediaEntry> entries) async {
     final lists = await LibraryStore.load();
     final updated = [
@@ -178,15 +302,19 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     if (mounted) Navigator.of(context).pop();
   }
 
-  /// Every audio entry in the library's own lists (not channels, not
-  /// playlists), deduplicated by address — the Add-tracks picker's pool.
-  static List<MediaEntry> _allAudio(List<MediaList> lists) {
+  /// Which chip a pool entry files under in the Add-media picker.
+  static String _kindOf(ParsedName p) =>
+      p.isAudio ? 'Music' : (p.isEpisode ? 'Episodes' : 'Movies');
+
+  /// Every entry in the library's own lists (not channels, not
+  /// playlists) — audio AND video — deduplicated by address: the
+  /// Add-media picker's pool.
+  static List<MediaEntry> _allMedia(List<MediaList> lists) {
     final seen = <String>{};
     final out = <MediaEntry>[];
     for (final l in lists) {
       if (l.isChannel || l.isPlaylist) continue;
       for (final e in l.entries) {
-        if (!parseMediaName(e.name).isAudio) continue;
         if (seen.add(e.address.toLowerCase())) out.add(e);
       }
     }
@@ -203,57 +331,125 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
       for (final e in playlist.entries) e.address.toLowerCase(),
     };
     final pool = [
-      for (final e in _allAudio(lists))
+      for (final e in _allMedia(lists))
         if (!held.contains(e.address.toLowerCase())) e,
     ];
     if (!mounted) return;
     if (pool.isEmpty) {
-      _snack('Every audio track in your library is already here.');
+      _snack('Everything in your library is already here.');
       return;
     }
+    final kinds = {for (final e in pool) _kindOf(parseMediaName(e.name))};
     final picked = <int>{};
+    var filter = 'All';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
         final t = WiTokens.of(context);
         return StatefulBuilder(builder: (context, setDialogState) {
+          final shown = [
+            for (final (i, e) in pool.indexed)
+              if (filter == 'All' ||
+                  _kindOf(parseMediaName(e.name)) == filter)
+                i,
+          ];
           return AlertDialog(
             backgroundColor: t.ink2,
-            title: Text('Add tracks',
+            title: Text('Add media',
                 style: TextStyle(color: t.bone, fontSize: 16)),
             content: SizedBox(
               width: 420,
-              height: 420,
-              child: ListView.builder(
-                itemCount: pool.length,
-                itemBuilder: (context, i) {
-                  final e = pool[i];
-                  final p = parseMediaName(e.name);
-                  return CheckboxListTile(
-                    value: picked.contains(i),
-                    dense: true,
-                    activeColor: t.accent,
-                    controlAffinity: ListTileControlAffinity.leading,
-                    onChanged: (on) => setDialogState(() {
-                      on == true ? picked.add(i) : picked.remove(i);
-                    }),
-                    title: Text(
-                      p.trackTitle ?? p.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: t.bone, fontSize: 13),
+              height: 460,
+              child: Column(
+                children: [
+                  // Type chips (only when the pool actually mixes
+                  // types): Music / Movies / Episodes.
+                  if (kinds.length > 1)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(
+                        spacing: 6,
+                        children: [
+                          for (final k in [
+                            'All',
+                            if (kinds.contains('Music')) 'Music',
+                            if (kinds.contains('Movies')) 'Movies',
+                            if (kinds.contains('Episodes')) 'Episodes',
+                          ])
+                            FilterChip(
+                              label: Text(k,
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: filter == k
+                                          ? t.ink
+                                          : t.boneDim)),
+                              selected: filter == k,
+                              selectedColor: t.accent,
+                              showCheckmark: false,
+                              onSelected: (_) =>
+                                  setDialogState(() => filter = k),
+                            ),
+                        ],
+                      ),
                     ),
-                    subtitle: Text(
-                      [
-                        if (p.artist != null) p.artist!,
-                        if (p.isTrack) p.title,
-                      ].join(' · '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: t.ash, fontSize: 11),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: shown.length,
+                      itemBuilder: (context, row) {
+                        final i = shown[row];
+                        final e = pool[i];
+                        final p = parseMediaName(e.name);
+                        final subtitle = p.isAudio
+                            ? [
+                                if (p.artist != null) p.artist!,
+                                if (p.isTrack) p.title,
+                              ].join(' · ')
+                            : p.isEpisode
+                                ? [
+                                    p.title,
+                                    'S${p.season.toString().padLeft(2, '0')}'
+                                        'E${p.episode.toString().padLeft(2, '0')}',
+                                  ].join(' · ')
+                                : [if (p.year != null) '${p.year}']
+                                    .join();
+                        return CheckboxListTile(
+                          value: picked.contains(i),
+                          dense: true,
+                          activeColor: t.accent,
+                          controlAffinity:
+                              ListTileControlAffinity.leading,
+                          onChanged: (on) => setDialogState(() {
+                            on == true
+                                ? picked.add(i)
+                                : picked.remove(i);
+                          }),
+                          secondary: Icon(
+                              p.isAudio
+                                  ? Icons.music_note
+                                  : Icons.movie_outlined,
+                              size: 16,
+                              color: t.ash),
+                          title: Text(
+                            p.trackTitle ?? p.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                TextStyle(color: t.bone, fontSize: 13),
+                          ),
+                          subtitle: subtitle.isEmpty
+                              ? null
+                              : Text(
+                                  subtitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      color: t.ash, fontSize: 11),
+                                ),
+                        );
+                      },
                     ),
-                  );
-                },
+                  ),
+                ],
               ),
             ),
             actions: [
@@ -277,7 +473,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
         playlist.id, [for (final i in picked.toList()..sort()) pool[i]]);
     await _reload();
     if (added > 0) {
-      _snack(added == 1 ? '1 track added.' : '$added tracks added.');
+      _snack(added == 1 ? '1 item added.' : '$added items added.');
     }
   }
 
@@ -312,9 +508,22 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
             Text(playlist.title,
                 style: TextStyle(color: t.bone, fontSize: 18),
                 overflow: TextOverflow.ellipsis),
-            Text(
-              'Playlist · $count ${count == 1 ? 'track' : 'tracks'}',
-              style: TextStyle(color: t.ash, fontSize: 11),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Content-derived icon — audio, video, or mixed.
+                Icon(playlistContentIcon(playlist),
+                    size: 12, color: t.ash),
+                const SizedBox(width: 4),
+                Text(
+                  _hasVideo
+                      ? 'Playlist · $count '
+                          '${count == 1 ? 'item' : 'items'}'
+                      : 'Playlist · $count '
+                          '${count == 1 ? 'track' : 'tracks'}',
+                  style: TextStyle(color: t.ash, fontSize: 11),
+                ),
+              ],
             ),
           ],
         ),
@@ -375,8 +584,9 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                         FilledButton.icon(
                           onPressed: entries.isEmpty
                               ? null
-                              : () => unawaited(
-                                  _queue.playTrack(entries.first)),
+                              : () => unawaited(_hasVideo
+                                  ? _playFrom(entries.first, entries)
+                                  : _queue.playTrack(entries.first)),
                           icon: const Icon(Icons.play_arrow, size: 20),
                           label: const Text('Play all'),
                         ),
@@ -384,6 +594,15 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                           onPressed: entries.isEmpty
                               ? null
                               : () {
+                                  if (_hasVideo) {
+                                    // Shuffled marathon: one random
+                                    // pass, chained through Up-next.
+                                    final order = [...entries]
+                                      ..shuffle(Random());
+                                    unawaited(
+                                        _playFrom(order.first, order));
+                                    return;
+                                  }
                                   if (!_queue.shuffle) {
                                     _queue.toggleShuffle();
                                   }
@@ -405,7 +624,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                             side: BorderSide(color: t.ash),
                           ),
                           icon: const Icon(Icons.playlist_add, size: 18),
-                          label: const Text('Add tracks'),
+                          label: const Text('Add media'),
                         ),
                       ],
                     ),
@@ -430,8 +649,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
           child: entries.isEmpty
               ? Center(
                   child: Text(
-                    'This playlist is empty — Add tracks above, or use '
-                    '"Add to playlist" on any track.',
+                    'This playlist is empty — Add media above, or use '
+                    '"Add to playlist" on any track, movie, or episode.',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 13, color: t.boneDim),
                   ),
@@ -587,19 +806,64 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     );
   }
 
+  /// 2:3 poster thumb for a video row, with a slim watch bar along its
+  /// bottom edge when the title is partway watched.
+  Widget _videoThumb(WiTokens t, MediaEntry entry, MediaMetadata meta) {
+    final state = WatchStateStore.instance.cachedNewestFor([entry]);
+    final showBar =
+        state != null && state.resumable && state.progress > 0;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(4),
+      child: SizedBox(
+        width: 34,
+        height: 51,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            entryPosterImage(meta, fit: BoxFit.cover) ??
+                Container(
+                  color: t.ink2,
+                  child:
+                      Icon(Icons.movie_outlined, size: 16, color: t.ash),
+                ),
+            if (showBar)
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: SizedBox(
+                  height: 4,
+                  child: LinearProgressIndicator(
+                    value: state.progress,
+                    backgroundColor: Colors.black45,
+                    color: t.accent,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _trackRow(WiTokens t, MediaEntry entry, int index) {
     final parsed = parseMediaName(entry.name);
+    final isVideo = !parsed.isAudio;
     final meta = MetadataService.instance.metadataFor(entry);
     final title = episodeNameFromLabel(meta.episodeLabel) ??
         parsed.trackTitle ??
-        parsed.title;
-    final subtitle = [
-      if (meta.trackArtist != null)
-        meta.trackArtist!
-      else if (parsed.artist != null)
-        parsed.artist!,
-      if (parsed.isTrack) parsed.title,
-    ].join(' · ');
+        (isVideo ? meta.title : parsed.title);
+    // Audio rows read artist · album; an episode row reads its show,
+    // a movie row its year.
+    final subtitle = isVideo
+        ? (parsed.isEpisode
+            ? meta.title
+            : [if (meta.year != null) '${meta.year}'].join())
+        : [
+            if (meta.trackArtist != null)
+              meta.trackArtist!
+            else if (parsed.artist != null)
+              parsed.artist!,
+            if (parsed.isTrack) parsed.title,
+          ].join(' · ');
     final downloaded =
         DownloadManager.instance.taskFor(entry.address)?.status ==
             DownloadStatus.done;
@@ -607,7 +871,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
         _queue.current?.name == entry.name;
     return InkWell(
       key: ValueKey('${entry.address}|${entry.name}'),
-      onTap: () => unawaited(_queue.playTrack(entry)),
+      onTap: () => unawaited(_playRow(entry)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         child: Row(
@@ -631,6 +895,10 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                       ),
                     ),
             ),
+            if (isVideo) ...[
+              _videoThumb(t, entry, meta),
+              const SizedBox(width: 10),
+            ],
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -676,7 +944,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
               itemBuilder: (context) => [
                 PopupMenuItem(
                     value: 'details',
-                    child: Text('Track details',
+                    child: Text(isVideo ? 'Details' : 'Track details',
                         style: TextStyle(color: t.bone, fontSize: 13))),
                 PopupMenuItem(
                     value: 'remove',

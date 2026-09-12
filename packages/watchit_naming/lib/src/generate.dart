@@ -130,6 +130,31 @@ String? realbumedMusicFileName(String name,
   return renamed;
 }
 
+/// [name] stripped of its album identity — the inverse of
+/// [musicFileName]: `Artist - Album (Year) - NN Title {mbid-...}.ext`
+/// becomes plain `Title.ext`, the shape of a standalone audio file that
+/// belongs to no album (the "remove from album" edit). [title] overrides
+/// the parsed track title (a user-edited display title becoming the real
+/// one). Any `{mbid-...}` tag is dropped — it pinned the track to a
+/// database release the file is leaving.
+///
+/// Returns null when [name] is not a music-convention track name, the
+/// title sanitizes to nothing, or the result would parse as a track
+/// again (a pathological title re-creating the `A - B - NN T` shape) —
+/// the renamed file must be unsorted audio by construction.
+String? unalbumedMusicFileName(String name, {String? title}) {
+  final parsed = parseMediaName(name);
+  if (!parsed.isTrack) return null;
+  final clean = sanitizeNamePart(title ?? parsed.trackTitle ?? '');
+  if (clean.isEmpty) return null;
+  final m = RegExp(r'\.[A-Za-z0-9]+$').firstMatch(name);
+  final ext = m?.group(0) ?? '';
+  final renamed = fitFileName(clean, ext);
+  final check = parseMediaName(renamed);
+  if (!check.isAudio || check.isTrack) return null;
+  return renamed;
+}
+
 /// Canonical W@tch video file name (docs/NAMING.md):
 ///
 /// - Movie: `Title (Year) {imdb-ttXXXXXXX} - [1080p].ext`

@@ -486,14 +486,14 @@ class _DetailScreenState extends State<DetailScreen> {
           // metadata cache; MetadataService notifies and this page's
           // ListenableBuilder repaints with the new details. Hidden
           // from kid profiles (editing is curation, not viewing).
-          // Audio joins playlists from here (tracks, mixes, anything).
-          if (parseMediaName(entry.name).isAudio)
-            IconButton(
-              tooltip: 'Add to playlist',
-              icon: Icon(Icons.playlist_add, color: t.boneDim, size: 22),
-              onPressed: () =>
-                  unawaited(addToPlaylistFlow(context, [entry])),
-            ),
+          // Anything joins playlists from here — tracks and mixes, but
+          // also movies and episodes (movie playlists, 2026-09-12).
+          IconButton(
+            tooltip: 'Add to playlist',
+            icon: Icon(Icons.playlist_add, color: t.boneDim, size: 22),
+            onPressed: () =>
+                unawaited(addToPlaylistFlow(context, [entry])),
+          ),
           if (!ProfileStore.instance.isKid)
             IconButton(
               tooltip: 'Edit details',
