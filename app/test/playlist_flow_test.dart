@@ -14,7 +14,10 @@ import 'package:watchit/screens/album_screen.dart' show AlbumAudioPlayer;
 import 'package:watchit/screens/detail_screen.dart';
 import 'package:watchit/screens/edit_details_screen.dart';
 import 'package:watchit/screens/needs_sorting_screen.dart';
+import 'package:watchit/screens/playlist_add_screen.dart';
 import 'package:watchit/screens/playlist_screen.dart';
+import 'package:watchit/screens/season_screen.dart';
+import 'package:watchit/screens/show_screen.dart';
 import 'package:watchit/services/connectivity.dart';
 import 'package:watchit/services/download_manager.dart';
 import 'package:watchit/services/embedded_client.dart';
@@ -22,6 +25,7 @@ import 'package:watchit/services/favourites.dart';
 import 'package:watchit/services/ffmpeg.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata_service.dart';
+import 'package:watchit/services/season_grouping.dart' show showSeasons;
 import 'package:watchit/services/terms.dart';
 import 'package:watchit/services/watch_state.dart';
 import 'package:watchit/theme/tokens.dart';
@@ -263,7 +267,11 @@ void main() {
 
     await tester.tap(find.text('Add media'));
     await tester.pumpAndSettle();
-    // Tracks One and Two are already in the playlist — only Three left.
+    // Full-screen picker, grouped like the wall: one album tile whose
+    // only not-yet-held track is Three.
+    expect(find.byType(PlaylistAddScreen), findsOneWidget);
+    await tester.tap(find.text('Neat Album (2020)'));
+    await tester.pumpAndSettle();
     expect(find.byType(CheckboxListTile), findsOneWidget);
     await tester.tap(find.byType(CheckboxListTile));
     await tester.pumpAndSettle();
@@ -540,7 +548,9 @@ void main() {
 
       await tester.tap(find.text('Add media'));
       await tester.pumpAndSettle();
-      // Mixed pool → chips; Movies narrows to the movie.
+      // Mixed pool → chips; Movies narrows to the movie (a flat row —
+      // singles never hide behind a group tile).
+      expect(find.byType(PlaylistAddScreen), findsOneWidget);
       expect(find.text('Music'), findsOneWidget);
       await tester.tap(find.text('Movies'));
       await tester.pumpAndSettle();
@@ -635,5 +645,155 @@ void main() {
     // Nothing renamed.
     final entry = (await LibraryStore.load()).single.entries.single;
     expect(entry.name, 'mystery tune.mp3');
+  });
+
+  group('picker + season/series playlist buttons (2026-09-13)', () {
+    MediaEntry ep(int n, int e, {String tag = ''}) => MediaEntry(
+          name: 'Hollow Pines S01E0$e$tag.mp4',
+          address: _addr(n),
+        );
+
+    testWidgets(
+        'Add media picker: the season tri-state checkbox selects the '
+        'whole season; Add appends the episodes in order with quality '
+        'tiers folded to one row', (tester) async {
+      await LibraryStore.save([
+        MediaList(id: 's', title: 'TV', entries: [
+          ep(31, 1, tag: ' [480p]'),
+          ep(32, 1, tag: ' [1080p]'),
+          ep(33, 2),
+        ]),
+        MediaList(
+            id: 'p',
+            title: 'Watch order',
+            kind: kListKindPlaylist,
+            entries: const []),
+      ]);
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: PlaylistScreen(playlistId: 'p', playerFactory: () => player),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Add media'));
+      await tester.pumpAndSettle();
+      // One show tile; its two E01 uploads folded into one episode slot.
+      expect(find.text('1 season · 2 episodes'), findsOneWidget);
+      // The show's tri-state checkbox picks every episode in one tap.
+      await tester.tap(find.byType(Checkbox).first);
+      await tester.pump();
+      await tester.tap(find.text('Add 2'));
+      await tester.pumpAndSettle();
+
+      final pl =
+          (await LibraryStore.load()).firstWhere((l) => l.id == 'p');
+      // Episode order kept; E01 added ONCE (its preferred version — the
+      // pool is name-sorted, so "[1080p]" leads the fold here).
+      expect([for (final e in pl.entries) e.address],
+          [_addr(32), _addr(33)]);
+      expect(pl.orderedAt, isNotNull);
+    });
+
+    testWidgets('Add media picker: search narrows to matching titles',
+        (tester) async {
+      await LibraryStore.save([
+        MediaList(id: 'v', title: 'Movies', entries: [
+          MediaEntry(name: 'Midnight Ferry (2021).mp4', address: _addr(21)),
+          MediaEntry(name: 'Dust County (2020).mp4', address: _addr(22)),
+        ]),
+        MediaList(
+            id: 'p',
+            title: 'Faves',
+            kind: kListKindPlaylist,
+            entries: const []),
+      ]);
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: PlaylistScreen(playlistId: 'p', playerFactory: () => player),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Add media'));
+      await tester.pumpAndSettle();
+      expect(find.text('Midnight Ferry'), findsOneWidget);
+      expect(find.text('Dust County'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), 'dust');
+      await tester.pump(const Duration(milliseconds: 200)); // debounce
+      expect(find.text('Dust County'), findsOneWidget);
+      expect(find.text('Midnight Ferry'), findsNothing);
+
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.pump();
+      await tester.tap(find.text('Add'));
+      await tester.pumpAndSettle();
+      final pl =
+          (await LibraryStore.load()).firstWhere((l) => l.id == 'p');
+      expect(pl.entries.single.address, _addr(22));
+    });
+
+    testWidgets(
+        'season page: Add season to playlist appends the episodes in '
+        'episode order, one preferred version each', (tester) async {
+      final entries = [
+        ep(33, 2),
+        ep(31, 1, tag: ' [480p]'),
+        ep(32, 1, tag: ' [1080p]'),
+      ];
+      await LibraryStore.save([
+        MediaList(id: 's', title: 'TV', entries: entries),
+        MediaList(
+            id: 'p',
+            title: 'Watch order',
+            kind: kListKindPlaylist,
+            entries: const []),
+      ]);
+      final season = showSeasons(entries, 'Hollow Pines').single;
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: SeasonScreen(group: season),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Add season to playlist'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Watch order'));
+      await tester.pumpAndSettle();
+      expect(find.text('Added 2 items to "Watch order".'), findsOneWidget);
+      final pl =
+          (await LibraryStore.load()).firstWhere((l) => l.id == 'p');
+      // Episode-number order (the list itself was shuffled), E01 once.
+      expect([for (final e in pl.entries) e.address],
+          [_addr(31), _addr(33)]);
+    });
+
+    testWidgets(
+        'show page: Add series to playlist spans every season in order',
+        (tester) async {
+      MediaEntry ep2(int n, int s, int e) => MediaEntry(
+          name: 'Hollow Pines S0${s}E0$e.mp4', address: _addr(n));
+      final entries = [ep2(41, 2, 1), ep2(42, 1, 1), ep2(43, 1, 2)];
+      await LibraryStore.save([
+        MediaList(id: 's', title: 'TV', entries: entries),
+        MediaList(
+            id: 'p',
+            title: 'Watch order',
+            kind: kListKindPlaylist,
+            entries: const []),
+      ]);
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: ShowScreen(seasons: showSeasons(entries, 'Hollow Pines')),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Add series to playlist'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Watch order'));
+      await tester.pumpAndSettle();
+      final pl =
+          (await LibraryStore.load()).firstWhere((l) => l.id == 'p');
+      expect([for (final e in pl.entries) e.address],
+          [_addr(42), _addr(43), _addr(41)]); // S1E1, S1E2, S2E1
+    });
   });
 }

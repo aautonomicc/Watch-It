@@ -21,6 +21,7 @@ import '../widgets/playlist_picker.dart' show playlistContentIcon;
 import '../widgets/seek_slider.dart';
 import 'detail_screen.dart';
 import 'player_screen.dart';
+import 'playlist_add_screen.dart';
 import 'settings_screen.dart' show promptForText;
 
 /// A playlist's own page: collage cover, Play all / Shuffle / Add
@@ -314,10 +315,6 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     if (mounted) Navigator.of(context).pop();
   }
 
-  /// Which chip a pool entry files under in the Add-media picker.
-  static String _kindOf(ParsedName p) =>
-      p.isAudio ? 'Music' : (p.isEpisode ? 'Episodes' : 'Movies');
-
   /// Every entry in the library's own lists (not channels, not
   /// playlists) — audio AND video — deduplicated by address: the
   /// Add-media picker's pool.
@@ -351,138 +348,19 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
       _snack('Everything in your library is already here.');
       return;
     }
-    final kinds = {for (final e in pool) _kindOf(parseMediaName(e.name))};
-    final picked = <int>{};
-    var filter = 'All';
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        final t = WiTokens.of(context);
-        return StatefulBuilder(builder: (context, setDialogState) {
-          final shown = [
-            for (final (i, e) in pool.indexed)
-              if (filter == 'All' ||
-                  _kindOf(parseMediaName(e.name)) == filter)
-                i,
-          ];
-          return AlertDialog(
-            backgroundColor: t.ink2,
-            title: Text('Add media',
-                style: TextStyle(color: t.bone, fontSize: 16)),
-            content: SizedBox(
-              width: 420,
-              height: 460,
-              child: Column(
-                children: [
-                  // Type chips (only when the pool actually mixes
-                  // types): Music / Movies / Episodes.
-                  if (kinds.length > 1)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Wrap(
-                        spacing: 6,
-                        children: [
-                          for (final k in [
-                            'All',
-                            if (kinds.contains('Music')) 'Music',
-                            if (kinds.contains('Movies')) 'Movies',
-                            if (kinds.contains('Episodes')) 'Episodes',
-                          ])
-                            FilterChip(
-                              label: Text(k,
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      color: filter == k
-                                          ? t.ink
-                                          : t.boneDim)),
-                              selected: filter == k,
-                              selectedColor: t.accent,
-                              showCheckmark: false,
-                              onSelected: (_) =>
-                                  setDialogState(() => filter = k),
-                            ),
-                        ],
-                      ),
-                    ),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: shown.length,
-                      itemBuilder: (context, row) {
-                        final i = shown[row];
-                        final e = pool[i];
-                        final p = parseMediaName(e.name);
-                        final subtitle = p.isAudio
-                            ? [
-                                if (p.artist != null) p.artist!,
-                                if (p.isTrack) p.title,
-                              ].join(' · ')
-                            : p.isEpisode
-                                ? [
-                                    p.title,
-                                    'S${p.season.toString().padLeft(2, '0')}'
-                                        'E${p.episode.toString().padLeft(2, '0')}',
-                                  ].join(' · ')
-                                : [if (p.year != null) '${p.year}']
-                                    .join();
-                        return CheckboxListTile(
-                          value: picked.contains(i),
-                          dense: true,
-                          activeColor: t.accent,
-                          controlAffinity:
-                              ListTileControlAffinity.leading,
-                          onChanged: (on) => setDialogState(() {
-                            on == true
-                                ? picked.add(i)
-                                : picked.remove(i);
-                          }),
-                          secondary: Icon(
-                              p.isAudio
-                                  ? Icons.music_note
-                                  : Icons.movie_outlined,
-                              size: 16,
-                              color: t.ash),
-                          title: Text(
-                            p.trackTitle ?? p.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style:
-                                TextStyle(color: t.bone, fontSize: 13),
-                          ),
-                          subtitle: subtitle.isEmpty
-                              ? null
-                              : Text(
-                                  subtitle,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      color: t.ash, fontSize: 11),
-                                ),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: Text('Cancel', style: TextStyle(color: t.ash)),
-              ),
-              FilledButton(
-                onPressed: picked.isEmpty
-                    ? null
-                    : () => Navigator.of(context).pop(true),
-                child: const Text('Add'),
-              ),
-            ],
-          );
-        });
-      },
+    // Full-screen picker (2026-09-13): searchable, grouped like the
+    // wall, tri-state album/season checkboxes — the old flat dialog
+    // was impractical for large libraries.
+    final picked = await Navigator.of(context).push<List<MediaEntry>>(
+      MaterialPageRoute(
+        builder: (_) => PlaylistAddScreen(
+          pool: pool,
+          playlistTitle: playlist.title,
+        ),
+      ),
     );
-    if (confirmed != true || !mounted) return;
-    final added = await addTracksToPlaylist(
-        playlist.id, [for (final i in picked.toList()..sort()) pool[i]]);
+    if (picked == null || picked.isEmpty || !mounted) return;
+    final added = await addTracksToPlaylist(playlist.id, picked);
     await _reload();
     if (added > 0) {
       _snack(added == 1 ? '1 item added.' : '$added items added.');

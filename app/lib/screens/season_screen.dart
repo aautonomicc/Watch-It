@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
@@ -12,6 +14,7 @@ import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
 import '../widgets/download_badge.dart';
+import '../widgets/playlist_picker.dart';
 import '../widgets/watch_progress.dart';
 import 'detail_screen.dart';
 import 'edit_details_screen.dart';
@@ -89,6 +92,16 @@ class SeasonScreen extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          // Season → playlist, in episode order: one preferred version
+          // per episode (the album app bar's exact precedent).
+          IconButton(
+            tooltip: 'Add season to playlist',
+            icon: Icon(Icons.playlist_add, color: t.boneDim, size: 22),
+            onPressed: () => unawaited(addToPlaylistFlow(context, [
+              for (final e in group.episodes)
+                preferredVersion(group.versionsOf(e)),
+            ])),
+          ),
           // Edit details for this season — artwork and synopsis, written
           // under the season key and overlaid on its episodes by
           // MetadataService.
