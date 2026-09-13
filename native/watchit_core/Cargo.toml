@@ -82,7 +82,7 @@ tracing-android = "0.2"
 # fix (#638). Idle-bandwidth note: only leaf-egress slice 1 shipped
 # (#622 slices 2-5 still open), so no idle-traffic change expected.
 # Pin a release, never git main.
-x0x = "0.42.1"
+x0x = "0.42.3"
 # CancellationToken for the mywatch heartbeat/watch task (already in the
 # x0x tree, so free on desktop).
 tokio-util = "0.7"
