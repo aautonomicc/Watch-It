@@ -21,8 +21,10 @@ library private by construction.
    a single codebase. Same UI language everywhere, adapted to touch vs desktop vs
    the 10-foot TV experience. (Five of the six ship today: Android,
    Linux and Windows since the early alphas, macOS since alpha.92, and
-   Android TV since alpha.95 — TV runs the normal UI for now, the
-   10-foot layout is still to come; iOS remains.)
+   Android TV since alpha.95 — fully remote-drivable since alpha.96
+   with its own player transport, safe-area frame and track menus,
+   though still on the normal layout; the 10-foot layout is to come,
+   and iOS remains.)
 2. **Client-only. No server, ever.** The Autonomi network is the backend. Install the
    app, add a list, get a poster-wall library. No accounts, no configuration, nothing
    to host.

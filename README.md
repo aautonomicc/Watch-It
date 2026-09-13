@@ -8,7 +8,10 @@ six platforms: **Android, Android TV, iPhone (iOS), Linux, Windows, and Mac.**
 Movies and TV shows — and, since alpha.76, **music**: albums render as a
 square cover-art wall (artwork and track data from MusicBrainz / Cover Art
 Archive, no key needed) and play right on the album page with shuffle,
-auto-advance, and a favourite heart.
+auto-advance, and a favourite heart. **Playlists** (alpha.97+) mix
+anything — tracks, movies, whole seasons of episodes — into an ordered
+play-through of your own, and an any-video playlist plays end to end as
+a marathon.
 
 Think the Plex / Emby / [Silo](https://github.com/Silo-Server/) experience —
 poster-wall library, rich metadata, resume-watching — but **with no server to install**.
@@ -348,6 +351,39 @@ always win on a clash. And when the network is unreachable at play
 time, the player now says so plainly ("Can't reach the Autonomi
 network", with a VPN hint) instead of surfacing a cryptic decoder
 error.
+
+Alpha.96 merges the project's **first external contribution** — a full
+Android TV UX wave: TV detection, an overscan safe area framing the
+app (with the video itself rendering full-bleed behind it — only the
+controls stay inside), a labelled TV app bar, a remote player
+transport with preview-then-commit timeline seeking, audio and caption
+track menus (local SRT/VTT caption files, or paste captions on TVs
+with no file picker), and an optional Grove palette — see
+[docs/ANDROID-TV.md](docs/ANDROID-TV.md). It also fixes My W@tch
+publishing for large libraries (the sync doc always fits the server's
+size cap). Alpha.97 cleans up music for real-world libraries:
+**organize tools** rename any audio file into the album convention
+from inside the app — move a track into an album from its editor, or
+sweep every unidentified track at once on the new "Needs sorting"
+screen — and **playlists** arrive, with their own section in the
+library drawer, a playlist page with Play all / Shuffle and
+drag-to-reorder play order, and renames syncing between linked
+devices. It also ships contributed Android **voice search** (a mic
+button in the search bar — the system recognizer, no app-side mic
+permission). Alpha.98 opens playlists to everything: movies and
+episodes join tracks, and a playlist holding video plays straight
+through the full-screen player as a **marathon**, chaining item to
+item. Albums gain an "Edit tracks" collection editor (drag to reorder
+= renumber the whole album, bulk move/remove), the My W@tch sync doc
+**shards and rotates** so even very large libraries sync whole, and
+the release APK goes dual-ABI — Fire TV Sticks and other 32-bit-app
+devices now install the normal APK. Alpha.99 rounds off the feedback
+from testers: removing a track from an album keeps its artwork and
+artist credit, standalone tracks get a first-class "Move to album"
+action, adding to a playlist becomes a full-screen searchable picker
+with grouped tri-state selection (a whole artist, album, show, or
+season in one tap), season and show pages gain Add-to-playlist
+buttons, and TV music plays with a single control bar.
 
 Docs:
 

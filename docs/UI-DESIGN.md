@@ -26,7 +26,9 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - Top row: **Continue Watching** (landscape thumbnails with progress bars)
 - **Recently Added** per list
 - **Next Up** (next unwatched episode per show)
-- List switcher in the sidebar/drawer: All · <list name> · <list name> · Downloads
+- List switcher in the sidebar/drawer: All · <list name> · <list name> · Downloads;
+  since alpha.97 the drawer also carries a **PLAYLISTS** section below the
+  Library lists (playlist rows with content-derived icons + "New playlist")
 - Desktop (alpha.94): home windows ≥1000 logical px keep the library
   drawer **pinned open** as a 290px side panel beside the wall — the
   burger sits on the far left of the app bar and toggles it (remembered
@@ -276,6 +278,35 @@ second profile exists (a pre-profile install is silently the lone
   the admin PIN travels together with its recovery code so "Forgot
   PIN?" keeps working on the new device
 
+### 11. Playlists (alpha.97–.99)
+
+Ordered mixes of anything in the library — tracks at first (alpha.97),
+movies and episodes too since alpha.98. Playlists live ONLY in the
+drawer's PLAYLISTS section (never as home wall rows) and never appear
+as move/copy targets — they hold references, the entries stay in their
+lists.
+
+- **Playlist page**: 2×2 collage cover, Play all / Shuffle / Add media,
+  drag-to-reorder rows — the order on the page IS the play order
+  (persisted, and synced newest-reorder-wins since alpha.98); row menu
+  Remove / details; app-bar Rename / Delete. Video rows show a poster
+  thumb with a slim watch bar; audio-only playlists play inline with
+  the shared play queue (transport + seek under the header), while a
+  playlist holding any video plays through the full-screen player as a
+  **marathon** — each finished item chains to the next via the Up-next
+  machinery
+- **Adding**: "Add media" opens a full-screen searchable picker
+  (alpha.99 — ranked search with type chips, the pool grouped like the
+  wall: artist → album → track, show → season → episode) whose group
+  checkboxes are tri-state, so one tap selects a whole artist, album,
+  show or season; quality tiers fold to one row per title. Detail
+  pages (any type), album pages, and — since alpha.99 — season and
+  show pages carry an Add-to-playlist button (season = its episodes in
+  order, show = every season's episodes)
+- **Icons derive from content**: all-audio queue-music, all-video
+  movie, mixed playlist-play — in the drawer, the picker dialog, and
+  the page header
+
 ## Layout adaptation
 
 | | Mobile (Android/iOS) | Desktop (Linux/Win/Mac) | TV (Android TV, 10-foot) |
@@ -290,13 +321,21 @@ TV notes: larger base type scale (readable at 3 m), no hover-only affordances, t
 entry kept to add/import flows only (paste via network share or a shown-on-TV import
 address is preferred over typing addresses with a remote).
 
-Shipped so far for TV (alpha.95): the leanback launcher entry + TV
-banner (a centred bucket-and-wordmark lockup on ink) and a visible
-accent focus ring with select-activation on every wall card, so the
-library browses by D-pad/remote today — running the *normal* layout;
-the 10-foot column above remains the target.
+Shipped so far for TV (alpha.95–.99): the leanback launcher entry + TV
+banner (alpha.95), then the alpha.96 TV UX wave from the first
+external PR — TV detection, an overscan safe area (0–10% margins,
+admin-set) framing the app with the focus ring while video renders
+**full-bleed** behind it (only the controls inset), a labelled
+Library/Search/Settings TV app bar, the remote player transport with
+preview-then-commit timeline seeking, audio/caption track menus with
+local SRT/VTT or pasted caption files, and an optional Grove palette —
+plus voice search (alpha.97), an audio seek bar that no longer traps
+the D-pad (alpha.98), and single-control-bar TV music (alpha.99); full
+interaction spec in [ANDROID-TV.md](ANDROID-TV.md). The app still runs
+the *normal* layout inside the safe area; the 10-foot column above
+remains the target.
 
-## Built so far (alpha.95)
+## Built so far (alpha.99)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,
@@ -401,8 +440,17 @@ Big Buck Bunny seed card with its three-tier version picker; alpha.94
 the pinned desktop drawer and the wordmark-styled picker heading;
 alpha.95 the Android TV launcher entry with the wall-card focus ring,
 the Include-profiles export/import checkboxes, and the honest "Can't
-reach the Autonomi network" playback overlay.
+reach the Autonomi network" playback overlay. Alpha.96 ships the full
+Android TV UX described in the TV notes above (safe-area frame,
+full-bleed video, TV app bar, remote transport, track/caption menus).
+Alpha.97–.99 add the music-organize surfaces (the track editor's
+Move-into-an-album section, the Needs sorting bulk screen, Move-to-
+album actions on the editor and detail page) and the playlist
+surfaces described in section 11 (drawer PLAYLISTS section, playlist
+page with marathon playback, the full-screen searchable Add-media
+picker, Add-to-playlist buttons on album/season/show pages), plus the
+album page's Edit-tracks collection editor (drag-reorder renumbering,
+bulk move/remove) and Android voice search in the Search app bar.
 Still to come from this document: filter/sort + fast-scroller on
 the grid, the full desktop keyboard map, mobile gestures, and the
-10-foot TV layout (the TV launcher entry + D-pad focus ring shipped
-in alpha.95).
+10-foot TV layout.
