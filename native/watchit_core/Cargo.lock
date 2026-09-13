@@ -8555,9 +8555,9 @@ dependencies = [
 
 [[package]]
 name = "x0x"
-version = "0.42.1"
+version = "0.42.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95cb13d3fb3f8729f14df68c3ff34f6dbdbbcd88422143101d0d0aa4dd812357"
+checksum = "b41b9946145af4b13d066b6b0fc29954d813ce9228e625dbe3aade8f3ce5731a"
 dependencies = [
  "ant-quic",
  "anyhow",
