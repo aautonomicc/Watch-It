@@ -31,13 +31,20 @@ APK covers it — no extra platform port. What it needs on top:
 - Hardware decode matters more here (TV boxes have weak CPUs) — libmpv uses
   MediaCodec on Android, same path as phones.
 
-Status (alpha.95): the manifest work (leanback entry, TV banner,
-leanback/touchscreen not-required) and card-level D-pad focus — a
-visible accent focus ring + select-activation on every wall card —
-shipped, so the APK appears in the TV launcher and the library
-browses by remote today. The 10-foot layout mode is still open, and
-real-TV-box testing is pending (emulator video playback is unreliable:
-emulated codecs render black).
+Status (alpha.99): the manifest work (leanback entry, TV banner,
+leanback/touchscreen not-required) and card-level D-pad focus shipped
+in alpha.95; alpha.96 merged the full TV UX wave (the first external
+PR): UiModeManager TV detection over a method channel, an overscan
+safe area (0–10% margins) framing the app while video renders
+full-bleed behind it, a labelled TV app bar, a remote player
+transport with preview-then-commit timeline seeking, audio/caption
+track menus with local SRT/VTT or pasted caption files, and an
+optional Grove palette — interaction spec in
+[ANDROID-TV.md](ANDROID-TV.md). Since alpha.98 the release APK is
+dual-ABI (armeabi-v7a + arm64-v8a), so 32-bit-app TV devices (Fire TV
+Stick, Google TV Streamer) install the normal APK, and real-device
+testing runs on both via the tester group. The 10-foot layout mode is
+still open.
 
 ## High-level structure
 
@@ -235,6 +242,21 @@ LAN plus public bootstrap for remote devices), implemented in
   newest-wins and never regress; entries arrive **playable**, because
   each entry's *shrunk* data map (a few hundred bytes regardless of file
   size) travels in the store and is expanded locally on import.
+  File renames travel too (alpha.97, newest-stamp-wins by rename time),
+  playlists arrive as playlists, and a playlist's drag-reordered play
+  order follows (alpha.98, newest-reorder-wins with a deterministic
+  tie-break so devices converge).
+- **Capacity — sharding + rotation (alpha.96/.98)**: store values are
+  byte-capped, and a large library's doc doesn't fit in one. Since
+  alpha.96 the doc builder trims until the doc ALWAYS fits (down to
+  list entries, last); since alpha.98 the doc additionally **shards**
+  across up to three store keys (`sync` + `sync/N` — part 0 alone
+  carries tombstones and channel subscriptions, so older builds see a
+  safe partial view) and **rotates** whatever still doesn't fit, so
+  the dropped tail leads the next cycle and everything reaches the
+  other devices over the following cycles — nothing starves. Receivers
+  fold the parts back together; the merge is union-based, so a partial
+  doc can never delete anything.
 - **User edits + artwork (alpha.62)**: `userEdited` metadata rows
   (titles, years, descriptions, episode names) travel inline in the sync
   doc, merged last-writer-wins by edit time. Artwork is too big for the
@@ -401,6 +423,13 @@ ships, and stored in the OS keychain beside the wallet key
 
 - **SQLite (drift)** — lists, metadata cache, watch history, resume points, download
   index, settings.
+- **Playlists (alpha.97/.98)** — a playlist is a media list with
+  `kind = 'playlist'` (schema v14): entries are address references
+  into the library, row position is the play order (`ordered_at`,
+  schema v15, stamps reorders for sync), and playlists are excluded
+  from home rows, move/copy targets, and the personal sync doc's
+  list-membership semantics they don't share. No new entity, so
+  bundles/export/import needed no format change.
 - **Riverpod** — app state management.
 - **Profiles (alpha.93)** — Netflix-style family viewing profiles are
   a *viewing-state scope*, not accounts: watch positions, favourites
@@ -421,8 +450,8 @@ ships, and stored in the OS keychain beside the wallet key
 
 | Platform | Artifact | Notes |
 |---|---|---|
-| Android | APK / AAB | targetSdk 34; Play Store optional, sideload-friendly |
-| Android TV | same APK / AAB | leanback launcher entry + TV banner shipped in alpha.95; sideloads onto any TV box; Play Store TV listing optional |
+| Android | APK / AAB | targetSdk 34; dual-ABI (armeabi-v7a + arm64-v8a) since alpha.98; Play Store optional, sideload-friendly |
+| Android TV | same APK / AAB | leanback launcher entry + TV banner since alpha.95, full TV UX since alpha.96; the dual-ABI APK installs directly on 32-bit-app devices (Fire TV Stick, Google TV Streamer); Play Store TV listing optional |
 | iOS | IPA | needs Apple dev account; TestFlight first |
 | Linux | AppImage + Flatpak | AppImage matches existing workflow |
 | Windows | portable zip | CI-built, ships with every release since alpha.55; unsigned (SmartScreen "More info → Run anyway"), installer/signing deferred to beta |

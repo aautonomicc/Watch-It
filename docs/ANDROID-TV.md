@@ -31,10 +31,13 @@ channel falls back to the ordinary interface.
 
 ## Screen fit and colour
 
-Settings starts with TV display on televisions. Device-local margins default
-to 5% on each edge and can be adjusted from 0–10% using buttons. The entire
-Navigator, dialogs and playback sit within this area. This intentionally
-reduces the picture area to avoid cropping on overscanning displays.
+Settings starts with TV display on televisions (admin profiles only —
+the margins and palette are device-wide). Device-local margins default
+to 5% on each edge and can be adjusted from 0–10% using buttons. The
+Navigator and dialogs sit within this area to avoid cropping on
+overscanning displays; since alpha.96 the video surface itself renders
+full-bleed edge to edge, with only the transport, captions and up-next
+banner inset to the safe area (the standard TV convention).
 
 TV text scaling is at least 1.15; larger accessibility text scaling is retained.
 The optional Grove palette uses soft green surfaces and retains W@tch blue,
@@ -64,6 +67,14 @@ Captions sit above the transport while controls are visible, then return toward
 the bottom of the picture when controls hide. Back closes the menu and returns
 focus to Play/Pause. An existing next-episode countdown waits while the menu is
 open so a picked file is not inadvertently attached to the next item.
+
+Music is different: the audio player draws its own title, seek bar and
+transport, so on TV it is NOT wrapped in the video transport overlay —
+one control bar, not two (alpha.99). Its seek bar keeps left/right for
+seeking while up/down move focus off the bar instead of adjusting the
+position (alpha.98), so the D-pad can always leave it; the remote Back
+key still exits playback, and marathon playlists still chain through
+audio and video items alike.
 
 ## Voice search
 

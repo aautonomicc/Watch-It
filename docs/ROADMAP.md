@@ -1,11 +1,38 @@
 # Roadmap
 
-**Status (2026-09-10):** latest release is **v0.1.0-alpha.95**
+**Status (2026-09-13):** latest release is **v0.1.0-alpha.99**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
-a release now ships **four artifacts**: a signed APK, a Linux AppImage,
-a Windows portable zip (since alpha.55), and a macOS universal dmg
-(since alpha.92 — unsigned, right-click → Open). The headline of the
-newest wave is **family & TV**: alpha.93 ships **profiles** (its own
+a release ships **four artifacts**: a signed APK (dual-ABI
+armeabi-v7a + arm64-v8a since alpha.98, so Fire TV Sticks and other
+32-bit-app devices install the normal APK), a Linux AppImage, a
+Windows portable zip (since alpha.55), and a macOS universal dmg
+(since alpha.92 — unsigned, right-click → Open). The newest wave is
+**playlists, collection editing & real TV UX**: alpha.96 merges the
+first external PR — the Android TV UX wave (TV detection, an overscan
+safe area with the focus ring, a labelled TV app bar, a remote player
+transport with preview-then-commit timeline seeking, audio/caption
+track menus with local SRT/VTT or pasted caption files, an optional
+Grove palette; see [ANDROID-TV.md](ANDROID-TV.md)) plus full-bleed
+video behind the safe area, and fixes My W@tch publishing for large
+libraries (the sync doc always fits the server's byte cap). Alpha.97
+is the music cleanup: organize tools that rename any audio file into
+the album convention from inside the app (single-track moves, a bulk
+"Needs sorting" screen), **playlists** with their own drawer section
+and page (drag-to-reorder play order, Play all / Shuffle), renames
+syncing between linked devices — plus contributed Android **voice
+search**. Alpha.98 lets playlists hold anything (movies and episodes
+join; an any-video playlist plays through the full-screen player as a
+**marathon**), adds the album "Edit tracks" collection editor
+(drag-reorder renumbering, bulk move/remove), shards the My W@tch
+sync doc across store parts with rotation so big libraries sync whole,
+and syncs playlist play order. Alpha.99 closes the tester-feedback
+round: un-albumed tracks keep their artwork and credit, standalone
+tracks get a first-class "Move to album" path, the playlist "Add
+media" dialog becomes a full-screen searchable grouped picker (a whole
+artist/album/show/season in one tap), season and show pages gain
+Add-to-playlist buttons, TV music plays with a single control bar, and
+the network stack bumps to x0x 0.42.3. Before that, **family & TV**:
+alpha.93 ships **profiles** (its own
 section below — Netflix-style viewing profiles with a "Who's watching?"
 picker, Kid/Adult types, per-profile PINs and an admin PIN with a
 one-time recovery code) and swaps the built-in seed catalog from Night
@@ -562,6 +589,18 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       texts) and their poster files sync to linked devices without a
       TMDB key, need-driven via a compact per-doc `have` list so the
       traffic drains to nothing once every device has everything
+- [x] Large libraries sync whole (alpha.96/.98): the sync doc always
+      fits the store's byte cap (alpha.96 — trimming continues down to
+      list entries instead of publishing an over-budget doc the server
+      refuses), and since alpha.98 it **shards** across up to three
+      store keys and **rotates** whatever still doesn't fit, so every
+      entry and edit reaches the other devices over the following
+      cycles — nothing starves (the fix for the "N entries did not
+      fit" reports from large-library devices)
+- [x] Renames, playlists and play order sync (alpha.97/.98): file
+      renames travel newest-stamp-wins, remote playlists arrive as
+      playlists, and a playlist's drag-reordered play order follows
+      (alpha.98)
 - [ ] My W@tch on iOS (stubbed out today)
 - [ ] Sync while apart: devices must currently be online together —
       no relay/mailbox in the middle (by design, for now)
@@ -671,6 +710,28 @@ File naming convention (the audio parallel of the Plex/Jellyfin one) in
 - [x] Background music on Android (alpha.86): playback keeps running
       with the screen off — media notification with prev/play/next,
       lock-screen controls, audio focus + unplugged-headphones pause
+- [x] Music organize tools (alpha.97): rename any audio file into the
+      album convention from inside the app — a "Move into an album"
+      section on the track editor, a single-track move dialog with a
+      before→after rename preview, and a bulk **Needs sorting** screen
+      (unidentified tracks → pick the album once → preview → Apply);
+      since alpha.99 removing a track from an album keeps its artwork
+      and artist credit, and a standalone track has a first-class
+      "Move to album" action right on its detail page
+- [x] Playlists (alpha.97–.99): ordered mixes with their own drawer
+      section and page — collage cover, Play all / Shuffle,
+      drag-to-reorder = play order (order syncs since alpha.98).
+      Playlists hold ANYTHING since alpha.98 — movies and episodes
+      too, with icons derived from the content — and an any-video
+      playlist plays through the full-screen player as a **marathon**
+      via Up-next chaining. Adding is a full-screen searchable picker
+      since alpha.99, grouped like the wall with tri-state checkboxes
+      (a whole artist/album/show/season in one tap), plus
+      Add-to-playlist buttons on album, season and show pages
+- [x] Album collection editor (alpha.98): "Edit tracks" mode on the
+      album page — checkbox rows with drag handles, drag-reorder
+      renumbers the whole album 1..N, "Renumber 1..N" closes gaps,
+      bulk move-to-album / remove-from-album
 - [ ] Artist pages with bio/fanart (TheAudioDB was scoped in the
       original plan; parked)
 - [ ] Top-level Video / Music home split (deferred by plan — lists
@@ -841,17 +902,34 @@ files stay install-global — a profile scopes only viewing state.
       accent focus ring + select-activation on every wall card — the
       same APK appears in the TV launcher and the library browses by
       D-pad/remote with the normal UI
-- [x] Voice search on Android (unreleased; from PR #7 by
+- [x] Android TV UX wave (alpha.96 — the first external PR, by
+      loviswaternakamoto): TV detection, an overscan safe area (0–10%
+      margins, admin-set) framing the app with the focus ring, a
+      labelled Library/Search/Settings TV app bar, a remote player
+      transport with preview-then-commit timeline seeking, audio and
+      caption track menus — local SRT/VTT caption files (≤2 MiB) or
+      pasted captions for TVs without a file picker — and an optional
+      Grove palette (off by default); plus the two agreed follow-ups:
+      video renders **full-bleed** behind the safe area (only the
+      controls inset) and the TV-display settings tile is admin-only.
+      Details in [ANDROID-TV.md](ANDROID-TV.md)
+- [x] Voice search on Android (alpha.97; contributed by
       loviswaternakamoto): a mic button in the Search app bar starts the
       system speech recognizer — no app-side mic permission, the single
       best transcription fills the query and searches immediately,
       cancel keeps the typed text, no-recognizer devices get a
       keyboard-fallback snackbar; Android-only (incl. TV), see
       [ANDROID-TV.md](ANDROID-TV.md)
+- [x] 32-bit TV devices install the normal APK (alpha.98): release
+      APKs ship dual-ABI (armeabi-v7a + arm64-v8a), covering Fire TV
+      Sticks and the Google TV Streamer without a side asset — and
+      real-device TV testing now runs on both via the tester group
+- [x] TV fixes from real-device testing: the audio seek bar no longer
+      traps the D-pad (up/down leave the bar — alpha.98), and music
+      plays with a single control bar instead of the TV transport
+      stacking over the audio player's own (alpha.99)
 - [ ] Android TV rest: 10-foot layout mode, focus polish on the
-      remaining screens, remote player controls; test on a real TV box
-      (emulator video playback is unreliable — emulated codecs render
-      black)
+      remaining screens
 - [ ] iOS build + TestFlight (FFI path required if sidecar chosen elsewhere)
 - [ ] Chapter markers, playback speed, subtitle handling for streamed items
 - [ ] Light theme, poster size options, keyboard-map settings
