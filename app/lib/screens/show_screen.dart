@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
@@ -10,6 +12,7 @@ import '../services/version_choice.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
 import '../widgets/download_badge.dart';
+import '../widgets/playlist_picker.dart';
 import 'edit_details_screen.dart';
 import 'season_screen.dart';
 
@@ -90,6 +93,18 @@ class ShowScreen extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          // Whole series → playlist, in watch order: one preferred
+          // version per episode across every season (the album app
+          // bar's exact precedent).
+          IconButton(
+            tooltip: 'Add series to playlist',
+            icon: Icon(Icons.playlist_add, color: t.boneDim, size: 22),
+            onPressed: () => unawaited(addToPlaylistFlow(context, [
+              for (final s in seasons)
+                for (final e in s.episodes)
+                  preferredVersion(s.versionsOf(e)),
+            ])),
+          ),
           // Edit details for the whole show — title, year, synopsis, and
           // show poster, written under the show's own key and overlaid
           // on every episode by MetadataService.

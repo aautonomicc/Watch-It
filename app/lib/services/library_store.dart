@@ -378,7 +378,10 @@ Future<MediaList> createPlaylist(String title) async {
 
 /// Append [entries] to the end of playlist [playlistId], deduplicating
 /// by address (a playlist holds each track once). Returns how many were
-/// actually added; -1 when the playlist no longer exists.
+/// actually added; -1 when the playlist no longer exists. An add that
+/// changes the playlist stamps [MediaList.orderedAt] so the appended
+/// order (a season's episodes, an album's tracks) syncs strictly to
+/// linked devices instead of riding the union merge's arbitrary order.
 Future<int> addTracksToPlaylist(
     String playlistId, List<MediaEntry> entries) async {
   final lists = await LibraryStore.load();
@@ -394,8 +397,10 @@ Future<int> addTracksToPlaylist(
   ];
   if (fresh.isEmpty) return 0;
   final updated = List<MediaList>.of(lists);
-  updated[i] =
-      updated[i].copyWith(entries: [...updated[i].entries, ...fresh]);
+  updated[i] = updated[i].copyWith(
+    entries: [...updated[i].entries, ...fresh],
+    orderedAt: DateTime.now().millisecondsSinceEpoch,
+  );
   await LibraryStore.save(updated);
   return fresh.length;
 }
