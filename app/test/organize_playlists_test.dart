@@ -665,6 +665,23 @@ void main() {
       expect(loaded[0].orderedAt, 123);
       expect(loaded[1].orderedAt, isNull);
     });
+
+    test('addTracksToPlaylist stamps orderedAt (2026-09-13: bulk adds — '
+        'a season, an album — must sync in strict appended order); a '
+        'no-op add leaves the stamp alone', () async {
+      final p = await createPlaylist('Faves');
+      expect((await LibraryStore.load()).single.orderedAt, isNull);
+      await addTracksToPlaylist(p.id, [plain(1), plain(2)]);
+      final stamped = (await LibraryStore.load()).single.orderedAt;
+      expect(stamped, isNotNull);
+      // Re-adding the same addresses changes nothing — no fresh stamp
+      // to clobber a newer remote reorder.
+      await LibraryStore.save([
+        (await LibraryStore.load()).single.copyWith(orderedAt: 7),
+      ]);
+      await addTracksToPlaylist(p.id, [plain(1)]);
+      expect((await LibraryStore.load()).single.orderedAt, 7);
+    });
   });
 
   group('planUnalbum / applyUnalbum (remove from album)', () {
@@ -737,6 +754,87 @@ void main() {
     test('non-track selection refuses', () async {
       final plan = await planUnalbum([unsorted(1, 'loose.mp3')]);
       expect(plan.error, contains('not an album track'));
+    });
+
+    test('a track with NO art/artist of its own adopts the ALBUM row\'s '
+        'as a COPY on the standalone key — the album row keeps its own '
+        'for the tracks staying behind (2026-09-13 artwork-loss fix)',
+        () async {
+      final leaving = track(1, 2, 'Two');
+      final staying = track(2, 1, 'One');
+      await LibraryStore.save([
+        MediaList(id: 'm', title: 'Music', entries: [staying, leaving]),
+      ]);
+      final parsed = parseMediaName(leaving.name);
+      final albumKey = albumLookupKey(parsed)!;
+      final albumPoster = await saveUserPoster(
+          albumKey, Uint8List.fromList([1, 2, 3]),
+          postersDirProvider: () async => postersDir);
+      await saveUserDetails(
+        lookupKey: albumKey,
+        title: parsed.title,
+        artist: const Value('Shared Credit'),
+        posterFile: Value(albumPoster),
+        postersDirProvider: () async => postersDir,
+      );
+
+      final plan = await planUnalbum([leaving]);
+      expect(plan.error, isNull);
+      await applyUnalbum(plan.items,
+          postersDirProvider: () async => postersDir);
+
+      final newRow =
+          await metadataRowFor(parseMediaName('Two.mp3').lookupKey);
+      expect(newRow, isNotNull);
+      expect(newRow!.artist, 'Shared Credit');
+      expect(newRow.posterFile, isNotNull);
+      // A copy under the standalone key — user_ files are deleted
+      // per-key, so sharing the album's file would be a time bomb.
+      expect(newRow.posterFile, isNot(albumPoster));
+      expect(
+          File('${postersDir.path}/${newRow.posterFile}')
+              .readAsBytesSync(),
+          [1, 2, 3]);
+      final albumRow = await metadataRowFor(albumKey);
+      expect(albumRow!.posterFile, albumPoster);
+      expect(albumRow.artist, 'Shared Credit');
+      expect(File('${postersDir.path}/$albumPoster').existsSync(), isTrue);
+    });
+
+    test('falls back to the base fold row\'s matcher (CAA-style) '
+        'artwork when neither the track nor the album row carries any',
+        () async {
+      final leaving = track(1, 2, 'Two');
+      await LibraryStore.save([
+        MediaList(id: 'm', title: 'Music', entries: [leaving]),
+      ]);
+      final parsed = parseMediaName(leaving.name);
+      // The matcher's row: NOT userEdited, shared music_*.jpg file.
+      File('${postersDir.path}/music_test.jpg')
+          .writeAsBytesSync([7, 7, 7]);
+      await applyRemoteTmdbDetails(
+        lookupKey: parsed.lookupKey,
+        updatedMs: 1,
+        title: parsed.title,
+        posterFile: 'music_test.jpg',
+      );
+
+      final plan = await planUnalbum([leaving]);
+      expect(plan.error, isNull);
+      await applyUnalbum(plan.items,
+          postersDirProvider: () async => postersDir);
+
+      final newRow =
+          await metadataRowFor(parseMediaName('Two.mp3').lookupKey);
+      expect(newRow, isNotNull);
+      expect(newRow!.posterFile, startsWith('user_'));
+      expect(
+          File('${postersDir.path}/${newRow.posterFile}')
+              .readAsBytesSync(),
+          [7, 7, 7]);
+      // The shared matcher file is never touched.
+      expect(File('${postersDir.path}/music_test.jpg').existsSync(),
+          isTrue);
     });
   });
 

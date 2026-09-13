@@ -1036,6 +1036,24 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
                     helper: 'Empty = the next free number in that '
                         'album.'),
               ),
+              const SizedBox(height: 10),
+              // The dialog-driven move (with a rename preview) — the
+              // first-class way back INTO an album, so a freshly
+              // removed track isn't stuck with the free-text fields
+              // above or the faraway Needs-sorting screen.
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: () => unawaited(_moveTrackToAlbum()),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: t.bone,
+                    side: BorderSide(color: t.ash),
+                  ),
+                  icon: const Icon(Icons.drive_file_move_outline,
+                      size: 18),
+                  label: const Text('Move to an album…'),
+                ),
+              ),
               const SizedBox(height: 12),
             ],
           ],

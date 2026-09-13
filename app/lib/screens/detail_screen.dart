@@ -15,12 +15,14 @@ import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/embedded_client.dart';
 import '../services/network_policy.dart';
+import '../services/organize.dart';
 import '../services/profiles.dart';
 import '../services/version_choice.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../widgets/detail_header.dart';
 import '../widgets/messenger.dart' show wiMessengerKey;
+import '../widgets/organize_dialogs.dart';
 import '../widgets/playlist_picker.dart';
 import '../widgets/watch_progress.dart';
 import 'edit_details_screen.dart';
@@ -111,6 +113,35 @@ class _DetailScreenState extends State<DetailScreen> {
       });
     }
     await _loadState();
+  }
+
+  /// "Move to album" on a standalone audio file: the track editor's
+  /// dialog-driven single-entry organize move, from the detail page —
+  /// target album asked once, rename previewed, then applied. The page
+  /// re-resolves its (renamed) entry afterwards.
+  Future<void> _moveToAlbum() async {
+    final input =
+        await askAlbumDialog(context, count: 1, askTrackNumber: true);
+    if (input == null || !mounted) return;
+    final plan = await planOrganize(
+      [entry],
+      artist: input.artist,
+      album: input.album,
+      year: input.year,
+      tracks: input.track == null ? null : [input.track!],
+    );
+    if (plan.error != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(plan.error!)));
+      }
+      return;
+    }
+    if (!mounted) return;
+    final confirmed = await confirmOrganizePlanDialog(context, plan.items);
+    if (confirmed != true || !mounted) return;
+    await applyOrganize(plan.items);
+    await _refreshAfterEdit();
   }
 
   /// Load the entry's resume point and, for episodes, the show's next
@@ -494,6 +525,16 @@ class _DetailScreenState extends State<DetailScreen> {
             onPressed: () =>
                 unawaited(addToPlaylistFlow(context, [entry])),
           ),
+          // A standalone audio file's first-class way (back) into an
+          // album — the same dialog-driven move the track editor
+          // offers, right where a just-unalbumed track lands.
+          if (!ProfileStore.instance.isKid && isUnsortedAudio(entry))
+            IconButton(
+              tooltip: 'Move to album',
+              icon: Icon(Icons.drive_file_move_outline,
+                  color: t.boneDim, size: 20),
+              onPressed: () => unawaited(_moveToAlbum()),
+            ),
           if (!ProfileStore.instance.isKid)
             IconButton(
               tooltip: 'Edit details',
