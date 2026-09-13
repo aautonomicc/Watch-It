@@ -303,28 +303,50 @@ Future<OrganizePlan> planUnalbum(List<MediaEntry> selection) async {
 /// Execute a [planUnalbum] plan: rename each track everywhere, then
 /// carry its per-track override row (artist credit, artwork — the
 /// custom title is already the new file name) onto the standalone
-/// file's own key. The album's shared row is untouched: it belongs to
-/// the tracks staying behind. Returns how many entries were renamed.
+/// file's own key. A track with no art/artist of its own adopts the
+/// ALBUM's — the standalone key gets none of the album-row/base-row
+/// overlay a track key enjoys, so without the copy the artwork and
+/// credit simply vanish from the renamed file (the 2026-09-13 tester
+/// report). Poster bytes are always COPIED under the new key (`user_`
+/// files are deleted per-key, never shared). The album's shared rows
+/// are untouched: they belong to the tracks staying behind. Returns
+/// how many entries were renamed.
 Future<int> applyUnalbum(
   List<OrganizePlanItem> items, {
   Future<Directory> Function()? postersDirProvider,
 }) async {
   if (items.isEmpty) return 0;
+  Future<Uint8List?> posterBytesOf(String? posterFile) async {
+    if (posterFile == null) return null;
+    final dir = await (postersDirProvider ?? defaultPostersDir)();
+    final f = File('${dir.path}/$posterFile');
+    return f.existsSync() ? f.readAsBytesSync() : null;
+  }
+
   final renamedCount = await _renameEverywhere(items);
   for (final it in items) {
     final oldParsed = parseMediaName(it.entry.name);
     final newParsed = parseMediaName(it.newName);
     final oldKey = trackLookupKey(oldParsed)!;
     final row = await metadataRowFor(oldKey);
-    if (row == null || !row.userEdited) continue;
-    final artist = row.artist;
-    Uint8List? posterBytes;
-    if (row.posterFile != null) {
-      final dir = await (postersDirProvider ?? defaultPostersDir)();
-      final f = File('${dir.path}/${row.posterFile}');
-      if (f.existsSync()) posterBytes = f.readAsBytesSync();
+    final ownRow = row != null && row.userEdited;
+    var artist = ownRow ? row.artist : null;
+    var posterBytes = ownRow ? await posterBytesOf(row.posterFile) : null;
+    // Fall back to what the album overlay was showing on this track:
+    // the album's own row first, then the base fold row (which carries
+    // e.g. CAA cover art from the matcher — not userEdited, still the
+    // artwork the user sees).
+    for (final key in [albumLookupKey(oldParsed), oldParsed.lookupKey]) {
+      if (artist != null && posterBytes != null) break;
+      if (key == null) continue;
+      final shared = await metadataRowFor(key);
+      if (shared == null) continue;
+      artist ??= shared.artist;
+      posterBytes ??= await posterBytesOf(shared.posterFile);
     }
-    await clearUserEdits(oldKey, postersDirProvider: postersDirProvider);
+    if (ownRow) {
+      await clearUserEdits(oldKey, postersDirProvider: postersDirProvider);
+    }
     if (artist == null && posterBytes == null) continue;
     Value<String?> poster = const Value.absent();
     if (posterBytes != null) {
