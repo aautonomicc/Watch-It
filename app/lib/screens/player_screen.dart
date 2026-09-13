@@ -770,7 +770,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Widget _tvTransport(Widget child, EdgeInsets inset) {
-    if (!TvSettings.instance.enabled) return child;
+    // Music renders its own transport (AudioPlayerView's seek bar +
+    // play/skip buttons, D-pad-traversable since the WiSeekSlider fix);
+    // wrapping it in the TV video overlay stacked a SECOND control bar
+    // on top (Fire TV report, 2026-09-13). The TV overlay exists for
+    // the bare video surface only — the remote's Back key still exits.
+    if (_isAudio || !TvSettings.instance.enabled) return child;
     return TvPlayerControls(
       inset: inset,
       title: _title,
