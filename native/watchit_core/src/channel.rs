@@ -29,7 +29,7 @@ pub const CODE_PREFIX: &str = "wchn1-";
 /// stored; the caller runs the backup ceremony and creates the channel
 /// from the phrase on confirm.
 pub fn generate() -> Result<(String, String, String), String> {
-    use coins_bip39::{English, Mnemonic};
+    use alloy_signer_local::coins_bip39::{English, Mnemonic};
     let mnemonic: Mnemonic<English> = Mnemonic::new_with_count(&mut rand::thread_rng(), 12)
         .map_err(|e| format!("mnemonic generation failed: {e}"))?;
     let phrase = mnemonic.to_phrase();
@@ -43,7 +43,7 @@ pub fn generate() -> Result<(String, String, String), String> {
 /// seed", seed)`, left half). Deterministic, so the phrase alone
 /// restores the identical channel on any machine.
 pub fn secret_from_mnemonic(phrase: &str) -> Result<String, String> {
-    use coins_bip39::{English, Mnemonic};
+    use alloy_signer_local::coins_bip39::{English, Mnemonic};
     let normalized = phrase
         .split_whitespace()
         .collect::<Vec<_>>()

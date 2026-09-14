@@ -208,7 +208,7 @@ impl WalletStore {
 /// `(phrase, private_key_hex, address)`. Nothing is stored; the caller
 /// runs the backup ceremony and imports the phrase on confirm.
 pub fn generate() -> Result<(String, String, String), String> {
-    use coins_bip39::{English, Mnemonic};
+    use alloy_signer_local::coins_bip39::{English, Mnemonic};
     let mnemonic: Mnemonic<English> = Mnemonic::new_with_count(&mut rand::thread_rng(), 12)
         .map_err(|e| format!("mnemonic generation failed: {e}"))?;
     let phrase = mnemonic.to_phrase();
@@ -222,7 +222,7 @@ pub fn generate() -> Result<(String, String, String), String> {
 /// MetaMask/Trust/any BIP-44 wallet app.
 pub fn key_from_mnemonic(phrase: &str) -> Result<String, String> {
     use alloy_signer_local::MnemonicBuilder;
-    use coins_bip39::English;
+    use alloy_signer_local::coins_bip39::English;
     let normalized = phrase.split_whitespace().collect::<Vec<_>>().join(" ");
     let signer = MnemonicBuilder::<English>::default()
         .phrase(normalized.to_lowercase())
