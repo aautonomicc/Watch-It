@@ -339,6 +339,11 @@ void main() {
     await tester.tap(find.text('Move 2 to album…'));
     await tester.pumpAndSettle();
 
+    // The picker page lists the library's existing album; this flow
+    // takes the New-album fall-through to the free-text dialog.
+    await tester.tap(find.text('New album…'));
+    await tester.pumpAndSettle();
+
     await tester.enterText(
         find.widgetWithText(TextField, 'Artist'), 'Neat Artist');
     await tester.enterText(

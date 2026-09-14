@@ -417,12 +417,17 @@ class _AlbumScreenState extends State<AlbumScreen>
 
   Future<void> _moveSelectedToAlbum() async {
     final selection = _selection;
-    final input =
-        await askAlbumDialog(context, count: selection.length);
+    // The picker hides THIS album (moving tracks into their own album
+    // is a no-op) — any selected track identifies it.
+    final input = await pickAlbumTargetFlow(context,
+        count: selection.length, excludeAlbumOf: selection.first);
     if (input == null || !mounted) return;
     setState(() => _working = true);
     final plan = await planOrganize(selection,
-        artist: input.artist, album: input.album, year: input.year);
+        artist: input.artist,
+        album: input.album,
+        year: input.year,
+        releaseMbid: input.mbid);
     if (!mounted) return;
     setState(() => _working = false);
     if (plan.error != null) {

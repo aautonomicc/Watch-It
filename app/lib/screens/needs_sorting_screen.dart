@@ -50,7 +50,8 @@ class _NeedsSortingScreenState extends State<NeedsSortingScreen> {
       [for (final i in _selected.toList()..sort()) _entries[i]];
 
   Future<void> _moveToAlbum() async {
-    final input = await askAlbumDialog(context, count: _selected.length);
+    final input =
+        await pickAlbumTargetFlow(context, count: _selected.length);
     if (input == null || !mounted) return;
     setState(() => _working = true);
     final plan = await planOrganize(
@@ -58,6 +59,7 @@ class _NeedsSortingScreenState extends State<NeedsSortingScreen> {
       artist: input.artist,
       album: input.album,
       year: input.year,
+      releaseMbid: input.mbid,
     );
     if (!mounted) return;
     setState(() => _working = false);

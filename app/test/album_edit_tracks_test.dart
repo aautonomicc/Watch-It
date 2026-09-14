@@ -145,6 +145,14 @@ void main() {
     await tester.tap(find.text('Move 1 to album…'));
     await tester.pumpAndSettle();
 
+    // The picker page opens; its own album is hidden (self-move is a
+    // no-op) so the library shows no target — fall through to the
+    // free-text dialog.
+    expect(find.text('Move 1 file to album'), findsOneWidget);
+    expect(find.textContaining('No albums in the library'), findsOneWidget);
+    await tester.tap(find.text('New album…'));
+    await tester.pumpAndSettle();
+
     await tester.enterText(
         find.widgetWithText(TextField, 'Artist'), 'Other Artist');
     await tester.enterText(
