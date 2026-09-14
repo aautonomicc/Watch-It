@@ -630,14 +630,21 @@ class _EditDetailsScreenState extends State<EditDetailsScreen> {
   /// the WHOLE album. The track is renamed into the target album,
   /// numbered after its existing tracks (or at the typed number).
   Future<void> _moveTrackToAlbum() async {
-    final input = await askAlbumDialog(context,
-        count: 1, initialArtist: _parsed.artist, askTrackNumber: true);
+    // On the track scope the picker hides the track's OWN album; on
+    // the unsorted scope the entry belongs to no album, so the
+    // exclusion matches nothing.
+    final input = await pickAlbumTargetFlow(context,
+        count: 1,
+        initialArtist: _parsed.artist,
+        askTrackNumber: true,
+        excludeAlbumOf: widget.entry);
     if (input == null || !mounted) return;
     final plan = await planOrganize(
       [widget.entry],
       artist: input.artist,
       album: input.album,
       year: input.year,
+      releaseMbid: input.mbid,
       tracks: input.track == null ? null : [input.track!],
     );
     if (plan.error != null) {

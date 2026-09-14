@@ -115,19 +115,20 @@ class _DetailScreenState extends State<DetailScreen> {
     await _loadState();
   }
 
-  /// "Move to album" on a standalone audio file: the track editor's
-  /// dialog-driven single-entry organize move, from the detail page —
-  /// target album asked once, rename previewed, then applied. The page
-  /// re-resolves its (renamed) entry afterwards.
+  /// "Move to album" on a standalone audio file: the shared
+  /// picker-driven single-entry organize move, from the detail page —
+  /// target album picked (or typed) once, rename previewed, then
+  /// applied. The page re-resolves its (renamed) entry afterwards.
   Future<void> _moveToAlbum() async {
     final input =
-        await askAlbumDialog(context, count: 1, askTrackNumber: true);
+        await pickAlbumTargetFlow(context, count: 1, askTrackNumber: true);
     if (input == null || !mounted) return;
     final plan = await planOrganize(
       [entry],
       artist: input.artist,
       album: input.album,
       year: input.year,
+      releaseMbid: input.mbid,
       tracks: input.track == null ? null : [input.track!],
     );
     if (plan.error != null) {

@@ -86,6 +86,11 @@ typedef OrganizePlan = ({List<OrganizePlanItem> items, String? error});
 /// given — and each entry's track title is its user-edited display
 /// title when one exists, else the title parsed from its file name.
 ///
+/// [releaseMbid] carries the target album's `{mbid-...}` tag into the
+/// new names — an EXISTING album whose tracks are tagged folds on the
+/// mbid key (AlbumKeys), so a move into it must tag the renamed files
+/// too or they would fold into a second same-named album.
+///
 /// Nothing is written; [applyOrganize] executes the plan. The plan
 /// refuses (error) when a name cannot be generated losslessly or a
 /// target track number is already taken by an entry outside the
@@ -95,6 +100,7 @@ Future<OrganizePlan> planOrganize(
   required String artist,
   required String album,
   int? year,
+  String? releaseMbid,
   List<int>? tracks,
   List<String?>? titles,
   List<MediaList>? lists,
@@ -186,6 +192,7 @@ Future<OrganizePlan> planOrganize(
       year: year,
       track: number,
       title: trackTitle,
+      releaseMbid: releaseMbid,
       ext: audioExtensionOf(entry.name),
     );
     final check = parseMediaName(newName);

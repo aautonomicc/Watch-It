@@ -930,6 +930,10 @@ void main() {
     await tester.tap(
         find.textContaining('Move only this track to another album'));
     await tester.pumpAndSettle();
+    // Picker page first (own album hidden); New album… falls through
+    // to the free-text dialog with the parsed artist prefilled.
+    await tester.tap(find.text('New album…'));
+    await tester.pumpAndSettle();
     await tester.enterText(
         find.widgetWithText(TextField, 'Artist'), 'Other Artist');
     // The dialog's own Album field (the editor has one too).
