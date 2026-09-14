@@ -236,7 +236,7 @@ convention — see [NAMING.md](NAMING.md).
       test range/offset access → done: embedded Rust-FFI client (watchit_core),
       HTTP Range seek verified byte-exact against the live network
 - [x] CI: `flutter analyze` + `flutter test` on push → GitHub Actions
-      (.github/workflows/ci.yml), pinned Flutter 3.44.6, runs on push to main + PRs
+      (.github/workflows/ci.yml), pinned Flutter 3.47.4, runs on push to main + PRs
 - [x] Decide accent color / app icon → blue #42a5f5 accent since 2026-07-30 (was copper #c9732b); icon: striped popcorn bucket (bone/blue #42a5f5/bone, branding/icon.svg) — bucket replaced the original `[>]` chevron 2026-07-29 (too close to Plex), stripe went red→blue with the accent change; name/wordmark: **W@tch** in Anton since 2026-07-31 (was lowercase mono `watch-it`)
       icon on ink, app-bar wordmark lockup matches (alpha.12); see BRAND.md
 

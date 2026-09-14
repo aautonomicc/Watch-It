@@ -4376,7 +4376,7 @@ class $$MediaListsTableTableManager
           withReferenceMapper: (p0) => p0
               .map(
                 (e) => (
-                  e.readTable(table),
+                  e.readTable<$MediaListsTable, MediaListRow>(table),
                   $$MediaListsTableReferences(db, table, e),
                 ),
               )
@@ -4752,7 +4752,7 @@ class $$MediaEntriesTableTableManager
           withReferenceMapper: (p0) => p0
               .map(
                 (e) => (
-                  e.readTable(table),
+                  e.readTable<$MediaEntriesTable, MediaEntryRow>(table),
                   $$MediaEntriesTableReferences(db, table, e),
                 ),
               )
@@ -5274,7 +5274,16 @@ class $$MetadataCacheTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$MetadataCacheTable, MetadataCacheRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $MetadataCacheTable,
+                    MetadataCacheRow
+                  >(db, table, e),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -5497,7 +5506,16 @@ class $$WatchStatesTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$WatchStatesTable, WatchStateRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $WatchStatesTable,
+                    WatchStateRow
+                  >(db, table, e),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -5798,7 +5816,16 @@ class $$DownloadsTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$DownloadsTable, DownloadRow>(table),
+                  BaseReferences<_$AppDatabase, $DownloadsTable, DownloadRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -6036,7 +6063,16 @@ class $$ProfilesTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$ProfilesTable, ProfileRow>(table),
+                  BaseReferences<_$AppDatabase, $ProfilesTable, ProfileRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -6185,7 +6221,18 @@ class $$ProfileListAccessTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$ProfileListAccessTable, ProfileListAccessRow>(
+                    table,
+                  ),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $ProfileListAccessTable,
+                    ProfileListAccessRow
+                  >(db, table, e),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),

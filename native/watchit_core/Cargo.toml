@@ -23,11 +23,16 @@ cc = "1"
 # the version upstream PR WithAutonomi/saorsa-core#160 targets).
 ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "dbc01ce8fdbdfe9ac4d064d35f36b4684bf6a616" }
 self_encryption = "0.36"
-# Upload-wallet key derivation: pinned to the alloy minor evmlib 0.9
-# already resolves to (no second alloy tree); the mnemonic feature adds
-# the BIP-39/BIP-32 path (m/44'/60'/0'/0/0, MetaMask-compatible).
-alloy-signer-local = { version = "1.8.3", features = ["mnemonic"] }
-coins-bip39 = { version = "0.12", default-features = false, features = ["english"] }
+# Upload-wallet key derivation; the mnemonic feature adds the
+# BIP-39/BIP-32 path (m/44'/60'/0'/0/0, MetaMask-compatible). 2.x may
+# resolve a second alloy tree beside evmlib's — acceptable: wallet.rs
+# only derives key hex + address strings, no cross-tree types.
+# BIP-39 mnemonics come via `alloy_signer_local::coins_bip39` (the
+# crate's public re-export) instead of a direct coins-bip39 dep — a
+# direct dep at a different version than alloy's internal pin (0.12)
+# makes MnemonicBuilder reject our Wordlist type (hit at the 2026-09-14
+# upgrade when 0.13 was tried); the re-export can never diverge.
+alloy-signer-local = { version = "2.4.2", features = ["mnemonic"] }
 rand = "0.8"
 axum = "0.8"
 # blake3 + rmp-serde mirror ant-core's address derivation (compute_address
@@ -44,10 +49,14 @@ sha2 = "0.10"
 # direct deps add no new code to the build): Ed25519 channel keys +
 # head-record signatures, SLIP-0010 derivation from the BIP-39 seed,
 # base32 channel codes (wchn1-…).
-ed25519-dalek = "2"
+ed25519-dalek = "3"
 hmac = "0.12"
 data-encoding = "2"
 # bundled: compiles its own SQLite, so Android/cross builds need no system lib
+# HELD AT 0.32 (2026-09-14 dep-upgrade audit): x0x itself depends on
+# rusqlite ^0.32, and rusqlite's native-sqlite `links` key allows only
+# ONE version per dependency graph — bumping here is impossible until
+# x0x bumps. Zero cost: the single shared copy is the current one.
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
@@ -74,32 +83,31 @@ tracing-android = "0.2"
 # ant-quic, post-quantum, mDNS LAN discovery) syncs lists/viewpoints
 # through a self-keyed CRDT KV store on a secret invite topic. Android
 # included since the NDK cross-build of the x0x tree was proven.
-# 0.42.x rolls up ~240 commits over 0.41.3: ADR-0061 supervised
-# upgrades, ADR-0064 owner-anchored fork authority, /health decoupled
-# from transport locks (#605), daemon single-instance guard (#629),
-# encrypted KvStore (#341-B); 0.42.1 adds saorsa-gossip 0.5.77
-# stranded-publish recovery (#613/#611/#336) and the P2P-bind advert
-# fix (#638). Idle-bandwidth note: only leaf-egress slice 1 shipped
-# (#622 slices 2-5 still open), so no idle-traffic change expected.
+# 0.43–0.45 (the 2026-09-13/14 release burst): 0.43.0's BREAKING
+# change is the upgrade-path library API only (AutoApplyUpgrader —
+# unused here; the Agent API is unchanged) + ant-quic 0.27.51 transport
+# fixes (#278 stale conn after disconnect, #280 single accept_bi
+# consumer, #283 shutdown drain); 0.44.0 makes relay fan-out lazy for
+# non-consumed topics (#674) + ant-quic 0.27.52 joins accept workers on
+# shutdown; 0.45.0 pins saorsa-gossip 0.5.81 (#58 dedupe read-lock —
+# the measured #656 CPU fix — + #41 bounded per-topic peer state + #42
+# IHAVE-flusher shutdown livelock fix). Idle-bandwidth note: #622 (leaf
+# egress budget) still open, so no leaf idle-traffic change expected.
 # Pin a release, never git main.
-x0x = "0.42.3"
+x0x = "0.45.0"
 # CancellationToken for the mywatch heartbeat/watch task (already in the
 # x0x tree, so free on desktop).
 tokio-util = "0.7"
 
 [target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dependencies]
-keyring = { version = "3", default-features = false, features = [
-    "windows-native",
-    "apple-native",
-    "async-secret-service",
-    "crypto-rust",
-    # async-io, NOT tokio: with the tokio feature zbus block_on panics
-    # ("Cannot start a runtime from within a runtime") when a keychain
-    # call happens on a runtime thread — and it killed the connect
-    # supervisor. async-io gives zbus its own executor; wallet.rs also
-    # runs every keyring call on a dedicated plain thread.
-    "async-io",
-] }
+# keyring 4 restructured into a facade over keyring-core + per-platform
+# store crates; the default `v1` feature keeps the old Entry API and
+# picks Keychain / Credential Manager / Secret Service automatically.
+# The zbus Secret Service store resolves zbus with async-io (never the
+# tokio feature whose block_on panics on a runtime thread — the old
+# alpha.55 lesson); wallet.rs still runs every keyring call on a
+# dedicated plain thread as belt and braces.
+keyring = "4"
 
 # NOTE: ant-quic was vendored at ../third_party/ant-quic from 0.27.44
 # through 0.27.47 purely to bump its exact unicode-width =0.2.0 pin

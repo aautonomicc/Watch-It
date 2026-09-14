@@ -43,12 +43,12 @@ dependencies:
   media_kit: ^1.2.6
   media_kit_video: ^2.0.1
   media_kit_libs_video: ^1.0.7
-  drift: ^2.34.2
+  drift: ^2.35.0
   drift_flutter: ^0.3.1
   http: ^1.2.0
   file_selector: ^1.0.3
   share_plus: ^13.3.0
-  archive: ^4.0.9
+  archive: ^4.3.0
   connectivity_plus: ^7.3.1
   qr_flutter: ^4.1.0
   mobile_scanner: ^7.4.0
@@ -84,9 +84,9 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
-  drift_dev: ^2.34.4
-  build_runner: ^2.15.1
-  sqlite3: ^3.5.0
+  drift_dev: ^2.35.0
+  build_runner: ^2.16.1
+  sqlite3: ^3.6.0
   file_selector_platform_interface: ^2.6.2
   path_provider_platform_interface: ^2.1.0
   plugin_platform_interface: ^2.1.8
