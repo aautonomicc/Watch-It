@@ -4010,6 +4010,679 @@ class ProfileListAccessCompanion extends UpdateCompanion<ProfileListAccessRow> {
   }
 }
 
+class $ArtistMetaTable extends ArtistMeta
+    with TableInfo<$ArtistMetaTable, ArtistMetaRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ArtistMetaTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _artistKeyMeta = const VerificationMeta(
+    'artistKey',
+  );
+  @override
+  late final GeneratedColumn<String> artistKey = GeneratedColumn<String>(
+    'artist_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _foundMeta = const VerificationMeta('found');
+  @override
+  late final GeneratedColumn<bool> found = GeneratedColumn<bool>(
+    'found',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("found" IN (0, 1))',
+    ),
+  );
+  static const VerificationMeta _mbidMeta = const VerificationMeta('mbid');
+  @override
+  late final GeneratedColumn<String> mbid = GeneratedColumn<String>(
+    'mbid',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _bioMeta = const VerificationMeta('bio');
+  @override
+  late final GeneratedColumn<String> bio = GeneratedColumn<String>(
+    'bio',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _bioUrlMeta = const VerificationMeta('bioUrl');
+  @override
+  late final GeneratedColumn<String> bioUrl = GeneratedColumn<String>(
+    'bio_url',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _formedYearMeta = const VerificationMeta(
+    'formedYear',
+  );
+  @override
+  late final GeneratedColumn<int> formedYear = GeneratedColumn<int>(
+    'formed_year',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _countryMeta = const VerificationMeta(
+    'country',
+  );
+  @override
+  late final GeneratedColumn<String> country = GeneratedColumn<String>(
+    'country',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _genresMeta = const VerificationMeta('genres');
+  @override
+  late final GeneratedColumn<String> genres = GeneratedColumn<String>(
+    'genres',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _portraitFileMeta = const VerificationMeta(
+    'portraitFile',
+  );
+  @override
+  late final GeneratedColumn<String> portraitFile = GeneratedColumn<String>(
+    'portrait_file',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _fetchedAtMeta = const VerificationMeta(
+    'fetchedAt',
+  );
+  @override
+  late final GeneratedColumn<int> fetchedAt = GeneratedColumn<int>(
+    'fetched_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    artistKey,
+    found,
+    mbid,
+    name,
+    bio,
+    bioUrl,
+    formedYear,
+    country,
+    genres,
+    portraitFile,
+    fetchedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'artist_meta';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ArtistMetaRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('artist_key')) {
+      context.handle(
+        _artistKeyMeta,
+        artistKey.isAcceptableOrUnknown(data['artist_key']!, _artistKeyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_artistKeyMeta);
+    }
+    if (data.containsKey('found')) {
+      context.handle(
+        _foundMeta,
+        found.isAcceptableOrUnknown(data['found']!, _foundMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_foundMeta);
+    }
+    if (data.containsKey('mbid')) {
+      context.handle(
+        _mbidMeta,
+        mbid.isAcceptableOrUnknown(data['mbid']!, _mbidMeta),
+      );
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    }
+    if (data.containsKey('bio')) {
+      context.handle(
+        _bioMeta,
+        bio.isAcceptableOrUnknown(data['bio']!, _bioMeta),
+      );
+    }
+    if (data.containsKey('bio_url')) {
+      context.handle(
+        _bioUrlMeta,
+        bioUrl.isAcceptableOrUnknown(data['bio_url']!, _bioUrlMeta),
+      );
+    }
+    if (data.containsKey('formed_year')) {
+      context.handle(
+        _formedYearMeta,
+        formedYear.isAcceptableOrUnknown(data['formed_year']!, _formedYearMeta),
+      );
+    }
+    if (data.containsKey('country')) {
+      context.handle(
+        _countryMeta,
+        country.isAcceptableOrUnknown(data['country']!, _countryMeta),
+      );
+    }
+    if (data.containsKey('genres')) {
+      context.handle(
+        _genresMeta,
+        genres.isAcceptableOrUnknown(data['genres']!, _genresMeta),
+      );
+    }
+    if (data.containsKey('portrait_file')) {
+      context.handle(
+        _portraitFileMeta,
+        portraitFile.isAcceptableOrUnknown(
+          data['portrait_file']!,
+          _portraitFileMeta,
+        ),
+      );
+    }
+    if (data.containsKey('fetched_at')) {
+      context.handle(
+        _fetchedAtMeta,
+        fetchedAt.isAcceptableOrUnknown(data['fetched_at']!, _fetchedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_fetchedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {artistKey};
+  @override
+  ArtistMetaRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ArtistMetaRow(
+      artistKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}artist_key'],
+      )!,
+      found: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}found'],
+      )!,
+      mbid: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}mbid'],
+      ),
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      ),
+      bio: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}bio'],
+      ),
+      bioUrl: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}bio_url'],
+      ),
+      formedYear: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}formed_year'],
+      ),
+      country: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}country'],
+      ),
+      genres: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}genres'],
+      ),
+      portraitFile: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}portrait_file'],
+      ),
+      fetchedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}fetched_at'],
+      )!,
+    );
+  }
+
+  @override
+  $ArtistMetaTable createAlias(String alias) {
+    return $ArtistMetaTable(attachedDatabase, alias);
+  }
+}
+
+class ArtistMetaRow extends DataClass implements Insertable<ArtistMetaRow> {
+  /// `artist.trim().toLowerCase()` — the [HomeArtist] fold key.
+  final String artistKey;
+  final bool found;
+
+  /// MusicBrainz artist id (UUID); the portrait file is named after it.
+  final String? mbid;
+
+  /// Canonical MusicBrainz artist name.
+  final String? name;
+
+  /// Wikipedia article extract (CC BY-SA — [bioUrl] is the required
+  /// attribution link).
+  final String? bio;
+  final String? bioUrl;
+
+  /// Formed/born year, area name, and top genres joined ` · `.
+  final int? formedYear;
+  final String? country;
+  final String? genres;
+
+  /// Portrait file name inside the posters dir (`artist_<mbid>.jpg`).
+  final String? portraitFile;
+  final int fetchedAt;
+  const ArtistMetaRow({
+    required this.artistKey,
+    required this.found,
+    this.mbid,
+    this.name,
+    this.bio,
+    this.bioUrl,
+    this.formedYear,
+    this.country,
+    this.genres,
+    this.portraitFile,
+    required this.fetchedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['artist_key'] = Variable<String>(artistKey);
+    map['found'] = Variable<bool>(found);
+    if (!nullToAbsent || mbid != null) {
+      map['mbid'] = Variable<String>(mbid);
+    }
+    if (!nullToAbsent || name != null) {
+      map['name'] = Variable<String>(name);
+    }
+    if (!nullToAbsent || bio != null) {
+      map['bio'] = Variable<String>(bio);
+    }
+    if (!nullToAbsent || bioUrl != null) {
+      map['bio_url'] = Variable<String>(bioUrl);
+    }
+    if (!nullToAbsent || formedYear != null) {
+      map['formed_year'] = Variable<int>(formedYear);
+    }
+    if (!nullToAbsent || country != null) {
+      map['country'] = Variable<String>(country);
+    }
+    if (!nullToAbsent || genres != null) {
+      map['genres'] = Variable<String>(genres);
+    }
+    if (!nullToAbsent || portraitFile != null) {
+      map['portrait_file'] = Variable<String>(portraitFile);
+    }
+    map['fetched_at'] = Variable<int>(fetchedAt);
+    return map;
+  }
+
+  ArtistMetaCompanion toCompanion(bool nullToAbsent) {
+    return ArtistMetaCompanion(
+      artistKey: Value(artistKey),
+      found: Value(found),
+      mbid: mbid == null && nullToAbsent ? const Value.absent() : Value(mbid),
+      name: name == null && nullToAbsent ? const Value.absent() : Value(name),
+      bio: bio == null && nullToAbsent ? const Value.absent() : Value(bio),
+      bioUrl: bioUrl == null && nullToAbsent
+          ? const Value.absent()
+          : Value(bioUrl),
+      formedYear: formedYear == null && nullToAbsent
+          ? const Value.absent()
+          : Value(formedYear),
+      country: country == null && nullToAbsent
+          ? const Value.absent()
+          : Value(country),
+      genres: genres == null && nullToAbsent
+          ? const Value.absent()
+          : Value(genres),
+      portraitFile: portraitFile == null && nullToAbsent
+          ? const Value.absent()
+          : Value(portraitFile),
+      fetchedAt: Value(fetchedAt),
+    );
+  }
+
+  factory ArtistMetaRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ArtistMetaRow(
+      artistKey: serializer.fromJson<String>(json['artistKey']),
+      found: serializer.fromJson<bool>(json['found']),
+      mbid: serializer.fromJson<String?>(json['mbid']),
+      name: serializer.fromJson<String?>(json['name']),
+      bio: serializer.fromJson<String?>(json['bio']),
+      bioUrl: serializer.fromJson<String?>(json['bioUrl']),
+      formedYear: serializer.fromJson<int?>(json['formedYear']),
+      country: serializer.fromJson<String?>(json['country']),
+      genres: serializer.fromJson<String?>(json['genres']),
+      portraitFile: serializer.fromJson<String?>(json['portraitFile']),
+      fetchedAt: serializer.fromJson<int>(json['fetchedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'artistKey': serializer.toJson<String>(artistKey),
+      'found': serializer.toJson<bool>(found),
+      'mbid': serializer.toJson<String?>(mbid),
+      'name': serializer.toJson<String?>(name),
+      'bio': serializer.toJson<String?>(bio),
+      'bioUrl': serializer.toJson<String?>(bioUrl),
+      'formedYear': serializer.toJson<int?>(formedYear),
+      'country': serializer.toJson<String?>(country),
+      'genres': serializer.toJson<String?>(genres),
+      'portraitFile': serializer.toJson<String?>(portraitFile),
+      'fetchedAt': serializer.toJson<int>(fetchedAt),
+    };
+  }
+
+  ArtistMetaRow copyWith({
+    String? artistKey,
+    bool? found,
+    Value<String?> mbid = const Value.absent(),
+    Value<String?> name = const Value.absent(),
+    Value<String?> bio = const Value.absent(),
+    Value<String?> bioUrl = const Value.absent(),
+    Value<int?> formedYear = const Value.absent(),
+    Value<String?> country = const Value.absent(),
+    Value<String?> genres = const Value.absent(),
+    Value<String?> portraitFile = const Value.absent(),
+    int? fetchedAt,
+  }) => ArtistMetaRow(
+    artistKey: artistKey ?? this.artistKey,
+    found: found ?? this.found,
+    mbid: mbid.present ? mbid.value : this.mbid,
+    name: name.present ? name.value : this.name,
+    bio: bio.present ? bio.value : this.bio,
+    bioUrl: bioUrl.present ? bioUrl.value : this.bioUrl,
+    formedYear: formedYear.present ? formedYear.value : this.formedYear,
+    country: country.present ? country.value : this.country,
+    genres: genres.present ? genres.value : this.genres,
+    portraitFile: portraitFile.present ? portraitFile.value : this.portraitFile,
+    fetchedAt: fetchedAt ?? this.fetchedAt,
+  );
+  ArtistMetaRow copyWithCompanion(ArtistMetaCompanion data) {
+    return ArtistMetaRow(
+      artistKey: data.artistKey.present ? data.artistKey.value : this.artistKey,
+      found: data.found.present ? data.found.value : this.found,
+      mbid: data.mbid.present ? data.mbid.value : this.mbid,
+      name: data.name.present ? data.name.value : this.name,
+      bio: data.bio.present ? data.bio.value : this.bio,
+      bioUrl: data.bioUrl.present ? data.bioUrl.value : this.bioUrl,
+      formedYear: data.formedYear.present
+          ? data.formedYear.value
+          : this.formedYear,
+      country: data.country.present ? data.country.value : this.country,
+      genres: data.genres.present ? data.genres.value : this.genres,
+      portraitFile: data.portraitFile.present
+          ? data.portraitFile.value
+          : this.portraitFile,
+      fetchedAt: data.fetchedAt.present ? data.fetchedAt.value : this.fetchedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ArtistMetaRow(')
+          ..write('artistKey: $artistKey, ')
+          ..write('found: $found, ')
+          ..write('mbid: $mbid, ')
+          ..write('name: $name, ')
+          ..write('bio: $bio, ')
+          ..write('bioUrl: $bioUrl, ')
+          ..write('formedYear: $formedYear, ')
+          ..write('country: $country, ')
+          ..write('genres: $genres, ')
+          ..write('portraitFile: $portraitFile, ')
+          ..write('fetchedAt: $fetchedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    artistKey,
+    found,
+    mbid,
+    name,
+    bio,
+    bioUrl,
+    formedYear,
+    country,
+    genres,
+    portraitFile,
+    fetchedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ArtistMetaRow &&
+          other.artistKey == this.artistKey &&
+          other.found == this.found &&
+          other.mbid == this.mbid &&
+          other.name == this.name &&
+          other.bio == this.bio &&
+          other.bioUrl == this.bioUrl &&
+          other.formedYear == this.formedYear &&
+          other.country == this.country &&
+          other.genres == this.genres &&
+          other.portraitFile == this.portraitFile &&
+          other.fetchedAt == this.fetchedAt);
+}
+
+class ArtistMetaCompanion extends UpdateCompanion<ArtistMetaRow> {
+  final Value<String> artistKey;
+  final Value<bool> found;
+  final Value<String?> mbid;
+  final Value<String?> name;
+  final Value<String?> bio;
+  final Value<String?> bioUrl;
+  final Value<int?> formedYear;
+  final Value<String?> country;
+  final Value<String?> genres;
+  final Value<String?> portraitFile;
+  final Value<int> fetchedAt;
+  final Value<int> rowid;
+  const ArtistMetaCompanion({
+    this.artistKey = const Value.absent(),
+    this.found = const Value.absent(),
+    this.mbid = const Value.absent(),
+    this.name = const Value.absent(),
+    this.bio = const Value.absent(),
+    this.bioUrl = const Value.absent(),
+    this.formedYear = const Value.absent(),
+    this.country = const Value.absent(),
+    this.genres = const Value.absent(),
+    this.portraitFile = const Value.absent(),
+    this.fetchedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ArtistMetaCompanion.insert({
+    required String artistKey,
+    required bool found,
+    this.mbid = const Value.absent(),
+    this.name = const Value.absent(),
+    this.bio = const Value.absent(),
+    this.bioUrl = const Value.absent(),
+    this.formedYear = const Value.absent(),
+    this.country = const Value.absent(),
+    this.genres = const Value.absent(),
+    this.portraitFile = const Value.absent(),
+    required int fetchedAt,
+    this.rowid = const Value.absent(),
+  }) : artistKey = Value(artistKey),
+       found = Value(found),
+       fetchedAt = Value(fetchedAt);
+  static Insertable<ArtistMetaRow> custom({
+    Expression<String>? artistKey,
+    Expression<bool>? found,
+    Expression<String>? mbid,
+    Expression<String>? name,
+    Expression<String>? bio,
+    Expression<String>? bioUrl,
+    Expression<int>? formedYear,
+    Expression<String>? country,
+    Expression<String>? genres,
+    Expression<String>? portraitFile,
+    Expression<int>? fetchedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (artistKey != null) 'artist_key': artistKey,
+      if (found != null) 'found': found,
+      if (mbid != null) 'mbid': mbid,
+      if (name != null) 'name': name,
+      if (bio != null) 'bio': bio,
+      if (bioUrl != null) 'bio_url': bioUrl,
+      if (formedYear != null) 'formed_year': formedYear,
+      if (country != null) 'country': country,
+      if (genres != null) 'genres': genres,
+      if (portraitFile != null) 'portrait_file': portraitFile,
+      if (fetchedAt != null) 'fetched_at': fetchedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ArtistMetaCompanion copyWith({
+    Value<String>? artistKey,
+    Value<bool>? found,
+    Value<String?>? mbid,
+    Value<String?>? name,
+    Value<String?>? bio,
+    Value<String?>? bioUrl,
+    Value<int?>? formedYear,
+    Value<String?>? country,
+    Value<String?>? genres,
+    Value<String?>? portraitFile,
+    Value<int>? fetchedAt,
+    Value<int>? rowid,
+  }) {
+    return ArtistMetaCompanion(
+      artistKey: artistKey ?? this.artistKey,
+      found: found ?? this.found,
+      mbid: mbid ?? this.mbid,
+      name: name ?? this.name,
+      bio: bio ?? this.bio,
+      bioUrl: bioUrl ?? this.bioUrl,
+      formedYear: formedYear ?? this.formedYear,
+      country: country ?? this.country,
+      genres: genres ?? this.genres,
+      portraitFile: portraitFile ?? this.portraitFile,
+      fetchedAt: fetchedAt ?? this.fetchedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (artistKey.present) {
+      map['artist_key'] = Variable<String>(artistKey.value);
+    }
+    if (found.present) {
+      map['found'] = Variable<bool>(found.value);
+    }
+    if (mbid.present) {
+      map['mbid'] = Variable<String>(mbid.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (bio.present) {
+      map['bio'] = Variable<String>(bio.value);
+    }
+    if (bioUrl.present) {
+      map['bio_url'] = Variable<String>(bioUrl.value);
+    }
+    if (formedYear.present) {
+      map['formed_year'] = Variable<int>(formedYear.value);
+    }
+    if (country.present) {
+      map['country'] = Variable<String>(country.value);
+    }
+    if (genres.present) {
+      map['genres'] = Variable<String>(genres.value);
+    }
+    if (portraitFile.present) {
+      map['portrait_file'] = Variable<String>(portraitFile.value);
+    }
+    if (fetchedAt.present) {
+      map['fetched_at'] = Variable<int>(fetchedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ArtistMetaCompanion(')
+          ..write('artistKey: $artistKey, ')
+          ..write('found: $found, ')
+          ..write('mbid: $mbid, ')
+          ..write('name: $name, ')
+          ..write('bio: $bio, ')
+          ..write('bioUrl: $bioUrl, ')
+          ..write('formedYear: $formedYear, ')
+          ..write('country: $country, ')
+          ..write('genres: $genres, ')
+          ..write('portraitFile: $portraitFile, ')
+          ..write('fetchedAt: $fetchedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -4021,6 +4694,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $ProfilesTable profiles = $ProfilesTable(this);
   late final $ProfileListAccessTable profileListAccess =
       $ProfileListAccessTable(this);
+  late final $ArtistMetaTable artistMeta = $ArtistMetaTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -4033,6 +4707,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     downloads,
     profiles,
     profileListAccess,
+    artistMeta,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -6260,6 +6935,333 @@ typedef $$ProfileListAccessTableProcessedTableManager =
       ProfileListAccessRow,
       PrefetchHooks Function()
     >;
+typedef $$ArtistMetaTableCreateCompanionBuilder =
+    ArtistMetaCompanion Function({
+      required String artistKey,
+      required bool found,
+      Value<String?> mbid,
+      Value<String?> name,
+      Value<String?> bio,
+      Value<String?> bioUrl,
+      Value<int?> formedYear,
+      Value<String?> country,
+      Value<String?> genres,
+      Value<String?> portraitFile,
+      required int fetchedAt,
+      Value<int> rowid,
+    });
+typedef $$ArtistMetaTableUpdateCompanionBuilder =
+    ArtistMetaCompanion Function({
+      Value<String> artistKey,
+      Value<bool> found,
+      Value<String?> mbid,
+      Value<String?> name,
+      Value<String?> bio,
+      Value<String?> bioUrl,
+      Value<int?> formedYear,
+      Value<String?> country,
+      Value<String?> genres,
+      Value<String?> portraitFile,
+      Value<int> fetchedAt,
+      Value<int> rowid,
+    });
+
+class $$ArtistMetaTableFilterComposer
+    extends Composer<_$AppDatabase, $ArtistMetaTable> {
+  $$ArtistMetaTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get artistKey => $composableBuilder(
+    column: $table.artistKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get found => $composableBuilder(
+    column: $table.found,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get mbid => $composableBuilder(
+    column: $table.mbid,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get bio => $composableBuilder(
+    column: $table.bio,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get bioUrl => $composableBuilder(
+    column: $table.bioUrl,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get formedYear => $composableBuilder(
+    column: $table.formedYear,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get country => $composableBuilder(
+    column: $table.country,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get genres => $composableBuilder(
+    column: $table.genres,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get portraitFile => $composableBuilder(
+    column: $table.portraitFile,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get fetchedAt => $composableBuilder(
+    column: $table.fetchedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ArtistMetaTableOrderingComposer
+    extends Composer<_$AppDatabase, $ArtistMetaTable> {
+  $$ArtistMetaTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get artistKey => $composableBuilder(
+    column: $table.artistKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get found => $composableBuilder(
+    column: $table.found,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get mbid => $composableBuilder(
+    column: $table.mbid,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get bio => $composableBuilder(
+    column: $table.bio,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get bioUrl => $composableBuilder(
+    column: $table.bioUrl,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get formedYear => $composableBuilder(
+    column: $table.formedYear,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get country => $composableBuilder(
+    column: $table.country,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get genres => $composableBuilder(
+    column: $table.genres,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get portraitFile => $composableBuilder(
+    column: $table.portraitFile,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get fetchedAt => $composableBuilder(
+    column: $table.fetchedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ArtistMetaTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ArtistMetaTable> {
+  $$ArtistMetaTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get artistKey =>
+      $composableBuilder(column: $table.artistKey, builder: (column) => column);
+
+  GeneratedColumn<bool> get found =>
+      $composableBuilder(column: $table.found, builder: (column) => column);
+
+  GeneratedColumn<String> get mbid =>
+      $composableBuilder(column: $table.mbid, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get bio =>
+      $composableBuilder(column: $table.bio, builder: (column) => column);
+
+  GeneratedColumn<String> get bioUrl =>
+      $composableBuilder(column: $table.bioUrl, builder: (column) => column);
+
+  GeneratedColumn<int> get formedYear => $composableBuilder(
+    column: $table.formedYear,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get country =>
+      $composableBuilder(column: $table.country, builder: (column) => column);
+
+  GeneratedColumn<String> get genres =>
+      $composableBuilder(column: $table.genres, builder: (column) => column);
+
+  GeneratedColumn<String> get portraitFile => $composableBuilder(
+    column: $table.portraitFile,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get fetchedAt =>
+      $composableBuilder(column: $table.fetchedAt, builder: (column) => column);
+}
+
+class $$ArtistMetaTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ArtistMetaTable,
+          ArtistMetaRow,
+          $$ArtistMetaTableFilterComposer,
+          $$ArtistMetaTableOrderingComposer,
+          $$ArtistMetaTableAnnotationComposer,
+          $$ArtistMetaTableCreateCompanionBuilder,
+          $$ArtistMetaTableUpdateCompanionBuilder,
+          (
+            ArtistMetaRow,
+            BaseReferences<_$AppDatabase, $ArtistMetaTable, ArtistMetaRow>,
+          ),
+          ArtistMetaRow,
+          PrefetchHooks Function()
+        > {
+  $$ArtistMetaTableTableManager(_$AppDatabase db, $ArtistMetaTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ArtistMetaTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ArtistMetaTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ArtistMetaTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> artistKey = const Value.absent(),
+                Value<bool> found = const Value.absent(),
+                Value<String?> mbid = const Value.absent(),
+                Value<String?> name = const Value.absent(),
+                Value<String?> bio = const Value.absent(),
+                Value<String?> bioUrl = const Value.absent(),
+                Value<int?> formedYear = const Value.absent(),
+                Value<String?> country = const Value.absent(),
+                Value<String?> genres = const Value.absent(),
+                Value<String?> portraitFile = const Value.absent(),
+                Value<int> fetchedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ArtistMetaCompanion(
+                artistKey: artistKey,
+                found: found,
+                mbid: mbid,
+                name: name,
+                bio: bio,
+                bioUrl: bioUrl,
+                formedYear: formedYear,
+                country: country,
+                genres: genres,
+                portraitFile: portraitFile,
+                fetchedAt: fetchedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String artistKey,
+                required bool found,
+                Value<String?> mbid = const Value.absent(),
+                Value<String?> name = const Value.absent(),
+                Value<String?> bio = const Value.absent(),
+                Value<String?> bioUrl = const Value.absent(),
+                Value<int?> formedYear = const Value.absent(),
+                Value<String?> country = const Value.absent(),
+                Value<String?> genres = const Value.absent(),
+                Value<String?> portraitFile = const Value.absent(),
+                required int fetchedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => ArtistMetaCompanion.insert(
+                artistKey: artistKey,
+                found: found,
+                mbid: mbid,
+                name: name,
+                bio: bio,
+                bioUrl: bioUrl,
+                formedYear: formedYear,
+                country: country,
+                genres: genres,
+                portraitFile: portraitFile,
+                fetchedAt: fetchedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$ArtistMetaTable, ArtistMetaRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $ArtistMetaTable,
+                    ArtistMetaRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ArtistMetaTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ArtistMetaTable,
+      ArtistMetaRow,
+      $$ArtistMetaTableFilterComposer,
+      $$ArtistMetaTableOrderingComposer,
+      $$ArtistMetaTableAnnotationComposer,
+      $$ArtistMetaTableCreateCompanionBuilder,
+      $$ArtistMetaTableUpdateCompanionBuilder,
+      (
+        ArtistMetaRow,
+        BaseReferences<_$AppDatabase, $ArtistMetaTable, ArtistMetaRow>,
+      ),
+      ArtistMetaRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -6278,4 +7280,6 @@ class $AppDatabaseManager {
       $$ProfilesTableTableManager(_db, _db.profiles);
   $$ProfileListAccessTableTableManager get profileListAccess =>
       $$ProfileListAccessTableTableManager(_db, _db.profileListAccess);
+  $$ArtistMetaTableTableManager get artistMeta =>
+      $$ArtistMetaTableTableManager(_db, _db.artistMeta);
 }

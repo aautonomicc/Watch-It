@@ -191,6 +191,42 @@ class MetadataCache extends Table {
   Set<Column> get primaryKey => {lookupKey};
 }
 
+/// Cached artist-page info (services/artist_info.dart), keyed by the
+/// normalized artist name the wall's artist fold uses. Filled once from
+/// the keyless MusicBrainz → Wikidata → Wikipedia chain and then served
+/// offline forever — only the artist page's explicit Refresh action
+/// refetches. `found == false` records a confirmed no-match so it is
+/// not retried automatically either.
+@DataClassName('ArtistMetaRow')
+class ArtistMeta extends Table {
+  /// `artist.trim().toLowerCase()` — the [HomeArtist] fold key.
+  TextColumn get artistKey => text()();
+  BoolColumn get found => boolean()();
+
+  /// MusicBrainz artist id (UUID); the portrait file is named after it.
+  TextColumn get mbid => text().nullable()();
+
+  /// Canonical MusicBrainz artist name.
+  TextColumn get name => text().nullable()();
+
+  /// Wikipedia article extract (CC BY-SA — [bioUrl] is the required
+  /// attribution link).
+  TextColumn get bio => text().nullable()();
+  TextColumn get bioUrl => text().nullable()();
+
+  /// Formed/born year, area name, and top genres joined ` · `.
+  IntColumn get formedYear => integer().nullable()();
+  TextColumn get country => text().nullable()();
+  TextColumn get genres => text().nullable()();
+
+  /// Portrait file name inside the posters dir (`artist_<mbid>.jpg`).
+  TextColumn get portraitFile => text().nullable()();
+  IntColumn get fetchedAt => integer()(); // epoch ms
+
+  @override
+  Set<Column> get primaryKey => {artistKey};
+}
+
 /// One managed download, keyed by the file's XOR address (the same file
 /// is the same everywhere it appears, so one copy serves every list).
 @DataClassName('DownloadRow')
@@ -233,6 +269,7 @@ class Downloads extends Table {
     Downloads,
     Profiles,
     ProfileListAccess,
+    ArtistMeta,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -252,7 +289,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 15;
+  int get schemaVersion => 16;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -357,6 +394,11 @@ class AppDatabase extends _$AppDatabase {
         if (hasMediaLists) {
           await m.addColumn(mediaLists, mediaLists.orderedAt);
         }
+      }
+      if (from < 16) {
+        // Artist pages: pull-once cache of the keyless MusicBrainz →
+        // Wikidata → Wikipedia artist info chain.
+        await m.createTable(artistMeta);
       }
       if (from >= 4 && from < 9) {
         // alpha.57: Edit details — user-authored metadata rows are
