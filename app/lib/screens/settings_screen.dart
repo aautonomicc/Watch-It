@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
+import '../services/artist_info.dart' show kArtistInfoAttributionNotice;
 import '../services/bundle.dart' show kTmdbAttributionNotice;
 import '../services/download_manager.dart';
 import '../services/library_store.dart';
@@ -827,6 +828,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         style: TextStyle(fontSize: 11.5, color: t.ash),
                       ),
                     ],
+                  ),
+                ),
+                // The artist pages' keyless sources get credit beside
+                // TMDB's (and CC BY-SA requires it for the bio text).
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  child: Text(
+                    kArtistInfoAttributionNotice,
+                    style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
                 ),
                 // Version details live here since the 2026-09-06 reorg

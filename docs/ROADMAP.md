@@ -732,8 +732,18 @@ File naming convention (the audio parallel of the Plex/Jellyfin one) in
       album page — checkbox rows with drag handles, drag-reorder
       renumbers the whole album 1..N, "Renumber 1..N" closes gaps,
       bulk move-to-album / remove-from-album
-- [ ] Artist pages with bio/fanart (TheAudioDB was scoped in the
-      original plan; parked)
+- [x] Artist pages with portrait, facts and bio (unreleased, ships with
+      the next release) — fully KEYLESS: the release `{mbid-...}` tags
+      on the artist's tracks identify the MusicBrainz artist (an
+      exact-name search is the collision-safe fallback), the artist
+      lookup supplies formed year / area / genres, the artist's
+      Wikidata item bridges to the Wikipedia bio extract (CC BY-SA,
+      attributed and linked on the page) and the Commons portrait
+      (P18). Everything is pulled ONCE per artist into a local cache
+      (artist_meta table + portrait file) and rendered offline; the
+      page's Refresh action is the only refetch. The originally scoped
+      TheAudioDB fanart banner was dropped by decision (2026-09-17):
+      it was the only piece needing an API key
 - [ ] Top-level Video / Music home split (deferred by plan — lists
       already separate the two in practice)
 
