@@ -98,7 +98,8 @@ unchanged.
   feeding the metadata matcher), importing a `.watch-list` **bundle** (a
   zip of datamap members plus TMDB metadata, posters, optional watch
   history) — spec v2 in [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md) — or
-  **publishing your own file from the app** (desktop, alpha.55+): the
+  **publishing your own file from the app** (desktop alpha.55+, Android
+  2026-09-18 — originals only there, no encode tiers): the
   upload's root map is stored locally under its derived address, so the
   new entry behaves exactly like an import. Export is the bundle, full
   stop (a name list without maps is unplayable).
@@ -167,11 +168,14 @@ serves deterministic decrypted bytes) to disk:
 - A downloaded item is the same library entry with a local path — stream vs
   downloaded is a playback-source detail, not a different library.
 
-### Upload — in-app uploads (shipped alpha.55/.56 as "Publish", renamed Upload 2026-08-27, desktop)
+### Upload — in-app uploads (shipped alpha.55/.56 as "Publish", renamed Upload 2026-08-27; desktop + Android)
 
 W@tch uploads to Autonomi itself; the `ant` CLI is no longer required for
-the write path. Desktop-only for now (needs the bundled ffmpeg and a
-windowed flow). Two new Rust modules in `watchit_core`:
+the write path. Desktop and, since 2026-09-18, Android (which bundles no
+ffmpeg: files upload exactly as picked — no quality tiers, no QUALITY
+section; the ledger/matcher cache live in `<appSupport>/upload_config`,
+folder picking stays desktop-only, and the wallet key uses the 0600 file
+fallback). iOS deferred. Two new Rust modules in `watchit_core`:
 
 - **Wallet** (`wallet.rs`): the payment key lives in the **OS keychain**
   (Windows Credential Manager / macOS Keychain / Secret Service on Linux,

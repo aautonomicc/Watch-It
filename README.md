@@ -74,7 +74,7 @@ for you. (As above, the titles shown are invented for the screenshots.)*
 
 ## How it works
 
-1. **Upload from the app — or with the CLI.** On desktop, the
+1. **Upload from the app — or with the CLI.** On desktop and Android, the
    **Upload** page (Settings → Upload; named *Publish* before 2026-08-27 — renamed
    because uploads are private; nothing is published) puts media on the
    network straight from W@tch: pick files
@@ -87,7 +87,10 @@ for you. (As above, the titles shown are invented for the screenshots.)*
    keep the original as-is), see a live cost estimate, and pay with the
    app's built-in ANT wallet (create or import it under
    Settings → Wallet; the key lives in the OS keychain — treat it as a
-   hot wallet and fund it small). A content-hash ledger remembers every
+   hot wallet and fund it small). On Android there is no bundled
+   ffmpeg and no folder picker — you multi-select files and they upload
+   exactly as they are, with no quality-tier step. A
+   content-hash ledger remembers every
    finished upload, so re-running a folder never pays for the same file
    twice. Finished uploads land in the library list of your choice ready
    to play, and their `.datamap` files can be saved to share. The same

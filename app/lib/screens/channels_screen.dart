@@ -496,8 +496,8 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
         padding: const EdgeInsets.all(24),
         child: Text(
           'Creating and publishing a channel is desktop-only in this '
-          'version (it needs local files and the upload wallet). '
-          'Subscribing works everywhere.',
+          'version (it needs the desktop\'s encoding and publishing '
+          'tools). Subscribing works everywhere.',
           style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
         ),
       );

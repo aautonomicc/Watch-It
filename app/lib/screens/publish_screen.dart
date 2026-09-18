@@ -162,8 +162,10 @@ class _PublishScreenState extends State<PublishScreen> {
               'against MusicBrainz/TMDB, renamed to canonical W@tch '
               'names, and uploaded in one unattended pass — files you '
               'already uploaded are recognized and never paid for twice. '
-              'Videos can be encoded into several quality versions on the '
-              'review page.',
+              '${isDesktopPlatform ? 'Videos can be encoded into '
+                  'several quality versions on the review page.' : 'Files '
+                  'upload exactly as they are — quality-version encoding '
+                  'is desktop-only.'}',
               style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
             ),
           ],
@@ -304,10 +306,17 @@ class _PublishScreenState extends State<PublishScreen> {
   }
 }
 
-/// Desktop platforms are the only place Upload exists this edition
-/// (uploads need local files, ffmpeg, and a wallet on disk).
+/// Desktop platforms. Channel publishing and the update check still
+/// key off these; Upload itself is gated on [isUploadPlatform].
 bool get isDesktopPlatform =>
     Platform.isLinux || Platform.isMacOS || Platform.isWindows;
+
+/// Where Upload — and the wallet that funds it — exists: desktop and,
+/// since 2026-09-18, Android. Phones bundle no ffmpeg, so the batch
+/// flow's no-ffmpeg path carries them: files upload exactly as picked,
+/// no quality-tier encoding and no QUALITY section on the review page.
+/// iOS stays out until the app ships there at all.
+bool get isUploadPlatform => isDesktopPlatform || Platform.isAndroid;
 
 /// Checkbox picker over the existing lists plus a create-new option —
 /// the import flow's picker pattern (its original is private to the

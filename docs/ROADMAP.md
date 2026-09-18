@@ -552,7 +552,18 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       Try again / Skip this file / Stop
 - [x] Batch upload with auto-matching (alpha.77–.79) — grew into its
       own section below
-- [ ] Upload on Android/iOS (desktop-only today)
+- [x] Upload on Android (2026-09-18, unreleased — ships next release):
+      the Settings → Upload door, the WALLET section and the batch
+      uploader all open on Android. Files upload exactly as picked —
+      phones bundle no ffmpeg, so the flow's no-ffmpeg path applies
+      (no probing, no QUALITY tier section) — the dedup ledger and
+      matcher cache live in `<appSupport>/upload_config` (shared with
+      the import matcher), and picking is multi-select files (folder
+      picking stays desktop-only; SAF tree URIs aren't enumerable).
+      The wallet key uses the 0600 file fallback (no desktop keyring),
+      which the wallet screen already surfaces. iOS is deferred until
+      the app ships there at all; channel publishing stays
+      desktop-only.
 - [ ] External signer / WalletConnect (the internal hot wallet is the
       only signing path today)
 - [ ] True self-update (the check only notifies; AppImageUpdate/zsync
@@ -795,7 +806,9 @@ canonical names automatically. CLI docs in [UPLOAD-CLI.md](UPLOAD-CLI.md).
       review carousel for the rest, and manual details for no-matches;
       target lists default by media type (Music / TV Shows / Movies)
       in both upload and import
-- [ ] Batch upload on Android/iOS (desktop-only, like all uploading)
+- [x] Batch upload on Android (2026-09-18, unreleased — original-file
+      uploads without encode tiers; see "Upload on Android" in the
+      Publish section above; iOS deferred)
 
 ## Network & data control (shipped 2026-09-03→06, v0.1.0-alpha.85–.92)
 
