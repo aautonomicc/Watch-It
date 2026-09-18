@@ -119,7 +119,10 @@ Flutter deps. Rust adds: `bip39` crate + BIP-32 derivation (e.g.
 `coins-bip32` or alloy's signer-mnemonic — pick whichever meshes with
 ant-core's existing evmlib wallet type).
 
-**Phase 2 (later edition): WalletConnect for MetaMask.** Checked
+**Phase 2 (later edition): WalletConnect for MetaMask.** *Struck by
+decision 2026-09-18 — see ROADMAP.md: staying hot-wallet-only so users
+aren't encouraged to connect their main wallets; deposit only what you
+upload with.* Checked
 2026-08-25: the official `reown_appkit` Flutter package is
 **Android/iOS only — no desktop support**, so EtchIt's approach doesn't
 drop in (their AppKit runs in Tauri's WebView; we have no WebView).
