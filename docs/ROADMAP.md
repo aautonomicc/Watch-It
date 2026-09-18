@@ -564,8 +564,14 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       which the wallet screen already surfaces. iOS is deferred until
       the app ships there at all; channel publishing stays
       desktop-only.
-- [ ] External signer / WalletConnect (the internal hot wallet is the
-      only signing path today)
+- ~~External signer / WalletConnect~~ — struck by decision
+      (2026-09-18): the app's own hot wallet stays the only signing
+      path. MetaMask has no desktop integration a Flutter app can
+      reach, WalletConnect/Reown needs a hosted Project ID and relay,
+      and — the deciding point — we don't want to encourage people to
+      connect their main wallets to W@tch. The intended model is the
+      opposite: deposit only the funds you wish to upload with into
+      the built-in hot wallet.
 - [ ] True self-update (the check only notifies; AppImageUpdate/zsync
       and a Windows helper are deferred — see PLAN-alpha55.md §6)
 
