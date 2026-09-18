@@ -124,10 +124,13 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - About / licenses (incl. TMDB attribution notice + logo; the Terms of
   Use & Disclaimer page — also gated on first launch; update-check
   toggle + "Update available" row on desktop and Android — since
-  2026-09-18 the row downloads and applies the update itself where it
-  can: Android hands the fetched APK to the system installer, an
-  AppImage run swaps the new image over `$APPIMAGE` in place and asks
-  for a restart; elsewhere it opens the release page; since 2026-09-06
+  alpha.101 the row downloads and applies the update itself on every
+  installed build: Android hands the fetched APK to the system
+  installer, an AppImage run swaps the new image over `$APPIMAGE` in
+  place and asks for a restart, Windows hands off to a small helper
+  that swaps the install folder and relaunches, and macOS swaps the
+  running app bundle in place and asks for a restart; dev/unbundled
+  runs keep opening the release page; since 2026-09-06
   the Version tile expands to the full network-stack versions with a
   Copy-versions button)
 
@@ -341,7 +344,7 @@ interaction spec in [ANDROID-TV.md](ANDROID-TV.md). The app still runs
 the *normal* layout inside the safe area; the 10-foot column above
 remains the target.
 
-## Built so far (alpha.99)
+## Built so far (alpha.101)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,
@@ -457,6 +460,11 @@ page with marathon playback, the full-screen searchable Add-media
 picker, Add-to-playlist buttons on album/season/show pages), plus the
 album page's Edit-tracks collection editor (drag-reorder renumbering,
 bulk move/remove) and Android voice search in the Search app bar.
+Alpha.100 adds the full-screen existing-album picker behind every
+move-to-album flow; alpha.101 adds the artist page's
+portrait/facts/bio header, opens the Upload door + WALLET section on
+Android, and turns the About update row into an in-place self-update
+on all four platforms.
 Still to come from this document: filter/sort + fast-scroller on
 the grid, the full desktop keyboard map, mobile gestures, and the
 10-foot TV layout.

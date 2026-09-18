@@ -388,6 +388,29 @@ with grouped tri-state selection (a whole artist, album, show, or
 season in one tap), season and show pages gain Add-to-playlist
 buttons, and TV music plays with a single control bar.
 
+Alpha.100 puts a full-screen **existing-album picker** behind every
+"Move to album" flow — search the library, browse artist → album, and
+the move derives its target from the chosen album's own tracks, so a
+moved file always joins the existing album instead of forking a
+near-duplicate — and upgrades the whole dependency stack (x0x 0.45.0
+network stack, Flutter 3.47.4, and the deferred Rust majors).
+Alpha.101 makes the update check a real **self-update** on all four
+platforms: the Settings → About "Update available" row now downloads
+and applies the update itself — Android hands the APK to the system
+installer (same signing key, data kept), a Linux AppImage swaps
+itself in place, Windows runs a small helper that swaps the install
+folder and relaunches (and the updated exe doesn't re-trip
+SmartScreen), and macOS swaps the running app bundle in place (no
+Gatekeeper right-click dance) — always user-triggered, with size and
+sha256 verified before anything is installed. The same release opens
+**uploads on Android**: the Upload door, wallet and batch uploader
+now work on phones and TV boxes (files upload exactly as picked — no
+encode tiers on devices without ffmpeg; channel publishing stays
+desktop-only). And artists get real **artist pages**: a portrait,
+formed year / country / genres and a Wikipedia bio — fully keyless
+via MusicBrainz, Wikidata and Wikimedia Commons, fetched once per
+artist into a local cache and shown offline from then on.
+
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users
