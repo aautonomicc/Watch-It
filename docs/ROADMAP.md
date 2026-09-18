@@ -584,8 +584,8 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       declared size + sha256 digest. AppImageUpdate/zsync rejected by
       decision (build-time embedding + external tooling for modest
       delta savings on a mostly-binary image); everywhere else
-      (macOS, non-AppImage Linux) the row keeps opening the
-      release page
+      (non-AppImage Linux; macOS until its entry below) the row keeps
+      opening the release page
 - [x] Self-update on Windows (2026-09-18, unreleased): helper swap —
       the running exe can't overwrite itself, so tapping the update
       row downloads and sha256-verifies the release zip into the
@@ -597,8 +597,19 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       up after itself. Bonus: app-written files carry no
       Mark-of-the-Web, so the updated exe doesn't re-trip SmartScreen
       the way a fresh browser download does
-- [ ] Self-update on macOS (unsigned build, deferred by decision
-      2026-09-18)
+- [x] Self-update on macOS (2026-09-18, unreleased): in-place bundle
+      swap — tapping the update row downloads and sha256-verifies the
+      release dmg, mounts it read-only, copies the new W@tch.app out
+      with `ditto` into a staging dir beside the installed bundle and
+      swaps it in with atomic renames (macOS allows renaming a running
+      bundle — its mapped binaries stay valid), keeping the previous
+      version as `.old` until the next launch; "restart W@tch to
+      finish", like the AppImage path, and no helper process needed.
+      Running from the read-only disk image is detected up front
+      ("drag it to Applications first"). Bonus: app-written files
+      carry no quarantine attribute, so the updated app doesn't
+      re-trip Gatekeeper the way a fresh browser download does.
+      Completes self-update across all four release platforms
 
 ## My W@tch — device sync (shipped 2026-08-26/27, v0.1.0-alpha.61/.62)
 
