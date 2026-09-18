@@ -304,6 +304,241 @@ void main() {
     });
   });
 
+  group('macOS app swap', () {
+    setUp(() {
+      UpdateInstaller.macPlatformOverride = true;
+    });
+
+    tearDown(() {
+      UpdateInstaller.macPlatformOverride = null;
+      UpdateInstaller.macAppBundleOverride = null;
+    });
+
+    Directory installBundle() {
+      final bundle = Directory('${tmp.path}/Applications/W@tch.app');
+      File('${bundle.path}/Contents/MacOS/W@tch')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('old-version');
+      UpdateInstaller.macAppBundleOverride = bundle.path;
+      return bundle;
+    }
+
+    void copyTree(Directory from, String to) {
+      Directory(to).createSync(recursive: true);
+      for (final e in from.listSync(recursive: true, followLinks: false)) {
+        final rel = e.path.substring(from.path.length);
+        if (e is Directory) {
+          Directory('$to$rel').createSync(recursive: true);
+        } else if (e is File) {
+          File('$to$rel')
+            ..createSync(recursive: true)
+            ..writeAsBytesSync(e.readAsBytesSync());
+        }
+      }
+    }
+
+    // Simulates hdiutil attach/detach + ditto with real file IO: attach
+    // materializes the dmg's volume (the app plus the Applications
+    // symlink), ditto copies the tree.
+    Future<ProcessResult> Function(String, List<String>) fakeRunner(
+      List<List<String>> commands, {
+      bool failAttach = false,
+      bool dittoWritesNothing = false,
+    }) {
+      return (exe, args) async {
+        commands.add([exe, ...args]);
+        if (exe == 'hdiutil' && args.first == 'attach') {
+          if (failAttach) {
+            return ProcessResult(0, 1, '', 'no mountable file systems');
+          }
+          final mnt = args[args.indexOf('-mountpoint') + 1];
+          File('$mnt/W@tch.app/Contents/MacOS/W@tch')
+            ..createSync(recursive: true)
+            ..writeAsStringSync('new-version');
+          Link('$mnt/Applications').createSync('/Applications');
+          return ProcessResult(0, 0, '', '');
+        }
+        if (exe == 'ditto') {
+          if (!dittoWritesNothing) {
+            copyTree(Directory(args[0]), args[1]);
+          }
+          return ProcessResult(0, 0, '', '');
+        }
+        return ProcessResult(0, 0, '', ''); // detach
+      };
+    }
+
+    test('downloads, verifies, mounts, swaps the bundle, keeps .old',
+        () async {
+      final bundle = installBundle();
+      final dmgBytes = utf8.encode('dmg-bytes');
+      final commands = <List<String>>[];
+      final installer = UpdateInstaller.instance
+        ..client = bytesClient(dmgBytes)
+        ..cacheDirOverride = tmp
+        ..processRunner = fakeRunner(commands);
+
+      await installer.downloadAndSwapMacApp(assetFor(
+          dmgBytes, 'Watch-It-0.1.0-alpha.101-macos-universal.dmg',
+          sha: sha256.convert(dmgBytes).toString()));
+
+      expect(installer.stage, UpdateInstallStage.awaitingRestart);
+      expect(installer.error, null);
+      expect(File('${bundle.path}/Contents/MacOS/W@tch').readAsStringSync(),
+          'new-version');
+      final old = Directory('${bundle.path}.old');
+      expect(File('${old.path}/Contents/MacOS/W@tch').readAsStringSync(),
+          'old-version');
+      expect(Directory('${bundle.path}.update').existsSync(), false);
+      // The dmg + mount work dir are gone once the swap lands.
+      expect(Directory('${tmp.path}/watchit-update').existsSync(), false);
+      // attach → ditto → detach, with the safety flags on the mount.
+      expect(
+          commands
+              .map((c) =>
+                  c.first == 'hdiutil' ? '${c[0]} ${c[1]}' : c.first)
+              .toList(),
+          ['hdiutil attach', 'ditto', 'hdiutil detach']);
+      expect(commands.first, containsAll(['-readonly', '-nobrowse']));
+
+      // Next launch drops the backup.
+      await UpdateInstaller.cleanupOldMacApp();
+      expect(old.existsSync(), false);
+    });
+
+    test('checksum mismatch fails, cleans up, never mounts', () async {
+      final bundle = installBundle();
+      final dmgBytes = utf8.encode('tampered');
+      final commands = <List<String>>[];
+      final installer = UpdateInstaller.instance
+        ..client = bytesClient(dmgBytes)
+        ..cacheDirOverride = tmp
+        ..processRunner = fakeRunner(commands);
+
+      await installer.downloadAndSwapMacApp(assetFor(
+          dmgBytes, 'W-macos-universal.dmg', sha: 'deadbeef${'0' * 56}'));
+
+      expect(installer.stage, UpdateInstallStage.failed);
+      expect(installer.error, contains('checksum'));
+      expect(commands, isEmpty);
+      expect(File('${bundle.path}/Contents/MacOS/W@tch').readAsStringSync(),
+          'old-version');
+      expect(Directory('${tmp.path}/watchit-update').existsSync(), false);
+    });
+
+    test('not running from an app bundle refuses up front', () async {
+      // No bundle override and the test runner's executable is not
+      // inside a .app → macAppBundlePath resolves null.
+      final commands = <List<String>>[];
+      final installer = UpdateInstaller.instance
+        ..client = bytesClient([1, 2, 3])
+        ..cacheDirOverride = tmp
+        ..processRunner = fakeRunner(commands);
+
+      await installer
+          .downloadAndSwapMacApp(assetFor([1, 2, 3], 'W.dmg'));
+
+      expect(installer.stage, UpdateInstallStage.failed);
+      expect(installer.error, contains('release page'));
+      expect(commands, isEmpty);
+    });
+
+    test('unwritable install folder refuses before downloading', () async {
+      final bundle = installBundle();
+      var downloaded = false;
+      final installer = UpdateInstaller.instance
+        ..client = MockClient((_) async {
+          downloaded = true;
+          return http.Response.bytes([1, 2, 3], 200);
+        })
+        ..cacheDirOverride = tmp;
+      final parent = bundle.parent.path;
+      Process.runSync('chmod', ['555', parent]);
+      try {
+        await installer
+            .downloadAndSwapMacApp(assetFor([1, 2, 3], 'W.dmg'));
+      } finally {
+        Process.runSync('chmod', ['755', parent]);
+      }
+
+      expect(installer.stage, UpdateInstallStage.failed);
+      expect(installer.error, contains("isn't writable"));
+      expect(downloaded, false);
+    });
+
+    test('mount failure surfaces and leaves the bundle untouched',
+        () async {
+      final bundle = installBundle();
+      final dmgBytes = utf8.encode('dmg-bytes');
+      final commands = <List<String>>[];
+      final installer = UpdateInstaller.instance
+        ..client = bytesClient(dmgBytes)
+        ..cacheDirOverride = tmp
+        ..processRunner = fakeRunner(commands, failAttach: true);
+
+      await installer.downloadAndSwapMacApp(
+          assetFor(dmgBytes, 'W-macos-universal.dmg'));
+
+      expect(installer.stage, UpdateInstallStage.failed);
+      expect(installer.error, contains('disk image'));
+      expect(installer.error, contains('no mountable file systems'));
+      expect(File('${bundle.path}/Contents/MacOS/W@tch').readAsStringSync(),
+          'old-version');
+      expect(Directory('${bundle.path}.old').existsSync(), false);
+      expect(Directory('${tmp.path}/watchit-update').existsSync(), false);
+    });
+
+    test('failed final rename puts the running bundle back', () async {
+      final bundle = installBundle();
+      final dmgBytes = utf8.encode('dmg-bytes');
+      final commands = <List<String>>[];
+      // ditto "succeeds" but writes nothing → the staging dir is
+      // missing when the final rename runs, which throws.
+      final installer = UpdateInstaller.instance
+        ..client = bytesClient(dmgBytes)
+        ..cacheDirOverride = tmp
+        ..processRunner = fakeRunner(commands, dittoWritesNothing: true);
+
+      await installer.downloadAndSwapMacApp(
+          assetFor(dmgBytes, 'W-macos-universal.dmg'));
+
+      expect(installer.stage, UpdateInstallStage.failed);
+      expect(File('${bundle.path}/Contents/MacOS/W@tch').readAsStringSync(),
+          'old-version');
+      expect(Directory('${bundle.path}.old').existsSync(), false);
+    });
+
+    test('cancel mid-download resets to idle and cleans the work dir',
+        () async {
+      final bundle = installBundle();
+      final chunk = List<int>.filled(1024, 7);
+      final commands = <List<String>>[];
+      final installer = UpdateInstaller.instance
+        ..cacheDirOverride = tmp
+        ..processRunner = fakeRunner(commands)
+        ..client = MockClient.streaming((req, body) async =>
+            http.StreamedResponse(
+                Stream.fromIterable([chunk, chunk, chunk, chunk]), 200));
+      installer.addListener(() {
+        if (installer.progress > 0 &&
+            installer.stage == UpdateInstallStage.downloading) {
+          installer.cancel();
+        }
+      });
+
+      await installer.downloadAndSwapMacApp(UpdateAsset(
+          name: 'W-macos-universal.dmg',
+          url: 'https://example.com/W.dmg',
+          size: chunk.length * 4));
+
+      expect(installer.stage, UpdateInstallStage.idle);
+      expect(commands, isEmpty);
+      expect(File('${bundle.path}/Contents/MacOS/W@tch').readAsStringSync(),
+          'old-version');
+      expect(Directory('${tmp.path}/watchit-update').existsSync(), false);
+    });
+  });
+
   group('APK download and install', () {
     test('downloads into the cache and fires the installer', () async {
       final bytes = utf8.encode('apk-bytes');

@@ -21,8 +21,8 @@ enum UpdateInstallStage {
   /// installer has been (or can be re-)launched.
   readyToInstall,
 
-  /// Linux only: the running AppImage was replaced on disk — the new
-  /// version starts on next launch.
+  /// Linux (AppImage) and macOS: the running AppImage / app bundle was
+  /// replaced on disk — the new version starts on next launch.
   awaitingRestart,
 
   /// Windows only: the zip is verified and the swap helper has been
@@ -64,6 +64,16 @@ class _Cancelled implements Exception {}
 /// before the app exits; the helper waits for the process to end,
 /// extracts the zip over the install folder and relaunches W@tch.
 ///
+/// macOS: downloads the release dmg, mounts it read-only, copies the
+/// new app bundle out with `ditto` (preserves the symlinked frameworks
+/// and signature a naive copy would break) into a staging dir beside
+/// the installed bundle, then swaps it in with atomic renames — safe
+/// while running, the old bundle's mapped binaries stay valid. The
+/// previous bundle is kept as `<app>.old` until the next launch
+/// ([cleanupOldMacApp]). App-written files carry no quarantine
+/// attribute, so the updated app doesn't re-trip Gatekeeper the way a
+/// fresh browser download would.
+///
 /// Every download verifies the byte size GitHub declared and, when the
 /// API supplies a sha256 digest, the checksum too — a short or
 /// tampered file is never installed.
@@ -90,8 +100,15 @@ class UpdateInstaller extends ChangeNotifier {
   @visibleForTesting
   static String? windowsInstallDirOverride;
   @visibleForTesting
+  static bool? macPlatformOverride;
+  @visibleForTesting
+  static String? macAppBundleOverride;
+  @visibleForTesting
   Future<void> Function(String executable, List<String> args)?
       processStarter;
+  @visibleForTesting
+  Future<ProcessResult> Function(String executable, List<String> args)?
+      processRunner;
   @visibleForTesting
   void Function()? exitOverride;
 
@@ -128,6 +145,23 @@ class UpdateInstaller extends ChangeNotifier {
       return null;
     }
     return exe.parent.path;
+  }
+
+  /// True on macOS (test-overridable).
+  static bool get onMacOS => macPlatformOverride ?? Platform.isMacOS;
+
+  /// The running `.app` bundle's path on macOS, or null when not
+  /// launched from one (test/dev runs) — then only the release page
+  /// can help.
+  static String? get macAppBundlePath {
+    final override = macAppBundleOverride;
+    if (override != null) return override;
+    if (!onMacOS) return null;
+    final exe = Platform.resolvedExecutable;
+    const marker = '.app/Contents/MacOS/';
+    final idx = exe.indexOf(marker);
+    if (idx < 0) return null;
+    return exe.substring(0, idx + '.app'.length);
   }
 
   /// Asks the user's session to stop the download.
@@ -228,6 +262,144 @@ class UpdateInstaller extends ChangeNotifier {
     } catch (_) {
       // Best effort only.
     }
+  }
+
+  /// macOS: download the release dmg, mount it, copy the new app
+  /// bundle out and swap it over the installed one — the new version
+  /// starts on the next launch.
+  Future<void> downloadAndSwapMacApp(UpdateAsset asset) async {
+    if (busy) return;
+    final bundle = macAppBundlePath;
+    if (bundle == null) {
+      _fail(UpdateInstallException(
+          'Not running from an installed app bundle — use the release '
+          'page instead.'));
+      return;
+    }
+    final staging = Directory('$bundle.update');
+    // Probe writability up front — running from the read-only disk
+    // image (or a folder this user can't write) would otherwise only
+    // fail after the whole download.
+    try {
+      if (staging.existsSync()) staging.deleteSync(recursive: true);
+      staging.createSync();
+      staging.deleteSync();
+    } catch (_) {
+      _fail(UpdateInstallException(
+          "The app's folder isn't writable. If W@tch is running from "
+          'the disk image, drag it to Applications first, then '
+          'update.'));
+      return;
+    }
+    _begin();
+    Directory? work;
+    String? mountPoint;
+    try {
+      final root = cacheDirOverride ?? Directory.systemTemp;
+      work = Directory('${root.path}/watchit-update');
+      // One update at a time — drop any earlier download first.
+      if (work.existsSync()) work.deleteSync(recursive: true);
+      work.createSync(recursive: true);
+      final dmg = File('${work.path}/${_safeName(asset.name)}');
+      await _download(asset, dmg);
+      final mnt = '${work.path}/mnt';
+      await _run(
+          'hdiutil',
+          [
+            'attach',
+            dmg.path,
+            '-nobrowse',
+            '-noautoopen',
+            '-readonly',
+            '-mountpoint',
+            mnt,
+          ],
+          'Could not open the downloaded disk image');
+      mountPoint = mnt;
+      // The volume holds the app plus an Applications symlink — take
+      // the one .app directory rather than assuming its exact name.
+      final srcApp = Directory(mnt)
+          .listSync(followLinks: false)
+          .whereType<Directory>()
+          .where((d) => d.path.endsWith('.app'))
+          .firstOrNull;
+      if (srcApp == null) {
+        throw UpdateInstallException(
+            'No app was found inside the disk image.');
+      }
+      await _run('ditto', [srcApp.path, staging.path],
+          'Could not copy the new version out of the disk image');
+      await _detach(mnt);
+      mountPoint = null;
+      final old = Directory('$bundle.old');
+      if (old.existsSync()) old.deleteSync(recursive: true);
+      await Directory(bundle).rename(old.path);
+      try {
+        await staging.rename(bundle);
+      } catch (e) {
+        // Put the running bundle back — never leave the path empty.
+        await old.rename(bundle);
+        rethrow;
+      }
+      stage = UpdateInstallStage.awaitingRestart;
+      progress = 1;
+      notifyListeners();
+      // Free the ~200MB dmg right away — nothing needs it any more.
+      _tryDeleteDir(work);
+    } on _Cancelled {
+      if (mountPoint != null) await _detach(mountPoint);
+      _tryDeleteDir(staging);
+      _tryDeleteDir(work);
+      _reset();
+    } catch (e) {
+      if (mountPoint != null) await _detach(mountPoint);
+      _tryDeleteDir(staging);
+      _tryDeleteDir(work);
+      _fail(e);
+    }
+  }
+
+  /// Startup housekeeping (macOS): a completed swap leaves the
+  /// previous bundle as `<app>.old` — this launch proves the new one
+  /// runs, so drop it (and any stray staging dir). Silent,
+  /// fire-and-forget.
+  static Future<void> cleanupOldMacApp() async {
+    final bundle = macAppBundlePath;
+    if (bundle == null) return;
+    for (final dir in [
+      Directory('$bundle.old'),
+      Directory('$bundle.update'),
+    ]) {
+      try {
+        if (dir.existsSync()) dir.deleteSync(recursive: true);
+      } catch (_) {
+        // Best effort only.
+      }
+    }
+  }
+
+  /// Runs a command and turns a non-zero exit into a readable error.
+  Future<void> _run(
+      String exe, List<String> args, String errorPrefix) async {
+    final run = processRunner ?? Process.run;
+    final res = await run(exe, args);
+    if (res.exitCode != 0) {
+      final detail = res.stderr.toString().trim();
+      throw UpdateInstallException(
+          '$errorPrefix (${detail.isEmpty ? 'exit ${res.exitCode}' : detail}).');
+    }
+  }
+
+  /// Best effort — a mount left behind is cosmetic, never fail the
+  /// update over it.
+  Future<void> _detach(String mountPoint) async {
+    try {
+      final run = processRunner ?? Process.run;
+      final res = await run('hdiutil', ['detach', mountPoint]);
+      if (res.exitCode != 0) {
+        await run('hdiutil', ['detach', mountPoint, '-force']);
+      }
+    } catch (_) {}
   }
 
   /// Windows: download the release zip into the system temp dir,

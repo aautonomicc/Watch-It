@@ -27,6 +27,8 @@ void main() {
     UpdateInstaller.appImagePathOverride = null;
     UpdateInstaller.windowsPlatformOverride = null;
     UpdateInstaller.windowsInstallDirOverride = null;
+    UpdateInstaller.macPlatformOverride = null;
+    UpdateInstaller.macAppBundleOverride = null;
     try {
       tmp.deleteSync(recursive: true);
     } catch (_) {}
@@ -142,6 +144,65 @@ void main() {
     expect(exited, true);
     await tester.pump();
     expect(find.textContaining('close and reopen'), findsOneWidget);
+  });
+
+  testWidgets('macOS bundle → tap downloads, swaps, asks for a restart',
+      (tester) async {
+    UpdateInstaller.macPlatformOverride = true;
+    final bundle = Directory('${tmp.path}/Applications/W@tch.app');
+    File('${bundle.path}/Contents/MacOS/W@tch')
+      ..createSync(recursive: true)
+      ..writeAsStringSync('old-version');
+    UpdateInstaller.macAppBundleOverride = bundle.path;
+    final dmgBytes = utf8.encode('dmg-bytes');
+    UpdateCheck.instance
+      ..availableTag = 'v0.1.0-alpha.101'
+      ..assets = [
+        UpdateAsset(
+          name: 'Watch-It-0.1.0-alpha.101-macos-universal.dmg',
+          url: 'https://example.com/mac.dmg',
+          size: dmgBytes.length,
+          sha256: sha256.convert(dmgBytes).toString(),
+        ),
+      ];
+    UpdateInstaller.instance
+      ..client = MockClient((_) async => http.Response.bytes(dmgBytes, 200))
+      ..cacheDirOverride = tmp
+      ..processRunner = (exe, args) async {
+        if (exe == 'hdiutil' && args.first == 'attach') {
+          final mnt = args[args.indexOf('-mountpoint') + 1];
+          File('$mnt/W@tch.app/Contents/MacOS/W@tch')
+            ..createSync(recursive: true)
+            ..writeAsStringSync('new-version');
+        }
+        if (exe == 'ditto') {
+          File('${args[1]}/Contents/MacOS/W@tch')
+            ..createSync(recursive: true)
+            ..writeAsStringSync('new-version');
+        }
+        return ProcessResult(0, 0, '', '');
+      };
+
+    await tester.pumpWidget(host());
+    expect(find.textContaining('download and update in place'),
+        findsOneWidget);
+
+    // Real file IO — run outside the fake-async zone.
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Update available'));
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (UpdateInstaller.instance.stage !=
+              UpdateInstallStage.awaitingRestart &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    expect(
+        UpdateInstaller.instance.stage, UpdateInstallStage.awaitingRestart);
+    await tester.pump();
+    expect(find.textContaining('restart W@tch'), findsOneWidget);
+    expect(File('${bundle.path}/Contents/MacOS/W@tch').readAsStringSync(),
+        'new-version');
   });
 
   testWidgets('downloading state shows progress and a cancel button',
