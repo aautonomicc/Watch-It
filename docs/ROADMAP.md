@@ -1,37 +1,45 @@
 # Roadmap
 
-**Status (2026-09-13):** latest release is **v0.1.0-alpha.99**
+**Status (2026-09-18):** latest release is **v0.1.0-alpha.101**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
 a release ships **four artifacts**: a signed APK (dual-ABI
 armeabi-v7a + arm64-v8a since alpha.98, so Fire TV Sticks and other
 32-bit-app devices install the normal APK), a Linux AppImage, a
 Windows portable zip (since alpha.55), and a macOS universal dmg
 (since alpha.92 — unsigned, right-click → Open). The newest wave is
-**playlists, collection editing & real TV UX**: alpha.96 merges the
-first external PR — the Android TV UX wave (TV detection, an overscan
-safe area with the focus ring, a labelled TV app bar, a remote player
-transport with preview-then-commit timeline seeking, audio/caption
-track menus with local SRT/VTT or pasted caption files, an optional
-Grove palette; see [ANDROID-TV.md](ANDROID-TV.md)) plus full-bleed
-video behind the safe area, and fixes My W@tch publishing for large
-libraries (the sync doc always fits the server's byte cap). Alpha.97
-is the music cleanup: organize tools that rename any audio file into
-the album convention from inside the app (single-track moves, a bulk
-"Needs sorting" screen), **playlists** with their own drawer section
-and page (drag-to-reorder play order, Play all / Shuffle), renames
-syncing between linked devices — plus contributed Android **voice
-search**. Alpha.98 lets playlists hold anything (movies and episodes
-join; an any-video playlist plays through the full-screen player as a
-**marathon**), adds the album "Edit tracks" collection editor
-(drag-reorder renumbering, bulk move/remove), shards the My W@tch
-sync doc across store parts with rotation so big libraries sync whole,
-and syncs playlist play order. Alpha.99 closes the tester-feedback
-round: un-albumed tracks keep their artwork and credit, standalone
-tracks get a first-class "Move to album" path, the playlist "Add
-media" dialog becomes a full-screen searchable grouped picker (a whole
-artist/album/show/season in one tap), season and show pages gain
-Add-to-playlist buttons, TV music plays with a single control bar, and
-the network stack bumps to x0x 0.42.3. Before that, **family & TV**:
+**self-update, Android uploads & artist pages**: alpha.101 turns the
+Settings → About update row into a real self-update on all four
+platforms — Android downloads the release APK and hands it to the
+system installer, a Linux AppImage swaps itself in place, Windows
+runs a helper swap (the updated exe doesn't re-trip SmartScreen),
+and macOS swaps the running app bundle in place (no Gatekeeper
+re-dance) — always user-triggered, size- and sha256-verified. The
+same release opens the batch uploader on **Android** (files upload
+exactly as picked — phones bundle no ffmpeg, so no encode tiers;
+channel publishing stays desktop-only) and gives artists real
+**pages**: portrait, formed year / area / genres and a Wikipedia bio,
+fully keyless via MusicBrainz → Wikidata → Wikipedia/Commons, pulled
+once per artist into a local cache and rendered offline. Alpha.100
+before it shipped the full-screen existing-album picker behind every
+move-to-album flow (search, artist→album grouping, targets derived
+from the chosen album's own tracks so moves join the existing fold)
+and a full dependency upgrade (x0x 0.45.0, Flutter 3.47.4, keyring 4,
+alloy 2.4.2, ed25519-dalek 3, drift 2.35). Before that, **playlists,
+collection editing & real TV UX** (alpha.96–.99): alpha.96 merges the
+first external PR — the Android TV UX wave (TV detection, overscan
+safe area + focus ring, TV app bar, remote transport with
+preview-then-commit seeking, track/caption menus, optional Grove
+palette; see [ANDROID-TV.md](ANDROID-TV.md)) plus full-bleed video
+and the My W@tch large-library byte-cap fix; alpha.97 is the music
+cleanup (organize tools, **playlists** with their own drawer section
+and page, rename sync) plus contributed Android **voice search**;
+alpha.98 opens playlists to movies and episodes with **marathon**
+playback, adds the album "Edit tracks" collection editor, and shards
+the My W@tch sync doc so big libraries sync whole; alpha.99 closes
+the tester-feedback round (un-albumed tracks keep artwork/credit, a
+first-class "Move to album" path, the full-screen searchable playlist
+picker, season/show Add-to-playlist buttons, single-control-bar TV
+music, x0x 0.42.3). Before that, **family & TV**:
 alpha.93 ships **profiles** (its own
 section below — Netflix-style viewing profiles with a "Who's watching?"
 picker, Kid/Adult types, per-profile PINs and an admin PIN with a
@@ -552,7 +560,7 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       Try again / Skip this file / Stop
 - [x] Batch upload with auto-matching (alpha.77–.79) — grew into its
       own section below
-- [x] Upload on Android (2026-09-18, unreleased — ships next release):
+- [x] Upload on Android (alpha.101):
       the Settings → Upload door, the WALLET section and the batch
       uploader all open on Android. Files upload exactly as picked —
       phones bundle no ffmpeg, so the flow's no-ffmpeg path applies
@@ -572,8 +580,8 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       connect their main wallets to W@tch. The intended model is the
       opposite: deposit only the funds you wish to upload with into
       the built-in hot wallet.
-- [x] True self-update — Android + Linux AppImage (2026-09-18,
-      unreleased): the Settings → About update row now downloads and
+- [x] True self-update — Android + Linux AppImage (alpha.101):
+      the Settings → About update row now downloads and
       applies the update where the app can — Android fetches the
       release APK to the app cache and hands it to the system
       installer (FileProvider + REQUEST_INSTALL_PACKAGES; same signing
@@ -586,7 +594,7 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       delta savings on a mostly-binary image); everywhere else
       (non-AppImage Linux; macOS until its entry below) the row keeps
       opening the release page
-- [x] Self-update on Windows (2026-09-18, unreleased): helper swap —
+- [x] Self-update on Windows (alpha.101): helper swap —
       the running exe can't overwrite itself, so tapping the update
       row downloads and sha256-verifies the release zip into the
       system temp dir, writes a small PowerShell helper (generated by
@@ -597,7 +605,7 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       up after itself. Bonus: app-written files carry no
       Mark-of-the-Web, so the updated exe doesn't re-trip SmartScreen
       the way a fresh browser download does
-- [x] Self-update on macOS (2026-09-18, unreleased): in-place bundle
+- [x] Self-update on macOS (alpha.101): in-place bundle
       swap — tapping the update row downloads and sha256-verifies the
       release dmg, mounts it read-only, copies the new W@tch.app out
       with `ditto` into a staging dir beside the installed bundle and
@@ -785,8 +793,8 @@ File naming convention (the audio parallel of the Plex/Jellyfin one) in
       album page — checkbox rows with drag handles, drag-reorder
       renumbers the whole album 1..N, "Renumber 1..N" closes gaps,
       bulk move-to-album / remove-from-album
-- [x] Artist pages with portrait, facts and bio (unreleased, ships with
-      the next release) — fully KEYLESS: the release `{mbid-...}` tags
+- [x] Artist pages with portrait, facts and bio (alpha.101) —
+      fully KEYLESS: the release `{mbid-...}` tags
       on the artist's tracks identify the MusicBrainz artist (an
       exact-name search is the collision-safe fallback), the artist
       lookup supplies formed year / area / genres, the artist's
@@ -848,7 +856,7 @@ canonical names automatically. CLI docs in [UPLOAD-CLI.md](UPLOAD-CLI.md).
       review carousel for the rest, and manual details for no-matches;
       target lists default by media type (Music / TV Shows / Movies)
       in both upload and import
-- [x] Batch upload on Android (2026-09-18, unreleased — original-file
+- [x] Batch upload on Android (alpha.101 — original-file
       uploads without encode tiers; see "Upload on Android" in the
       Publish section above; iOS deferred)
 

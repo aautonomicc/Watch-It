@@ -31,7 +31,7 @@ APK covers it — no extra platform port. What it needs on top:
 - Hardware decode matters more here (TV boxes have weak CPUs) — libmpv uses
   MediaCodec on Android, same path as phones.
 
-Status (alpha.99): the manifest work (leanback entry, TV banner,
+Status (alpha.101): the manifest work (leanback entry, TV banner,
 leanback/touchscreen not-required) and card-level D-pad focus shipped
 in alpha.95; alpha.96 merged the full TV UX wave (the first external
 PR): UiModeManager TV detection over a method channel, an overscan
