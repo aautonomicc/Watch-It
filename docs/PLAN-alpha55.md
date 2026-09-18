@@ -269,8 +269,11 @@ self-update later:**
   > the next launch) — the AppImageUpdate/zsync approach named above
   > was REJECTED in favour of the plain swap. The phase-1 note "an
   > APK can't self-serve an install anyway" was wrong — it can, via
-  > an installer intent. Windows helper-swap and macOS remain
-  > deferred; there the row still opens the release page.
+  > an installer intent. Windows helper-swap SHIPPED 2026-09-18
+  > (zip downloaded + sha-verified to the temp dir, app-written
+  > PowerShell helper swaps the install folder after the app exits
+  > and relaunches); macOS remains deferred — there the row still
+  > opens the release page.
 
 ## Suggested build order (each step lands with tests)
 

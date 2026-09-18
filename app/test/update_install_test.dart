@@ -161,6 +161,149 @@ void main() {
     });
   });
 
+  group('Windows helper swap', () {
+    setUp(() {
+      UpdateInstaller.windowsPlatformOverride = true;
+    });
+
+    tearDown(() {
+      UpdateInstaller.windowsPlatformOverride = null;
+      UpdateInstaller.windowsInstallDirOverride = null;
+    });
+
+    test('downloads, verifies, writes the helper, hands off and exits',
+        () async {
+      final install = Directory('${tmp.path}/install')..createSync();
+      UpdateInstaller.windowsInstallDirOverride = install.path;
+      final bytes = utf8.encode('zip-bytes');
+      final started = <List<String>>[];
+      var exited = 0;
+      final installer = UpdateInstaller.instance
+        ..client = bytesClient(bytes)
+        ..cacheDirOverride = tmp
+        ..processStarter = (exe, args) async {
+          started.add([exe, ...args]);
+        }
+        ..exitOverride = () => exited++;
+
+      await installer.downloadAndRunWindowsUpdate(assetFor(
+          bytes, 'Watch-It-0.1.0-alpha.101-windows-x64.zip',
+          sha: sha256.convert(bytes).toString()));
+
+      expect(installer.stage, UpdateInstallStage.applying);
+      expect(installer.error, null);
+      expect(exited, 1);
+      expect(started, hasLength(1));
+      final args = started.single;
+      expect(args.first, 'powershell.exe');
+      final script = File(args[args.indexOf('-File') + 1]);
+      expect(script.readAsStringSync(), contains('Expand-Archive'));
+      final zip = File(args[args.indexOf('-ZipPath') + 1]);
+      expect(zip.readAsStringSync(), 'zip-bytes');
+      expect(args[args.indexOf('-InstallDir') + 1], install.path);
+      expect(args[args.indexOf('-ExeName') + 1], 'watchit.exe');
+      expect(int.parse(args[args.indexOf('-AppPid') + 1]), pid);
+    });
+
+    test('checksum mismatch fails, cleans up, never hands off', () async {
+      final install = Directory('${tmp.path}/install')..createSync();
+      UpdateInstaller.windowsInstallDirOverride = install.path;
+      final bytes = utf8.encode('tampered');
+      final started = <List<String>>[];
+      var exited = 0;
+      final installer = UpdateInstaller.instance
+        ..client = bytesClient(bytes)
+        ..cacheDirOverride = tmp
+        ..processStarter = (exe, args) async {
+          started.add([exe, ...args]);
+        }
+        ..exitOverride = () => exited++;
+
+      await installer.downloadAndRunWindowsUpdate(assetFor(
+          bytes, 'W-windows-x64.zip', sha: 'deadbeef${'0' * 56}'));
+
+      expect(installer.stage, UpdateInstallStage.failed);
+      expect(installer.error, contains('checksum'));
+      expect(started, isEmpty);
+      expect(exited, 0);
+      expect(Directory('${tmp.path}/watchit-update').existsSync(), false);
+    });
+
+    test('not running from an installed bundle refuses up front',
+        () async {
+      // No install-dir override and the test runner's executable is not
+      // watchit.exe → windowsInstallDir resolves null.
+      final started = <List<String>>[];
+      final installer = UpdateInstaller.instance
+        ..client = bytesClient([1, 2, 3])
+        ..cacheDirOverride = tmp
+        ..processStarter = (exe, args) async {
+          started.add([exe]);
+        };
+
+      await installer
+          .downloadAndRunWindowsUpdate(assetFor([1, 2, 3], 'W.zip'));
+
+      expect(installer.stage, UpdateInstallStage.failed);
+      expect(installer.error, contains('release page'));
+      expect(started, isEmpty);
+    });
+
+    test('helper launch failure surfaces and does not exit the app',
+        () async {
+      final install = Directory('${tmp.path}/install')..createSync();
+      UpdateInstaller.windowsInstallDirOverride = install.path;
+      final bytes = utf8.encode('zip-bytes');
+      var exited = 0;
+      final installer = UpdateInstaller.instance
+        ..client = bytesClient(bytes)
+        ..cacheDirOverride = tmp
+        ..processStarter = (exe, args) async {
+          throw Exception('powershell missing');
+        }
+        ..exitOverride = () => exited++;
+
+      await installer.downloadAndRunWindowsUpdate(
+          assetFor(bytes, 'W-windows-x64.zip'));
+
+      expect(installer.stage, UpdateInstallStage.failed);
+      expect(installer.error, contains('powershell missing'));
+      expect(exited, 0);
+      expect(Directory('${tmp.path}/watchit-update').existsSync(), false);
+    });
+
+    test('cancel mid-download resets to idle and cleans the work dir',
+        () async {
+      final install = Directory('${tmp.path}/install')..createSync();
+      UpdateInstaller.windowsInstallDirOverride = install.path;
+      final chunk = List<int>.filled(1024, 7);
+      final started = <List<String>>[];
+      final installer = UpdateInstaller.instance
+        ..cacheDirOverride = tmp
+        ..processStarter = (exe, args) async {
+          started.add([exe]);
+        }
+        ..client = MockClient.streaming((req, body) async =>
+            http.StreamedResponse(
+                Stream.fromIterable([chunk, chunk, chunk, chunk]), 200));
+      installer.addListener(() {
+        if (installer.progress > 0 &&
+            installer.stage == UpdateInstallStage.downloading) {
+          installer.cancel();
+        }
+      });
+
+      await installer.downloadAndRunWindowsUpdate(UpdateAsset(
+          name: 'W-windows-x64.zip',
+          url: 'https://example.com/W-windows-x64.zip',
+          size: chunk.length * 4));
+
+      expect(installer.stage, UpdateInstallStage.idle);
+      expect(started, isEmpty);
+      expect(Directory('${tmp.path}/watchit-update').existsSync(), false);
+    });
+  });
+
   group('APK download and install', () {
     test('downloads into the cache and fires the installer', () async {
       final bytes = utf8.encode('apk-bytes');

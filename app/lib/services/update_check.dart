@@ -50,7 +50,7 @@ class UpdateAsset {
 /// and compares its tag to the running version; a newer one sets
 /// [availableTag]/[releaseUrl]/[assets] and notifies (main.dart shows a
 /// quiet snackbar, Settings → About grows a row that can download and
-/// apply the update on Android and AppImage Linux). Failures are
+/// apply the update on Android, AppImage Linux and Windows). Failures are
 /// silent — offline must never nag. This is the app's only phone-home
 /// besides the Autonomi network and the user's own TMDB key, so it
 /// sits behind a visible Settings toggle (default ON). Runs on desktop
@@ -99,6 +99,11 @@ class UpdateCheck extends ChangeNotifier {
   /// The release's Linux AppImage.
   UpdateAsset? get appImageAsset =>
       assets.where((a) => a.name.endsWith('.AppImage')).firstOrNull;
+
+  /// The release's Windows portable zip (`…-windows-x64.zip`).
+  UpdateAsset? get windowsZipAsset => assets
+      .where((a) => a.name.endsWith('.zip') && a.name.contains('windows'))
+      .firstOrNull;
 
   static Future<bool> enabled() async =>
       (await SharedPreferences.getInstance()).getBool(enabledPref) ?? true;

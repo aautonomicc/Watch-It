@@ -10,10 +10,11 @@ import '../theme/tokens.dart';
 /// Settings → About "Update available" row.
 ///
 /// Hidden until [UpdateCheck] has seen a newer release. Where the app
-/// can update itself — Android with an APK asset, or Linux running
-/// from an AppImage with an AppImage asset — tapping downloads and
-/// applies the update (user-triggered only, never automatic); anywhere
-/// else it opens the release page like before.
+/// can update itself — Android with an APK asset, Linux running from
+/// an AppImage with an AppImage asset, or an installed Windows bundle
+/// with a zip asset — tapping downloads and applies the update
+/// (user-triggered only, never automatic); anywhere else it opens the
+/// release page like before.
 class UpdateAvailableTile extends StatelessWidget {
   const UpdateAvailableTile({super.key});
 
@@ -25,6 +26,11 @@ class UpdateAvailableTile extends StatelessWidget {
       UpdateInstaller.runningAppImagePath != null &&
       UpdateCheck.instance.appImageAsset != null;
 
+  bool get _selfUpdateWindows =>
+      UpdateInstaller.onWindows &&
+      UpdateInstaller.windowsInstallDir != null &&
+      UpdateCheck.instance.windowsZipAsset != null;
+
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
@@ -35,9 +41,9 @@ class UpdateAvailableTile extends StatelessWidget {
         final tag = UpdateCheck.instance.availableTag;
         if (tag == null) return const SizedBox.shrink();
         final installer = UpdateInstaller.instance;
-        if (!_selfUpdateApk && !_selfUpdateAppImage) {
-          // No self-update path here (Windows/macOS, dev runs, plain
-          // Linux bundles): keep the open-the-release-page row.
+        if (!_selfUpdateApk && !_selfUpdateAppImage && !_selfUpdateWindows) {
+          // No self-update path here (macOS, dev runs, plain Linux
+          // bundles): keep the open-the-release-page row.
           return _tile(
             t,
             subtitle: '$tag — open the release page to download',
@@ -77,11 +83,19 @@ class UpdateAvailableTile extends StatelessWidget {
               subtitle:
                   '$tag installed — restart W@tch to finish the update',
             );
+          case UpdateInstallStage.applying:
+            return _tile(
+              t,
+              subtitle:
+                  'Installing $tag — W@tch will close and reopen updated',
+            );
           case UpdateInstallStage.idle:
           case UpdateInstallStage.failed:
             final action = _selfUpdateApk
                 ? 'tap to download and install'
-                : 'tap to download and update in place';
+                : _selfUpdateWindows
+                    ? 'tap to download — W@tch restarts to finish'
+                    : 'tap to download and update in place';
             return _tile(
               t,
               subtitle: installer.stage == UpdateInstallStage.failed
@@ -92,8 +106,11 @@ class UpdateAvailableTile extends StatelessWidget {
               onTap: () => _selfUpdateApk
                   ? installer
                       .downloadAndInstallApk(UpdateCheck.instance.apkAsset!)
-                  : installer.downloadAndSwapAppImage(
-                      UpdateCheck.instance.appImageAsset!),
+                  : _selfUpdateWindows
+                      ? installer.downloadAndRunWindowsUpdate(
+                          UpdateCheck.instance.windowsZipAsset!)
+                      : installer.downloadAndSwapAppImage(
+                          UpdateCheck.instance.appImageAsset!),
             );
         }
       },
