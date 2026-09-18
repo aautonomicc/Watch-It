@@ -25,6 +25,11 @@ enum UpdateInstallStage {
   /// version starts on next launch.
   awaitingRestart,
 
+  /// Windows only: the zip is verified and the swap helper has been
+  /// launched — the app is closing so the helper can replace the
+  /// install folder and relaunch it.
+  applying,
+
   /// The attempt failed; [UpdateInstaller.error] says why. Starting
   /// again retries from scratch.
   failed,
@@ -52,6 +57,13 @@ class _Cancelled implements Exception {}
 /// previous file is kept as `<image>.old` until the next launch
 /// ([cleanupOldAppImage]) in case anything goes wrong.
 ///
+/// Windows: the running exe can't overwrite itself, so the zip is
+/// downloaded to the system temp dir and a small PowerShell helper
+/// (written by the app at update time — it always matches this build
+/// and, like the zip, carries no Mark-of-the-Web) is launched detached
+/// before the app exits; the helper waits for the process to end,
+/// extracts the zip over the install folder and relaunches W@tch.
+///
 /// Every download verifies the byte size GitHub declared and, when the
 /// API supplies a sha256 digest, the checksum too — a short or
 /// tampered file is never installed.
@@ -73,6 +85,15 @@ class UpdateInstaller extends ChangeNotifier {
   static String? appImagePathOverride;
   @visibleForTesting
   Directory? cacheDirOverride;
+  @visibleForTesting
+  static bool? windowsPlatformOverride;
+  @visibleForTesting
+  static String? windowsInstallDirOverride;
+  @visibleForTesting
+  Future<void> Function(String executable, List<String> args)?
+      processStarter;
+  @visibleForTesting
+  void Function()? exitOverride;
 
   UpdateInstallStage stage = UpdateInstallStage.idle;
 
@@ -83,12 +104,31 @@ class UpdateInstaller extends ChangeNotifier {
   bool _cancelled = false;
   String? _apkPath;
 
-  bool get busy => stage == UpdateInstallStage.downloading;
+  bool get busy =>
+      stage == UpdateInstallStage.downloading ||
+      stage == UpdateInstallStage.applying;
 
   /// The running AppImage's path, or null when not launched from one
   /// (dev runs, plain bundles) — then only the release page can help.
   static String? get runningAppImagePath =>
       appImagePathOverride ?? Platform.environment['APPIMAGE'];
+
+  /// True on Windows (test-overridable).
+  static bool get onWindows => windowsPlatformOverride ?? Platform.isWindows;
+
+  /// The Windows install folder (the directory holding watchit.exe),
+  /// or null when not running from the release bundle (dev runs) —
+  /// then only the release page can help.
+  static String? get windowsInstallDir {
+    final override = windowsInstallDirOverride;
+    if (override != null) return override;
+    if (!onWindows) return null;
+    final exe = File(Platform.resolvedExecutable);
+    if (exe.uri.pathSegments.last.toLowerCase() != 'watchit.exe') {
+      return null;
+    }
+    return exe.parent.path;
+  }
 
   /// Asks the user's session to stop the download.
   void cancel() {
@@ -190,6 +230,76 @@ class UpdateInstaller extends ChangeNotifier {
     }
   }
 
+  /// Windows: download the release zip into the system temp dir,
+  /// verify it, then hand off to the swap helper and exit — the helper
+  /// waits for this process to die, extracts the zip over the install
+  /// folder (retrying while file locks clear), relaunches W@tch and
+  /// cleans up after itself.
+  Future<void> downloadAndRunWindowsUpdate(UpdateAsset asset) async {
+    if (busy) return;
+    final installDir = windowsInstallDir;
+    if (installDir == null) {
+      _fail(UpdateInstallException(
+          'Not running from an installed W@tch folder — use the release '
+          'page instead.'));
+      return;
+    }
+    _begin();
+    Directory? work;
+    try {
+      final root = cacheDirOverride ?? Directory.systemTemp;
+      work = Directory('${root.path}/watchit-update');
+      // One update at a time — drop any earlier download first.
+      if (work.existsSync()) work.deleteSync(recursive: true);
+      work.createSync(recursive: true);
+      final zip = File('${work.path}/${_safeName(asset.name)}');
+      await _download(asset, zip);
+      final script = File('${work.path}/watchit-update.ps1')
+        ..writeAsStringSync(kWindowsUpdaterScript);
+      final start = processStarter ??
+          (exe, args) async {
+            await Process.start(exe, args,
+                mode: ProcessStartMode.detached);
+          };
+      await start('powershell.exe', [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        script.path,
+        '-ZipPath',
+        zip.path,
+        '-InstallDir',
+        installDir,
+        '-ExeName',
+        _windowsExeName,
+        '-AppPid',
+        '$pid',
+        '-LogPath',
+        '${work.path}/watchit-update.log',
+      ]);
+      stage = UpdateInstallStage.applying;
+      progress = 1;
+      notifyListeners();
+      // The helper waits for this process to end before touching any
+      // file, so leave right away.
+      (exitOverride ?? () => exit(0))();
+    } on _Cancelled {
+      _tryDeleteDir(work);
+      _reset();
+    } catch (e) {
+      _tryDeleteDir(work);
+      _fail(e);
+    }
+  }
+
+  /// The name the helper relaunches. Defensive fallback for test runs
+  /// whose executable isn't the app.
+  static String get _windowsExeName {
+    final name = File(Platform.resolvedExecutable).uri.pathSegments.last;
+    return name.toLowerCase() == 'watchit.exe' ? name : 'watchit.exe';
+  }
+
   void _begin() {
     stage = UpdateInstallStage.downloading;
     progress = 0;
@@ -216,6 +326,12 @@ class UpdateInstaller extends ChangeNotifier {
   static void _tryDelete(File? f) {
     try {
       if (f != null && f.existsSync()) f.deleteSync();
+    } catch (_) {}
+  }
+
+  static void _tryDeleteDir(Directory? d) {
+    try {
+      if (d != null && d.existsSync()) d.deleteSync(recursive: true);
     } catch (_) {}
   }
 
@@ -284,3 +400,69 @@ class _DigestSink implements Sink<Digest> {
   @override
   void close() {}
 }
+
+/// The Windows swap helper. Written next to the downloaded zip and run
+/// detached; everything in here executes after the app has exited (the
+/// zip's own integrity was already verified before the handoff).
+const kWindowsUpdaterScript = r'''
+param(
+  [Parameter(Mandatory = $true)][string]$ZipPath,
+  [Parameter(Mandatory = $true)][string]$InstallDir,
+  [Parameter(Mandatory = $true)][string]$ExeName,
+  [Parameter(Mandatory = $true)][int]$AppPid,
+  [string]$LogPath
+)
+$ErrorActionPreference = 'Stop'
+function Log($msg) {
+  if ($LogPath) {
+    try {
+      Add-Content -LiteralPath $LogPath `
+        -Value ("{0} {1}" -f (Get-Date -Format o), $msg)
+    } catch {}
+  }
+}
+try {
+  Log "waiting for W@tch (pid $AppPid) to exit"
+  try { Wait-Process -Id $AppPid -Timeout 60 -ErrorAction Stop } catch {}
+  Start-Sleep -Milliseconds 500
+
+  $staging = Join-Path ([System.IO.Path]::GetTempPath()) `
+    ("watchit-update-staging-" + [System.IO.Path]::GetRandomFileName())
+  Log "extracting $ZipPath"
+  Expand-Archive -LiteralPath $ZipPath -DestinationPath $staging -Force
+
+  # The zip's members live at its root (watchit.exe, DLLs, data\) --
+  # copy them over the install folder, retrying while stray file locks
+  # clear.
+  $tries = 0
+  while ($true) {
+    try {
+      Copy-Item -Path (Join-Path $staging '*') -Destination $InstallDir `
+        -Recurse -Force
+      break
+    } catch {
+      $tries++
+      if ($tries -ge 10) { throw }
+      Log "copy attempt $tries failed: $_"
+      Start-Sleep -Seconds 1
+    }
+  }
+  Log "relaunching"
+  Start-Process -FilePath (Join-Path $InstallDir $ExeName) `
+    -WorkingDirectory $InstallDir
+  Remove-Item -LiteralPath $staging -Recurse -Force `
+    -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $ZipPath -Force -ErrorAction SilentlyContinue
+  Log "done"
+} catch {
+  Log "update failed: $_"
+  # Leave the user with a running app either way: whatever sits in the
+  # install folder still starts, and re-running the in-app update
+  # repairs a partial copy.
+  try {
+    Start-Process -FilePath (Join-Path $InstallDir $ExeName) `
+      -WorkingDirectory $InstallDir
+  } catch {}
+  exit 1
+}
+''';

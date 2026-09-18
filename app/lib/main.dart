@@ -115,7 +115,7 @@ Future<void> main() async {
   // Update check-and-notify (desktop + Android): ≤once/24h against
   // GitHub releases, behind the Settings → About toggle; a newer tag
   // shows a quiet snackbar and a Settings row that can download and
-  // apply the update on Android / AppImage Linux. Silent on
+  // apply the update on Android / AppImage Linux / Windows. Silent on
   // failure/offline. A completed AppImage swap leaves the previous
   // version as <image>.old — this launch proves the new one, drop it.
   unawaited(UpdateInstaller.cleanupOldAppImage());

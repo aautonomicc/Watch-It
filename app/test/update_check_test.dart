@@ -137,17 +137,24 @@ void main() {
                   'browser_download_url': 'https://example.com/app.AppImage',
                   'size': 20,
                 },
+                {
+                  'name': 'Watch-It-0.1.0-alpha.57-windows-x64.zip',
+                  'browser_download_url': 'https://example.com/win.zip',
+                  'size': 30,
+                },
                 {'name': 42}, // malformed entry is skipped, not fatal
               ],
             }),
             200));
       await check.maybeCheck();
-      expect(check.assets, hasLength(3));
+      expect(check.assets, hasLength(4));
       expect(check.apkAsset?.name, 'Watch-It-0.1.0-alpha.57.apk');
       expect(check.apkAsset?.size, 10);
       expect(check.apkAsset?.sha256, 'abcdef0123');
       expect(check.appImageAsset?.url, 'https://example.com/app.AppImage');
       expect(check.appImageAsset?.sha256, null);
+      expect(check.windowsZipAsset?.url, 'https://example.com/win.zip');
+      expect(check.windowsZipAsset?.size, 30);
     }, skip: !Platform.isLinux && !Platform.isWindows && !Platform.isMacOS);
 
     test('failure is silent and does not stamp the check time', () async {

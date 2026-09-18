@@ -25,6 +25,8 @@ void main() {
 
   tearDown(() {
     UpdateInstaller.appImagePathOverride = null;
+    UpdateInstaller.windowsPlatformOverride = null;
+    UpdateInstaller.windowsInstallDirOverride = null;
     try {
       tmp.deleteSync(recursive: true);
     } catch (_) {}
@@ -95,6 +97,51 @@ void main() {
     await tester.pump();
     expect(find.textContaining('restart W@tch'), findsOneWidget);
     expect(current.readAsStringSync(), 'new');
+  });
+
+  testWidgets('Windows install → tap downloads and hands off to the helper',
+      (tester) async {
+    UpdateInstaller.windowsPlatformOverride = true;
+    final install = Directory('${tmp.path}/install')..createSync();
+    UpdateInstaller.windowsInstallDirOverride = install.path;
+    final bytes = utf8.encode('zip-bytes');
+    UpdateCheck.instance
+      ..availableTag = 'v0.1.0-alpha.101'
+      ..assets = [
+        UpdateAsset(
+          name: 'Watch-It-0.1.0-alpha.101-windows-x64.zip',
+          url: 'https://example.com/win.zip',
+          size: bytes.length,
+          sha256: sha256.convert(bytes).toString(),
+        ),
+      ];
+    var handedOff = false;
+    var exited = false;
+    UpdateInstaller.instance
+      ..client = MockClient((_) async => http.Response.bytes(bytes, 200))
+      ..cacheDirOverride = tmp
+      ..processStarter = (exe, args) async {
+        handedOff = true;
+      }
+      ..exitOverride = () => exited = true;
+
+    await tester.pumpWidget(host());
+    expect(find.textContaining('W@tch restarts to finish'), findsOneWidget);
+
+    // Real file IO — run outside the fake-async zone.
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Update available'));
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (UpdateInstaller.instance.stage != UpdateInstallStage.applying &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    expect(UpdateInstaller.instance.stage, UpdateInstallStage.applying);
+    expect(handedOff, true);
+    expect(exited, true);
+    await tester.pump();
+    expect(find.textContaining('close and reopen'), findsOneWidget);
   });
 
   testWidgets('downloading state shows progress and a cancel button',
