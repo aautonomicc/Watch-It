@@ -572,8 +572,24 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       connect their main wallets to W@tch. The intended model is the
       opposite: deposit only the funds you wish to upload with into
       the built-in hot wallet.
-- [ ] True self-update (the check only notifies; AppImageUpdate/zsync
-      and a Windows helper are deferred — see PLAN-alpha55.md §6)
+- [x] True self-update — Android + Linux AppImage (2026-09-18,
+      unreleased): the Settings → About update row now downloads and
+      applies the update where the app can — Android fetches the
+      release APK to the app cache and hands it to the system
+      installer (FileProvider + REQUEST_INSTALL_PACKAGES; same signing
+      cert keeps data), AppImage runs download the new image beside
+      `$APPIMAGE`, mark it executable and atomically rename it over
+      the running file (previous version kept as `.old` until the
+      next launch). Downloads are user-triggered only and verify the
+      declared size + sha256 digest. AppImageUpdate/zsync rejected by
+      decision (build-time embedding + external tooling for modest
+      delta savings on a mostly-binary image); everywhere else
+      (Windows, macOS, non-AppImage Linux) the row keeps opening the
+      release page
+- [ ] Self-update on Windows (helper-swap: the running exe can't
+      overwrite itself — ship a tiny updater that waits, extracts the
+      new zip over the folder and relaunches; deferred by decision
+      2026-09-18) and macOS (unsigned build, deferred)
 
 ## My W@tch — device sync (shipped 2026-08-26/27, v0.1.0-alpha.61/.62)
 

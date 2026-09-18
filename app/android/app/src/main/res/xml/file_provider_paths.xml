@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the update-download area is shareable (see AndroidManifest's
+     FileProvider entry); Dart writes release APKs to <cache>/updates/. -->
+<paths>
+    <cache-path name="updates" path="updates/" />
+</paths>

@@ -10,6 +10,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- In-app updates: a user-triggered "Download update" fetches the
+         release APK and hands it to the system package installer. The
+         OS still asks for its one-time "install unknown apps" grant. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <!-- Android TV: installable and launchable from the leanback launcher.
          Neither leanback nor a touchscreen is REQUIRED, so phone/tablet
          installs (and Play filtering, should the app ever get there) are
@@ -60,6 +64,18 @@
             android:name=".MediaPlaybackService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+        <!-- Shares the downloaded update APK (app cache, updates/) with
+             the system package installer — content URIs only, the cache
+             path itself is never handed out. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_provider_paths" />
+        </provider>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

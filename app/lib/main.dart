@@ -41,6 +41,7 @@ import 'services/rootmap_seeder.dart';
 import 'services/season_grouping.dart';
 import 'services/terms.dart';
 import 'services/update_check.dart';
+import 'services/update_install.dart';
 import 'services/watch_state.dart';
 import 'services/x0x_cellular.dart';
 import 'theme/tokens.dart';
@@ -111,9 +112,13 @@ Future<void> main() async {
   // keyless install shows posters/descriptions without a TMDB key.
   // Gap-fill (existing rows/files win) behind a one-time flag.
   unawaited(seedBundledMetadata());
-  // Desktop update check-and-notify: ≤once/24h against GitHub releases,
-  // behind the Settings → About toggle; a newer tag shows a quiet
-  // snackbar and a Settings row. Silent on failure/offline.
+  // Update check-and-notify (desktop + Android): ≤once/24h against
+  // GitHub releases, behind the Settings → About toggle; a newer tag
+  // shows a quiet snackbar and a Settings row that can download and
+  // apply the update on Android / AppImage Linux. Silent on
+  // failure/offline. A completed AppImage swap leaves the previous
+  // version as <image>.old — this launch proves the new one, drop it.
+  unawaited(UpdateInstaller.cleanupOldAppImage());
   UpdateCheck.instance.addListener(() {
     final tag = UpdateCheck.instance.availableTag;
     if (tag == null) return;
