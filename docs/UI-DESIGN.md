@@ -76,7 +76,9 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - CONTENT section (renamed from LIBRARY 2026-08-30) order: Channels
   (public, amber, on top) · My W@tch (the two sharing surfaces sit
   together, public above private) · My Media (renamed from Media) ·
-  Upload (desktop-only, moved out of the home drawer) · Downloads
+  Upload (desktop + Android since 2026-09-18 — Android uploads
+  originals only, no encode tiers; moved out of the home drawer) ·
+  Downloads
   (queue/storage/behaviour tile, moved in from its own DOWNLOADS
   section 2026-08-30 — sits below My Media, and below Upload where
   that shows). The drawer is connection status + list navigation +

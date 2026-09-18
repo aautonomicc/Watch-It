@@ -1184,6 +1184,73 @@ void main() {
     expect(ledger.readAsLinesSync().length, 2);
   });
 
+  test('no usable ffmpeg (the Android case): a present-but-unavailable '
+      'service plans no tiers — the video uploads once, as the original '
+      'file', () async {
+    fake.wallet = {'configured': true, 'address': '0xabc', 'storage': 'file'};
+    final vid = mediaFile('phone-clip.mkv', 66);
+    final addr = 'c3' * 32;
+    fake.uploadResults = [
+      {
+        'address': addr,
+        'size': 64,
+        'chunks': 3,
+        'cost_atto': '1000',
+        'gas_wei': '1',
+      },
+    ];
+    fake.datamaps[addr] = [3, 3];
+
+    final session = BatchUploadSession.instance;
+    session.probeOverride = (path) async => null;
+    session.matchOverride = scriptedMatcher({
+      'phone-clip.mkv': cli.MatchOutcome(
+        type: 'video',
+        name: 'Phone Clip (2026).mkv',
+        ids: {'imdb': 'tt0000002'},
+        method: 'tags',
+        confidence: 'high',
+      ),
+    });
+    // Android ships no ffmpeg: the session still gets a REAL service
+    // object, just one whose `available` is false — the degrade must
+    // not depend on the ffmpeg param being null.
+    await session.startPrepare(
+      api: api(),
+      paths: [vid.path],
+      listName: 'Clips',
+      workDir: dirIn('work-android'),
+      configDir: dirIn('config-android'),
+      ffmpeg: _NoFfmpeg(),
+    );
+    while (session.stage == BatchStage.preparing) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    // No probes → nothing for the QUALITY section, one as-is upload.
+    expect(session.readyVideoEntries, isEmpty);
+    expect(session.offeredTiers, isEmpty);
+    expect(session.plannedUploadCount, 1);
+
+    await session.startUpload();
+    while (session.stage != BatchStage.done) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    // One upload under the matched name — the original file, no tier
+    // outputs.
+    final uploaded = [
+      for (final e in session.entries)
+        if (e.status == 'uploaded') e,
+    ];
+    expect(uploaded.length, 1);
+    expect(uploaded.single.name, 'Phone Clip (2026).mkv');
+    expect(uploaded.single.address, addr);
+    expect(
+        File('${tempDir.path}/config-android/ledger.jsonl')
+            .readAsLinesSync()
+            .length,
+        1);
+  });
+
   test('needs-attention resume: a second pass over the same work dir '
       're-matches and replaces the entry', () async {
     final file = mediaFile('lost.mp4', 65);

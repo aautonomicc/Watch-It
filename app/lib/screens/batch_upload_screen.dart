@@ -17,17 +17,21 @@ import '../services/publish_plan.dart' as plan;
 import '../services/publish_api.dart';
 import '../theme/tokens.dart';
 import '../widgets/match_review_cards.dart';
-import 'publish_screen.dart' show isDesktopPlatform, pickTargetLists;
+import 'publish_screen.dart'
+    show isDesktopPlatform, isUploadPlatform, pickTargetLists;
 import 'settings_screen.dart' show promptForText;
 import 'wallet_screen.dart';
 
 /// Batch upload with auto-matching — the upload CLI's prepare/upload
-/// pipeline as a desktop screen. Pick files or a whole folder; every
-/// file is hashed (already-uploaded content is skipped for free via the
-/// shared ledger), classified with ffprobe, matched against
+/// pipeline as an in-app screen (desktop + Android; see
+/// [isUploadPlatform]). Pick files — or, on desktop, a whole folder;
+/// every file is hashed (already-uploaded content is skipped for free
+/// via the shared ledger), classified with ffprobe, matched against
 /// MusicBrainz/TMDB, and renamed to its canonical W@tch name. Uncertain
 /// matches wait for one look; then the whole batch uploads unattended,
-/// paid from the app wallet, and ends with a .watch-list bundle.
+/// paid from the app wallet, and ends with a .watch-list bundle. On
+/// Android no ffmpeg ships, so the flow's no-ffmpeg path applies: no
+/// probing, no QUALITY tier section — files upload exactly as picked.
 class BatchUploadScreen extends StatefulWidget {
   const BatchUploadScreen({
     super.key,
@@ -155,6 +159,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   Future<void> _reviewAttention(PreviousBatch batch) async {
     if (!_session.idle) return;
     final tmdbKey = await AppSettings.tmdbApiKey();
+    final configDir = widget.configDir ?? await uploadConfigDir();
     if (!mounted) return;
     await _session.startPrepare(
       api: _api,
@@ -163,7 +168,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       workDir: batch.workDir,
       tmdbKey: tmdbKey,
       ffprobeBin: locateFfprobeBin(),
-      configDir: widget.configDir,
+      configDir: configDir,
       ffmpeg: widget.ffmpegOverride ?? FfmpegService(),
     );
   }
@@ -175,11 +180,12 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
 
   Future<void> _resumeFromDir(Directory dir) async {
     if (!_session.idle) return;
+    final configDir = widget.configDir ?? await uploadConfigDir();
     await _session.resumeBatch(
       api: _api,
       workDir: dir,
       ffprobeBin: locateFfprobeBin(),
-      configDir: widget.configDir,
+      configDir: configDir,
       ffmpeg: widget.ffmpegOverride ?? FfmpegService(),
     );
   }
@@ -264,7 +270,10 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    if (forget) forgetUploads(batch, configDir: widget.configDir);
+    if (forget) {
+      forgetUploads(batch,
+          configDir: widget.configDir ?? await uploadConfigDir());
+    }
     deleteBatch(batch);
     await _loadAttention();
   }
@@ -339,6 +348,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     final listName = _list.trim().isEmpty ? 'My uploads' : _list.trim();
     final tmdbKey = await AppSettings.tmdbApiKey();
     final workDir = await _workDir(listName);
+    final configDir = widget.configDir ?? await uploadConfigDir();
     if (!mounted) return;
     await _session.startPrepare(
       api: _api,
@@ -347,7 +357,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       workDir: workDir,
       tmdbKey: tmdbKey,
       ffprobeBin: locateFfprobeBin(),
-      configDir: widget.configDir,
+      configDir: configDir,
       ffmpeg: widget.ffmpegOverride ?? FfmpegService(),
     );
   }
@@ -388,7 +398,8 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   List<Widget> _setupChildren(WiTokens t) {
     return [
       Text(
-        'Upload a folder of media with automatic naming and metadata: '
+        '${isDesktopPlatform ? 'Upload a folder of media' : 'Upload '
+            'your media files'} with automatic naming and metadata: '
         'each file is matched against MusicBrainz (music) or TMDB '
         '(movies and shows), renamed to its canonical W@tch name, and '
         'uploaded in one unattended pass. Music is reviewed one whole '
@@ -412,12 +423,18 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
             icon: const Icon(Icons.insert_drive_file_outlined, size: 18),
             label: const Text('Add files'),
           ),
-          const SizedBox(width: 10),
-          OutlinedButton.icon(
-            onPressed: _pickFolder,
-            icon: const Icon(Icons.folder_outlined, size: 18),
-            label: const Text('Add a folder'),
-          ),
+          // Folder picking is desktop-only: Android's directory picker
+          // returns a SAF tree URI that dart:io can't enumerate — the
+          // multi-select file picker covers phones (it copies picks
+          // into cache and hands back real paths).
+          if (isDesktopPlatform) ...[
+            const SizedBox(width: 10),
+            OutlinedButton.icon(
+              onPressed: _pickFolder,
+              icon: const Icon(Icons.folder_outlined, size: 18),
+              label: const Text('Add a folder'),
+            ),
+          ],
         ],
       ),
       if (_previous.isNotEmpty) ...[
@@ -1457,8 +1474,8 @@ Future<Directory> Function()? batchResumeRootOverride;
 /// "Continue upload" opens the batch screen resuming the newest one
 /// (or, with several waiting, at their management list). The same pass
 /// sweeps fully finished batch records left behind by a crash on the
-/// done page or by older versions. Desktop-only, like the batch
-/// uploader itself; a silent no-op when nothing is interrupted.
+/// done page or by older versions. Only where the uploader exists
+/// (desktop + Android); a silent no-op when nothing is interrupted.
 Future<void> offerBatchResume(
   BuildContext context, {
   String? apiBase,
@@ -1466,7 +1483,7 @@ Future<void> offerBatchResume(
   Directory? configDir,
   FfmpegService? ffmpegOverride,
 }) async {
-  if (_batchResumeOffered || !isDesktopPlatform) return;
+  if (_batchResumeOffered || !isUploadPlatform) return;
   _batchResumeOffered = true;
   if (!BatchUploadSession.instance.idle) return;
   final List<PreviousBatch> interrupted;
@@ -1528,6 +1545,20 @@ Future<void> offerBatchResume(
       ffmpegOverride: ffmpegOverride,
     ),
   ));
+}
+
+/// Where the uploader keeps its matcher config, MusicBrainz cache and
+/// content-hash dedup ledger when the caller passed no override: null
+/// on desktop (CliConfig falls back to the real `~/.watchit-upload`,
+/// shared with the CLI and the import matcher) and the SAME
+/// `<appSupport>/upload_config` directory the import matcher uses on
+/// phones, where there is no HOME to fall back to.
+Future<Directory?> uploadConfigDir() async {
+  if (Platform.isAndroid || Platform.isIOS) {
+    final support = await getApplicationSupportDirectory();
+    return Directory(p.join(support.path, 'upload_config'));
+  }
+  return null;
 }
 
 /// The bundled ffprobe beside the executable (AppImage / Windows zip

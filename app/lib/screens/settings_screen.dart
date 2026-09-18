@@ -32,7 +32,8 @@ import 'media_lists_screen.dart';
 import 'my_watch_screen.dart';
 import 'profile_picker_screen.dart' show switchProfileFlow;
 import 'profiles_screen.dart';
-import 'publish_screen.dart' show PublishScreen, isDesktopPlatform;
+import 'publish_screen.dart'
+    show PublishScreen, isDesktopPlatform, isUploadPlatform;
 import 'terms_screen.dart';
 import 'wallet_screen.dart';
 
@@ -522,8 +523,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onTap: _openMediaLists,
                   ),
                   // Upload — moved out of the home drawer (2026-08-29);
-                  // desktop-only like the Publish flow it opens.
-                  if (isDesktopPlatform)
+                  // desktop + Android since 2026-09-18 (Android uploads
+                  // originals only — no ffmpeg, so no quality tiers).
+                  if (isUploadPlatform)
                     ListTile(
                       leading: Icon(
                         Icons.cloud_upload_outlined,
@@ -747,12 +749,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   trailing: Icon(Icons.chevron_right, color: t.ash),
                   onTap: _pickThemeMode,
                 ),
-                // Desktop-only this edition (Upload is): see
-                // docs/PLAN-alpha55.md. Section named WALLET (not
-                // PUBLISHING) since the Publish→Upload rename — one
-                // wallet funds both spaces
+                // Shown wherever Upload is (desktop + Android; on
+                // Android the key lives in the 0600 file fallback —
+                // the wallet screen surfaces that). Section named
+                // WALLET (not PUBLISHING) since the Publish→Upload
+                // rename — one wallet funds both spaces
                 // (docs/PLAN-personal-vs-channels.md).
-                if (_isAdmin && isDesktopPlatform) ...[
+                if (_isAdmin && isUploadPlatform) ...[
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
                     child: Text(
