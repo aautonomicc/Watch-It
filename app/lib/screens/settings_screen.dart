@@ -4,7 +4,6 @@ import 'dart:io' show exit;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
@@ -24,6 +23,7 @@ import '../services/tv_settings.dart';
 import 'tv_display_screen.dart';
 import '../widgets/brand_mark.dart';
 import '../widgets/messenger.dart';
+import '../widgets/update_tile.dart';
 import 'channels_screen.dart';
 import 'data_screen.dart';
 import 'downloads_screen.dart';
@@ -33,7 +33,7 @@ import 'my_watch_screen.dart';
 import 'profile_picker_screen.dart' show switchProfileFlow;
 import 'profiles_screen.dart';
 import 'publish_screen.dart'
-    show PublishScreen, isDesktopPlatform, isUploadPlatform;
+    show PublishScreen, isUploadPlatform;
 import 'terms_screen.dart';
 import 'wallet_screen.dart';
 
@@ -923,36 +923,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       MaterialPageRoute(builder: (_) => const ExitInfoScreen()),
                     ),
                   ),
-                if (isDesktopPlatform) ...[
-                  ListenableBuilder(
-                    listenable: UpdateCheck.instance,
-                    builder: (context, _) {
-                      final tag = UpdateCheck.instance.availableTag;
-                      if (tag == null) return const SizedBox.shrink();
-                      return ListTile(
-                        leading: Icon(Icons.system_update_alt, color: t.accent),
-                        title: Text(
-                          'Update available',
-                          style: TextStyle(color: t.accent, fontSize: 15),
-                        ),
-                        subtitle: Text(
-                          '$tag — open the release page to download',
-                          style: TextStyle(color: t.ash, fontSize: 12),
-                        ),
-                        trailing: Icon(
-                          Icons.open_in_new,
-                          color: t.ash,
-                          size: 18,
-                        ),
-                        onTap: () => launchUrl(
-                          Uri.parse(
-                            UpdateCheck.instance.releaseUrl ??
-                                UpdateCheck.releasePage,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+                if (UpdateCheck.supportedPlatform) ...[
+                  const UpdateAvailableTile(),
                   SwitchListTile(
                     secondary: Icon(Icons.update, color: t.accent),
                     title: Text(

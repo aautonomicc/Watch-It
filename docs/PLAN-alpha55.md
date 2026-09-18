@@ -263,6 +263,14 @@ self-update later:**
   process or an installer handoff (ties into the Inno decision). Real
   work on both platforms for modest payoff while check-and-notify
   covers awareness. Not this edition.
+  > **Superseded (2026-09-18):** phase 2 SHIPPED for Android
+  > (download APK → system installer via FileProvider) and Linux
+  > AppImage (atomic in-place swap of `$APPIMAGE`, `.old` kept until
+  > the next launch) — the AppImageUpdate/zsync approach named above
+  > was REJECTED in favour of the plain swap. The phase-1 note "an
+  > APK can't self-serve an install anyway" was wrong — it can, via
+  > an installer intent. Windows helper-swap and macOS remain
+  > deferred; there the row still opens the release page.
 
 ## Suggested build order (each step lands with tests)
 

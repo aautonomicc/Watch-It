@@ -113,6 +113,43 @@ void main() {
       expect(called, false);
     }, skip: !Platform.isLinux && !Platform.isWindows && !Platform.isMacOS);
 
+    test('assets are parsed: apk skips tvtest, AppImage found, digest kept',
+        () async {
+      final check = UpdateCheck.instance
+        ..client = MockClient((request) async => http.Response(
+            jsonEncode({
+              'tag_name': 'v0.1.0-alpha.57',
+              'html_url': 'https://example.com/tag',
+              'assets': [
+                {
+                  'name': 'Watch-It-0.1.0-alpha.57-armeabi-v7a-tvtest.apk',
+                  'browser_download_url': 'https://example.com/tvtest.apk',
+                  'size': 5,
+                },
+                {
+                  'name': 'Watch-It-0.1.0-alpha.57.apk',
+                  'browser_download_url': 'https://example.com/app.apk',
+                  'size': 10,
+                  'digest': 'sha256:ABCDEF0123',
+                },
+                {
+                  'name': 'Watch-It-0.1.0-alpha.57-x86_64.AppImage',
+                  'browser_download_url': 'https://example.com/app.AppImage',
+                  'size': 20,
+                },
+                {'name': 42}, // malformed entry is skipped, not fatal
+              ],
+            }),
+            200));
+      await check.maybeCheck();
+      expect(check.assets, hasLength(3));
+      expect(check.apkAsset?.name, 'Watch-It-0.1.0-alpha.57.apk');
+      expect(check.apkAsset?.size, 10);
+      expect(check.apkAsset?.sha256, 'abcdef0123');
+      expect(check.appImageAsset?.url, 'https://example.com/app.AppImage');
+      expect(check.appImageAsset?.sha256, null);
+    }, skip: !Platform.isLinux && !Platform.isWindows && !Platform.isMacOS);
+
     test('failure is silent and does not stamp the check time', () async {
       final check = UpdateCheck.instance
         ..client = MockClient((_) async => throw const SocketException('offline'));

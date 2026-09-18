@@ -257,6 +257,48 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        // In-app update: Dart downloads the release APK into the app
+        // cache (updates/), we hand it to the system package installer
+        // via a FileProvider content URI. The installer owns the rest —
+        // signature check, the one-time "install unknown apps" grant,
+        // and data-preserving upgrade (same signing cert).
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger, "watchit/update"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "installApk" -> {
+                    val path = call.argument<String>("path")
+                    val file = if (path == null) null else File(path)
+                    if (file == null || !file.exists()) {
+                        result.error("missing", "The downloaded update is gone.", null)
+                    } else {
+                        try {
+                            val uri = androidx.core.content.FileProvider.getUriForFile(
+                                this, "$packageName.fileprovider", file
+                            )
+                            val intent = Intent(Intent.ACTION_VIEW)
+                                .setDataAndType(
+                                    uri, "application/vnd.android.package-archive"
+                                )
+                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: ActivityNotFoundException) {
+                            result.error(
+                                "installer",
+                                "No package installer is available on this device.",
+                                null
+                            )
+                        } catch (e: Exception) {
+                            result.error(
+                                "installer", "Could not start the installer: $e", null
+                            )
+                        }
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
         // Exit diagnostics: the OS keeps a record of WHY this app's
         // process last died (native crash, ANR, system kill, …) that
         // survives the death itself — the only crash evidence available

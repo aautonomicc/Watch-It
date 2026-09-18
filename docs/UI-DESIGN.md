@@ -123,8 +123,12 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - Appearance (Colour scheme; sits below Metadata since 2026-08-30)
 - About / licenses (incl. TMDB attribution notice + logo; the Terms of
   Use & Disclaimer page — also gated on first launch; update-check
-  toggle + "Update available" row on desktop; since 2026-09-06 the
-  Version tile expands to the full network-stack versions with a
+  toggle + "Update available" row on desktop and Android — since
+  2026-09-18 the row downloads and applies the update itself where it
+  can: Android hands the fetched APK to the system installer, an
+  AppImage run swaps the new image over `$APPIMAGE` in place and asks
+  for a restart; elsewhere it opens the release page; since 2026-09-06
+  the Version tile expands to the full network-stack versions with a
   Copy-versions button)
 
 ### 7. Upload (desktop, alpha.55+; renamed from Publish 2026-08-27;
