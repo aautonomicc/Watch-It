@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/tv_settings.dart';
 
-/// "Join with invite code" dialog. Owns its controllers until the dialog
+/// "Enter an invite code" dialog. Owns its controllers until the dialog
 /// route is actually disposed (same pattern as [DeviceNameDialog]).
 ///
 /// On TV nothing autofocuses a text field (that would pop the IME over
@@ -58,7 +58,7 @@ class _JoinLinkDialogState extends State<JoinLinkDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('Join with invite code'),
+        title: const Text('Enter an invite code'),
         scrollable: true,
         content: Column(
           mainAxisSize: MainAxisSize.min,
