@@ -48,13 +48,12 @@ class PlaylistScreen extends StatefulWidget {
 
   /// Test overrides, like the album page's.
   final AlbumAudioPlayer Function()? playerFactory;
-  final ({String url, bool local})? Function(MediaEntry entry)?
-      sourceOverride;
+  final ({String url, bool local})? Function(MediaEntry entry)? sourceOverride;
 
   /// Test override replacing the [PlayerScreen] push (widget tests have
   /// no native libmpv): receives the first entry and the play order.
   final void Function(MediaEntry first, List<MediaEntry> order)?
-      videoLauncherOverride;
+  videoLauncherOverride;
 
   @override
   State<PlaylistScreen> createState() => _PlaylistScreenState();
@@ -112,7 +111,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     final meta = MetadataService.instance.metadataFor(entry);
     final parsed = parseMediaName(entry.name);
     return NowPlayingTrack(
-      title: episodeNameFromLabel(meta.episodeLabel) ??
+      title:
+          episodeNameFromLabel(meta.episodeLabel) ??
           parsed.trackTitle ??
           parsed.title,
       artist: meta.trackArtist ?? meta.artist ?? parsed.artist,
@@ -123,16 +123,16 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
 
   void _snack(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   /// Any video in the playlist flips the whole page to PlayerScreen
   /// playback (marathon mode) — the inline audio queue would play a
   /// movie sound-only.
   bool get _hasVideo =>
-      _playlist?.entries.any((e) => !parseMediaName(e.name).isAudio) ??
-      false;
+      _playlist?.entries.any((e) => !parseMediaName(e.name).isAudio) ?? false;
 
   /// Playback source for [e]: the downloaded file when complete on
   /// disk, else the embedded client's stream URL (the test override
@@ -148,10 +148,10 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
 
   /// The playlist entry after [current] in [order]; null at the end —
   /// PlayerScreen's Up-next flow turns this into marathon playback.
-  static MediaEntry? _nextInOrder(
-      List<MediaEntry> order, MediaEntry current) {
+  static MediaEntry? _nextInOrder(List<MediaEntry> order, MediaEntry current) {
     final i = order.indexWhere(
-        (e) => e.address == current.address && e.name == current.name);
+      (e) => e.address == current.address && e.name == current.name,
+    );
     if (i < 0 || i + 1 >= order.length) return null;
     return order[i + 1];
   }
@@ -169,13 +169,14 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     if (!source.local) {
       final gate = await streamingGateNow();
       if (gate == StreamingGate.block) {
-        _snack("You're on mobile data — streaming is set to Wi-Fi only "
-            '(Settings → Network)');
+        _snack(
+          "You're on mobile data — streaming is set to Wi-Fi only "
+          '(Settings → Network)',
+        );
         return;
       }
       if (gate == StreamingGate.ask) {
-        if (!mounted ||
-            await confirmCellularStreaming(context) != true) {
+        if (!mounted || await confirmCellularStreaming(context) != true) {
           return;
         }
         CellularStreamingConsent.granted = true;
@@ -194,6 +195,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
         : Duration.zero;
     final meta = MetadataService.instance.metadataFor(first);
     final bufferSizeMb = await AppSettings.bufferSizeMb();
+    final softwareDecode = await AppSettings.softwareVideoDecode();
     if (!mounted) return;
     final launcher = widget.videoLauncherOverride;
     if (launcher != null) {
@@ -211,12 +213,12 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
           nextFor: (e) => _nextInOrder(order, e),
           sourceFor: _sourceFor,
           bufferSizeMb: bufferSizeMb,
+          softwareDecode: softwareDecode,
         ),
       ),
     );
     if (pausedForPlayback) {
-      final resumed =
-          await DownloadManager.instance.resumeAfterPlayback();
+      final resumed = await DownloadManager.instance.resumeAfterPlayback();
       if (resumed) _snack('Downloads resumed');
     }
     await _reload();
@@ -238,8 +240,10 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
   /// merge play order newest-stamp-wins. Removal keeps the old stamp —
   /// the remaining rows' relative order is unchanged, and stamping there
   /// could clobber a newer reorder arriving from a linked device.
-  Future<void> _persistOrder(List<MediaEntry> entries,
-      {bool stampOrder = false}) async {
+  Future<void> _persistOrder(
+    List<MediaEntry> entries, {
+    bool stampOrder = false,
+  }) async {
     final lists = await LibraryStore.load();
     final updated = [
       for (final l in lists)
@@ -268,10 +272,12 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
   Future<void> _rename() async {
     final playlist = _playlist;
     if (playlist == null) return;
-    final title = await promptForText(context,
-        title: 'Rename playlist',
-        hint: 'Playlist name',
-        initial: playlist.title);
+    final title = await promptForText(
+      context,
+      title: 'Rename playlist',
+      hint: 'Playlist name',
+      initial: playlist.title,
+    );
     if (title == null || title.trim().isEmpty) return;
     final lists = await LibraryStore.load();
     await LibraryStore.save([
@@ -289,8 +295,10 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: t.ink2,
-        title: Text('Delete "${playlist.title}"?',
-            style: TextStyle(color: t.bone, fontSize: 16)),
+        title: Text(
+          'Delete "${playlist.title}"?',
+          style: TextStyle(color: t.bone, fontSize: 16),
+        ),
         content: Text(
           'The playlist is removed. The tracks themselves stay in your '
           'library.',
@@ -310,8 +318,10 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     );
     if (confirmed != true || !mounted) return;
     final lists = await LibraryStore.load();
-    await LibraryStore.save(
-        [for (final l in lists) if (l.id != playlist.id) l]);
+    await LibraryStore.save([
+      for (final l in lists)
+        if (l.id != playlist.id) l,
+    ]);
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -327,8 +337,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
         if (seen.add(e.address.toLowerCase())) out.add(e);
       }
     }
-    out.sort(
-        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    out.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return out;
   }
 
@@ -336,9 +345,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     final playlist = _playlist;
     if (playlist == null) return;
     final lists = await LibraryStore.load();
-    final held = {
-      for (final e in playlist.entries) e.address.toLowerCase(),
-    };
+    final held = {for (final e in playlist.entries) e.address.toLowerCase()};
     final pool = [
       for (final e in _allMedia(lists))
         if (!held.contains(e.address.toLowerCase())) e,
@@ -353,10 +360,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     // was impractical for large libraries.
     final picked = await Navigator.of(context).push<List<MediaEntry>>(
       MaterialPageRoute(
-        builder: (_) => PlaylistAddScreen(
-          pool: pool,
-          playlistTitle: playlist.title,
-        ),
+        builder: (_) =>
+            PlaylistAddScreen(pool: pool, playlistTitle: playlist.title),
       ),
     );
     if (picked == null || picked.isEmpty || !mounted) return;
@@ -381,8 +386,10 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
       return Scaffold(
         appBar: AppBar(backgroundColor: t.ink, elevation: 0),
         body: Center(
-          child: Text('This playlist no longer exists.',
-              style: TextStyle(fontSize: 13, color: t.boneDim)),
+          child: Text(
+            'This playlist no longer exists.',
+            style: TextStyle(fontSize: 13, color: t.boneDim),
+          ),
         ),
       );
     }
@@ -395,22 +402,23 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(playlist.title,
-                style: TextStyle(color: t.bone, fontSize: 18),
-                overflow: TextOverflow.ellipsis),
+            Text(
+              playlist.title,
+              style: TextStyle(color: t.bone, fontSize: 18),
+              overflow: TextOverflow.ellipsis,
+            ),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 // Content-derived icon — audio, video, or mixed.
-                Icon(playlistContentIcon(playlist),
-                    size: 12, color: t.ash),
+                Icon(playlistContentIcon(playlist), size: 12, color: t.ash),
                 const SizedBox(width: 4),
                 Text(
                   _hasVideo
                       ? 'Playlist · $count '
-                          '${count == 1 ? 'item' : 'items'}'
+                            '${count == 1 ? 'item' : 'items'}'
                       : 'Playlist · $count '
-                          '${count == 1 ? 'track' : 'tracks'}',
+                            '${count == 1 ? 'track' : 'tracks'}',
                   style: TextStyle(color: t.ash, fontSize: 11),
                 ),
               ],
@@ -429,13 +437,19 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
             },
             itemBuilder: (context) => [
               PopupMenuItem(
-                  value: 'rename',
-                  child: Text('Rename playlist',
-                      style: TextStyle(color: t.bone, fontSize: 13))),
+                value: 'rename',
+                child: Text(
+                  'Rename playlist',
+                  style: TextStyle(color: t.bone, fontSize: 13),
+                ),
+              ),
               PopupMenuItem(
-                  value: 'delete',
-                  child: Text('Delete playlist',
-                      style: TextStyle(color: t.rust, fontSize: 13))),
+                value: 'delete',
+                child: Text(
+                  'Delete playlist',
+                  style: TextStyle(color: t.rust, fontSize: 13),
+                ),
+              ),
             ],
           ),
         ],
@@ -474,9 +488,11 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                         FilledButton.icon(
                           onPressed: entries.isEmpty
                               ? null
-                              : () => unawaited(_hasVideo
-                                  ? _playFrom(entries.first, entries)
-                                  : _queue.playTrack(entries.first)),
+                              : () => unawaited(
+                                  _hasVideo
+                                      ? _playFrom(entries.first, entries)
+                                      : _queue.playTrack(entries.first),
+                                ),
                           icon: const Icon(Icons.play_arrow, size: 20),
                           label: const Text('Play all'),
                         ),
@@ -489,16 +505,18 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                                     // pass, chained through Up-next.
                                     final order = [...entries]
                                       ..shuffle(Random());
-                                    unawaited(
-                                        _playFrom(order.first, order));
+                                    unawaited(_playFrom(order.first, order));
                                     return;
                                   }
                                   if (!_queue.shuffle) {
                                     _queue.toggleShuffle();
                                   }
-                                  unawaited(_queue.playTrack(entries[
-                                      DateTime.now().millisecond %
-                                          entries.length]));
+                                  unawaited(
+                                    _queue.playTrack(
+                                      entries[DateTime.now().millisecond %
+                                          entries.length],
+                                    ),
+                                  );
                                 },
                           style: OutlinedButton.styleFrom(
                             foregroundColor: t.bone,
@@ -555,8 +573,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                     list.insert(newIndex, moved);
                     unawaited(_persistOrder(list, stampOrder: true));
                   },
-                  itemBuilder: (context, i) =>
-                      _trackRow(t, entries[i], i),
+                  itemBuilder: (context, i) => _trackRow(t, entries[i], i),
                 ),
         ),
       ],
@@ -570,7 +587,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
       final image = i < entries.length
           ? entryPosterImage(
               MetadataService.instance.metadataFor(entries[i]),
-              fit: BoxFit.cover)
+              fit: BoxFit.cover,
+            )
           : null;
       return image ??
           Container(
@@ -619,16 +637,22 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-              fontSize: 13.5, fontWeight: FontWeight.w600, color: t.bone),
+            fontSize: 13.5,
+            fontWeight: FontWeight.w600,
+            color: t.bone,
+          ),
         ),
         Row(
           children: [
-            Text(_clock(position),
-                style: TextStyle(
-                    fontSize: 11,
-                    color: t.ash,
-                    fontFamily: wiMonoFamily,
-                    fontFamilyFallback: wiMonoFallback)),
+            Text(
+              _clock(position),
+              style: TextStyle(
+                fontSize: 11,
+                color: t.ash,
+                fontFamily: wiMonoFamily,
+                fontFamilyFallback: wiMonoFallback,
+              ),
+            ),
             Expanded(
               child: WiSeekSlider(
                 value: maxMs == 0
@@ -640,15 +664,19 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                 onChanged: maxMs == 0
                     ? null
                     : (v) => unawaited(
-                        _queue.seek(Duration(milliseconds: v.round()))),
+                        _queue.seek(Duration(milliseconds: v.round())),
+                      ),
               ),
             ),
-            Text(_clock(duration),
-                style: TextStyle(
-                    fontSize: 11,
-                    color: t.ash,
-                    fontFamily: wiMonoFamily,
-                    fontFamilyFallback: wiMonoFallback)),
+            Text(
+              _clock(duration),
+              style: TextStyle(
+                fontSize: 11,
+                color: t.ash,
+                fontFamily: wiMonoFamily,
+                fontFamilyFallback: wiMonoFallback,
+              ),
+            ),
           ],
         ),
         Row(
@@ -657,8 +685,11 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
             IconButton(
               tooltip: _queue.shuffle ? 'Shuffle off' : 'Shuffle',
               onPressed: _queue.toggleShuffle,
-              icon: Icon(Icons.shuffle,
-                  size: 22, color: _queue.shuffle ? t.accent : t.ash),
+              icon: Icon(
+                Icons.shuffle,
+                size: 22,
+                color: _queue.shuffle ? t.accent : t.ash,
+              ),
             ),
             const SizedBox(width: 4),
             IconButton(
@@ -673,8 +704,10 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                 foregroundColor: t.ink,
               ),
               onPressed: () => unawaited(_queue.playOrPause()),
-              icon: Icon(_queue.playing ? Icons.pause : Icons.play_arrow,
-                  size: 28),
+              icon: Icon(
+                _queue.playing ? Icons.pause : Icons.play_arrow,
+                size: 28,
+              ),
             ),
             IconButton(
               tooltip: 'Next track',
@@ -683,12 +716,14 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
             ),
             const SizedBox(width: 4),
             IconButton(
-              tooltip:
-                  fav ? 'Remove from favourites' : 'Add to favourites',
-              onPressed: () => unawaited(
-                  FavouritesStore.instance.toggle(current.address)),
-              icon: Icon(fav ? Icons.favorite : Icons.favorite_border,
-                  size: 22, color: fav ? t.accent : t.ash),
+              tooltip: fav ? 'Remove from favourites' : 'Add to favourites',
+              onPressed: () =>
+                  unawaited(FavouritesStore.instance.toggle(current.address)),
+              icon: Icon(
+                fav ? Icons.favorite : Icons.favorite_border,
+                size: 22,
+                color: fav ? t.accent : t.ash,
+              ),
             ),
           ],
         ),
@@ -700,8 +735,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
   /// bottom edge when the title is partway watched.
   Widget _videoThumb(WiTokens t, MediaEntry entry, MediaMetadata meta) {
     final state = WatchStateStore.instance.cachedNewestFor([entry]);
-    final showBar =
-        state != null && state.resumable && state.progress > 0;
+    final showBar = state != null && state.resumable && state.progress > 0;
     return ClipRRect(
       borderRadius: BorderRadius.circular(4),
       child: SizedBox(
@@ -713,8 +747,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
             entryPosterImage(meta, fit: BoxFit.cover) ??
                 Container(
                   color: t.ink2,
-                  child:
-                      Icon(Icons.movie_outlined, size: 16, color: t.ash),
+                  child: Icon(Icons.movie_outlined, size: 16, color: t.ash),
                 ),
             if (showBar)
               Align(
@@ -738,15 +771,16 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     final parsed = parseMediaName(entry.name);
     final isVideo = !parsed.isAudio;
     final meta = MetadataService.instance.metadataFor(entry);
-    final title = episodeNameFromLabel(meta.episodeLabel) ??
+    final title =
+        episodeNameFromLabel(meta.episodeLabel) ??
         parsed.trackTitle ??
         (isVideo ? meta.title : parsed.title);
     // Audio rows read artist · album; an episode row reads its show,
     // a movie row its year.
     final subtitle = isVideo
         ? (parsed.isEpisode
-            ? meta.title
-            : [if (meta.year != null) '${meta.year}'].join())
+              ? meta.title
+              : [if (meta.year != null) '${meta.year}'].join())
         : [
             if (meta.trackArtist != null)
               meta.trackArtist!
@@ -756,8 +790,9 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
           ].join(' · ');
     final downloaded =
         DownloadManager.instance.taskFor(entry.address)?.status ==
-            DownloadStatus.done;
-    final isCurrent = _queue.current?.address == entry.address &&
+        DownloadStatus.done;
+    final isCurrent =
+        _queue.current?.address == entry.address &&
         _queue.current?.name == entry.name;
     return InkWell(
       key: ValueKey('${entry.address}|${entry.name}'),
@@ -800,8 +835,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                     style: TextStyle(
                       fontSize: 13.5,
                       color: isCurrent ? t.accent : t.bone,
-                      fontWeight:
-                          isCurrent ? FontWeight.w600 : FontWeight.w400,
+                      fontWeight: isCurrent ? FontWeight.w600 : FontWeight.w400,
                     ),
                   ),
                   if (subtitle.isNotEmpty)
@@ -825,21 +859,30 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
               onSelected: (v) => switch (v) {
                 'remove' => unawaited(_removeTrack(entry)),
                 'details' => unawaited(() async {
-                    await Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => DetailScreen(entry: entry)));
-                    await _reload();
-                  }()),
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => DetailScreen(entry: entry),
+                    ),
+                  );
+                  await _reload();
+                }()),
                 _ => null,
               },
               itemBuilder: (context) => [
                 PopupMenuItem(
-                    value: 'details',
-                    child: Text(isVideo ? 'Details' : 'Track details',
-                        style: TextStyle(color: t.bone, fontSize: 13))),
+                  value: 'details',
+                  child: Text(
+                    isVideo ? 'Details' : 'Track details',
+                    style: TextStyle(color: t.bone, fontSize: 13),
+                  ),
+                ),
                 PopupMenuItem(
-                    value: 'remove',
-                    child: Text('Remove from playlist',
-                        style: TextStyle(color: t.rust, fontSize: 13))),
+                  value: 'remove',
+                  child: Text(
+                    'Remove from playlist',
+                    style: TextStyle(color: t.rust, fontSize: 13),
+                  ),
+                ),
               ],
             ),
           ],

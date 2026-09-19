@@ -76,6 +76,7 @@ class PlayerScreen extends StatefulWidget {
     this.nextFor,
     this.sourceFor,
     this.bufferSizeMb = AppSettings.defaultBufferSizeMb,
+    this.softwareDecode = false,
   });
 
   final String url;
@@ -102,6 +103,12 @@ class PlayerScreen extends StatefulWidget {
 
   /// mpv demuxer cache cap (Settings → Streaming → Buffer size).
   final int bufferSizeMb;
+
+  /// Decode video on the CPU instead of the hardware decoder (Settings →
+  /// Software video decoding) — the workaround for devices whose hardware
+  /// path renders a black picture with working sound. On Android this
+  /// makes the vendored media_kit controller pass hwdec=no to mpv.
+  final bool softwareDecode;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -174,7 +181,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
         bufferSize: widget.bufferSizeMb * 1024 * 1024,
       ),
     );
-    _controller = VideoController(_player);
+    _controller = VideoController(
+      _player,
+      configuration: VideoControllerConfiguration(
+        enableHardwareAcceleration: !widget.softwareDecode,
+      ),
+    );
     final platform = _player.platform;
     if (platform is NativePlayer) {
       // Cold chunk fetches can exceed mpv's default 60s network timeout,

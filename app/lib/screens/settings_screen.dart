@@ -32,8 +32,7 @@ import 'media_lists_screen.dart';
 import 'my_watch_screen.dart';
 import 'profile_picker_screen.dart' show switchProfileFlow;
 import 'profiles_screen.dart';
-import 'publish_screen.dart'
-    show PublishScreen, isUploadPlatform;
+import 'publish_screen.dart' show PublishScreen, isUploadPlatform;
 import 'terms_screen.dart';
 import 'wallet_screen.dart';
 
@@ -53,6 +52,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<MediaList>? _lists;
   String? _version;
   int _bufferSizeMb = AppSettings.defaultBufferSizeMb;
+  bool _softwareVideoDecode = false;
   TmdbKeySource _tmdbKeySource = TmdbKeySource.none;
   int? _dataSizeBytes;
   bool _dataSizeKnown = false;
@@ -86,6 +86,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _reload() async {
     final lists = await LibraryStore.load();
     final bufferSizeMb = await AppSettings.bufferSizeMb();
+    final softwareVideoDecode = await AppSettings.softwareVideoDecode();
     final tmdbKeySource = await AppSettings.tmdbKeySource();
     await NetworkPause.instance.ensureLoaded();
     // Data tile subtitle: the running period total (best-effort —
@@ -95,6 +96,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _lists = lists;
         _bufferSizeMb = bufferSizeMb;
+        _softwareVideoDecode = softwareVideoDecode;
         _tmdbKeySource = tmdbKeySource;
         _dataUsageTotal = usage == null ? null : formatBytes(usage.total.total);
       });
@@ -677,6 +679,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     'effect the next time you press Play.',
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
+                ),
+                // Playback-compatibility escape hatch: some devices'
+                // hardware video path (notably certain Android TV boxes)
+                // plays sound with a black picture — CPU decoding
+                // sidesteps the broken decoder→surface handoff.
+                SwitchListTile(
+                  secondary: Icon(
+                    Icons.smart_display_outlined,
+                    color: t.accent,
+                  ),
+                  title: Text(
+                    'Software video decoding',
+                    style: TextStyle(color: t.bone, fontSize: 15),
+                  ),
+                  subtitle: Text(
+                    'Try this if videos play with sound but a black '
+                    'picture. Decodes on the CPU — uses more power, and '
+                    'high resolutions may stutter. Takes effect the next '
+                    'time you press Play.',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  value: _softwareVideoDecode,
+                  onChanged: (v) async {
+                    await AppSettings.setSoftwareVideoDecode(v);
+                    if (mounted) setState(() => _softwareVideoDecode = v);
+                  },
                 ),
                 if (_isAdmin) ...[
                   Padding(
