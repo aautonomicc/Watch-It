@@ -1083,14 +1083,16 @@ mod imp {
     }
 
     fn parse_invite(invite: &str) -> Result<String, String> {
-        let hex_part = invite
-            .trim()
+        // Case never carries meaning in an invite (prefix + hex), and TV
+        // remote keyboards capitalize freely — accept any casing.
+        let lower = invite.trim().to_lowercase();
+        let hex_part = lower
             .strip_prefix(INVITE_PREFIX)
             .ok_or("not a My W@tch invite code")?;
         if hex_part.len() != 64 || hex::decode(hex_part).is_err() {
             return Err("invite code is damaged (wrong length or characters)".into());
         }
-        Ok(hex_part.to_lowercase())
+        Ok(hex_part.to_string())
     }
 
     /// Membership tag for an artwork request: proves the requester holds
@@ -1192,6 +1194,21 @@ mod imp {
             assert_ne!(a, art_auth(&"bb".repeat(32), &"11".repeat(32)));
             // Domain-separated from the gossip topic derivation.
             assert!(!topic_for(&"aa".repeat(32)).contains(&a));
+        }
+
+        #[test]
+        fn parse_invite_accepts_any_casing() {
+            let secret = "ab".repeat(32);
+            let canonical = format!("{INVITE_PREFIX}{secret}");
+            assert_eq!(parse_invite(&canonical).unwrap(), secret);
+            // TV remote keyboards capitalize freely: prefix and hex in
+            // any case (plus stray whitespace) normalize to the same
+            // lowercase secret.
+            let shouty = format!(" WTCH1-{} ", secret.to_uppercase());
+            assert_eq!(parse_invite(&shouty).unwrap(), secret);
+            // Damage still refused.
+            assert!(parse_invite("wtch1-abcd").is_err());
+            assert!(parse_invite(&format!("wchn1-{secret}")).is_err());
         }
 
         #[test]
