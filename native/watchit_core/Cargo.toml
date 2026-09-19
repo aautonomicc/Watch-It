@@ -17,11 +17,11 @@ path = "src/bin/devserver.rs"
 cc = "1"
 
 [dependencies]
-# Pinned to ant-core 0.8.1 (tag ant-core-v0.8.1). Still exposes
+# Pinned to ant-core 0.9.0 (tag ant-core-v0.9.0). Still exposes
 # Client::file_download_to_sender + self_encryption 0.36 get_range seek;
-# pulls saorsa-core 0.27.3 (starved-routing-table runtime recovery, and
-# the version upstream PR WithAutonomi/saorsa-core#160 targets).
-ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "dbc01ce8fdbdfe9ac4d064d35f36b4684bf6a616" }
+# brings the V2-903 download-diagnostics stack (node-GET correlation,
+# flush-after-failed-download) + settlement-version quote gate.
+ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "785a155ce044fc5fb3f9a7106e990eee264b2be2" }
 self_encryption = "0.36"
 # Upload-wallet key derivation; the mnemonic feature adds the
 # BIP-39/BIP-32 path (m/44'/60'/0'/0/0, MetaMask-compatible). 2.x may
