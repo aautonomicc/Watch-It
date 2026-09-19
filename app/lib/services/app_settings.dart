@@ -26,6 +26,22 @@ class AppSettings {
     await prefs.setInt(_bufferSizeKey, mb);
   }
 
+  static const _softwareVideoDecodeKey = 'software_video_decode_v1';
+
+  /// Decode video on the CPU instead of the device's hardware decoder
+  /// (Settings, beside Buffer size). Off by default — the workaround for
+  /// devices whose hardware path plays sound with a black picture (some
+  /// Android TV boxes). Applied when the player opens.
+  static Future<bool> softwareVideoDecode() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_softwareVideoDecodeKey) ?? false;
+  }
+
+  static Future<void> setSoftwareVideoDecode(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_softwareVideoDecodeKey, value);
+  }
+
   static const _lastStreamedHeightKey = 'last_streamed_height_v1';
 
   /// Resolution (height in pixels, e.g. 1080) of the version the user
@@ -139,7 +155,8 @@ class AppSettings {
   }
 
   static Future<void> setDownloadNetworkPolicy(
-      DownloadNetworkPolicy value) async {
+    DownloadNetworkPolicy value,
+  ) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_downloadNetworkKey, value.name);
   }
@@ -156,7 +173,8 @@ class AppSettings {
   }
 
   static Future<void> setStreamingNetworkPolicy(
-      StreamingNetworkPolicy value) async {
+    StreamingNetworkPolicy value,
+  ) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_streamingNetworkKey, value.name);
   }
@@ -258,15 +276,16 @@ class AppSettings {
   /// the historic unsuffixed key.
   static Future<ThemeMode> themeMode() async {
     final prefs = await SharedPreferences.getInstance();
-    final name =
-        prefs.getString(ProfileStore.instance.prefKey(_themeModeKey));
+    final name = prefs.getString(ProfileStore.instance.prefKey(_themeModeKey));
     return ThemeMode.values.asNameMap()[name] ?? ThemeMode.dark;
   }
 
   static Future<void> setThemeMode(ThemeMode mode) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
-        ProfileStore.instance.prefKey(_themeModeKey), mode.name);
+      ProfileStore.instance.prefKey(_themeModeKey),
+      mode.name,
+    );
   }
 
   static const _drawerPinnedKey = 'drawer_pinned_v1';
@@ -299,7 +318,8 @@ class AppSettings {
   }
 
   static Future<void> setPauseDownloadsOnPlay(
-      PauseDownloadsOnPlay value) async {
+    PauseDownloadsOnPlay value,
+  ) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_pauseDownloadsOnPlayKey, value.name);
   }

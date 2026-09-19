@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart' show LicenseRegistry;
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/screens/settings_screen.dart';
 import 'package:watchit/screens/terms_screen.dart';
+import 'package:watchit/services/app_settings.dart';
 import 'package:watchit/services/bundle.dart' show kTmdbAttributionNotice;
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/licenses.dart';
@@ -24,7 +25,8 @@ void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     await LibraryStore.useForTesting(
-        AppDatabase.forTesting(NativeDatabase.memory()));
+      AppDatabase.forTesting(NativeDatabase.memory()),
+    );
   });
 
   tearDown(() => debugAppDataDirOverride = null);
@@ -35,10 +37,12 @@ void main() {
     tester.view.physicalSize = const Size(1200, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(MaterialApp(
-      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
-      home: const SettingsScreen(),
-    ));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: const SettingsScreen(),
+      ),
+    );
     await tester.pumpAndSettle();
   }
 
@@ -56,22 +60,26 @@ void main() {
     var found = false;
     for (var i = 0; i < 50 && !found; i++) {
       await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 20)));
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
       await tester.pump();
       found = find.textContaining('2 KB').evaluate().isNotEmpty;
     }
     expect(find.textContaining('2 KB'), findsOneWidget);
   });
 
-  testWidgets('About shows the TMDB attribution notice and logo',
-      (tester) async {
+  testWidgets('About shows the TMDB attribution notice and logo', (
+    tester,
+  ) async {
     await pumpSettings(tester);
     expect(find.text(kTmdbAttributionNotice), findsOneWidget);
     expect(
-      find.byWidgetPredicate((w) =>
-          w is Image &&
-          w.image is AssetImage &&
-          (w.image as AssetImage).assetName == 'assets/tmdb_logo.png'),
+      find.byWidgetPredicate(
+        (w) =>
+            w is Image &&
+            w.image is AssetImage &&
+            (w.image as AssetImage).assetName == 'assets/tmdb_logo.png',
+      ),
       findsOneWidget,
     );
   });
@@ -107,15 +115,17 @@ void main() {
     // runAsync: the collector loads the GPL/OFL texts from the asset
     // bundle, which is real async I/O the fake-async zone would deadlock.
     final entries = await tester.runAsync(
-        () => LicenseRegistry.licenses.toList());
+      () => LicenseRegistry.licenses.toList(),
+    );
     final byPackage = {
       for (final e in entries!)
         for (final p in e.packages) p: e.paragraphs.toList(),
     };
     expect(byPackage, contains('self_encryption'));
     expect(
-      byPackage['self_encryption']!
-          .any((p) => p.text.contains('GNU GENERAL PUBLIC LICENSE')),
+      byPackage['self_encryption']!.any(
+        (p) => p.text.contains('GNU GENERAL PUBLIC LICENSE'),
+      ),
       isTrue,
     );
     expect(byPackage, contains('W@tch'));
@@ -124,8 +134,9 @@ void main() {
     expect(byPackage, contains('watchit_core Rust crates'));
     expect(byPackage, contains('Anton font'));
     expect(
-      byPackage['Anton font']!
-          .any((p) => p.text.contains('SIL OPEN FONT LICENSE')),
+      byPackage['Anton font']!.any(
+        (p) => p.text.contains('SIL OPEN FONT LICENSE'),
+      ),
       isTrue,
     );
   });
@@ -155,8 +166,9 @@ void main() {
     expect(await LibraryStore.load(), isEmpty);
   });
 
-  testWidgets('About: update toggle persists; available update shows a row',
-      (tester) async {
+  testWidgets('About: update toggle persists; available update shows a row', (
+    tester,
+  ) async {
     UpdateCheck.resetForTesting();
     addTearDown(UpdateCheck.resetForTesting);
     await pumpSettings(tester);
@@ -174,5 +186,29 @@ void main() {
     await tester.pump();
     expect(find.text('Update available'), findsOneWidget);
     expect(find.textContaining('v0.1.0-alpha.99'), findsOneWidget);
+  });
+
+  testWidgets('Software video decoding toggle persists and defaults off', (
+    tester,
+  ) async {
+    expect(await AppSettings.softwareVideoDecode(), false);
+    await pumpSettings(tester);
+    final tile = find.text('Software video decoding');
+    await tester.ensureVisible(tile);
+    await tester.pump();
+    expect(tile, findsOneWidget);
+    // Below Buffer size — the playback pair stays together.
+    expect(
+      tester.getTopLeft(tile).dy,
+      greaterThan(tester.getTopLeft(find.text('Buffer size')).dy),
+    );
+
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+    expect(await AppSettings.softwareVideoDecode(), true);
+
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+    expect(await AppSettings.softwareVideoDecode(), false);
   });
 }

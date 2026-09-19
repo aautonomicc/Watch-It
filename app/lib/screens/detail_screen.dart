@@ -120,8 +120,11 @@ class _DetailScreenState extends State<DetailScreen> {
   /// target album picked (or typed) once, rename previewed, then
   /// applied. The page re-resolves its (renamed) entry afterwards.
   Future<void> _moveToAlbum() async {
-    final input =
-        await pickAlbumTargetFlow(context, count: 1, askTrackNumber: true);
+    final input = await pickAlbumTargetFlow(
+      context,
+      count: 1,
+      askTrackNumber: true,
+    );
     if (input == null || !mounted) return;
     final plan = await planOrganize(
       [entry],
@@ -133,8 +136,9 @@ class _DetailScreenState extends State<DetailScreen> {
     );
     if (plan.error != null) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(plan.error!)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(plan.error!)));
       }
       return;
     }
@@ -335,6 +339,7 @@ class _DetailScreenState extends State<DetailScreen> {
     }
     final meta = MetadataService.instance.metadataFor(entry);
     final bufferSizeMb = await AppSettings.bufferSizeMb();
+    final softwareDecode = await AppSettings.softwareVideoDecode();
     final state = _state;
     final resumeFrom = !fromStart && state != null && state.resumable
         ? Duration(milliseconds: state.positionMs)
@@ -363,6 +368,7 @@ class _DetailScreenState extends State<DetailScreen> {
           },
           sourceFor: _sourceFor,
           bufferSizeMb: bufferSizeMb,
+          softwareDecode: softwareDecode,
         ),
       ),
     );
@@ -523,8 +529,7 @@ class _DetailScreenState extends State<DetailScreen> {
           IconButton(
             tooltip: 'Add to playlist',
             icon: Icon(Icons.playlist_add, color: t.boneDim, size: 22),
-            onPressed: () =>
-                unawaited(addToPlaylistFlow(context, [entry])),
+            onPressed: () => unawaited(addToPlaylistFlow(context, [entry])),
           ),
           // A standalone audio file's first-class way (back) into an
           // album — the same dialog-driven move the track editor
@@ -532,8 +537,11 @@ class _DetailScreenState extends State<DetailScreen> {
           if (!ProfileStore.instance.isKid && isUnsortedAudio(entry))
             IconButton(
               tooltip: 'Move to album',
-              icon: Icon(Icons.drive_file_move_outline,
-                  color: t.boneDim, size: 20),
+              icon: Icon(
+                Icons.drive_file_move_outline,
+                color: t.boneDim,
+                size: 20,
+              ),
               onPressed: () => unawaited(_moveToAlbum()),
             ),
           if (!ProfileStore.instance.isKid)
