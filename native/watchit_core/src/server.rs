@@ -111,6 +111,22 @@ fn protected_router(engine: &'static Engine) -> Router {
             post(move |body: Bytes| mywatch_announce(engine, body)),
         )
         .route(
+            "/mywatch/pair",
+            get(move || mywatch_pair_status(engine)),
+        )
+        .route(
+            "/mywatch/pair/start",
+            post(move |body: Bytes| mywatch_pair_start(engine, body)),
+        )
+        .route(
+            "/mywatch/pair/send",
+            post(move |body: Bytes| mywatch_pair_send(engine, body)),
+        )
+        .route(
+            "/mywatch/pair/cancel",
+            post(move || mywatch_pair_cancel(engine)),
+        )
+        .route(
             "/mywatch/sync",
             get(move || mywatch_sync_get(engine))
                 .post(move |body: Bytes| mywatch_sync_put(engine, body)),
@@ -705,6 +721,41 @@ async fn mywatch_announce(engine: &'static Engine, body: Bytes) -> Response {
 /// `DELETE /mywatch` — unlink this device and wipe its link artefacts.
 async fn mywatch_unlink(engine: &'static Engine) -> Response {
     mywatch_result(engine.mywatch.unlink().await)
+}
+
+/// `POST /mywatch/pair/start` — `{"device_name": …}`: reverse-QR
+/// pairing, unlinked side. Mints the `wtchp1-` code the device shows as
+/// a QR and starts listening on the rendezvous topic; a linked device
+/// scans the code and sends the link secret over.
+async fn mywatch_pair_start(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    let name = v["device_name"].as_str().unwrap_or("");
+    mywatch_result(engine.mywatch.pair_start(name).await)
+}
+
+/// `POST /mywatch/pair/send` — `{"code": …}`: reverse-QR pairing,
+/// linked side. Seals the link secret to the scanned code's key and
+/// republishes it on the rendezvous topic until the new device acks.
+async fn mywatch_pair_send(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    let code = v["code"].as_str().unwrap_or("");
+    mywatch_result(engine.mywatch.pair_send(code).await)
+}
+
+/// `GET /mywatch/pair` — the pairing attempt in flight (either side):
+/// role, code, state (waiting/linking/sending/delivered/failed) and the
+/// failure message, for the UI's poll.
+async fn mywatch_pair_status(engine: &'static Engine) -> Response {
+    json_ok(engine.mywatch.pair_status().await)
+}
+
+/// `POST /mywatch/pair/cancel` — abandon (or sweep) the pairing attempt.
+async fn mywatch_pair_cancel(engine: &'static Engine) -> Response {
+    mywatch_result(engine.mywatch.pair_cancel().await)
 }
 
 /// `POST /mywatch/enabled` — `{"enabled": bool}`: the Settings switch.
@@ -2023,6 +2074,9 @@ mod channel_api_tests {
             ("POST", "/channel/subscribe"),
             ("POST", "/channel/enabled"),
             ("POST", "/mywatch/enabled"),
+            ("POST", "/mywatch/pair/start"),
+            ("POST", "/mywatch/pair/send"),
+            ("GET", "/mywatch/pair"),
             ("GET", &format!("/channel/manifest/{}", "11".repeat(32))[..]),
         ] {
             let (status, _) = send(&app, method, uri, vec![], None).await;

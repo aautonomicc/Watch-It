@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../widgets/wi_qr.dart';
 import '../widgets/device_name_dialog.dart';
 import '../widgets/join_link_dialog.dart';
+import '../widgets/pair_dialogs.dart';
 import '../services/tv_settings.dart';
 
 import '../services/library_store.dart';
@@ -131,6 +132,62 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
     });
   }
 
+  /// Camera platforms only — TVs and desktops have no camera, so a
+  /// scan button would be dead weight there.
+  bool get _canScan =>
+      (Platform.isAndroid || Platform.isIOS) && !TvSettings.instance.enabled;
+
+  /// Reverse-QR pairing, unlinked side: show a pairing code for a
+  /// linked phone to scan — the path for devices with a screen but no
+  /// camera (TVs, desktops). Joins the EXISTING link on success.
+  Future<void> _pairStart() async {
+    final name = await _askDeviceName('Name this device');
+    if (name == null) return;
+    await _runBusy(() async {
+      final code = await _api.pairStart(name);
+      if (!mounted) return;
+      final linked = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => PairCodeDialog(api: _api, code: code),
+      );
+      if (linked == true && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content:
+                Text('Linked! Syncing with your other devices starts now.')));
+      }
+    });
+  }
+
+  /// Reverse-QR pairing, linked side: scan the code a new device is
+  /// showing and send it the link.
+  Future<void> _pairSend() async {
+    final code = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => QrScanScreen(
+          title: 'Scan pairing code',
+          hint: 'Point the camera at the pairing code shown on the '
+              'new device (My W@tch → "Pair by showing a code")',
+          accept: (v) => v.trim().toLowerCase().startsWith('wtchp1-'),
+        ),
+      ),
+    );
+    if (code == null) return;
+    await _runBusy(() async {
+      await _api.pairSend(code.trim().toLowerCase());
+      if (!mounted) return;
+      final delivered = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => PairSendDialog(api: _api),
+      );
+      if (delivered == true && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Link sent — the new device is joining now.')));
+      }
+    });
+  }
+
   Future<void> _syncNow() async {
     await _runBusy(() async {
       final summary = await MyWatchSync.instance.syncNow();
@@ -185,10 +242,8 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
   }
 
   Future<(String, String)?> _askJoinDetails() async {
-    // Phones scan the desktop's QR instead of typing 70 chars; TVs have
-    // no camera, so the scan button would be dead weight there.
-    final canScan =
-        (Platform.isAndroid || Platform.isIOS) && !TvSettings.instance.enabled;
+    // Phones scan the desktop's QR instead of typing 70 chars.
+    final canScan = _canScan;
     return showDialog<(String, String)>(
       context: context,
       builder: (_) => JoinLinkDialog(
@@ -337,6 +392,18 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
         label: const Text('Join with invite code'),
         onPressed: _busy ? null : _joinLink,
       ),
+      const SizedBox(height: 12),
+      OutlinedButton.icon(
+        icon: const Icon(Icons.qr_code_2),
+        label: const Text('Pair by showing a code'),
+        onPressed: _busy ? null : _pairStart,
+      ),
+      const SizedBox(height: 6),
+      Text(
+        'No camera on this device? Show a pairing code here and scan '
+        'it with a phone that is already linked — no typing needed.',
+        style: TextStyle(fontSize: 12, color: t.ash),
+      ),
     ];
   }
 
@@ -462,6 +529,17 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
         label: const Text('Show invite (add a device)'),
         onPressed: _busy ? null : _showExistingInvite,
       ),
+      // Reverse-QR pairing: the new device shows a code, this device's
+      // camera scans it — for adding TVs/desktops, which cannot scan
+      // the invite themselves.
+      if (_canScan) ...[
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          icon: const Icon(Icons.qr_code_scanner),
+          label: const Text('Link a new device (scan its code)'),
+          onPressed: _busy || starting ? null : _pairSend,
+        ),
+      ],
       const SizedBox(height: 12),
       OutlinedButton.icon(
         style: OutlinedButton.styleFrom(foregroundColor: t.rust),

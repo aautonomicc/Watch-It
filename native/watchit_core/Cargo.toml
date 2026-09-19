@@ -45,6 +45,14 @@ rmp-serde = "1"
 base64 = "0.22"
 # artwork transfer integrity (already in the x0x tree, so free)
 sha2 = "0.10"
+# Reverse-QR pairing (My W@tch): the unlinked device shows an ephemeral
+# x25519 public key as a QR; a linked device seals the 32-byte link
+# secret to it and publishes the box on a short-lived gossip topic.
+# Both crates are already in the dependency tree (x0x pulls them), so
+# these direct deps add no new code to the build. static_secrets: the
+# receiver must reuse its ephemeral key across every candidate message.
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+chacha20poly1305 = "0.10"
 # Channel identity (all three already in the dependency tree, so these
 # direct deps add no new code to the build): Ed25519 channel keys +
 # head-record signatures, SLIP-0010 derivation from the BIP-39 seed,

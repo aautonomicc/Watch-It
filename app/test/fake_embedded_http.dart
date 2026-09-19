@@ -48,6 +48,18 @@ class FakeEmbeddedHttp extends HttpOverrides {
   /// Raw bodies of every `POST /mywatch/announce`.
   final List<String> myWatchAnnounces = [];
 
+  /// Code `POST /mywatch/pair/start` hands out (reverse-QR pairing).
+  String myWatchPairCode = 'wtchp1-${'ef' * 48}';
+
+  /// State `GET /mywatch/pair` plays back; pair/start, pair/send and
+  /// pair/cancel mutate it the way the Rust core would. Tests override
+  /// it to drive the pairing dialogs through their lifecycles.
+  Map<String, dynamic> myWatchPairStatus = {'active': false};
+
+  /// Raw bodies of every `POST /mywatch/pair/start` and `…/pair/send`,
+  /// plus a marker line for every `…/pair/cancel`.
+  final List<String> myWatchPairPosts = [];
+
   /// Raw bodies of every `POST /mywatch/enabled` (the Settings switch).
   final List<String> myWatchEnabledPosts = [];
 
@@ -544,6 +556,51 @@ class FakeEmbeddedHttp extends HttpOverrides {
     if (method == 'POST' && path == '/mywatch/announce') {
       myWatchAnnounces.add(utf8.decode(body));
       return (200, utf8.encode(jsonEncode({'announced': true})));
+    }
+    if (method == 'POST' && path == '/mywatch/pair/start') {
+      myWatchPairPosts.add(utf8.decode(body));
+      final json = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
+      if ((json['device_name'] as String? ?? '').trim().isEmpty) {
+        return (400, utf8.encode('device name is required'));
+      }
+      if (myWatchStatus['linked'] == true) {
+        return (400, utf8.encode('this device is already linked — unlink first'));
+      }
+      myWatchPairStatus = {
+        'active': true,
+        'role': 'receive',
+        'code': myWatchPairCode,
+        'state': 'waiting',
+        'message': null,
+      };
+      return (200, utf8.encode(jsonEncode({'code': myWatchPairCode})));
+    }
+    if (method == 'POST' && path == '/mywatch/pair/send') {
+      myWatchPairPosts.add(utf8.decode(body));
+      final json = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
+      final code = (json['code'] as String? ?? '').trim().toLowerCase();
+      if (!code.startsWith('wtchp1-')) {
+        return (400, utf8.encode('not a My W@tch pairing code'));
+      }
+      if (myWatchStatus['linked'] != true) {
+        return (400, utf8.encode('this device is not linked'));
+      }
+      myWatchPairStatus = {
+        'active': true,
+        'role': 'send',
+        'code': code,
+        'state': 'sending',
+        'message': null,
+      };
+      return (200, utf8.encode(jsonEncode({'sending': true})));
+    }
+    if (method == 'GET' && path == '/mywatch/pair') {
+      return (200, utf8.encode(jsonEncode(myWatchPairStatus)));
+    }
+    if (method == 'POST' && path == '/mywatch/pair/cancel') {
+      myWatchPairPosts.add('cancel');
+      myWatchPairStatus = {'active': false};
+      return (200, utf8.encode(jsonEncode({'cancelled': true})));
     }
     if (method == 'DELETE' && path == '/mywatch') {
       myWatchStatus = {

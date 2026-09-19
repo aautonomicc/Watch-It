@@ -27,6 +27,12 @@
 /// Invite string prefix; version-bumped if the format ever changes.
 pub const INVITE_PREFIX: &str = "wtch1-";
 
+/// Pairing-code prefix (reverse-QR pairing: the UNLINKED device shows
+/// this code — an ephemeral x25519 public key + rendezvous nonce — and
+/// a linked device with a camera scans it and sends the link secret
+/// over, sealed to that key). Version-bumped if the format changes.
+pub const PAIR_PREFIX: &str = "wtchp1-";
+
 /// Everything the routes call, real on desktop, stub elsewhere.
 pub use imp::MyWatchStore;
 
@@ -45,7 +51,7 @@ mod imp {
     use serde_json::{json, Value};
     use tokio::sync::Mutex;
 
-    use super::INVITE_PREFIX;
+    use super::{INVITE_PREFIX, PAIR_PREFIX};
 
     /// Seconds between own-record heartbeats while linked (also bounds
     /// how stale another device's "last heard" can look while online).
@@ -83,6 +89,20 @@ mod imp {
     const ART_CHUNK_TIMEOUT: Duration = Duration::from_secs(10);
     /// Requests per chunk before the fetch gives up.
     const ART_CHUNK_RETRIES: u32 = 3;
+    /// How long a displayed pairing code stays valid on the receiving
+    /// (unlinked) device before it fails "expired". Generous: gossip
+    /// convergence on a fresh topic runs ~a minute, and the user still
+    /// has to walk over and scan.
+    const PAIR_CODE_TTL: Duration = Duration::from_secs(10 * 60);
+    /// How long the linked (sending) device keeps republishing the
+    /// sealed secret while waiting for the receiver's ack. Live runs
+    /// have seen fresh-topic convergence take 3+ minutes, and giving
+    /// up early shows a false failure while the receiver still links.
+    const PAIR_SEND_WINDOW: Duration = Duration::from_secs(300);
+    /// Seconds between sealed-secret republishes (gossip on a fresh
+    /// topic drops early messages until the mesh converges — repeating
+    /// is what makes the rendezvous reliable).
+    const PAIR_RESEND_SECS: u64 = 5;
 
     fn now_ms() -> u64 {
         SystemTime::now()
@@ -127,6 +147,45 @@ mod imp {
         /// Link config exists; agent/network still coming up (retrying).
         Starting,
         Ready(Running),
+    }
+
+    /// Where a reverse-QR pairing attempt stands. `Failed` is terminal
+    /// but kept in the session so the UI can read the reason; any new
+    /// pair_* call (or an explicit cancel) sweeps it.
+    #[derive(Clone)]
+    enum PairState {
+        /// Receiving side: code on screen, listening for the secret.
+        Waiting,
+        /// Receiving side: secret arrived, link is being set up.
+        Linking,
+        /// Sending side: republishing the sealed secret, awaiting ack.
+        Sending,
+        /// Sending side: the receiver acknowledged the secret.
+        Delivered,
+        Failed(String),
+    }
+
+    impl PairState {
+        fn name(&self) -> &'static str {
+            match self {
+                PairState::Waiting => "waiting",
+                PairState::Linking => "linking",
+                PairState::Sending => "sending",
+                PairState::Delivered => "delivered",
+                PairState::Failed(_) => "failed",
+            }
+        }
+    }
+
+    /// One live (or just-finished) pairing attempt, either side.
+    struct PairingSession {
+        /// "receive" (unlinked device showing the code) or "send"
+        /// (linked device that scanned it).
+        role: &'static str,
+        /// The `wtchp1-…` code involved (receive: the one on screen).
+        code: String,
+        state: Arc<std::sync::Mutex<PairState>>,
+        cancel: tokio_util::sync::CancellationToken,
     }
 
     /// State the background task shares with the store (spawned futures
@@ -180,6 +239,12 @@ mod imp {
         /// One artwork fetch at a time — posters are small and the app
         /// requests them sequentially anyway.
         art_fetch: Mutex<()>,
+        /// The reverse-QR pairing attempt in flight (either side).
+        pairing: Mutex<Option<PairingSession>>,
+        /// Throwaway identity dir for the receive-side pairing agent —
+        /// deliberately OUTSIDE the mywatch dir so it can never collide
+        /// with the main agent's keys, and wiped after every attempt.
+        pair_dir: Option<PathBuf>,
     }
 
     impl MyWatchStore {
@@ -196,11 +261,13 @@ mod imp {
                     art_index: std::sync::Mutex::new(Default::default()),
                     map_rot: AtomicU64::new(0),
                 }),
+                pair_dir: data_dir.map(|d| Path::new(d).join("mywatch-pair")),
                 dir,
                 off_path,
                 phase: Mutex::new(Phase::Off),
                 message: std::sync::Mutex::new(None),
                 art_fetch: Mutex::new(()),
+                pairing: Mutex::new(None),
             };
             let persisted = store.load_state();
             store
@@ -347,6 +414,7 @@ mod imp {
         /// other devices join with.
         pub async fn create_link(&'static self, device_name: &str) -> Result<Value, String> {
             self.ensure_unlinked().await?;
+            self.cancel_pairing().await;
             let mut secret = [0u8; 32];
             use rand::RngCore;
             rand::thread_rng().fill_bytes(&mut secret);
@@ -371,6 +439,7 @@ mod imp {
             invite: &str,
         ) -> Result<Value, String> {
             self.ensure_unlinked().await?;
+            self.cancel_pairing().await;
             let secret_hex = parse_invite(invite)?;
             let cfg = LinkConfig {
                 device_name: clean_name(device_name)?,
@@ -388,6 +457,250 @@ mod imp {
         pub async fn invite(&self) -> Result<Value, String> {
             let cfg = self.load_config().ok_or("this device is not linked")?;
             Ok(json!({ "invite": format!("{INVITE_PREFIX}{}", cfg.secret_hex) }))
+        }
+
+        // ---- reverse-QR pairing -----------------------------------------
+        //
+        // The forward invite QR needs a camera on the JOINING device —
+        // useless for TVs and desktops. Reverse pairing flips the roles:
+        // the unlinked device (which has a screen) shows a `wtchp1-`
+        // code carrying an ephemeral x25519 public key + a rendezvous
+        // nonce, and an already-linked device with a camera scans it,
+        // seals the existing 32-byte link secret to that key, and
+        // publishes the box on a gossip topic derived from the nonce.
+        // The unlinked device has been subscribed since it showed the
+        // code; it decrypts, acks, and joins the EXISTING link — no new
+        // group, no re-joining of other devices. Trust model matches
+        // the forward QR: whoever can physically see the screen decides
+        // who joins; nothing on the wire reveals the secret.
+
+        /// Unlinked side: mint a pairing code, bring a throwaway agent
+        /// up on the rendezvous topic, and wait for a linked device to
+        /// send the secret over. Idempotent while an attempt is waiting
+        /// (reopening the dialog keeps the same code).
+        pub async fn pair_start(&'static self, device_name: &str) -> Result<Value, String> {
+            self.ensure_unlinked().await?;
+            let device_name = clean_name(device_name)?;
+            {
+                let pairing = self.pairing.lock().await;
+                if let Some(s) = &*pairing {
+                    let live = matches!(
+                        *s.state.lock().unwrap(),
+                        PairState::Waiting | PairState::Linking
+                    );
+                    if s.role == "receive" && live {
+                        return Ok(json!({ "code": s.code.clone() }));
+                    }
+                }
+            }
+            self.cancel_pairing().await;
+            let esk = x25519_dalek::StaticSecret::random_from_rng(rand::thread_rng());
+            let pk = x25519_dalek::PublicKey::from(&esk);
+            let mut nonce = [0u8; 16];
+            use rand::RngCore;
+            rand::thread_rng().fill_bytes(&mut nonce);
+            let code = pair_code(pk.as_bytes(), &nonce);
+            let state = Arc::new(std::sync::Mutex::new(PairState::Waiting));
+            let cancel = tokio_util::sync::CancellationToken::new();
+            *self.pairing.lock().await = Some(PairingSession {
+                role: "receive",
+                code: code.clone(),
+                state: Arc::clone(&state),
+                cancel: cancel.clone(),
+            });
+            tokio::spawn(self.pair_receive_task(
+                device_name,
+                esk,
+                hex::encode(nonce),
+                state,
+                cancel,
+            ));
+            Ok(json!({ "code": code }))
+        }
+
+        /// Linked side: scanned a new device's pairing code — seal the
+        /// link secret to its key and start republishing on the
+        /// rendezvous topic until the receiver acks (or the window
+        /// closes). Returns immediately; progress via [`Self::pair_status`].
+        pub async fn pair_send(&'static self, code: &str) -> Result<Value, String> {
+            let (rpk, nonce) = parse_pair_code(code)?;
+            let cfg = self
+                .load_config()
+                .ok_or("this device is not linked — only a linked device can send the link over")?;
+            let agent = {
+                let phase = self.phase.lock().await;
+                match &*phase {
+                    Phase::Ready(r) => Arc::clone(&r.agent),
+                    _ => {
+                        return Err("this device's My W@tch connection is still \
+                                    starting — try again in a moment"
+                            .into())
+                    }
+                }
+            };
+            self.cancel_pairing().await;
+            let (payload, ct_hash) = seal_secret(&cfg.secret_hex, &rpk)?;
+            let state = Arc::new(std::sync::Mutex::new(PairState::Sending));
+            let cancel = tokio_util::sync::CancellationToken::new();
+            *self.pairing.lock().await = Some(PairingSession {
+                role: "send",
+                code: code.trim().to_lowercase(),
+                state: Arc::clone(&state),
+                cancel: cancel.clone(),
+            });
+            tokio::spawn(pair_send_task(
+                agent,
+                pair_topic(&hex::encode(nonce)),
+                payload,
+                ct_hash,
+                state,
+                cancel,
+            ));
+            Ok(json!({ "sending": true }))
+        }
+
+        /// The pairing attempt in flight (either side), for the UI's
+        /// poll: role, code, and where it stands.
+        pub async fn pair_status(&self) -> Value {
+            let pairing = self.pairing.lock().await;
+            match &*pairing {
+                None => json!({ "active": false }),
+                Some(s) => {
+                    let state = s.state.lock().unwrap().clone();
+                    json!({
+                        "active": true,
+                        "role": s.role,
+                        "code": s.code,
+                        "state": state.name(),
+                        "message": match state {
+                            PairState::Failed(m) => Value::String(m),
+                            _ => Value::Null,
+                        },
+                    })
+                }
+            }
+        }
+
+        /// Abandon the pairing attempt (either side). Also how the UI
+        /// sweeps a finished (delivered/failed) session.
+        pub async fn pair_cancel(&self) -> Result<Value, String> {
+            self.cancel_pairing().await;
+            Ok(json!({ "cancelled": true }))
+        }
+
+        /// Take the session out and cancel its task. The receive task
+        /// shuts its own throwaway agent down on cancellation.
+        async fn cancel_pairing(&self) {
+            let taken = self.pairing.lock().await.take();
+            if let Some(s) = taken {
+                s.cancel.cancel();
+            }
+        }
+
+        /// The receive half: throwaway agent on the rendezvous topic →
+        /// first message that opens under our ephemeral key wins → ack →
+        /// join the link with the received secret.
+        async fn pair_receive_task(
+            &'static self,
+            device_name: String,
+            esk: x25519_dalek::StaticSecret,
+            nonce_hex: String,
+            state: Arc<std::sync::Mutex<PairState>>,
+            cancel: tokio_util::sync::CancellationToken,
+        ) {
+            let fail = |msg: String| {
+                tracing::warn!("mywatch pairing (receive) failed: {msg}");
+                *state.lock().unwrap() = PairState::Failed(msg);
+            };
+            let Some(dir) = self.pair_dir.clone() else {
+                fail("no data dir available for My W@tch".into());
+                return;
+            };
+            let _ = std::fs::remove_dir_all(&dir);
+            let agent = match build_pair_agent(&dir).await {
+                Ok(a) => a,
+                Err(e) => {
+                    fail(e);
+                    let _ = std::fs::remove_dir_all(&dir);
+                    return;
+                }
+            };
+            let secret_hex = {
+                let mut sub = match agent.subscribe(&pair_topic(&nonce_hex)).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        fail(format!("pairing subscribe failed: {e}"));
+                        crate::x0x_tune::shutdown_agent(&agent, "mywatch-pair").await;
+                        let _ = std::fs::remove_dir_all(&dir);
+                        return;
+                    }
+                };
+                let our_pk = x25519_dalek::PublicKey::from(&esk);
+                let deadline = tokio::time::Instant::now() + PAIR_CODE_TTL;
+                let received = loop {
+                    let msg = tokio::select! {
+                        _ = cancel.cancelled() => break None,
+                        _ = tokio::time::sleep_until(deadline) => {
+                            fail("the pairing code expired — show a fresh one".into());
+                            break None;
+                        }
+                        m = sub.recv() => match m {
+                            Some(m) => m,
+                            None => {
+                                fail("the pairing connection closed unexpectedly".into());
+                                break None;
+                            }
+                        },
+                    };
+                    // Anything on this public-by-construction topic is
+                    // stranger input; only a box sealed to OUR ephemeral
+                    // key opens.
+                    if let Some((secret, ct_hash)) =
+                        open_secret(&esk, our_pk.as_bytes(), &msg.payload)
+                    {
+                        *state.lock().unwrap() = PairState::Linking;
+                        // Ack a few times, best effort — repetition is
+                        // the delivery strategy on a gossip topic.
+                        let ack = json!({ "wtch": "pair_ack", "v": 1, "ct_hash": ct_hash })
+                            .to_string()
+                            .into_bytes();
+                        for i in 0..5 {
+                            if i > 0 {
+                                tokio::time::sleep(Duration::from_secs(2)).await;
+                            }
+                            let _ = agent
+                                .publish(&pair_topic(&nonce_hex), ack.clone())
+                                .await;
+                        }
+                        break Some(secret);
+                    }
+                };
+                crate::x0x_tune::shutdown_agent(&agent, "mywatch-pair").await;
+                let _ = std::fs::remove_dir_all(&dir);
+                match received {
+                    Some(s) => s,
+                    None => return,
+                }
+            };
+            if self.load_config().is_some() {
+                // Linked some other way while the code was up — the
+                // arriving secret loses; drop the session quietly.
+                *self.pairing.lock().await = None;
+                return;
+            }
+            let cfg = LinkConfig {
+                device_name,
+                secret_hex,
+                created_at_ms: now_ms(),
+            };
+            if let Err(e) = self.save_config(&cfg) {
+                fail(e);
+                return;
+            }
+            let _ = self.set_enabled_flag(true);
+            *self.pairing.lock().await = None;
+            tracing::info!("mywatch pairing: secret received, joining the link");
+            tokio::spawn(self.start_with_config(cfg));
         }
 
         /// Update this device's library summary and republish its record.
@@ -757,6 +1070,9 @@ mod imp {
         /// devices keep the link; this device's stale record ages out on
         /// their screens.
         pub async fn unlink(&self) -> Result<Value, String> {
+            // A pairing attempt in flight (a send session, typically)
+            // makes no sense once the link goes.
+            self.cancel_pairing().await;
             // Same rule as set_enabled: take the agent out under the
             // lock, shut it down after — a hung shutdown must not wedge
             // the status routes on this mutex.
@@ -1172,6 +1488,201 @@ mod imp {
         Ok(())
     }
 
+    // ---- reverse-QR pairing plumbing ------------------------------------
+
+    /// `wtchp1-<hex pk 32B><hex nonce 16B>` — what the unlinked device
+    /// renders as a QR.
+    fn pair_code(pk: &[u8; 32], nonce: &[u8; 16]) -> String {
+        format!("{PAIR_PREFIX}{}{}", hex::encode(pk), hex::encode(nonce))
+    }
+
+    /// Parse a scanned/typed pairing code (case never carries meaning).
+    fn parse_pair_code(code: &str) -> Result<([u8; 32], [u8; 16]), String> {
+        let lower = code.trim().to_lowercase();
+        let hex_part = lower
+            .strip_prefix(PAIR_PREFIX)
+            .ok_or("not a My W@tch pairing code")?;
+        let mut raw = [0u8; 48];
+        if hex_part.len() != 96 || hex::decode_to_slice(hex_part, &mut raw).is_err() {
+            return Err("pairing code is damaged (wrong length or characters)".into());
+        }
+        let mut pk = [0u8; 32];
+        let mut nonce = [0u8; 16];
+        pk.copy_from_slice(&raw[..32]);
+        nonce.copy_from_slice(&raw[32..]);
+        Ok((pk, nonce))
+    }
+
+    /// Rendezvous topic for one pairing attempt. Derived from the nonce
+    /// alone (never the key), domain-separated from every other topic.
+    fn pair_topic(nonce_hex: &str) -> String {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"watchit mywatch v1 pair topic");
+        hasher.update(nonce_hex.as_bytes());
+        format!("wtch-mywatch-pair-{}", hasher.finalize().to_hex())
+    }
+
+    /// Symmetric key for one sealed secret: DH shared point + both
+    /// public keys under a domain tag. Fresh sender key per seal, so a
+    /// fixed zero AEAD nonce is safe by construction.
+    fn pair_key(dh: &[u8; 32], receiver_pk: &[u8; 32], sender_pk: &[u8; 32]) -> [u8; 32] {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"watchit mywatch v1 pair key");
+        hasher.update(dh);
+        hasher.update(receiver_pk);
+        hasher.update(sender_pk);
+        *hasher.finalize().as_bytes()
+    }
+
+    /// Seal the 32-byte link secret to the receiver's ephemeral public
+    /// key. Returns the topic payload and the ciphertext hash the
+    /// receiver echoes back as its ack.
+    fn seal_secret(
+        secret_hex: &str,
+        receiver_pk: &[u8; 32],
+    ) -> Result<(Vec<u8>, String), String> {
+        use chacha20poly1305::aead::{Aead, KeyInit};
+        let secret =
+            hex::decode(secret_hex).map_err(|_| "link secret is damaged".to_string())?;
+        let esk = x25519_dalek::StaticSecret::random_from_rng(rand::thread_rng());
+        let epk = x25519_dalek::PublicKey::from(&esk);
+        let dh = esk.diffie_hellman(&x25519_dalek::PublicKey::from(*receiver_pk));
+        let key = pair_key(dh.as_bytes(), receiver_pk, epk.as_bytes());
+        let cipher = chacha20poly1305::ChaCha20Poly1305::new((&key).into());
+        let ct = cipher
+            .encrypt((&[0u8; 12]).into(), secret.as_slice())
+            .map_err(|_| "sealing the link secret failed".to_string())?;
+        let ct_hash = blake3::hash(&ct).to_hex().to_string();
+        let payload = json!({
+            "wtch": "pair_secret",
+            "v": 1,
+            "epk": hex::encode(epk.as_bytes()),
+            "ct": hex::encode(&ct),
+        })
+        .to_string()
+        .into_bytes();
+        Ok((payload, ct_hash))
+    }
+
+    /// Try to open one rendezvous-topic message as a secret sealed to
+    /// our ephemeral key. None for anything else — foreign messages,
+    /// damage, tampering, or a box for a different key.
+    fn open_secret(
+        esk: &x25519_dalek::StaticSecret,
+        our_pk: &[u8; 32],
+        payload: &[u8],
+    ) -> Option<(String, String)> {
+        use chacha20poly1305::aead::{Aead, KeyInit};
+        let v: Value = serde_json::from_slice(payload).ok()?;
+        if v["wtch"].as_str() != Some("pair_secret") {
+            return None;
+        }
+        let mut epk = [0u8; 32];
+        hex::decode_to_slice(v["epk"].as_str()?, &mut epk).ok()?;
+        let ct = hex::decode(v["ct"].as_str()?).ok()?;
+        let dh = esk.diffie_hellman(&x25519_dalek::PublicKey::from(epk));
+        let key = pair_key(dh.as_bytes(), our_pk, &epk);
+        let cipher = chacha20poly1305::ChaCha20Poly1305::new((&key).into());
+        let secret = cipher.decrypt((&[0u8; 12]).into(), ct.as_slice()).ok()?;
+        if secret.len() != 32 {
+            return None;
+        }
+        Some((hex::encode(secret), blake3::hash(&ct).to_hex().to_string()))
+    }
+
+    fn is_pair_ack(payload: &[u8], ct_hash: &str) -> bool {
+        serde_json::from_slice::<Value>(payload).is_ok_and(|v| {
+            v["wtch"].as_str() == Some("pair_ack")
+                && v["ct_hash"].as_str() == Some(ct_hash)
+        })
+    }
+
+    /// A minimal agent for the receive side of pairing: own throwaway
+    /// identity dir (wiped afterwards), no KV store — it exists only to
+    /// sit on the rendezvous topic.
+    async fn build_pair_agent(dir: &Path) -> Result<Arc<x0x::Agent>, String> {
+        let _ = std::fs::create_dir_all(dir);
+        let agent = x0x::Agent::builder()
+            .with_machine_key(dir.join("machine.key"))
+            .with_agent_key_path(dir.join("agent.key"))
+            .with_identity_dir(dir)
+            .with_peer_cache_dir(dir.join("peers"))
+            .with_network_config(x0x::network::NetworkConfig::default())
+            .build()
+            .await
+            .map_err(|e| format!("pairing agent build failed: {e}"))?;
+        agent
+            .join_network()
+            .await
+            .map_err(|e| format!("pairing network join failed: {e}"))?;
+        crate::x0x_tune::quiet_agent(&agent, "mywatch-pair").await;
+        let agent = Arc::new(agent);
+        crate::datausage::spawn_x0x_sampler(
+            crate::datausage::Component::MyWatch,
+            Arc::downgrade(&agent),
+        );
+        Ok(agent)
+    }
+
+    /// The send half: republish the sealed secret on the rendezvous
+    /// topic every few seconds until the receiver's ack (or the window
+    /// closes). Runs on the main linked agent — subscribing joins the
+    /// topic mesh, which is also what carries the ack back.
+    async fn pair_send_task(
+        agent: Arc<x0x::Agent>,
+        topic: String,
+        payload: Vec<u8>,
+        ct_hash: String,
+        state: Arc<std::sync::Mutex<PairState>>,
+        cancel: tokio_util::sync::CancellationToken,
+    ) {
+        let fail = |msg: &str| {
+            tracing::warn!("mywatch pairing (send) failed: {msg}");
+            *state.lock().unwrap() = PairState::Failed(msg.into());
+        };
+        let mut sub = match agent.subscribe(&topic).await {
+            Ok(s) => s,
+            Err(e) => {
+                fail(&format!("pairing subscribe failed: {e}"));
+                return;
+            }
+        };
+        let deadline = tokio::time::Instant::now() + PAIR_SEND_WINDOW;
+        loop {
+            if tokio::time::Instant::now() >= deadline {
+                fail(
+                    "no confirmation from the new device — it may still have \
+                     linked (check its screen), or show a fresh code there \
+                     and scan again",
+                );
+                return;
+            }
+            if let Err(e) = agent.publish(&topic, payload.clone()).await {
+                tracing::debug!("mywatch pairing publish failed (will retry): {e}");
+            }
+            let wait = tokio::time::sleep(Duration::from_secs(PAIR_RESEND_SECS));
+            tokio::pin!(wait);
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => return,
+                    _ = &mut wait => break,
+                    m = sub.recv() => match m {
+                        Some(m) if is_pair_ack(&m.payload, &ct_hash) => {
+                            tracing::info!("mywatch pairing: receiver acknowledged");
+                            *state.lock().unwrap() = PairState::Delivered;
+                            return;
+                        }
+                        Some(_) => {}
+                        None => {
+                            fail("the pairing connection closed unexpectedly");
+                            return;
+                        }
+                    },
+                }
+            }
+        }
+    }
+
     /// Gossip topic for a link. Derived, so the raw invite secret never
     /// appears in topic-shaped places on the wire, and a future encrypted
     /// payload could key itself from the same secret independently.
@@ -1209,6 +1720,90 @@ mod imp {
             // Damage still refused.
             assert!(parse_invite("wtch1-abcd").is_err());
             assert!(parse_invite(&format!("wchn1-{secret}")).is_err());
+        }
+
+        #[test]
+        fn pair_code_round_trips_any_casing() {
+            let pk = [0xAB_u8; 32];
+            let nonce = [0x5C_u8; 16];
+            let code = pair_code(&pk, &nonce);
+            assert!(code.starts_with(PAIR_PREFIX));
+            assert_eq!(parse_pair_code(&code).unwrap(), (pk, nonce));
+            // Remote keyboards / QR generators capitalize freely.
+            let shouty = format!(" {} ", code.to_uppercase());
+            assert_eq!(parse_pair_code(&shouty).unwrap(), (pk, nonce));
+            // Damage and foreign prefixes refused.
+            assert!(parse_pair_code("wtchp1-abcd").is_err());
+            assert!(parse_pair_code(&code[..code.len() - 2]).is_err());
+            assert!(parse_pair_code(&code.replace(PAIR_PREFIX, "wtch1-")).is_err());
+        }
+
+        #[test]
+        fn pair_topic_is_stable_and_domain_separated() {
+            let nonce_hex = "5c".repeat(16);
+            let topic = pair_topic(&nonce_hex);
+            assert_eq!(topic, pair_topic(&nonce_hex));
+            assert!(topic.starts_with("wtch-mywatch-pair-"));
+            assert_ne!(topic, pair_topic(&"11".repeat(16)));
+            // A link secret used as a nonce must not land on the link's
+            // own store topic (different domain tags).
+            let secret = "ab".repeat(32);
+            assert_ne!(pair_topic(&secret), topic_for(&secret));
+        }
+
+        #[test]
+        fn sealed_secret_opens_only_under_the_right_key() {
+            let esk = x25519_dalek::StaticSecret::random_from_rng(rand::thread_rng());
+            let pk = x25519_dalek::PublicKey::from(&esk);
+            let secret_hex = "ab".repeat(32);
+            let (payload, ct_hash) = seal_secret(&secret_hex, pk.as_bytes()).unwrap();
+            let (opened, echoed) =
+                open_secret(&esk, pk.as_bytes(), &payload).unwrap();
+            assert_eq!(opened, secret_hex);
+            assert_eq!(echoed, ct_hash);
+            // The ack echoes exactly that hash.
+            let ack = serde_json::json!({ "wtch": "pair_ack", "v": 1, "ct_hash": ct_hash })
+                .to_string()
+                .into_bytes();
+            assert!(is_pair_ack(&ack, &echoed));
+            assert!(!is_pair_ack(&ack, &"00".repeat(32)));
+            assert!(!is_pair_ack(&payload, &echoed));
+            // A different receiver key opens nothing.
+            let other = x25519_dalek::StaticSecret::random_from_rng(rand::thread_rng());
+            let other_pk = x25519_dalek::PublicKey::from(&other);
+            assert!(open_secret(&other, other_pk.as_bytes(), &payload).is_none());
+            // Tampered ciphertext refused.
+            let mut v: Value = serde_json::from_slice(&payload).unwrap();
+            let ct = v["ct"].as_str().unwrap().to_string();
+            let flipped = if ct.starts_with('0') { "1" } else { "0" };
+            v["ct"] = Value::String(format!("{flipped}{}", &ct[1..]));
+            assert!(open_secret(&esk, pk.as_bytes(), v.to_string().as_bytes()).is_none());
+            // Non-pairing chatter on the topic ignored.
+            assert!(open_secret(&esk, pk.as_bytes(), b"{\"wtch\":\"other\"}").is_none());
+            assert!(open_secret(&esk, pk.as_bytes(), b"not json").is_none());
+        }
+
+        #[tokio::test]
+        async fn pair_status_reports_the_session_lifecycle() {
+            let (store, _dir) = test_store("pairstatus");
+            let v = store.pair_status().await;
+            assert_eq!(v["active"], serde_json::json!(false));
+            *store.pairing.lock().await = Some(PairingSession {
+                role: "send",
+                code: "wtchp1-00".into(),
+                state: Arc::new(std::sync::Mutex::new(PairState::Failed(
+                    "boom".into(),
+                ))),
+                cancel: tokio_util::sync::CancellationToken::new(),
+            });
+            let v = store.pair_status().await;
+            assert_eq!(v["active"], serde_json::json!(true));
+            assert_eq!(v["role"], serde_json::json!("send"));
+            assert_eq!(v["state"], serde_json::json!("failed"));
+            assert_eq!(v["message"], serde_json::json!("boom"));
+            store.pair_cancel().await.unwrap();
+            let v = store.pair_status().await;
+            assert_eq!(v["active"], serde_json::json!(false));
         }
 
         #[test]
@@ -1326,6 +1921,18 @@ mod imp {
             Err(UNSUPPORTED.into())
         }
         pub async fn invite(&self) -> Result<Value, String> {
+            Err(UNSUPPORTED.into())
+        }
+        pub async fn pair_start(&'static self, _name: &str) -> Result<Value, String> {
+            Err(UNSUPPORTED.into())
+        }
+        pub async fn pair_send(&'static self, _code: &str) -> Result<Value, String> {
+            Err(UNSUPPORTED.into())
+        }
+        pub async fn pair_status(&self) -> Value {
+            json!({ "active": false })
+        }
+        pub async fn pair_cancel(&self) -> Result<Value, String> {
             Err(UNSUPPORTED.into())
         }
         pub async fn announce(&self, _l: u64, _e: u64) -> Result<Value, String> {
