@@ -662,6 +662,16 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       renames travel newest-stamp-wins, remote playlists arrive as
       playlists, and a playlist's drag-reordered play order follows
       (alpha.98)
+- [x] Reverse-QR pairing (unreleased — ships next release): a device
+      with a screen but no camera (TV, desktop) joins by SHOWING a
+      `wtchp1-` pairing code — a linked phone picks "Link a new
+      device", scans it, and sends the existing link secret over a
+      short-lived rendezvous gossip topic, sealed to the code's
+      ephemeral x25519 key; the new device joins the SAME My W@tch (no
+      new group, no re-joining). Fixes the Nvidia Shield report "the
+      70-char invite is painful on a remote" properly — nothing to
+      type at all. Supersedes the "short numeric pairing codes" idea
+      (which would only cover the rare no-camera-anywhere case)
 - [ ] My W@tch on iOS (stubbed out today)
 - [ ] Sync while apart: devices must currently be online together —
       no relay/mailbox in the middle (by design, for now)

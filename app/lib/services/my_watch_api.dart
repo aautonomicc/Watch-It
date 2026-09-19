@@ -90,6 +90,28 @@ class MyWatchApi {
     return json['invite'] as String? ?? '';
   }
 
+  /// Reverse-QR pairing, unlinked side: mint the `wtchp1-` pairing code
+  /// this device shows as a QR (a linked device scans it and sends the
+  /// link secret over). Idempotent while an attempt is waiting.
+  Future<String> pairStart(String deviceName) async {
+    final json = await _request('POST', '/mywatch/pair/start',
+        body: {'device_name': deviceName});
+    return json['code'] as String? ?? '';
+  }
+
+  /// Reverse-QR pairing, linked side: send the link secret to the
+  /// device whose pairing code was scanned. Returns immediately;
+  /// progress via [pairStatus].
+  Future<void> pairSend(String code) =>
+      _request('POST', '/mywatch/pair/send', body: {'code': code});
+
+  /// The pairing attempt in flight (either side).
+  Future<MyWatchPairStatus> pairStatus() async =>
+      MyWatchPairStatus.fromJson(await _request('GET', '/mywatch/pair'));
+
+  /// Abandon (or sweep a finished) pairing attempt.
+  Future<void> pairCancel() => _request('POST', '/mywatch/pair/cancel');
+
   /// Publish this device's current library summary into its record.
   Future<void> announce({required int lists, required int entries}) =>
       _request('POST', '/mywatch/announce',
@@ -310,6 +332,38 @@ class RemoteSyncDoc {
 
   /// address → base64 shrunk data map.
   final Map<String, String> maps;
+}
+
+/// Where a reverse-QR pairing attempt stands (see the pair* methods).
+class MyWatchPairStatus {
+  const MyWatchPairStatus({
+    required this.active,
+    this.role,
+    this.code,
+    this.state,
+    this.message,
+  });
+
+  factory MyWatchPairStatus.fromJson(Map<String, dynamic> json) =>
+      MyWatchPairStatus(
+        active: json['active'] as bool? ?? false,
+        role: json['role'] as String?,
+        code: json['code'] as String?,
+        state: json['state'] as String?,
+        message: json['message'] as String?,
+      );
+
+  final bool active;
+
+  /// `receive` (this device is showing the code) or `send`.
+  final String? role;
+  final String? code;
+
+  /// `waiting`, `linking`, `sending`, `delivered` or `failed`.
+  final String? state;
+
+  /// The failure reason when [state] is `failed`.
+  final String? message;
 }
 
 class MyWatchStatus {

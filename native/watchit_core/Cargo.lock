@@ -8312,6 +8312,7 @@ dependencies = [
  "blake3",
  "bytes",
  "cc",
+ "chacha20poly1305",
  "data-encoding",
  "ed25519-dalek",
  "futures",
@@ -8333,6 +8334,7 @@ dependencies = [
  "tracing-android",
  "tracing-subscriber",
  "x0x",
+ "x25519-dalek",
  "xor_name",
 ]
 
