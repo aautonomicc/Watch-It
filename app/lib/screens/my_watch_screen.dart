@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../widgets/wi_qr.dart';
 import '../widgets/device_name_dialog.dart';
+import '../widgets/join_link_dialog.dart';
+import '../services/tv_settings.dart';
 
 import '../services/library_store.dart';
 import '../services/my_watch_api.dart';
@@ -183,69 +185,29 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
   }
 
   Future<(String, String)?> _askJoinDetails() async {
-    final nameController = TextEditingController(text: _defaultDeviceName());
-    final inviteController = TextEditingController();
-    final ok = await showDialog<bool>(
+    // Phones scan the desktop's QR instead of typing 70 chars; TVs have
+    // no camera, so the scan button would be dead weight there.
+    final canScan =
+        (Platform.isAndroid || Platform.isIOS) && !TvSettings.instance.enabled;
+    return showDialog<(String, String)>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Join with invite code'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController,
-              maxLength: 48,
-              decoration: const InputDecoration(labelText: 'Device name'),
-            ),
-            TextField(
-              controller: inviteController,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Invite code',
-                helperText: 'Shown under the QR code on the linked device '
-                    '(starts with wtch1-)',
-              ),
-            ),
-            // Phones scan the desktop's QR instead of typing 70 chars.
-            if (Platform.isAndroid || Platform.isIOS)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.qr_code_scanner, size: 18),
-                  label: const Text('Scan QR code'),
-                  onPressed: () async {
-                    final code = await Navigator.of(context).push<String>(
-                      MaterialPageRoute(
-                        builder: (_) => QrScanScreen(
-                          title: 'Scan invite',
-                          hint: 'Point the camera at the QR code shown on '
-                              'your linked device',
-                          accept: (v) => v.startsWith('wtch1-'),
-                        ),
-                      ),
-                    );
-                    if (code != null) inviteController.text = code;
-                  },
+      builder: (_) => JoinLinkDialog(
+        initialName: _defaultDeviceName(),
+        onScanQr: !canScan
+            ? null
+            : () => Navigator.of(context).push<String>(
+                  MaterialPageRoute(
+                    builder: (_) => QrScanScreen(
+                      title: 'Scan invite',
+                      hint: 'Point the camera at the QR code shown on '
+                          'your linked device',
+                      accept: (v) =>
+                          v.trim().toLowerCase().startsWith('wtch1-'),
+                    ),
+                  ),
                 ),
-              ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Join'),
-          ),
-        ],
       ),
     );
-    if (ok != true) return null;
-    final name = nameController.text.trim();
-    final invite = inviteController.text.trim();
-    if (name.isEmpty || invite.isEmpty) return null;
-    return (name, invite);
   }
 
   Future<void> _showInvite(String invite, {required bool fresh}) async {

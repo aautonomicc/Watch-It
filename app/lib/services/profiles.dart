@@ -19,17 +19,19 @@ import 'library_store.dart';
 const kAdminProfileId = 'admin';
 
 /// Fresh profile id: creation time (base36 epoch ms, roughly sortable)
-/// plus 4 secure-random base36 chars. The entropy suffix matters: the
+/// plus 8 secure-random base36 chars. The entropy suffix matters: the
 /// clock alone collides when two profiles are created in the same
 /// millisecond — back-to-back creates in tests, and the family-import
 /// merge loop creating several profiles in production — and a duplicate
 /// id violates the profiles primary key AND would silently merge two
-/// profiles' watch histories.
+/// profiles' watch histories. Eight chars (36^8 ≈ 2.8e12) keep the
+/// birthday-collision odds negligible even for hundreds of ids in one
+/// millisecond; four (36^4 ≈ 1.7e6) measurably did not.
 String newProfileId() {
   const alphabet = '0123456789abcdefghijklmnopqrstuvwxyz';
   final rng = Random.secure();
   final suffix =
-      List.generate(4, (_) => alphabet[rng.nextInt(alphabet.length)]).join();
+      List.generate(8, (_) => alphabet[rng.nextInt(alphabet.length)]).join();
   return 'p${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}$suffix';
 }
 

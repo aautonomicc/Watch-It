@@ -71,7 +71,9 @@ void main() {
       // profiles were created inside one millisecond — back-to-back
       // creates in tests, several profiles in one family import — and a
       // duplicate id violates the primary key AND merges watch
-      // histories. The entropy suffix makes that impossible.
+      // histories. The 8-char entropy suffix makes 500 same-millisecond
+      // ids collide with odds ~4e-8 (the earlier 4-char suffix flaked
+      // this very test at ~7% — a real latent bug, not test noise).
       final ids = {for (var i = 0; i < 500; i++) newProfileId()};
       expect(ids, hasLength(500));
       expect(ids.every((id) => RegExp(r'^p[0-9a-z]+$').hasMatch(id)),
