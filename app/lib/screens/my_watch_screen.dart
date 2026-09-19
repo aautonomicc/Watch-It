@@ -167,7 +167,7 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
         builder: (_) => QrScanScreen(
           title: 'Scan pairing code',
           hint: 'Point the camera at the pairing code shown on the '
-              'new device (My W@tch → "Pair by showing a code")',
+              'new device (My W@tch → "Show a pairing code")',
           accept: (v) => v.trim().toLowerCase().startsWith('wtchp1-'),
         ),
       ),
@@ -278,8 +278,8 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'On your other device, open My W@tch and choose "Join '
-                'with invite code" — scan or copy this. Anyone with '
+                'On your other device, open My W@tch and choose "Enter '
+                'an invite code" — scan or copy this. Anyone with '
                 'this code can join your link, so share it only with '
                 'your own devices.',
                 style: TextStyle(fontSize: 13, color: t.boneDim),
@@ -365,7 +365,57 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
     );
   }
 
+  /// The three unlinked actions grouped by the user's SITUATION, not the
+  /// mechanism: starting fresh vs adding this device to an existing My
+  /// W@tch. The two join transports (invite code, pairing code) sit under
+  /// one header so they read as one choice, and the platform decides
+  /// which of them leads: a phone types/scans an invite, a TV or desktop
+  /// (screen, no camera) shows a pairing code for a linked phone to scan
+  /// — that path is the primary button there, and starting a NEW My
+  /// W@tch (the classic mis-tap that forks a second group) drops to
+  /// outlined.
   List<Widget> _unlinkedBody(WiTokens t) {
+    final canScan = _canScan;
+    Widget header(String text) => Text(
+          text,
+          style: TextStyle(
+              fontSize: 13, fontWeight: FontWeight.w700, color: t.bone),
+        );
+    final startLabel = const Text('Start a new My W@tch');
+    const startIcon = Icon(Icons.add_link);
+    final start = canScan
+        ? FilledButton.icon(
+            icon: startIcon,
+            label: startLabel,
+            onPressed: _busy ? null : _createLink,
+          )
+        : OutlinedButton.icon(
+            icon: startIcon,
+            label: startLabel,
+            onPressed: _busy ? null : _createLink,
+          );
+    final joinLabel = const Text('Enter an invite code (from a linked device)');
+    final join = OutlinedButton.icon(
+      // A scan lives inside this flow only where a camera exists;
+      // elsewhere the invite is typed or pasted.
+      icon: Icon(canScan ? Icons.qr_code_scanner : Icons.keyboard),
+      label: joinLabel,
+      onPressed: _busy ? null : _joinLink,
+    );
+    final pairLabel =
+        const Text('Show a pairing code (scan it with a linked phone)');
+    const pairIcon = Icon(Icons.qr_code_2);
+    final pair = canScan
+        ? OutlinedButton.icon(
+            icon: pairIcon,
+            label: pairLabel,
+            onPressed: _busy ? null : _pairStart,
+          )
+        : FilledButton.icon(
+            icon: pairIcon,
+            label: pairLabel,
+            onPressed: _busy ? null : _pairStart,
+          );
     return [
       Text(
         'Link your own devices into a private "My W@tch". Linked '
@@ -381,27 +431,33 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
         style: TextStyle(fontSize: 12, color: t.ash),
       ),
       const SizedBox(height: 20),
-      FilledButton.icon(
-        icon: const Icon(Icons.add_link),
-        label: const Text('Create a link on this device'),
-        onPressed: _busy ? null : _createLink,
-      ),
-      const SizedBox(height: 12),
-      OutlinedButton.icon(
-        icon: const Icon(Icons.qr_code_scanner),
-        label: const Text('Join with invite code'),
-        onPressed: _busy ? null : _joinLink,
-      ),
-      const SizedBox(height: 12),
-      OutlinedButton.icon(
-        icon: const Icon(Icons.qr_code_2),
-        label: const Text('Pair by showing a code'),
-        onPressed: _busy ? null : _pairStart,
-      ),
+      header('Setting up your first device?'),
+      const SizedBox(height: 8),
+      start,
       const SizedBox(height: 6),
       Text(
-        'No camera on this device? Show a pairing code here and scan '
-        'it with a phone that is already linked — no typing needed.',
+        'Already using My W@tch on another device? Add this device '
+        'below instead — starting new here would make a separate My '
+        'W@tch.',
+        style: TextStyle(fontSize: 12, color: t.ash),
+      ),
+      const SizedBox(height: 20),
+      header('Already have a My W@tch?'),
+      const SizedBox(height: 8),
+      if (canScan) ...[
+        join,
+        const SizedBox(height: 12),
+        pair,
+      ] else ...[
+        pair,
+        const SizedBox(height: 12),
+        join,
+      ],
+      const SizedBox(height: 6),
+      Text(
+        'Either way this device joins your existing My W@tch — the '
+        'pairing code needs no typing: a phone that is already linked '
+        'scans this screen.',
         style: TextStyle(fontSize: 12, color: t.ash),
       ),
     ];
@@ -526,7 +582,7 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
       const SizedBox(height: 12),
       OutlinedButton.icon(
         icon: const Icon(Icons.qr_code),
-        label: const Text('Show invite (add a device)'),
+        label: const Text('Add a device — show invite code'),
         onPressed: _busy ? null : _showExistingInvite,
       ),
       // Reverse-QR pairing: the new device shows a code, this device's
@@ -536,7 +592,7 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
         const SizedBox(height: 12),
         OutlinedButton.icon(
           icon: const Icon(Icons.qr_code_scanner),
-          label: const Text('Link a new device (scan its code)'),
+          label: const Text('Add a device — scan its pairing code'),
           onPressed: _busy || starting ? null : _pairSend,
         ),
       ],

@@ -51,9 +51,32 @@ void main() {
     testWidgets('pair button shows the code dialog with a QR',
         (tester) async {
       await open(tester);
-      expect(find.text('Pair by showing a code'), findsOneWidget);
-      expect(find.textContaining('No camera on this device?'), findsOneWidget);
-      await tester.tap(find.text('Pair by showing a code'));
+      expect(find.text('Show a pairing code (scan it with a linked phone)'), findsOneWidget);
+      expect(find.textContaining('scans this screen'), findsOneWidget);
+      // Tests run on desktop (no camera): the pairing path is the
+      // primary button and leads the join section, above the invite
+      // entry, and starting a NEW My W@tch drops to outlined.
+      expect(find.text('Setting up your first device?'), findsOneWidget);
+      expect(find.text('Already have a My W@tch?'), findsOneWidget);
+      expect(
+          find.widgetWithText(
+              FilledButton, 'Show a pairing code (scan it with a linked phone)'),
+          findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'Start a new My W@tch'),
+          findsOneWidget);
+      expect(
+          tester
+              .getTopLeft(find.text(
+                  'Show a pairing code (scan it with a linked phone)'))
+              .dy,
+          lessThan(tester
+              .getTopLeft(
+                  find.text('Enter an invite code (from a linked device)'))
+              .dy));
+      // No camera → the invite is typed, not scanned.
+      expect(find.byIcon(Icons.keyboard), findsOneWidget);
+      expect(find.byIcon(Icons.qr_code_scanner), findsNothing);
+      await tester.tap(find.text('Show a pairing code (scan it with a linked phone)'));
       await tester.pumpAndSettle();
       // Device-name dialog first, like create/join.
       expect(find.text('Name this device'), findsOneWidget);
@@ -75,7 +98,7 @@ void main() {
     testWidgets('dialog pops into the linked view once the secret lands',
         (tester) async {
       await open(tester);
-      await tester.tap(find.text('Pair by showing a code'));
+      await tester.tap(find.text('Show a pairing code (scan it with a linked phone)'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Continue'));
       await tester.pump();
@@ -105,7 +128,7 @@ void main() {
     testWidgets('an expired code surfaces the failure, Close sweeps it',
         (tester) async {
       await open(tester);
-      await tester.tap(find.text('Pair by showing a code'));
+      await tester.tap(find.text('Show a pairing code (scan it with a linked phone)'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Continue'));
       await tester.pump();
@@ -132,7 +155,7 @@ void main() {
 
     testWidgets('Cancel abandons the attempt', (tester) async {
       await open(tester);
-      await tester.tap(find.text('Pair by showing a code'));
+      await tester.tap(find.text('Show a pairing code (scan it with a linked phone)'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Continue'));
       await tester.pump();
@@ -158,9 +181,9 @@ void main() {
         'devices': const [],
       };
       await open(tester);
-      expect(find.text('Show invite (add a device)'), findsOneWidget);
+      expect(find.text('Add a device — show invite code'), findsOneWidget);
       // Tests run on desktop: no camera, so no scan entry point.
-      expect(find.text('Link a new device (scan its code)'), findsNothing);
+      expect(find.text('Add a device — scan its pairing code'), findsNothing);
       await close(tester);
     });
 

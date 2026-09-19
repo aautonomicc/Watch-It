@@ -61,8 +61,8 @@ void main() {
     testWidgets('offers create and join, announces the library',
         (tester) async {
       await open(tester);
-      expect(find.text('Create a link on this device'), findsOneWidget);
-      expect(find.text('Join with invite code'), findsOneWidget);
+      expect(find.text('Start a new My W@tch'), findsOneWidget);
+      expect(find.text('Enter an invite code (from a linked device)'), findsOneWidget);
       expect(find.textContaining('in sync automatically'), findsOneWidget);
       // Opening the page announces the (empty) library.
       expect(fake.requests, contains('POST /mywatch/announce'));
@@ -71,7 +71,7 @@ void main() {
 
     testWidgets('create link shows the QR invite dialog', (tester) async {
       await open(tester);
-      await tester.tap(find.text('Create a link on this device'));
+      await tester.tap(find.text('Start a new My W@tch'));
       await tester.pumpAndSettle();
       // Device-name dialog with a prefilled name.
       expect(find.text('Name this device'), findsOneWidget);
@@ -92,7 +92,7 @@ void main() {
 
     testWidgets('join posts the pasted invite', (tester) async {
       await open(tester);
-      await tester.tap(find.text('Join with invite code'));
+      await tester.tap(find.text('Enter an invite code (from a linked device)'));
       await tester.pumpAndSettle();
       await tester.enterText(
           find.widgetWithText(TextField, 'Invite code'), fake.myWatchInvite);
@@ -105,7 +105,7 @@ void main() {
 
     testWidgets('a bad invite surfaces the server message', (tester) async {
       await open(tester);
-      await tester.tap(find.text('Join with invite code'));
+      await tester.tap(find.text('Enter an invite code (from a linked device)'));
       await tester.pumpAndSettle();
       await tester.enterText(
           find.widgetWithText(TextField, 'Invite code'), 'garbage');
@@ -162,7 +162,7 @@ void main() {
       expect(find.textContaining('· this device ·'), findsOneWidget);
       expect(find.textContaining('last heard 2 min ago'), findsOneWidget);
       expect(find.textContaining('2 lists · 17 items'), findsOneWidget);
-      expect(find.text('Show invite (add a device)'), findsOneWidget);
+      expect(find.text('Add a device — show invite code'), findsOneWidget);
       expect(find.text('Unlink this device'), findsOneWidget);
       await close(tester);
     });
@@ -241,7 +241,7 @@ void main() {
       await tester.tap(find.text('Unlink'));
       await tester.pumpAndSettle();
       expect(fake.requests, contains('DELETE /mywatch'));
-      expect(find.text('Create a link on this device'), findsOneWidget);
+      expect(find.text('Start a new My W@tch'), findsOneWidget);
       await close(tester);
     });
 

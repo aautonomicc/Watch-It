@@ -67,7 +67,7 @@ void main() {
     await tester.tap(find.text('Join'));
     await tester.pumpAndSettle();
     expect(popped, isEmpty);
-    expect(find.text('Join with invite code'), findsOneWidget);
+    expect(find.text('Enter an invite code'), findsOneWidget);
     final focused = FocusManager.instance.primaryFocus;
     final field = find.widgetWithText(TextField, 'Invite code');
     expect(tester.widget<TextField>(field).focusNode, focused);
