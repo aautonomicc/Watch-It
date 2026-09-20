@@ -24,6 +24,7 @@ void main() {
   });
 
   tearDown(() {
+    UpdateInstaller.androidPlatformOverride = null;
     UpdateInstaller.appImagePathOverride = null;
     UpdateInstaller.windowsPlatformOverride = null;
     UpdateInstaller.windowsInstallDirOverride = null;
@@ -60,6 +61,46 @@ void main() {
     expect(find.text('Update available'), findsOneWidget);
     expect(find.textContaining('open the release page'), findsOneWidget);
   }, skip: Platform.environment['APPIMAGE'] != null);
+
+  testWidgets('Android → tap downloads the APK and opens the installer',
+      (tester) async {
+    UpdateInstaller.androidPlatformOverride = true;
+    final bytes = utf8.encode('apk-bytes');
+    UpdateCheck.instance
+      ..availableTag = 'v0.1.0-alpha.101'
+      ..assets = [
+        UpdateAsset(
+          name: 'Watch-It-0.1.0-alpha.101.apk',
+          url: 'https://example.com/W.apk',
+          size: bytes.length,
+          sha256: sha256.convert(bytes).toString(),
+        ),
+      ];
+    String? launchedPath;
+    UpdateInstaller.instance
+      ..client = MockClient((_) async => http.Response.bytes(bytes, 200))
+      ..cacheDirOverride = tmp
+      ..apkInstallLauncher = (p) async => launchedPath = p;
+
+    await tester.pumpWidget(host());
+    expect(find.textContaining('download and install'), findsOneWidget);
+
+    // Real file IO — run outside the fake-async zone.
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Update available'));
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (UpdateInstaller.instance.stage !=
+              UpdateInstallStage.readyToInstall &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    expect(UpdateInstaller.instance.stage, UpdateInstallStage.readyToInstall);
+    expect(launchedPath, endsWith('Watch-It-0.1.0-alpha.101.apk'));
+    await tester.pump();
+    expect(find.textContaining('tap to open the installer again'),
+        findsOneWidget);
+  });
 
   testWidgets('AppImage run → tap downloads, swaps, asks for a restart',
       (tester) async {

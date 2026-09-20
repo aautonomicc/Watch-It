@@ -35,6 +35,10 @@ enum UpdateInstallStage {
   failed,
 }
 
+/// The in-app update path that applies on this platform, when the
+/// release assets [UpdateCheck] knows include the matching artifact.
+enum SelfUpdateKind { apk, appImage, windows, mac }
+
 class UpdateInstallException implements Exception {
   UpdateInstallException(this.message);
   final String message;
@@ -129,6 +133,49 @@ class UpdateInstaller extends ChangeNotifier {
   /// (dev runs, plain bundles) — then only the release page can help.
   static String? get runningAppImagePath =>
       appImagePathOverride ?? Platform.environment['APPIMAGE'];
+
+  @visibleForTesting
+  static bool? androidPlatformOverride;
+
+  /// True on Android (test-overridable).
+  static bool get onAndroid => androidPlatformOverride ?? Platform.isAndroid;
+
+  /// The self-update path that applies right now — this platform can
+  /// apply the update itself AND the known release carries the matching
+  /// asset — or null when only the release page can help (dev runs,
+  /// plain Linux bundles). Single source for the Settings → About row
+  /// and the startup snackbar.
+  static SelfUpdateKind? get availableSelfUpdate {
+    final check = UpdateCheck.instance;
+    if (onAndroid && check.apkAsset != null) return SelfUpdateKind.apk;
+    if (runningAppImagePath != null && check.appImageAsset != null) {
+      return SelfUpdateKind.appImage;
+    }
+    if (onWindows && windowsInstallDir != null &&
+        check.windowsZipAsset != null) {
+      return SelfUpdateKind.windows;
+    }
+    if (onMacOS && macAppBundlePath != null && check.macDmgAsset != null) {
+      return SelfUpdateKind.mac;
+    }
+    return null;
+  }
+
+  /// Starts the download-and-apply flow for [kind] (as returned by
+  /// [availableSelfUpdate] — the matching asset is known to exist).
+  Future<void> startSelfUpdate(SelfUpdateKind kind) {
+    final check = UpdateCheck.instance;
+    switch (kind) {
+      case SelfUpdateKind.apk:
+        return downloadAndInstallApk(check.apkAsset!);
+      case SelfUpdateKind.appImage:
+        return downloadAndSwapAppImage(check.appImageAsset!);
+      case SelfUpdateKind.windows:
+        return downloadAndRunWindowsUpdate(check.windowsZipAsset!);
+      case SelfUpdateKind.mac:
+        return downloadAndSwapMacApp(check.macDmgAsset!);
+    }
+  }
 
   /// True on Windows (test-overridable).
   static bool get onWindows => windowsPlatformOverride ?? Platform.isWindows;
