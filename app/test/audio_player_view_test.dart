@@ -9,7 +9,9 @@ import 'package:watchit/models/media_list.dart';
 import 'package:watchit/screens/player_screen.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata_service.dart';
+import 'package:watchit/services/tv_settings.dart';
 import 'package:watchit/theme/tokens.dart';
+import 'package:watchit/widgets/seek_slider.dart';
 
 /// PlayerScreen's audio layout ([AudioPlayerView]) — the surface music
 /// gets instead of a black Video widget. PlayerScreen itself needs
@@ -104,5 +106,33 @@ void main() {
     await pumpView(tester, duration: Duration.zero);
     final slider = tester.widget<Slider>(find.byType(Slider));
     expect(slider.onChanged, isNull);
+  });
+
+  // Issue #11 (Google TV Streamer): nothing pulled focus to the seek bar
+  // on entry, so the remote's left/right did nothing until focus happened
+  // to land on it. On TV the bar takes focus when the player opens.
+  testWidgets('TV autofocuses the seek bar; desktop/mobile does not',
+      (tester) async {
+    await pumpView(tester);
+    expect(tester.widget<Slider>(find.byType(Slider)).autofocus, isFalse);
+
+    TvSettings.instance.dispose();
+    TvSettings.instance = TvSettings(enabled: true);
+    addTearDown(() {
+      TvSettings.instance.dispose();
+      TvSettings.instance = TvSettings();
+    });
+    await tester.pumpWidget(const SizedBox());
+    await pumpView(tester);
+    final node = tester
+        .widgetList<Focus>(
+          find.descendant(
+            of: find.byType(WiSeekSlider),
+            matching: find.byType(Focus),
+          ),
+        )
+        .map((f) => f.focusNode)
+        .firstWhere((n) => n?.debugLabel == 'seek slider')!;
+    expect(node.hasPrimaryFocus, isTrue);
   });
 }

@@ -787,7 +787,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // wrapping it in the TV video overlay stacked a SECOND control bar
     // on top (Fire TV report, 2026-09-13). The TV overlay exists for
     // the bare video surface only — the remote's Back key still exits.
-    if (_isAudio || !TvSettings.instance.enabled) return child;
+    // The overlay's media fast-forward/rewind handling was lost with
+    // it, so AudioMediaKeys restores those keys from any focus
+    // (Google TV Streamer report, issue #11).
+    if (_isAudio) {
+      return AudioMediaKeys(
+        position: _position,
+        duration: _duration,
+        onSeek: (position) => unawaited(_player.seek(position)),
+        child: child,
+      );
+    }
+    if (!TvSettings.instance.enabled) return child;
     return TvPlayerControls(
       inset: inset,
       title: _title,
@@ -1012,6 +1023,11 @@ class AudioPlayerView extends StatelessWidget {
                   ),
                   Expanded(
                     child: WiSeekSlider(
+                      // On TV the remote should seek the moment the
+                      // player opens — nothing else pulls focus to the
+                      // bar, so left/right otherwise did nothing until
+                      // focus happened to land on it (issue #11).
+                      autofocus: TvSettings.instance.enabled,
                       value: maxMs == 0
                           ? 0
                           : position.inMilliseconds.clamp(0, maxMs).toDouble(),

@@ -110,4 +110,92 @@ void main() {
     // Still focused — the keys were swallowed, not passed to the slider.
     expect(node.hasPrimaryFocus, isTrue);
   });
+
+  // The Google TV Streamer report (issue #11): the remote's media FF/RW
+  // keys did nothing on audio surfaces unless the seek bar held focus.
+  // AudioMediaKeys wraps a surface and handles them from any focus.
+  group('AudioMediaKeys', () {
+    Widget mediaHarness({
+      required Duration position,
+      required Duration duration,
+      ValueChanged<Duration>? onSeek,
+    }) => MaterialApp(
+      home: Scaffold(
+        body: AudioMediaKeys(
+          position: position,
+          duration: duration,
+          onSeek: onSeek,
+          child: Column(
+            children: [
+              TextButton(
+                autofocus: true,
+                onPressed: () {},
+                child: const Text('Transport'),
+              ),
+              const Text('Track list'),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    testWidgets('media FF/RW seek ±10 s from a non-slider focus', (
+      tester,
+    ) async {
+      final seeks = <Duration>[];
+      await tester.pumpWidget(
+        mediaHarness(
+          position: const Duration(seconds: 30),
+          duration: const Duration(minutes: 3),
+          onSeek: seeks.add,
+        ),
+      );
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.mediaFastForward);
+      await tester.pump();
+      expect(seeks, [const Duration(seconds: 40)]);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.mediaRewind);
+      await tester.pump();
+      expect(seeks.last, const Duration(seconds: 20));
+    });
+
+    testWidgets('seeks clamp to the track bounds', (tester) async {
+      final seeks = <Duration>[];
+      await tester.pumpWidget(
+        mediaHarness(
+          position: const Duration(seconds: 4),
+          duration: const Duration(seconds: 9),
+          onSeek: seeks.add,
+        ),
+      );
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.mediaRewind);
+      await tester.pump();
+      expect(seeks.last, Duration.zero);
+      await tester.sendKeyEvent(LogicalKeyboardKey.mediaFastForward);
+      await tester.pump();
+      expect(seeks.last, const Duration(seconds: 9));
+    });
+
+    testWidgets('null onSeek (nothing playing) ignores the keys', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        mediaHarness(
+          position: Duration.zero,
+          duration: const Duration(minutes: 3),
+          onSeek: null,
+        ),
+      );
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.mediaFastForward);
+      await tester.pump();
+      // Nothing to assert beyond "no crash" — the handler must report
+      // ignored so the event keeps bubbling.
+      expect(find.text('Transport'), findsOneWidget);
+    });
+  });
 }

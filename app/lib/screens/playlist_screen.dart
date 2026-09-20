@@ -454,14 +454,23 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
           ),
         ],
       ),
-      body: ListenableBuilder(
-        listenable: Listenable.merge([
-          MetadataService.instance,
-          DownloadManager.instance,
-          WatchStateStore.instance,
-          FavouritesStore.instance,
-        ]),
-        builder: (context, _) => _body(t, playlist),
+      // The remote's media fast-forward/rewind keys seek the playing
+      // track from any focus — playlist rows included (issue #11).
+      body: AudioMediaKeys(
+        position: _queue.position,
+        duration: _queue.duration,
+        onSeek: _queue.current == null
+            ? null
+            : (position) => unawaited(_queue.seek(position)),
+        child: ListenableBuilder(
+          listenable: Listenable.merge([
+            MetadataService.instance,
+            DownloadManager.instance,
+            WatchStateStore.instance,
+            FavouritesStore.instance,
+          ]),
+          builder: (context, _) => _body(t, playlist),
+        ),
       ),
     );
   }

@@ -286,7 +286,7 @@ class _AlbumScreenState extends State<AlbumScreen>
                 ),
               ],
       ),
-      body: _editMode ? _editBody(t, group) : ListView(
+      body: _mediaKeys(_editMode ? _editBody(t, group) : ListView(
         padding: const EdgeInsets.all(16),
         children: [
           DetailHeader(
@@ -365,9 +365,20 @@ class _AlbumScreenState extends State<AlbumScreen>
           for (final entry in group.tracks)
             _trackRow(context, t, entry, credit),
         ],
-      ),
+      )),
     );
   }
+
+  /// The remote's media fast-forward/rewind keys seek the playing track
+  /// from any focus — track list included (issue #11).
+  Widget _mediaKeys(Widget child) => AudioMediaKeys(
+        position: _queue.position,
+        duration: _queue.duration,
+        onSeek: _queue.current == null
+            ? null
+            : (position) => unawaited(_queue.seek(position)),
+        child: child,
+      );
 
   /// Drag-renumbering treats the album as ONE 1..N sequence, which has
   /// no meaning across disc boundaries — multi-disc albums keep their
