@@ -114,29 +114,19 @@ Future<void> main() async {
   unawaited(seedBundledMetadata());
   // Update check-and-notify (desktop + Android): ≤once/24h against
   // GitHub releases, behind the Settings → About toggle; a newer tag
-  // shows a quiet snackbar and a Settings row that can download and
-  // apply the update on Android / AppImage Linux / Windows / macOS.
-  // Silent on failure/offline. A completed AppImage or macOS bundle
-  // swap leaves the previous version as `.old` — this launch proves
-  // the new one, drop it.
+  // shows a quiet snackbar whose action starts the in-app update where
+  // the app can apply it itself (Android / AppImage Linux / Windows /
+  // macOS — same path as the Settings → About row) and opens the
+  // release page everywhere else. Silent on failure/offline. A
+  // completed AppImage or macOS bundle swap leaves the previous
+  // version as `.old` — this launch proves the new one, drop it.
   unawaited(UpdateInstaller.cleanupOldAppImage());
   unawaited(UpdateInstaller.cleanupOldMacApp());
   UpdateCheck.instance.addListener(() {
     final tag = UpdateCheck.instance.availableTag;
     if (tag == null) return;
-    final url = UpdateCheck.instance.releaseUrl;
     wiMessengerKey.currentState?.showSnackBar(
-      SnackBar(
-        content: Text('Update available: $tag'),
-        duration: const Duration(seconds: 8),
-        action: url == null
-            ? null
-            : SnackBarAction(
-                label: 'View',
-                onPressed: () => launchUrl(Uri.parse(url)),
-              ),
-      ),
-    );
+        updateAvailableSnackBar(tag, UpdateCheck.instance.releaseUrl));
   });
   unawaited(UpdateCheck.instance.maybeCheck());
   // My W@tch background sync: publishes this device's lists/viewpoints
@@ -166,6 +156,68 @@ Future<void> main() async {
   // the profile store picked the launch profile.
   wiThemeMode.value = await AppSettings.themeMode();
   runApp(const WatchItApp());
+}
+
+/// The startup "Update available" notice. Where the app can apply the
+/// update itself the action is **Update** and starts the same
+/// download-and-install flow as the Settings → About row (previously it
+/// opened the release page in a browser even on Android — the report
+/// that prompted this); elsewhere **View** still opens the release page.
+@visibleForTesting
+SnackBar updateAvailableSnackBar(String tag, String? url) {
+  final kind = UpdateInstaller.availableSelfUpdate;
+  return SnackBar(
+    content: Text('Update available: $tag'),
+    duration: const Duration(seconds: 8),
+    action: kind != null
+        ? SnackBarAction(
+            label: 'Update',
+            onPressed: () => startSnackbarSelfUpdate(kind),
+          )
+        : url == null
+            ? null
+            : SnackBarAction(
+                label: 'View',
+                onPressed: () => launchUrl(Uri.parse(url)),
+              ),
+  );
+}
+
+/// Runs the in-app update the snackbar offered. The user may be nowhere
+/// near Settings, so progress is pointed at the About row and the
+/// outcome comes back through the app-wide messenger: on Android the
+/// system installer opens by itself when the download lands, an
+/// AppImage/macOS swap asks for a restart, Windows closes and reopens
+/// on its own, and a failure names the error with a retry pointer.
+@visibleForTesting
+void startSnackbarSelfUpdate(SelfUpdateKind kind) {
+  final installer = UpdateInstaller.instance;
+  if (installer.busy) return;
+  void report() {
+    if (installer.stage == UpdateInstallStage.downloading) return;
+    installer.removeListener(report);
+    final messenger = wiMessengerKey.currentState;
+    switch (installer.stage) {
+      case UpdateInstallStage.awaitingRestart:
+        messenger?.showSnackBar(const SnackBar(
+            content: Text('Update installed — restart W@tch to finish.')));
+      case UpdateInstallStage.failed:
+        messenger?.showSnackBar(SnackBar(
+            content: Text('${installer.error ?? 'Update failed.'} '
+                'You can retry from Settings → About.')));
+      case UpdateInstallStage.downloading: // unreachable — handled above
+      case UpdateInstallStage.idle: // cancelled from Settings
+      case UpdateInstallStage.readyToInstall: // system installer is up
+      case UpdateInstallStage.applying: // the app is about to exit
+        break;
+    }
+  }
+
+  installer.addListener(report);
+  unawaited(installer.startSelfUpdate(kind));
+  wiMessengerKey.currentState?.showSnackBar(const SnackBar(
+      content:
+          Text('Downloading the update — progress is in Settings → About.')));
 }
 
 /// On resume from background (phone wake), the QUIC sockets are often

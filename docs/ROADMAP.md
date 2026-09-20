@@ -539,7 +539,11 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       tiers fold into the alpha.49 version picker
 - [x] Update check (alpha.56): desktop-only, at most once per 24h
       against GitHub releases, snackbar + Settings → About badge;
-      toggle in About (the app's only phone-home), default on
+      toggle in About (the app's only phone-home), default on;
+      since the self-updaters shipped, the snackbar's action starts
+      the in-app update where the app can apply it itself (unreleased
+      — ships next release; it used to open the release page even on
+      Android, the tester report that prompted the fix)
 - [x] Edit details (alpha.57): user metadata (title/year/description)
       plus artwork from an image file, a picked video frame (bundled
       ffmpeg, desktop), or the player's "use this frame" button (all

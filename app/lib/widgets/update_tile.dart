@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -18,24 +16,6 @@ import '../theme/tokens.dart';
 class UpdateAvailableTile extends StatelessWidget {
   const UpdateAvailableTile({super.key});
 
-  bool get _selfUpdateApk =>
-      Platform.isAndroid && UpdateCheck.instance.apkAsset != null;
-
-  bool get _selfUpdateAppImage =>
-      Platform.isLinux &&
-      UpdateInstaller.runningAppImagePath != null &&
-      UpdateCheck.instance.appImageAsset != null;
-
-  bool get _selfUpdateWindows =>
-      UpdateInstaller.onWindows &&
-      UpdateInstaller.windowsInstallDir != null &&
-      UpdateCheck.instance.windowsZipAsset != null;
-
-  bool get _selfUpdateMac =>
-      UpdateInstaller.onMacOS &&
-      UpdateInstaller.macAppBundlePath != null &&
-      UpdateCheck.instance.macDmgAsset != null;
-
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
@@ -46,10 +26,8 @@ class UpdateAvailableTile extends StatelessWidget {
         final tag = UpdateCheck.instance.availableTag;
         if (tag == null) return const SizedBox.shrink();
         final installer = UpdateInstaller.instance;
-        if (!_selfUpdateApk &&
-            !_selfUpdateAppImage &&
-            !_selfUpdateWindows &&
-            !_selfUpdateMac) {
+        final kind = UpdateInstaller.availableSelfUpdate;
+        if (kind == null) {
           // No self-update path here (dev runs, plain Linux bundles):
           // keep the open-the-release-page row.
           return _tile(
@@ -99,11 +77,14 @@ class UpdateAvailableTile extends StatelessWidget {
             );
           case UpdateInstallStage.idle:
           case UpdateInstallStage.failed:
-            final action = _selfUpdateApk
-                ? 'tap to download and install'
-                : _selfUpdateWindows
-                    ? 'tap to download — W@tch restarts to finish'
-                    : 'tap to download and update in place';
+            final action = switch (kind) {
+              SelfUpdateKind.apk => 'tap to download and install',
+              SelfUpdateKind.windows =>
+                'tap to download — W@tch restarts to finish',
+              SelfUpdateKind.appImage ||
+              SelfUpdateKind.mac =>
+                'tap to download and update in place',
+            };
             return _tile(
               t,
               subtitle: installer.stage == UpdateInstallStage.failed
@@ -111,19 +92,7 @@ class UpdateAvailableTile extends StatelessWidget {
                       'Tap to try again.'
                   : '$tag — $action',
               error: installer.stage == UpdateInstallStage.failed,
-              onTap: () {
-                final check = UpdateCheck.instance;
-                if (_selfUpdateApk) {
-                  installer.downloadAndInstallApk(check.apkAsset!);
-                } else if (_selfUpdateWindows) {
-                  installer
-                      .downloadAndRunWindowsUpdate(check.windowsZipAsset!);
-                } else if (_selfUpdateMac) {
-                  installer.downloadAndSwapMacApp(check.macDmgAsset!);
-                } else {
-                  installer.downloadAndSwapAppImage(check.appImageAsset!);
-                }
-              },
+              onTap: () => installer.startSelfUpdate(kind),
             );
         }
       },
