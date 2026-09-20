@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -59,8 +60,13 @@ class _FakePlayer implements AlbumAudioPlayer {
     _playing.add(playing);
   }
 
+  final seeks = <Duration>[];
+
   @override
-  Future<void> seek(Duration position) async => _position.add(position);
+  Future<void> seek(Duration position) async {
+    seeks.add(position);
+    _position.add(position);
+  }
 
   void completeTrack() => _completed.add(true);
 
@@ -202,6 +208,29 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await tester.pump(const Duration(seconds: 1));
     expect(find.text('Edit album details'), findsOneWidget);
+  });
+
+  testWidgets('media FF/RW keys seek the playing track from the track list',
+      (tester) async {
+    // Issue #11 (Google TV Streamer): the media keys did nothing on audio
+    // surfaces unless the seek bar itself held focus.
+    await pumpAlbum(tester);
+    await tester.tap(find.text('Gimme Shelter'));
+    await tester.pump(const Duration(milliseconds: 100));
+    player.emitPosition(const Duration(seconds: 30));
+    await tester.pump();
+
+    // Focus a track ROW — deliberately not the seek bar.
+    await tester.scrollUntilVisible(find.text('Love In Vain'), 100);
+    Focus.of(tester.element(find.text('Love In Vain'))).requestFocus();
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.mediaFastForward);
+    await tester.pump();
+    expect(player.seeks, [const Duration(seconds: 40)]);
+    await tester.sendKeyEvent(LogicalKeyboardKey.mediaRewind);
+    await tester.pump();
+    expect(player.seeks.last, const Duration(seconds: 30));
   });
 
   testWidgets('play/pause toggles; next and completion advance in order',
