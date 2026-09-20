@@ -1,6 +1,6 @@
 # Roadmap
 
-**Status (2026-09-18):** latest release is **v0.1.0-alpha.101**
+**Status (2026-09-20):** latest release is **v0.1.0-alpha.101**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
 a release ships **four artifacts**: a signed APK (dual-ABI
 armeabi-v7a + arm64-v8a since alpha.98, so Fire TV Sticks and other
@@ -19,7 +19,14 @@ exactly as picked — phones bundle no ffmpeg, so no encode tiers;
 channel publishing stays desktop-only) and gives artists real
 **pages**: portrait, formed year / area / genres and a Wikipedia bio,
 fully keyless via MusicBrainz → Wikidata → Wikipedia/Commons, pulled
-once per artist into a local cache and rendered offline. Alpha.100
+once per artist into a local cache and rendered offline. On main and
+**unreleased** (ship with the next release): **reverse-QR pairing** —
+a TV or desktop joins My W@tch by *showing* a pairing code a linked
+phone scans, so nothing is typed on a remote — with the unlinked
+screen regrouped by intent (first device vs adding to an existing
+My W@tch), a TV-friendly invite dialog with case-insensitive codes,
+a Settings "Software video decoding" toggle for devices that play
+sound over a black picture, and an ant-core 0.9.0 bump. Alpha.100
 before it shipped the full-screen existing-album picker behind every
 move-to-album flow (search, artist→album grouping, targets derived
 from the chosen album's own tracks so moves join the existing fold)
@@ -672,6 +679,17 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       70-char invite is painful on a remote" properly — nothing to
       type at all. Supersedes the "short numeric pairing codes" idea
       (which would only cover the rare no-camera-anywhere case)
+- [x] TV-friendly joining (unreleased — ships next release): the
+      unlinked screen is grouped by the user's situation instead of
+      mechanism — "Setting up your first device?" → **Start a new
+      My W@tch**, and "Already have a My W@tch?" over both join paths
+      (**Show a pairing code** / **Enter an invite code**), with the
+      pairing code first and primary on TV/desktop and the linked
+      view's add-a-device actions worded to match. The invite dialog
+      is TV-ified (Join takes initial D-pad focus, no surprise
+      on-screen keyboard, monospace field, Enter submits) and invite
+      codes are case-insensitive end-to-end; the QR-scan button is
+      hidden on cameraless TVs
 - [ ] My W@tch on iOS (stubbed out today)
 - [ ] Sync while apart: devices must currently be online together —
       no relay/mailbox in the middle (by design, for now)
@@ -729,8 +747,9 @@ implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → Channels.
       code stays copyable inside the dialog)
 - [ ] Channel directory (deliberately NOT in v1 — codes only; a curated
       directory would be a separate repo/site with its own vetting)
-- [ ] Mobile channel creation (subscribe works everywhere; publishing
-      needs the desktop wallet)
+- [ ] Mobile channel creation (subscribe works everywhere; closer
+      since alpha.101 opened the wallet + uploads on Android — the
+      remaining gap is the channel publish flow itself)
 - [ ] ~~Channel avatars~~ (shipped alpha.70), multi-owner channels,
       comments (parking lot)
 
@@ -1011,6 +1030,13 @@ files stay install-global — a profile scopes only viewing state.
       traps the D-pad (up/down leave the bar — alpha.98), and music
       plays with a single control bar instead of the TV transport
       stacking over the audio player's own (alpha.99)
+- [x] Software video decoding toggle (unreleased — ships next
+      release): a Settings switch directly below Buffer size forces
+      CPU decoding (mpv `hwdec=no`) for devices where hardware decode
+      composites a black picture with working sound — the Nvidia
+      Shield (Tegra X1) report; default off. A/B test builds on the
+      alpha.101 release page isolate hardware decode vs the Impeller
+      renderer while the tester narrows it down
 - [ ] Android TV rest: 10-foot layout mode, focus polish on the
       remaining screens
 - [ ] iOS build + TestFlight (FFI path required if sidecar chosen elsewhere)

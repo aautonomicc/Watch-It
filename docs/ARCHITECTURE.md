@@ -238,6 +238,19 @@ LAN plus public bootstrap for remote devices), implemented in
   from the secret — the secret itself never goes on the wire, and nothing
   about the group is discoverable without it. The invite is the key:
   share it only with your own devices. Unlink wipes the local agent state.
+- **Reverse-QR pairing (unreleased — ships next release)**: a device
+  with a screen but no camera (TV, desktop) joins by *showing* a
+  `wtchp1-` pairing code — an ephemeral x25519 public key + 16-byte
+  nonce rendered as a branded QR. A linked phone scans it and
+  publishes the group's existing 32-byte link secret on a short-lived
+  rendezvous gossip topic (blake3 of the nonce), sealed to the code's
+  key with a fresh-per-seal x25519 exchange + ChaCha20-Poly1305; the
+  joiner decrypts and runs the normal join, so it lands in the SAME
+  My W@tch. The receiver runs a throwaway agent in its own directory
+  (wiped per attempt) and acks with the ciphertext's blake3; codes
+  expire after 10 minutes and every attempt uses a fresh key + nonce.
+  Any linked device can onboard the next — there is no "original"
+  device, since all linked devices hold the same secret.
 - **What syncs** (background cycle every 30 s, app-wide — no screen needs
   to be open; plus a manual "Sync now"): each device publishes a sync doc
   under its own store keys. Watch lists merge by title with
@@ -299,7 +312,9 @@ LAN plus public bootstrap for remote devices), implemented in
   per-device online dots, last-heard times, and the persisted "Last sync"
   stamp. Server routes (`GET/DELETE /mywatch`, `POST /mywatch/link|join|
   announce`, `GET /mywatch/invite`, `POST /mywatch/sync|art/index|art/
-  fetch`) sit behind the same `x-watchit-auth` shared secret as Upload.
+  fetch`, and for pairing `POST /mywatch/pair/start|send|cancel` +
+  `GET /mywatch/pair`) sit behind the same `x-watchit-auth` shared
+  secret as Upload.
 - **Platforms**: desktop and Android (verified end-to-end on real
   hardware, desktop AppImage ↔ Android phone); iOS is stubbed out for
   now. Devices must be online *together* for changes to travel — there is

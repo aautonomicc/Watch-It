@@ -76,6 +76,34 @@ position (alpha.98), so the D-pad can always leave it; the remote Back
 key still exits playback, and marathon playlists still chain through
 audio and video items alike.
 
+## Joining My W@tch on TV (unreleased — ships next release)
+
+The My W@tch unlinked screen groups its choices by situation, and on a
+TV (or any cameraless device with a screen) the **Show a pairing code**
+path comes first as the filled-primary button: the TV displays a
+`wtchp1-` pairing code as a branded QR, an already linked phone picks
+"Add a device — scan its pairing code" and scans the TV's screen, and
+the TV joins the existing My W@tch — nothing is typed on a remote.
+Codes expire after ten minutes and each attempt is an independent
+handshake.
+
+The **Enter an invite code** dialog remains for keyboard devices and
+is TV-aware: the Join button takes initial D-pad focus so no on-screen
+keyboard pops up unasked, the invite field is monospace with
+autocorrect off, Enter submits, an empty submit moves focus into the
+field instead of closing the dialog, invite codes are accepted in any
+casing, and the QR-scan button is hidden on TV (no camera).
+
+## Software video decoding (unreleased — ships next release)
+
+Settings gains a **Software video decoding** switch directly below
+Buffer size (visible to all profiles): it forces CPU decoding (mpv
+`hwdec=no`; the GPU still renders) for devices where hardware decode
+composites a black picture with working sound — reported on the
+Nvidia Shield (Tegra X1). Default off; the subtitle points at the
+symptom. A/B test builds attached to the alpha.101 release page
+isolate hardware decode vs the Impeller renderer.
+
 ## Voice search
 
 The Search screen's app bar shows a microphone action on Android only —
