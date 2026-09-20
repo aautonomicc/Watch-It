@@ -26,7 +26,10 @@ phone scans, so nothing is typed on a remote — with the unlinked
 screen regrouped by intent (first device vs adding to an existing
 My W@tch), a TV-friendly invite dialog with case-insensitive codes,
 a Settings "Software video decoding" toggle for devices that play
-sound over a black picture, and an ant-core 0.9.0 bump. Alpha.100
+sound over a black picture, an ant-core 0.9.0 bump, and **mobile
+channel creation** — the My Channel segment (create, publish items,
+publish updates, edit, restore) opens on Android; files publish as-is
+there (no ffmpeg, no encode tiers), mirroring Android uploads. Alpha.100
 before it shipped the full-screen existing-album picker behind every
 move-to-album flow (search, artist→album grouping, targets derived
 from the chosen album's own tracks so moves join the existing fold)
@@ -577,8 +580,8 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       picking stays desktop-only; SAF tree URIs aren't enumerable).
       The wallet key uses the 0600 file fallback (no desktop keyring),
       which the wallet screen already surfaces. iOS is deferred until
-      the app ships there at all; channel publishing stays
-      desktop-only.
+      the app ships there at all; channel publishing followed on
+      2026-09-20 (see the Channels section).
 - ~~External signer / WalletConnect~~ — struck by decision
       (2026-09-18): the app's own hot wallet stays the only signing
       path. MetaMask has no desktop integration a Flutter app can
@@ -747,9 +750,14 @@ implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → Channels.
       code stays copyable inside the dialog)
 - [ ] Channel directory (deliberately NOT in v1 — codes only; a curated
       directory would be a separate repo/site with its own vetting)
-- [ ] Mobile channel creation (subscribe works everywhere; closer
-      since alpha.101 opened the wallet + uploads on Android — the
-      remaining gap is the channel publish flow itself)
+- [x] Mobile channel creation (2026-09-20, unreleased — ships next
+      release): the My Channel segment gates on the upload platforms
+      (desktop + Android) instead of desktop-only — create, publish
+      items, publish updates, edit and restore all work on Android;
+      files publish as-is (no ffmpeg → no quality tiers, said plainly
+      with the permanence trade-off on the publish page). Subscribe
+      keeps working everywhere; iOS stays subscribe-only until the app
+      ships there at all.
 - [ ] ~~Channel avatars~~ (shipped alpha.70), multi-owner channels,
       comments (parking lot)
 

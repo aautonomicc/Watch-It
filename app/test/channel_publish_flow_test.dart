@@ -12,6 +12,8 @@ import 'package:watchit/db/app_database.dart';
 import 'package:watchit/screens/channel_publish_screen.dart';
 import 'package:watchit/services/channel_service.dart';
 import 'package:watchit/services/ffmpeg.dart';
+import 'package:watchit/screens/publish_screen.dart'
+    show debugDesktopPlatformOverride, debugUploadPlatformOverride;
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/publish_plan.dart';
 import 'package:watchit/theme/tokens.dart';
@@ -35,16 +37,18 @@ class _FakeFileSelector extends FileSelectorPlatform
 
 /// Probe/encode without real processes.
 class _FakeFfmpeg extends FfmpegService {
-  _FakeFfmpeg(this.probes);
+  _FakeFfmpeg(this.probes, {this.availableOverride = true});
   final Map<String, MediaProbe?> probes;
   final List<String> encodes = [];
+  final bool availableOverride;
 
   @override
-  Future<bool> get available async => true;
+  Future<bool> get available async => availableOverride;
 
   @override
-  Future<MediaProbe?> probe(String path) async =>
-      probes[path.split(Platform.pathSeparator).last];
+  Future<MediaProbe?> probe(String path) async => availableOverride
+      ? probes[path.split(Platform.pathSeparator).last]
+      : null;
 
   @override
   Future<void> encode({
@@ -195,6 +199,39 @@ void main() {
     expect(find.textContaining('Still needed: the description'),
         findsOneWidget);
     expect(find.text('Describe this item'), findsOneWidget);
+  });
+
+  testWidgets(
+      'Android shape: no ffmpeg → as-is copy, permanence note, honest '
+      'verdict, no QUALITY section', (tester) async {
+    debugDesktopPlatformOverride = false;
+    debugUploadPlatformOverride = true;
+    addTearDown(() {
+      debugDesktopPlatformOverride = null;
+      debugUploadPlatformOverride = null;
+    });
+    fake.wallet = {'address': '0x1', 'storage': 'file'};
+    FileSelectorPlatform.instance =
+        _FakeFileSelector([mediaFile('My Film (2026).mkv')]);
+    await openScreen(tester,
+        _FakeFfmpeg({'My Film (2026).mkv': hevcProbe},
+            availableOverride: false));
+    // Intro reads as-is, never "on this computer"/"qualities you pick".
+    expect(find.textContaining('uploaded as it is'), findsOneWidget);
+    expect(find.textContaining('this computer'), findsNothing);
+    // The no-encoder banner explains itself + the permanence trade-off,
+    // without blaming a missing desktop ffmpeg install.
+    expect(find.textContaining('can\'t encode quality versions'),
+        findsOneWidget);
+    expect(find.textContaining('permanent'), findsWidgets);
+    expect(find.textContaining('ffmpeg was not found'), findsNothing);
+
+    await tester.tap(find.text('Choose a file'));
+    await tester.pumpAndSettle();
+    // Null probe with no ffmpeg = honest verdict, no QUALITY section.
+    expect(find.textContaining('no encoding tools'), findsOneWidget);
+    expect(find.textContaining('Could not read this file'), findsNothing);
+    expect(find.text('QUALITY'), findsNothing);
   });
 
   testWidgets(

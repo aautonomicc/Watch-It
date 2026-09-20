@@ -106,10 +106,14 @@ List<PublishTier> defaultTiers(MediaProbe? probe) {
   return offered;
 }
 
-/// Plain-English one-liner about a probed file.
-String probeVerdict(MediaProbe? probe) {
+/// Plain-English one-liner about a probed file. A null probe means
+/// either the file was unreadable or no ffprobe exists at all (Android
+/// bundles none) — pass [ffmpegAvailable] false to say the honest thing.
+String probeVerdict(MediaProbe? probe, {bool ffmpegAvailable = true}) {
   if (probe == null) {
-    return 'Could not read this file — it can only be published as-is.';
+    return ffmpegAvailable
+        ? 'Could not read this file — it can only be published as-is.'
+        : 'Published as-is — this device has no encoding tools.';
   }
   if (!probe.hasVideo) {
     final codec = probe.audioCodec?.toUpperCase();

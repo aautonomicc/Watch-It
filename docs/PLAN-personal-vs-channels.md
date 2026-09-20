@@ -187,7 +187,8 @@ existing show/season grouping on the subscriber side for free.
   process (de-listing ≠ deletion; say so there too).
 - No comments, no subscriber counts, no monetization, no multi-owner
   channels, no mobile channel *creation* (subscribe works everywhere;
-  publishing needs the desktop wallet anyway).
+  publishing needs the desktop wallet anyway). *(Creation opened on
+  Android 2026-09-20, once alpha.101 brought the wallet + uploads there.)*
 
 ## Part 3 — The safety wall (naming + friction + terms)
 
@@ -298,6 +299,8 @@ Deliberate choices:
   serves both spaces.
 - Mobile: Channels tile shows Subscribed only (channel *creation* is
   desktop-only in v1, like Upload); Add channel + QR scan work everywhere.
+  *(Superseded 2026-09-20: channel creation follows Upload onto Android —
+  the My Channel segment gates on the upload platforms now.)*
 
 ## Suggested build order
 

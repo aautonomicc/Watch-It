@@ -306,17 +306,27 @@ class _PublishScreenState extends State<PublishScreen> {
   }
 }
 
-/// Desktop platforms. Channel publishing and the update check still
-/// key off these; Upload itself is gated on [isUploadPlatform].
+/// Desktop platforms — where quality-tier encoding (bundled ffmpeg) and
+/// folder picking exist. Upload, the wallet, and channel publishing are
+/// gated on [isUploadPlatform] instead.
 bool get isDesktopPlatform =>
-    Platform.isLinux || Platform.isMacOS || Platform.isWindows;
+    debugDesktopPlatformOverride ??
+    (Platform.isLinux || Platform.isMacOS || Platform.isWindows);
 
 /// Where Upload — and the wallet that funds it — exists: desktop and,
-/// since 2026-09-18, Android. Phones bundle no ffmpeg, so the batch
-/// flow's no-ffmpeg path carries them: files upload exactly as picked,
-/// no quality-tier encoding and no QUALITY section on the review page.
-/// iOS stays out until the app ships there at all.
-bool get isUploadPlatform => isDesktopPlatform || Platform.isAndroid;
+/// since 2026-09-18, Android (channel publishing joined 2026-09-20).
+/// Phones bundle no ffmpeg, so the no-ffmpeg path carries them: files
+/// upload exactly as picked, no quality-tier encoding and no QUALITY
+/// section. iOS stays out until the app ships there at all.
+bool get isUploadPlatform =>
+    debugUploadPlatformOverride ?? (isDesktopPlatform || Platform.isAndroid);
+
+/// Test seams — widget tests run on a desktop host, so pinning the
+/// Android/iOS branches needs an override. Reset to null in tearDown.
+@visibleForTesting
+bool? debugDesktopPlatformOverride;
+@visibleForTesting
+bool? debugUploadPlatformOverride;
 
 /// Checkbox picker over the existing lists plus a create-new option —
 /// the import flow's picker pattern (its original is private to the

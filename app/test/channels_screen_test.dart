@@ -10,6 +10,8 @@ import 'package:watchit/db/app_database.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/screens/channels_screen.dart';
 import 'package:watchit/screens/describe_item_screen.dart';
+import 'package:watchit/screens/publish_screen.dart'
+    show debugDesktopPlatformOverride, debugUploadPlatformOverride;
 import 'package:watchit/services/channel_service.dart';
 import 'package:watchit/services/channels_api.dart';
 import 'package:watchit/services/ffmpeg.dart';
@@ -327,6 +329,39 @@ void main() {
       expect(find.textContaining('PUBLIC and PERMANENT'), findsOneWidget);
       expect(find.text('Create channel'), findsOneWidget);
       expect(find.text('Restore channel'), findsOneWidget);
+    });
+
+    testWidgets('mobile upload platform (Android) gets the full body',
+        (tester) async {
+      // Android: not desktop, but an upload platform since alpha.101 —
+      // channel creation opened up with it (2026-09-20).
+      debugDesktopPlatformOverride = false;
+      debugUploadPlatformOverride = true;
+      addTearDown(() {
+        debugDesktopPlatformOverride = null;
+        debugUploadPlatformOverride = null;
+      });
+      await openMine(tester);
+      expect(find.text('Create channel'), findsOneWidget);
+      expect(find.text('Restore channel'), findsOneWidget);
+      expect(find.textContaining('not available on this platform'),
+          findsNothing);
+    });
+
+    testWidgets('non-upload platform (iOS) keeps the restriction copy',
+        (tester) async {
+      debugDesktopPlatformOverride = false;
+      debugUploadPlatformOverride = false;
+      addTearDown(() {
+        debugDesktopPlatformOverride = null;
+        debugUploadPlatformOverride = null;
+      });
+      await openMine(tester);
+      expect(find.textContaining('not available on this platform'),
+          findsOneWidget);
+      expect(find.textContaining('Subscribing works everywhere'),
+          findsOneWidget);
+      expect(find.text('Create channel'), findsNothing);
     });
 
     testWidgets('Create channel opens the name/description form',

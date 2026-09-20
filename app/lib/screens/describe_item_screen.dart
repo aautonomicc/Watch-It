@@ -451,8 +451,11 @@ class _DescribeItemScreenState extends State<DescribeItemScreen> {
                       ),
                     const SizedBox(height: 8),
                     Text(
-                      'For self-made video, grabbing a frame is the '
-                      'natural poster source.',
+                      _frameSourceAvailable
+                          ? 'For self-made video, grabbing a frame is '
+                              'the natural poster source.'
+                          : 'Pick an image file, or use Check TMDB for '
+                              'known films.',
                       style: TextStyle(color: t.ash, fontSize: 11.5),
                     ),
                   ],

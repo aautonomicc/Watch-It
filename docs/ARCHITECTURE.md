@@ -385,11 +385,13 @@ ships, and stored in the OS keychain beside the wallet key
   channel — empty the moment the channel is created, mirroring the
   manifest after each published update (imported through the exact
   subscriber fetch+verify path), gone when the channel is removed.
-- **Publishing** (desktop-only, needs the wallet): items enter one
+- **Publishing** (upload platforms — desktop and, since 2026-09-20,
+  Android; needs the wallet): items enter one
   explicit pick at a time, starting from a LOCAL FILE (the Upload
   flow's shape, screens/channel_publish_screen.dart): choose a file →
   quality tiers to encode (same ffmpeg tiers/planning as Upload; tiers
-  fold into one channel item via the version picker) → required
+  fold into one channel item via the version picker — Android bundles
+  no ffmpeg, so files publish as-is, no tiers) → required
   Describe-this-item (title, description, artwork mandatory — the page
   runs against the local file, so frame-grab artwork samples it
   directly; saved as a normal Edit-details row keyed by the parsed file

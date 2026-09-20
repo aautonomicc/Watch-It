@@ -15,19 +15,20 @@ import '../theme/tokens.dart';
 import '../widgets/channel_badge.dart';
 import 'channels_screen.dart' show ChannelAttestationDialog;
 import 'describe_item_screen.dart';
-import 'publish_screen.dart' show pickTargetLists;
+import 'publish_screen.dart' show isDesktopPlatform, pickTargetLists;
 import 'wallet_screen.dart';
 
 /// Publish an item to the channel, starting from a FILE — the Upload
 /// flow's shape applied to the public space: pick one local file, choose
-/// the qualities to encode (bundled ffmpeg, same tiers as Upload),
+/// the qualities to encode (bundled ffmpeg, same tiers as Upload;
+/// platforms without ffmpeg — Android — publish the file as-is),
 /// describe it for subscribers (required — with the Check TMDB helper
 /// for known films), attest the rights, then encode + upload.
 ///
 /// Finished uploads are STAGED on the channel's item list; nothing is
 /// public until "Publish update" ships the signed manifest (the uploads
 /// themselves are private-visibility — their data maps only leave this
-/// computer inside the manifest). One file per pass on purpose: channel
+/// device inside the manifest). One file per pass on purpose: channel
 /// items enter one explicit pick at a time, there is no bulk publish.
 class ChannelPublishScreen extends StatefulWidget {
   const ChannelPublishScreen({
@@ -488,10 +489,12 @@ class _ChannelPublishScreenState extends State<ChannelPublishScreen> {
     return [
       Text(
         'Add an item to your channel straight from a file on this '
-        'computer: it is encoded into the qualities you pick, described '
-        'for subscribers, and uploaded. The uploads stay staged — '
-        'nothing becomes public until you press "Publish update" on the '
-        'channel page.',
+        'device: it is '
+        '${isDesktopPlatform ? 'encoded into the qualities you pick, '
+            'described for subscribers, and uploaded'
+            : 'described for subscribers and uploaded as it is'}. '
+        'The uploads stay staged — nothing becomes public until you '
+        'press "Publish update" on the channel page.',
         style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
       ),
       const SizedBox(height: 8),
@@ -506,8 +509,14 @@ class _ChannelPublishScreenState extends State<ChannelPublishScreen> {
       if (_ffmpegAvailable == false) ...[
         const SizedBox(height: 12),
         Text(
-          'ffmpeg was not found beside the app, so quality tiers are '
-          'unavailable — the file can only be uploaded as-is.',
+          '${isDesktopPlatform ? 'ffmpeg was not found beside the app, '
+              'so quality tiers are unavailable — the file can only be '
+              'uploaded as-is'
+              : 'This device can\'t encode quality versions, so the '
+              'file is published exactly as it is'}. '
+          'Published channel content is permanent — it can\'t be '
+          'replaced with a better-encoded copy later, only joined by '
+          'one published from a device with encoding tools.',
           style: TextStyle(color: t.rust, fontSize: 12, height: 1.4),
         ),
       ],
@@ -607,7 +616,7 @@ class _ChannelPublishScreenState extends State<ChannelPublishScreen> {
           style: TextStyle(color: t.bone, fontSize: 14),
         ),
         subtitle: Text(
-          probeVerdict(_probe),
+          probeVerdict(_probe, ffmpegAvailable: _ffmpegAvailable != false),
           style: TextStyle(color: t.ash, fontSize: 12),
         ),
         trailing: IconButton(
