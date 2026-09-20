@@ -23,7 +23,7 @@ import '../widgets/poster_crop_dialog.dart';
 import 'channel_publish_screen.dart';
 import 'describe_item_screen.dart';
 import 'list_home_screen.dart';
-import 'publish_screen.dart' show isDesktopPlatform;
+import 'publish_screen.dart' show isDesktopPlatform, isUploadPlatform;
 import 'qr_scan_screen.dart';
 
 /// Channels — the PUBLIC content space (docs/PLAN-personal-vs-channels.md
@@ -491,13 +491,12 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
     if (status == null) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (!isDesktopPlatform) {
+    if (!isUploadPlatform) {
       return Padding(
         padding: const EdgeInsets.all(24),
         child: Text(
-          'Creating and publishing a channel is desktop-only in this '
-          'version (it needs the desktop\'s encoding and publishing '
-          'tools). Subscribing works everywhere.',
+          'Creating and publishing a channel is not available on this '
+          'platform in this version. Subscribing works everywhere.',
           style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
         ),
       );
@@ -687,7 +686,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
             title: Text('Channel key is missing',
                 style: TextStyle(color: t.rust, fontSize: 14)),
             subtitle: Text(
-              'The signing key is gone from this computer — publishing '
+              'The signing key is gone from this device — publishing '
               'is frozen until you restore from the recovery phrase.',
               style: TextStyle(color: t.boneDim, fontSize: 12),
             ),
@@ -701,7 +700,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
             subtitle: Text(
               'Confirmed during creation. The phrase is never stored — '
               'losing it means the channel can never publish again '
-              'if this computer dies. It restores the channel, not '
+              'if this device dies. It restores the channel, not '
               'your wallet money.',
               style: TextStyle(color: t.ash, fontSize: 12),
             ),
@@ -709,7 +708,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
           if (own.keyStorage == 'file')
             Text(
               'No system keychain was found, so the channel key is '
-              'stored in an app file on this computer.',
+              'stored in an app file on this device.',
               style: TextStyle(color: t.rust, fontSize: 12),
             ),
         ],
@@ -790,7 +789,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
         ListTile(
           contentPadding: EdgeInsets.zero,
           leading: Icon(Icons.delete_forever_outlined, color: t.rust),
-          title: Text('Remove channel from this computer',
+          title: Text('Remove channel from this device',
               style: TextStyle(color: t.rust, fontSize: 14)),
           subtitle: Text(
             'Subscribers keep the last published version; publishing '
@@ -826,7 +825,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
             style: TextStyle(color: t.bone, fontSize: 16)),
         content: Text(
           'The channel key and its item list are deleted from this '
-          'computer. Without the 12-word recovery phrase the channel is '
+          'device. Without the 12-word recovery phrase the channel is '
           'frozen forever at what it last published — there is no other '
           'way back.',
           style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
@@ -849,7 +848,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
       await ChannelService.instance.clearMyItems();
       // Drops the channel's amber list from the library too.
       unawaited(ChannelService.instance.syncNow());
-      _snack('Channel removed from this computer');
+      _snack('Channel removed from this device');
     } catch (e) {
       _snack('$e');
     }
@@ -1266,7 +1265,7 @@ class _EditChannelScreenState extends State<EditChannelScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Changes are staged on this computer and go public with '
+                  'Changes are staged on this device and go public with '
                   'the next publish. Old manifests — including an old '
                   'avatar — stay on the network; they just stop being '
                   'shown.',
@@ -1673,7 +1672,7 @@ class _ChannelSeedBackupScreenState extends State<ChannelSeedBackupScreen> {
       children: [
         Text(
           'Write these 12 words down on paper, in order. They are the '
-          'only way to restore the channel on another computer — and '
+          'only way to restore the channel on another device — and '
           'the only way back if this one dies.',
           style: TextStyle(color: t.bone, fontSize: 14, height: 1.4),
         ),

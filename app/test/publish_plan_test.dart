@@ -102,7 +102,14 @@ void main() {
     });
 
     test('unprobed', () {
-      expect(probeVerdict(null), contains('as-is'));
+      expect(probeVerdict(null), contains('Could not read this file'));
+    });
+
+    test('unprobed without ffmpeg blames the missing tools, not the file',
+        () {
+      final v = probeVerdict(null, ffmpegAvailable: false);
+      expect(v, contains('no encoding tools'));
+      expect(v, isNot(contains('Could not read')));
     });
 
     test('audio', () {

@@ -244,7 +244,9 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   added channel surfaces at the TOP of both until reordered in
   Settings → Home screen (the drawer always mirrors the home screen's
   row order and visibility)
-- **My Channel** segment (desktop): Create channel → name/description →
+- **My Channel** segment (upload platforms — desktop, and Android since
+  2026-09-20, unreleased; files publish as-is there, no encode tiers):
+  Create channel → name/description →
   12-word key ceremony (show → retype 3) → full-screen
   public/permanent/attributable gate confirmed by typing the channel
   name; then code + QR to share, backup-status row, the item list
