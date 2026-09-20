@@ -50,7 +50,8 @@ library private by construction.
    against the databases and name them canonically, choose quality tiers,
    pay with a built-in wallet, and the uploads land in the library with
    their datamaps on-device (shipped for desktop in alpha.55/.56; batch
-   auto-matching in alpha.77–.79).
+   auto-matching in alpha.77–.79; uploads on Android in alpha.101 and
+   channel publishing there in alpha.102 — as-is files, no encode tiers).
 8. **Play everything.** libmpv-based engine: every container/codec, subtitles,
    multiple audio tracks, chapters.
 9. **Own your data.** Watch history, resume points, lists, and cached metadata stored

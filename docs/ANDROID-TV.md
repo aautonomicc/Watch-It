@@ -74,9 +74,14 @@ one control bar, not two (alpha.99). Its seek bar keeps left/right for
 seeking while up/down move focus off the bar instead of adjusting the
 position (alpha.98), so the D-pad can always leave it; the remote Back
 key still exits playback, and marathon playlists still chain through
-audio and video items alike.
+audio and video items alike. Since alpha.103 audio seeking also works
+from ANY focus (issue #11): the remote's fast-forward/rewind media
+keys seek ±10 s wherever focus sits — including the track list on the
+album and playlist pages — and the full-screen audio player opens with
+the seek bar already focused, so D-pad left/right seek immediately
+while up/down still traverse away.
 
-## Joining My W@tch on TV (unreleased — ships next release)
+## Joining My W@tch on TV (alpha.102)
 
 The My W@tch unlinked screen groups its choices by situation, and on a
 TV (or any cameraless device with a screen) the **Show a pairing code**
@@ -94,7 +99,7 @@ autocorrect off, Enter submits, an empty submit moves focus into the
 field instead of closing the dialog, invite codes are accepted in any
 casing, and the QR-scan button is hidden on TV (no camera).
 
-## Software video decoding (unreleased — ships next release)
+## Software video decoding (alpha.102)
 
 Settings gains a **Software video decoding** switch directly below
 Buffer size (visible to all profiles): it forces CPU decoding (mpv

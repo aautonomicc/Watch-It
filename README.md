@@ -405,11 +405,28 @@ Gatekeeper right-click dance) — always user-triggered, with size and
 sha256 verified before anything is installed. The same release opens
 **uploads on Android**: the Upload door, wallet and batch uploader
 now work on phones and TV boxes (files upload exactly as picked — no
-encode tiers on devices without ffmpeg; channel publishing stays
-desktop-only). And artists get real **artist pages**: a portrait,
+encode tiers on devices without ffmpeg). And artists get real
+**artist pages**: a portrait,
 formed year / country / genres and a Wikipedia bio — fully keyless
 via MusicBrainz, Wikidata and Wikimedia Commons, fetched once per
 artist into a local cache and shown offline from then on.
+
+Alpha.102 makes joining My W@tch on a TV painless: the setup screen
+is grouped by intent ("Setting up your first device?" vs "Already
+have a My W@tch?"), and **reverse-QR pairing** lets a device with a
+screen but no camera — a TV or desktop — join by *showing* a pairing
+code that an already linked phone scans, so nothing is typed on a
+remote; the typed invite path keeps a TV-friendly dialog with
+case-insensitive codes. The same release opens **channel creation on
+Android** (create, publish, edit and restore a channel from a phone
+or TV box — files publish as-is there, like Android uploads) and
+adds a **Software video decoding** toggle for devices where hardware
+decode plays sound over a black picture. Alpha.103 rounds off the
+loop: the startup "Update available" notification now starts the
+in-app update itself where the app can apply it (it used to open the
+release page), and TV audio seeking works from any focus — the
+remote's fast-forward/rewind keys seek ±10 s wherever focus sits and
+the music player opens with its seek bar focused.
 
 Docs:
 

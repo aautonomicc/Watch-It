@@ -130,7 +130,10 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   place and asks for a restart, Windows hands off to a small helper
   that swaps the install folder and relaunches, and macOS swaps the
   running app bundle in place and asks for a restart; dev/unbundled
-  runs keep opening the release page; since 2026-09-06
+  runs keep opening the release page; since alpha.103 the startup
+  "Update available" snackbar's action starts the same in-app update
+  on self-update platforms instead of opening the release page;
+  since 2026-09-06
   the Version tile expands to the full network-stack versions with a
   Copy-versions button)
 
@@ -183,7 +186,7 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   Android). When its pill is set to Off in Settings → Network → Data
   (the Built-in x0x client switch until 2026-09-06), the linked view
   shows a "switched off" card instead of the connecting spinner.
-- Unlinked (regrouped by intent, unreleased — ships next release):
+- Unlinked (regrouped by intent, alpha.102):
   "Setting up your first device?" → **Start a new My W@tch** (names
   the device, shows the invite as a branded QR + copyable `wtch1-…`
   code), and "Already have a My W@tch?" over both join paths —
@@ -244,8 +247,8 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   added channel surfaces at the TOP of both until reordered in
   Settings → Home screen (the drawer always mirrors the home screen's
   row order and visibility)
-- **My Channel** segment (upload platforms — desktop, and Android since
-  2026-09-20, unreleased; files publish as-is there, no encode tiers):
+- **My Channel** segment (upload platforms — desktop, and Android
+  since alpha.102; files publish as-is there, no encode tiers):
   Create channel → name/description →
   12-word key ceremony (show → retype 3) → full-screen
   public/permanent/attributable gate confirmed by typing the channel
@@ -353,7 +356,7 @@ interaction spec in [ANDROID-TV.md](ANDROID-TV.md). The app still runs
 the *normal* layout inside the safe area; the 10-foot column above
 remains the target.
 
-## Built so far (alpha.101)
+## Built so far (alpha.103)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,
@@ -473,7 +476,13 @@ Alpha.100 adds the full-screen existing-album picker behind every
 move-to-album flow; alpha.101 adds the artist page's
 portrait/facts/bio header, opens the Upload door + WALLET section on
 Android, and turns the About update row into an in-place self-update
-on all four platforms.
+on all four platforms. Alpha.102 regroups the My W@tch unlinked
+screen by intent, adds reverse-QR pairing (a TV/desktop joins by
+showing a code a linked phone scans) and the TV-friendly invite
+dialog, opens My Channel on Android, and adds the Software video
+decoding toggle; alpha.103 points the update snackbar at the in-app
+updater and makes TV audio seeking work from any focus with the seek
+bar autofocused in the full-screen audio player.
 Still to come from this document: filter/sort + fast-scroller on
 the grid, the full desktop keyboard map, mobile gestures, and the
 10-foot TV layout.

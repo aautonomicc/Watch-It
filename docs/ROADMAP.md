@@ -1,35 +1,42 @@
 # Roadmap
 
-**Status (2026-09-20):** latest release is **v0.1.0-alpha.101**
+**Status (2026-09-20):** latest release is **v0.1.0-alpha.103**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
 a release ships **four artifacts**: a signed APK (dual-ABI
 armeabi-v7a + arm64-v8a since alpha.98, so Fire TV Sticks and other
 32-bit-app devices install the normal APK), a Linux AppImage, a
 Windows portable zip (since alpha.55), and a macOS universal dmg
 (since alpha.92 — unsigned, right-click → Open). The newest wave is
-**self-update, Android uploads & artist pages**: alpha.101 turns the
-Settings → About update row into a real self-update on all four
-platforms — Android downloads the release APK and hands it to the
-system installer, a Linux AppImage swaps itself in place, Windows
-runs a helper swap (the updated exe doesn't re-trip SmartScreen),
-and macOS swaps the running app bundle in place (no Gatekeeper
-re-dance) — always user-triggered, size- and sha256-verified. The
-same release opens the batch uploader on **Android** (files upload
-exactly as picked — phones bundle no ffmpeg, so no encode tiers;
-channel publishing stays desktop-only) and gives artists real
+**pairing, mobile channels & TV fixes**: alpha.102 ships
+**reverse-QR pairing** — a TV or desktop joins My W@tch by *showing*
+a pairing code a linked phone scans, so nothing is typed on a
+remote — with the unlinked screen regrouped by intent (first device
+vs adding to an existing My W@tch), a TV-friendly invite dialog with
+case-insensitive codes, a Settings "Software video decoding" toggle
+for devices that play sound over a black picture, an ant-core 0.9.0
+bump, and **mobile channel creation** — the My Channel segment
+(create, publish items, publish updates, edit, restore) opens on
+Android; files publish as-is there (no ffmpeg, no encode tiers),
+mirroring Android uploads. Alpha.102 is also the first release
+installable from inside the app — alpha.101's self-updaters download
+and digest-verify its exact assets. Alpha.103 makes the startup
+"Update available" snackbar's action start that in-app update
+(instead of opening the release page) and fixes TV audio seeking:
+the remote's FF/RW keys seek ±10 s in the music player from any
+focus, and the seek bar takes focus when the full-screen audio
+player opens (issue #11). Before that, **self-update, Android
+uploads & artist pages**: alpha.101 turns the Settings → About
+update row into a real self-update on all four platforms — Android
+downloads the release APK and hands it to the system installer, a
+Linux AppImage swaps itself in place, Windows runs a helper swap
+(the updated exe doesn't re-trip SmartScreen), and macOS swaps the
+running app bundle in place (no Gatekeeper re-dance) — always
+user-triggered, size- and sha256-verified. The same release opens
+the batch uploader on **Android** (files upload exactly as picked —
+phones bundle no ffmpeg, so no encode tiers) and gives artists real
 **pages**: portrait, formed year / area / genres and a Wikipedia bio,
 fully keyless via MusicBrainz → Wikidata → Wikipedia/Commons, pulled
-once per artist into a local cache and rendered offline. On main and
-**unreleased** (ship with the next release): **reverse-QR pairing** —
-a TV or desktop joins My W@tch by *showing* a pairing code a linked
-phone scans, so nothing is typed on a remote — with the unlinked
-screen regrouped by intent (first device vs adding to an existing
-My W@tch), a TV-friendly invite dialog with case-insensitive codes,
-a Settings "Software video decoding" toggle for devices that play
-sound over a black picture, an ant-core 0.9.0 bump, and **mobile
-channel creation** — the My Channel segment (create, publish items,
-publish updates, edit, restore) opens on Android; files publish as-is
-there (no ffmpeg, no encode tiers), mirroring Android uploads. Alpha.100
+once per artist into a local cache and rendered offline. Alpha.100
 before it shipped the full-screen existing-album picker behind every
 move-to-album flow (search, artist→album grouping, targets derived
 from the chosen album's own tracks so moves join the existing fold)
@@ -541,9 +548,9 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       against GitHub releases, snackbar + Settings → About badge;
       toggle in About (the app's only phone-home), default on;
       since the self-updaters shipped, the snackbar's action starts
-      the in-app update where the app can apply it itself (unreleased
-      — ships next release; it used to open the release page even on
-      Android, the tester report that prompted the fix)
+      the in-app update where the app can apply it itself (alpha.103;
+      it used to open the release page even on Android, the tester
+      report that prompted the fix)
 - [x] Edit details (alpha.57): user metadata (title/year/description)
       plus artwork from an image file, a picked video frame (bundled
       ffmpeg, desktop), or the player's "use this frame" button (all
@@ -584,8 +591,8 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       picking stays desktop-only; SAF tree URIs aren't enumerable).
       The wallet key uses the 0600 file fallback (no desktop keyring),
       which the wallet screen already surfaces. iOS is deferred until
-      the app ships there at all; channel publishing followed on
-      2026-09-20 (see the Channels section).
+      the app ships there at all; channel publishing followed in
+      alpha.102 (see the Channels section).
 - ~~External signer / WalletConnect~~ — struck by decision
       (2026-09-18): the app's own hot wallet stays the only signing
       path. MetaMask has no desktop integration a Flutter app can
@@ -676,7 +683,7 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       renames travel newest-stamp-wins, remote playlists arrive as
       playlists, and a playlist's drag-reordered play order follows
       (alpha.98)
-- [x] Reverse-QR pairing (unreleased — ships next release): a device
+- [x] Reverse-QR pairing (alpha.102): a device
       with a screen but no camera (TV, desktop) joins by SHOWING a
       `wtchp1-` pairing code — a linked phone picks "Link a new
       device", scans it, and sends the existing link secret over a
@@ -686,7 +693,7 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       70-char invite is painful on a remote" properly — nothing to
       type at all. Supersedes the "short numeric pairing codes" idea
       (which would only cover the rare no-camera-anywhere case)
-- [x] TV-friendly joining (unreleased — ships next release): the
+- [x] TV-friendly joining (alpha.102): the
       unlinked screen is grouped by the user's situation instead of
       mechanism — "Setting up your first device?" → **Start a new
       My W@tch**, and "Already have a My W@tch?" over both join paths
@@ -754,8 +761,8 @@ implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → Channels.
       code stays copyable inside the dialog)
 - [ ] Channel directory (deliberately NOT in v1 — codes only; a curated
       directory would be a separate repo/site with its own vetting)
-- [x] Mobile channel creation (2026-09-20, unreleased — ships next
-      release): the My Channel segment gates on the upload platforms
+- [x] Mobile channel creation (alpha.102): the My Channel segment
+      gates on the upload platforms
       (desktop + Android) instead of desktop-only — create, publish
       items, publish updates, edit and restore all work on Android;
       files publish as-is (no ffmpeg → no quality tiers, said plainly
@@ -1039,11 +1046,16 @@ files stay install-global — a profile scopes only viewing state.
       Sticks and the Google TV Streamer without a side asset — and
       real-device TV testing now runs on both via the tester group
 - [x] TV fixes from real-device testing: the audio seek bar no longer
-      traps the D-pad (up/down leave the bar — alpha.98), and music
+      traps the D-pad (up/down leave the bar — alpha.98), music
       plays with a single control bar instead of the TV transport
-      stacking over the audio player's own (alpha.99)
-- [x] Software video decoding toggle (unreleased — ships next
-      release): a Settings switch directly below Buffer size forces
+      stacking over the audio player's own (alpha.99), and audio
+      seeking works from any focus (alpha.103, issue #11): the
+      remote's FF/RW media keys seek ±10 s wherever focus sits —
+      including the track list on album and playlist pages — and the
+      full-screen audio player opens with the seek bar focused so
+      D-pad left/right seek immediately
+- [x] Software video decoding toggle (alpha.102): a Settings switch
+      directly below Buffer size forces
       CPU decoding (mpv `hwdec=no`) for devices where hardware decode
       composites a black picture with working sound — the Nvidia
       Shield (Tegra X1) report; default off. A/B test builds on the
