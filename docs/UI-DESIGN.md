@@ -183,12 +183,19 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   Android). When its pill is set to Off in Settings → Network → Data
   (the Built-in x0x client switch until 2026-09-06), the linked view
   shows a "switched off" card instead of the connecting spinner.
-- Unlinked: **Link this device** (names the device, shows the invite as
-  a QR code + copyable `wtch1-…` code) or **Join** (paste the code, or
-  scan the QR with the camera on Android/iOS)
+- Unlinked (regrouped by intent, unreleased — ships next release):
+  "Setting up your first device?" → **Start a new My W@tch** (names
+  the device, shows the invite as a branded QR + copyable `wtch1-…`
+  code), and "Already have a My W@tch?" over both join paths —
+  **Show a pairing code** (the device displays a `wtchp1-` QR that a
+  linked phone scans; listed first and primary on TV/desktop, where
+  there's no camera) and **Enter an invite code** (paste the code, or
+  scan the QR with the camera on Android/iOS; TV-friendly dialog,
+  any-casing codes)
 - Linked: Last sync / Linked since, a row per device with online dot,
-  last-heard time, and list/item counts; Show invite, **Sync now**, and
-  Unlink (with confirm)
+  last-heard time, and list/item counts; **Add a device — show invite
+  code** and (camera devices) **Add a device — scan its pairing
+  code**, **Sync now**, and Unlink (with confirm)
 - Sync itself is invisible: a background cycle keeps lists, viewing
   positions, edits, and artwork current whenever linked devices are
   online together — the page never needs to be open
