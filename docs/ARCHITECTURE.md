@@ -31,7 +31,7 @@ APK covers it — no extra platform port. What it needs on top:
 - Hardware decode matters more here (TV boxes have weak CPUs) — libmpv uses
   MediaCodec on Android, same path as phones.
 
-Status (alpha.101): the manifest work (leanback entry, TV banner,
+Status (alpha.103): the manifest work (leanback entry, TV banner,
 leanback/touchscreen not-required) and card-level D-pad focus shipped
 in alpha.95; alpha.96 merged the full TV UX wave (the first external
 PR): UiModeManager TV detection over a method channel, an overscan
@@ -43,8 +43,10 @@ optional Grove palette — interaction spec in
 [ANDROID-TV.md](ANDROID-TV.md). Since alpha.98 the release APK is
 dual-ABI (armeabi-v7a + arm64-v8a), so 32-bit-app TV devices (Fire TV
 Stick, Google TV Streamer) install the normal APK, and real-device
-testing runs on both via the tester group. The 10-foot layout mode is
-still open.
+testing runs on both via the tester group — the alpha.98–.103 TV
+fixes (seek-bar D-pad traversal, single control bar for music, audio
+media keys from any focus) all came out of it. The 10-foot layout
+mode is still open.
 
 ## High-level structure
 
@@ -238,7 +240,7 @@ LAN plus public bootstrap for remote devices), implemented in
   from the secret — the secret itself never goes on the wire, and nothing
   about the group is discoverable without it. The invite is the key:
   share it only with your own devices. Unlink wipes the local agent state.
-- **Reverse-QR pairing (unreleased — ships next release)**: a device
+- **Reverse-QR pairing (alpha.102)**: a device
   with a screen but no camera (TV, desktop) joins by *showing* a
   `wtchp1-` pairing code — an ephemeral x25519 public key + 16-byte
   nonce rendered as a branded QR. A linked phone scans it and
@@ -385,7 +387,7 @@ ships, and stored in the OS keychain beside the wallet key
   channel — empty the moment the channel is created, mirroring the
   manifest after each published update (imported through the exact
   subscriber fetch+verify path), gone when the channel is removed.
-- **Publishing** (upload platforms — desktop and, since 2026-09-20,
+- **Publishing** (upload platforms — desktop and, since alpha.102,
   Android; needs the wallet): items enter one
   explicit pick at a time, starting from a LOCAL FILE (the Upload
   flow's shape, screens/channel_publish_screen.dart): choose a file →
