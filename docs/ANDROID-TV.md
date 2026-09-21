@@ -11,6 +11,12 @@ channel falls back to the ordinary interface.
   dismissed. The page's shortcut Focus node is excluded from TV traversal.
 - A foreground focus outline remains visible over posters, buttons and tiles.
   Scroll events reposition the outline; it does not run a continuous animation.
+  Since alpha.104 the outline's stroke draws entirely OUTSIDE the focused
+  control (clamped to the safe area at its edges), wall-card labels keep a
+  small horizontal inset from the cards' own accent focus ring, and the
+  Continue shelf and browse grid use the same taller TV cells as the home
+  shelves — a focused card no longer paints its highlight across the title
+  text or crops the label bottoms under the 1.15 text scale.
 - The device-name dialog initially focuses Continue on TV. Up moves toward
   the name field; Left reaches Cancel. Phone keyboard Done also submits a
   nonempty name. The dialog owns and disposes its text controller.
@@ -90,7 +96,12 @@ path comes first as the filled-primary button: the TV displays a
 "Add a device — scan its pairing code" and scans the TV's screen, and
 the TV joins the existing My W@tch — nothing is typed on a remote.
 Codes expire after ten minutes and each attempt is an independent
-handshake.
+handshake. Since alpha.104 the pairing, invite and channel-code QR
+dialogs fit small TV viewports whole: the dialog widens so its text
+wraps into fewer lines and the QR shrinks (floor ~120px, still
+scannable) to the height the dialog really has — previously a fixed
+220px QR pushed its own bottom third out of view with no way to
+scroll it back on a D-pad.
 
 The **Enter an invite code** dialog remains for keyboard devices and
 is TV-aware: the Join button takes initial D-pad focus so no on-screen

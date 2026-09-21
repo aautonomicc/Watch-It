@@ -8,6 +8,7 @@ import '../services/library_arrangement.dart';
 import '../services/library_store.dart';
 import '../services/metadata_service.dart';
 import '../services/season_grouping.dart';
+import '../services/tv_settings.dart';
 import '../theme/tokens.dart';
 import '../widgets/channel_info_card.dart';
 import '../widgets/library_drawer.dart';
@@ -279,9 +280,11 @@ class _ListHomeScreenState extends State<ListHomeScreen> {
   Widget _grid(WiTokens t, List<HomeItem> items) {
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
         maxCrossAxisExtent: 140,
-        mainAxisExtent: 236,
+        // TV's 1.15 minimum text scale needs taller cells (the home
+        // shelves' 232→258 bump) — at 236 the label bottoms cropped.
+        mainAxisExtent: TvSettings.instance.enabled ? 262 : 236,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
       ),

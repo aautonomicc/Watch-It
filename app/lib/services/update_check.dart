@@ -41,17 +41,29 @@ class UpdateAsset {
       sha256: sha,
     );
   }
+
+  /// GitHub's own field shape, so [fromJson] round-trips a persisted
+  /// asset exactly like an API one.
+  Map<String, Object?> toJson() => {
+        'name': name,
+        'browser_download_url': url,
+        'size': size,
+        if (sha256 != null) 'digest': 'sha256:$sha256',
+      };
 }
 
 /// Update check-and-notify, and the asset list the in-app updater
 /// feeds from.
 ///
-/// At most once per 24h on startup, asks GitHub for the latest release
-/// and compares its tag to the running version; a newer one sets
-/// [availableTag]/[releaseUrl]/[assets] and notifies (main.dart shows a
-/// quiet snackbar, Settings → About grows a row that can download and
-/// apply the update on Android, AppImage Linux, Windows and installed
-/// macOS bundles). Failures are
+/// At most once per 24h — on startup and whenever the app returns to
+/// the foreground (phones often go weeks without a cold start, so a
+/// startup-only check never ran there) — asks GitHub for the latest
+/// release and compares its tag to the running version; a newer one
+/// sets [availableTag]/[releaseUrl]/[assets], persists the result so
+/// later launches inside the throttle window still show it, and
+/// notifies (main.dart shows a quiet snackbar, Settings → About grows
+/// a row that can download and apply the update on Android, AppImage
+/// Linux, Windows and installed macOS bundles). Failures are
 /// silent — offline must never nag. This is the app's only phone-home
 /// besides the Autonomi network and the user's own TMDB key, so it
 /// sits behind a visible Settings toggle (default ON). Runs on desktop
@@ -65,6 +77,13 @@ class UpdateCheck extends ChangeNotifier {
 
   static const enabledPref = 'update_check_enabled_v1';
   static const lastCheckPref = 'update_check_last_v1';
+
+  /// The last successful check's newer release, persisted so the
+  /// Settings → About row (and the startup snackbar) survive the 24h
+  /// throttle: without it, a launch inside the throttle window showed
+  /// nothing at all — a rolling blind window on devices that rarely
+  /// stay open long enough to pass a fresh check.
+  static const availablePref = 'update_check_available_v1';
   static const releasePage =
       'https://github.com/aautonomicc/Watch-It/releases/latest';
   static const _api =
@@ -118,12 +137,15 @@ class UpdateCheck extends ChangeNotifier {
         .setBool(enabledPref, value);
   }
 
-  /// Startup entry point; no-op on unsupported platforms, when
-  /// switched off, or within 24h of the last successful check.
+  /// Entry point on startup AND app resume; no-op on unsupported
+  /// platforms or when switched off. A persisted earlier result is
+  /// restored first so the update surfaces even inside the 24h
+  /// throttle; the network check itself still runs at most once a day.
   Future<void> maybeCheck({DateTime Function() now = DateTime.now}) async {
     if (!supportedPlatform) return;
     final prefs = await SharedPreferences.getInstance();
     if (!(prefs.getBool(enabledPref) ?? true)) return;
+    await _restorePersisted(prefs);
     final nowMs = now().millisecondsSinceEpoch;
     final last = prefs.getInt(lastCheckPref) ?? 0;
     if (nowMs - last < const Duration(hours: 24).inMilliseconds) return;
@@ -146,12 +168,56 @@ class UpdateCheck extends ChangeNotifier {
         assets = rawAssets is List
             ? rawAssets.map(UpdateAsset.fromJson).nonNulls.toList()
             : const [];
+        await prefs.setString(
+            availablePref,
+            jsonEncode({
+              'tag': availableTag,
+              'url': releaseUrl,
+              'assets': [for (final a in assets) a.toJson()],
+            }));
         notifyListeners();
+      } else {
+        // Up to date: a stale restored/announced update (the app was
+        // updated some other way) must disappear again.
+        await prefs.remove(availablePref);
+        if (availableTag != null) {
+          availableTag = null;
+          releaseUrl = null;
+          assets = const [];
+          notifyListeners();
+        }
       }
     } catch (_) {
       // Silent by design.
     } finally {
       if (ownsClient) c.close();
+    }
+  }
+
+  /// Brings a previously seen newer release back into memory (About
+  /// row + snackbar) without any network. Drops the stored value once
+  /// it no longer beats the running version.
+  Future<void> _restorePersisted(SharedPreferences prefs) async {
+    final raw = prefs.getString(availablePref);
+    if (raw == null) return;
+    try {
+      final json = jsonDecode(raw) as Map<String, dynamic>;
+      final tag = json['tag'] as String? ?? '';
+      final info = await PackageInfo.fromPlatform();
+      if (!isNewerTag(tag, info.version, info.buildNumber)) {
+        await prefs.remove(availablePref);
+        return;
+      }
+      if (availableTag == tag) return;
+      availableTag = tag;
+      releaseUrl = json['url'] as String? ?? releasePage;
+      final rawAssets = json['assets'];
+      assets = rawAssets is List
+          ? rawAssets.map(UpdateAsset.fromJson).nonNulls.toList()
+          : const [];
+      notifyListeners();
+    } catch (_) {
+      await prefs.remove(availablePref);
     }
   }
 

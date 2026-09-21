@@ -130,8 +130,16 @@ Future<void> main() async {
   UpdateCheck.instance.addListener(() {
     final tag = UpdateCheck.instance.availableTag;
     if (tag == null) return;
-    wiMessengerKey.currentState?.showSnackBar(
-        updateAvailableSnackBar(tag, UpdateCheck.instance.releaseUrl));
+    final bar = updateAvailableSnackBar(tag, UpdateCheck.instance.releaseUrl);
+    final messenger = wiMessengerKey.currentState;
+    if (messenger != null) {
+      messenger.showSnackBar(bar);
+    } else {
+      // A persisted result restores before the first frame — showing
+      // it then would silently drop it (no messenger yet). Defer.
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => wiMessengerKey.currentState?.showSnackBar(bar));
+    }
   });
   unawaited(UpdateCheck.instance.maybeCheck());
   // My W@tch background sync: publishes this device's lists/viewpoints
@@ -237,6 +245,10 @@ class _LifecycleReconnector with WidgetsBindingObserver {
       // Also restart downloads the app itself parked (6h background
       // budget, connection loss while frozen).
       unawaited(DownloadManager.instance.onAppResumed());
+      // And look for a newer release: phones can go weeks without a
+      // cold start, so a startup-only check never ran there. The 24h
+      // throttle inside keeps this to one request a day.
+      unawaited(UpdateCheck.instance.maybeCheck());
     }
   }
 }
@@ -773,7 +785,9 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     return [
       _sectionTitle(t, 'Continue Watching'),
       SizedBox(
-        height: 232,
+        // TV's 1.15 minimum text scale needs the same taller cells as
+        // the list shelves — at 232 the label bottoms cropped.
+        height: TvSettings.instance.enabled ? 258 : 232,
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -929,19 +943,27 @@ class _ContinueCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 6),
-            Text(
-              meta.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.5, color: t.boneDim),
-            ),
-            if (subtitle.isNotEmpty)
-              Text(
-                subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 10.5, color: t.ash),
+            Padding(
+              padding: kCardLabelPadding,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    meta.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11.5, color: t.boneDim),
+                  ),
+                  if (subtitle.isNotEmpty)
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 10.5, color: t.ash),
+                    ),
+                ],
               ),
+            ),
           ],
         ),
       ),

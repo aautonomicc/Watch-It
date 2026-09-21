@@ -550,7 +550,11 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       since the self-updaters shipped, the snackbar's action starts
       the in-app update where the app can apply it itself (alpha.103;
       it used to open the release page even on Android, the tester
-      report that prompted the fix)
+      report that prompted the fix). Unreleased — ships next release:
+      the check also runs on app resume (phones can go weeks without
+      a cold start, so a startup-only check never ran there) and a
+      found update persists, so the About row and snackbar survive
+      the 24h throttle instead of vanishing for a day per launch
 - [x] Edit details (alpha.57): user metadata (title/year/description)
       plus artwork from an image file, a picked video frame (bundled
       ffmpeg, desktop), or the player's "use this frame" button (all
@@ -1053,7 +1057,15 @@ files stay install-global — a profile scopes only viewing state.
       remote's FF/RW media keys seek ±10 s wherever focus sits —
       including the track list on album and playlist pages — and the
       full-screen audio player opens with the seek bar focused so
-      D-pad left/right seek immediately
+      D-pad left/right seek immediately. From the Streamer first-run
+      report (unreleased — ships next release): the focus outline
+      draws outside the focused control and card labels clear the
+      cards' own focus ring (highlight no longer clips title text),
+      the Continue shelf and browse grid get the TV cell-height bump
+      (label bottoms cropped under the 1.15 text scale), and the
+      pairing/invite/channel QR dialogs fit small TV viewports whole
+      (wider dialog + the QR shrinks to the height it really has,
+      floor ~120px — the bottom third of the QR used to crop away)
 - [x] Software video decoding toggle (alpha.102): a Settings switch
       directly below Buffer size forces
       CPU decoding (mpv `hwdec=no`) for devices where hardware decode

@@ -2094,15 +2094,13 @@ class ChannelQrDialog extends StatelessWidget {
       title: Text('Share this code',
           style: TextStyle(color: t.bone, fontSize: 16)),
       content: SizedBox(
-        width: 300,
+        width: wiQrDialogWidth(context),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              color: Colors.white,
-              padding: const EdgeInsets.all(8),
-              child: WiQr(data: code, size: 220),
-            ),
+            // Shrinks on small TV viewports instead of overflowing the
+            // dialog (this column had no scroll view at all).
+            Flexible(child: WiQrCard(data: code, size: 220)),
             const SizedBox(height: 12),
             SelectableText(
               code,

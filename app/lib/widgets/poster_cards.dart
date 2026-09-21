@@ -13,6 +13,15 @@ import 'watch_progress.dart';
 /// would be invisible on a plain InkWell. The ring is a
 /// foregroundDecoration, so gaining focus never shifts layout; select/
 /// enter activation comes with InkWell for free.
+///
+/// The ring's stroke paints INSIDE the card bounds, so card labels keep
+/// [kCardLabelPadding] of horizontal clearance — edge-to-edge text would
+/// have its first/last glyphs painted over while focused (the Streamer
+/// tester's "highlight clips the text" report).
+/// Horizontal inset for text under a wall card's artwork: keeps the
+/// focus ring's 2.5px stroke off the glyphs.
+const kCardLabelPadding = EdgeInsets.symmetric(horizontal: 4);
+
 class WiCardInk extends StatefulWidget {
   const WiCardInk({
     super.key,
@@ -113,24 +122,35 @@ class PosterCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 6),
-            Text(
-              meta.year != null ? '${meta.title} (${meta.year})' : meta.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.5, color: t.boneDim),
-            ),
-            // Format/size of this upload — or, when several uploads of
-            // the title are folded into this one card, the version count.
-            if (allVersions.length > 1
-                    ? '${allVersions.length} versions'
-                    : formatInfoLine(entry)
-                case final line?)
-              Text(
-                line,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 10, color: t.ash),
+            Padding(
+              padding: kCardLabelPadding,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    meta.year != null
+                        ? '${meta.title} (${meta.year})'
+                        : meta.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11.5, color: t.boneDim),
+                  ),
+                  // Format/size of this upload — or, when several
+                  // uploads of the title are folded into this one card,
+                  // the version count.
+                  if (allVersions.length > 1
+                          ? '${allVersions.length} versions'
+                          : formatInfoLine(entry)
+                      case final line?)
+                    Text(
+                      line,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 10, color: t.ash),
+                    ),
+                ],
               ),
+            ),
           ],
         ),
       ),
@@ -189,21 +209,29 @@ class AlbumCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 6),
-            Text(
-              meta.title.isEmpty ? group.album : meta.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.5, color: t.boneDim),
-            ),
-            Text(
-              // A user-set album credit (Edit album details) beats
-              // everything; else a compilation's group credit beats any
-              // single track's row.
-              '${meta.albumArtist ?? (group.isCompilation ? group.artist : meta.artist ?? group.artist)} · $n '
-              '${n == 1 ? 'track' : 'tracks'}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10.5, color: t.ash),
+            Padding(
+              padding: kCardLabelPadding,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    meta.title.isEmpty ? group.album : meta.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11.5, color: t.boneDim),
+                  ),
+                  Text(
+                    // A user-set album credit (Edit album details) beats
+                    // everything; else a compilation's group credit beats
+                    // any single track's row.
+                    '${meta.albumArtist ?? (group.isCompilation ? group.artist : meta.artist ?? group.artist)} · $n '
+                    '${n == 1 ? 'track' : 'tracks'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10.5, color: t.ash),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -313,17 +341,25 @@ class ArtistCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 6),
-            Text(
-              meta.artist ?? group.artist,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.5, color: t.boneDim),
-            ),
-            Text(
-              '${albums.length} albums · $tracks tracks',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10.5, color: t.ash),
+            Padding(
+              padding: kCardLabelPadding,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    meta.artist ?? group.artist,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11.5, color: t.boneDim),
+                  ),
+                  Text(
+                    '${albums.length} albums · $tracks tracks',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10.5, color: t.ash),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -388,19 +424,27 @@ class ShowCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 6),
-            Text(
-              meta.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.5, color: t.boneDim),
-            ),
-            Text(
-              seasons == 1
-                  ? 'Season ${group.seasons.single.season} · $count ep'
-                  : '$seasons seasons · $count ep',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10.5, color: t.ash),
+            Padding(
+              padding: kCardLabelPadding,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    meta.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11.5, color: t.boneDim),
+                  ),
+                  Text(
+                    seasons == 1
+                        ? 'Season ${group.seasons.single.season} · $count ep'
+                        : '$seasons seasons · $count ep',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10.5, color: t.ash),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
