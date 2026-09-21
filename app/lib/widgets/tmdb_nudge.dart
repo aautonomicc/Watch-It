@@ -13,8 +13,9 @@ Future<bool> shouldShowTmdbNudge() async {
 /// One-time dismissible banner nudging keyless users toward a free TMDB
 /// key. Releases ship without one, so posters and descriptions only
 /// appear after the user adds theirs (or imports a bundle carrying
-/// them). Tapping the banner opens Settings; the close button dismisses
-/// it for good.
+/// them). Any interaction dismisses it for good: tapping the banner
+/// opens Settings (and counts as acknowledged — on a TV remote the bar
+/// is the natural Select target), the close button just dismisses.
 class TmdbNudgeBanner extends StatelessWidget {
   const TmdbNudgeBanner({
     super.key,
