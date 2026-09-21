@@ -86,6 +86,15 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.select);
     await tester.pumpAndSettle();
     expect(find.byType(SettingsScreen), findsOneWidget);
+    // TvInitialFocus gives the screen a VISIBLE starting focus — the
+    // back button, first in traversal order (before, nothing was
+    // focused and the first Select happened to activate the first
+    // tile invisibly). One step down reaches the TV display tile.
+    final focused = tester.binding.focusManager.primaryFocus;
+    expect(focused, isNotNull);
+    expect(focused, isNot(isA<FocusScopeNode>()));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.select);
     await tester.pumpAndSettle();
     expect(find.byType(TvDisplayScreen), findsOneWidget);

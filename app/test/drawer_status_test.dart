@@ -25,11 +25,13 @@ Widget _status({
   String channelsState = 'off',
   bool channelsSupported = true,
   bool channelsEnabled = true,
+  bool pinned = false,
 }) =>
     MaterialApp(
       theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
       home: Scaffold(
         body: WiDrawerStatus(
+          pinned: pinned,
           healthProvider: () async => ClientHealth(state: state, peers: peers),
           channelsStatusProvider: () async => ChannelsStatus(
               supported: channelsSupported,
@@ -128,6 +130,63 @@ void main() {
       await tester.tap(find.text('My W@tch: linked'));
       await tester.pumpAndSettle();
       expect(find.byType(MyWatchScreen), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets(
+        'PINNED rows push WITHOUT popping — the back arrow survives '
+        '(regression: the unconditional pop killed the home route under '
+        'the pinned desktop panel)', (tester) async {
+      MyWatchSync.status.value = const MyWatchSyncStatus(
+          supported: true, linked: true, agentState: 'ready');
+      await tester.pumpWidget(_status(pinned: true));
+      await tester.pump();
+      await tester.tap(find.text('My W@tch: linked'));
+      await tester.pumpAndSettle();
+      // The page sits OVER the home route: a back arrow exists and
+      // popping it lands back on the home scaffold — before the fix the
+      // status row popped home first (there is no modal drawer to close
+      // when pinned), leaving My W@tch as the only route: no arrow, no
+      // Escape, only killing the app.
+      expect(find.byType(MyWatchScreen), findsOneWidget);
+      expect(find.byType(BackButton), findsOneWidget);
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      expect(find.byType(MyWatchScreen), findsNothing);
+      expect(find.byType(WiDrawerStatus), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('modal (unpinned) rows still close the drawer by popping',
+        (tester) async {
+      // The row lives in a MODAL drawer here: tapping must pop the
+      // drawer route and push the page over home.
+      MyWatchSync.status.value = const MyWatchSyncStatus(
+          supported: true, linked: true, agentState: 'ready');
+      final scaffoldKey = GlobalKey<ScaffoldState>();
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: Scaffold(
+          key: scaffoldKey,
+          drawer: Drawer(
+            child: WiDrawerStatus(
+              healthProvider: () async => ClientHealth(state: 'ready'),
+              channelsStatusProvider: () async =>
+                  ChannelsStatus(supported: false, state: 'off'),
+            ),
+          ),
+        ),
+      ));
+      scaffoldKey.currentState!.openDrawer();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('My W@tch: linked'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MyWatchScreen), findsOneWidget);
+      // The drawer was closed on the way — back returns straight home.
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      expect(find.byType(MyWatchScreen), findsNothing);
+      expect(find.byType(Drawer), findsNothing); // closed, not reopened
       await tester.pumpWidget(const SizedBox());
     });
   });

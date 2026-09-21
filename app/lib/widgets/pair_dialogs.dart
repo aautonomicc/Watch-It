@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../services/my_watch_api.dart';
+import '../services/tv_settings.dart';
 import '../theme/tokens.dart';
 import 'wi_qr.dart';
 
@@ -126,6 +127,9 @@ class _PairCodeDialogState extends State<PairCodeDialog> {
       ),
       actions: [
         TextButton(
+          // The dialog's only control takes the TV's initial D-pad focus
+          // — without it the dialog opened with no visible focus at all.
+          autofocus: TvSettings.instance.enabled,
           onPressed: _cancel,
           child: Text(_failure == null ? 'Cancel' : 'Close'),
         ),
@@ -227,6 +231,7 @@ class _PairSendDialogState extends State<PairSendDialog> {
       ),
       actions: [
         TextButton(
+          autofocus: TvSettings.instance.enabled,
           onPressed: _cancel,
           child: Text(_failure == null ? 'Cancel' : 'Close'),
         ),

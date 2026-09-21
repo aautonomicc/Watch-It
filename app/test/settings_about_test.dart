@@ -290,4 +290,23 @@ void main() {
     await ImpellerSettings.setDisabled(true);
     expect(await ImpellerSettings.effectiveDisabled(), true);
   });
+
+  test('displayVersion reads like the release naming, not raw pubspec '
+      'fields', () {
+    // The Android tester read "0.1.0 (build 104)" as the version row
+    // having been removed — releases are only known as vX.Y.Z-alpha.N.
+    expect(displayVersion('0.1.0', '104'), 'v0.1.0-alpha.104');
+    expect(displayVersion('0.1.0', ''), 'v0.1.0');
+  });
+
+  testWidgets('the plain Version row is tappable, so a TV D-pad can '
+      'reach it', (tester) async {
+    await pumpSettings(tester);
+    // No /versions route in tests → the plain row renders (the same row
+    // an Android device shows when the fetch fails). Without an onTap a
+    // ListTile is skipped by focus traversal entirely.
+    final tile =
+        tester.widget<ListTile>(find.widgetWithText(ListTile, 'Version'));
+    expect(tile.onTap, isNotNull);
+  });
 }

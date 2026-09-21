@@ -24,6 +24,7 @@ import '../widgets/detail_header.dart';
 import '../widgets/messenger.dart' show wiMessengerKey;
 import '../widgets/organize_dialogs.dart';
 import '../widgets/playlist_picker.dart';
+import '../widgets/tv_dpad_focus.dart';
 import '../widgets/watch_progress.dart';
 import 'edit_details_screen.dart';
 import 'player_screen.dart';
@@ -509,7 +510,10 @@ class _DetailScreenState extends State<DetailScreen> {
       DownloadStatus.error => (Icons.refresh, 'Retry download'),
       DownloadStatus.done => (Icons.download_done, 'Downloaded'),
     };
-    return Scaffold(
+    // TvInitialFocus: on TV the page opens with a visible focus ring
+    // instead of a dark screen the D-pad has to hunt across.
+    return TvInitialFocus(
+        child: Scaffold(
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
@@ -817,7 +821,7 @@ class _DetailScreenState extends State<DetailScreen> {
           ],
         ],
       ),
-    );
+    ));
   }
 }
 

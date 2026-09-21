@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/tv_settings.dart';
+import 'tv_dpad_focus.dart';
 
 /// "Enter an invite code" dialog. Owns its controllers until the dialog
 /// route is actually disposed (same pattern as [DeviceNameDialog]).
@@ -30,7 +31,11 @@ class JoinLinkDialog extends StatefulWidget {
 class _JoinLinkDialogState extends State<JoinLinkDialog> {
   late final _nameController = TextEditingController(text: widget.initialName);
   final _inviteController = TextEditingController();
-  final _inviteFocus = FocusNode();
+  // TvFieldFocusNode: on TV vertical arrows LEAVE the field as focus
+  // traversal — a plain field swallowed all four arrows, so a remote
+  // that wandered down into a field could never get back to Join.
+  final _nameFocus = TvFieldFocusNode(debugLabel: 'device name');
+  final _inviteFocus = TvFieldFocusNode(debugLabel: 'invite code');
 
   /// Join stays pressable even while empty — a disabled button cannot
   /// hold the TV's initial D-pad focus. Pressing it without a code
@@ -52,6 +57,7 @@ class _JoinLinkDialogState extends State<JoinLinkDialog> {
   void dispose() {
     _nameController.dispose();
     _inviteController.dispose();
+    _nameFocus.dispose();
     _inviteFocus.dispose();
     super.dispose();
   }
@@ -65,6 +71,7 @@ class _JoinLinkDialogState extends State<JoinLinkDialog> {
           children: [
             TextField(
               controller: _nameController,
+              focusNode: _nameFocus,
               maxLength: 48,
               textInputAction: TextInputAction.next,
               decoration: const InputDecoration(labelText: 'Device name'),

@@ -7,6 +7,7 @@ import '../widgets/wi_qr.dart';
 import '../widgets/device_name_dialog.dart';
 import '../widgets/join_link_dialog.dart';
 import '../widgets/pair_dialogs.dart';
+import '../widgets/tv_dpad_focus.dart';
 import '../services/tv_settings.dart';
 
 import '../services/library_store.dart';
@@ -331,7 +332,10 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
     final status = _status;
-    return Scaffold(
+    // TvInitialFocus: on TV the screen opens with a visible focus ring
+    // instead of a dark screen the D-pad has to hunt across.
+    return TvInitialFocus(
+        child: Scaffold(
       appBar: AppBar(title: const Text('My W@tch')),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -360,7 +364,7 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
             ..._linkedBody(t, status),
         ],
       ),
-    );
+    ));
   }
 
   /// The three unlinked actions grouped by the user's SITUATION, not the

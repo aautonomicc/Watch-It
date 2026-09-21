@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:watchit/services/tv_settings.dart';
@@ -94,5 +95,50 @@ void main() {
     await tester.tap(find.text('Scan QR code'));
     await tester.pumpAndSettle();
     expect(find.text('wtch1-feedbeef'), findsOneWidget);
+  });
+
+  testWidgets('on TV: a vertical arrow LEAVES a field — the D-pad is '
+      'never trapped below the Join button (tester report)', (tester) async {
+    TvSettings.instance = TvSettings(enabled: true);
+    await show(tester);
+
+    // The trap state: focus wandered down into the invite field. A plain
+    // TextField consumes all four arrows as caret movement, so no arrow
+    // ever escaped and Join was unreachable until the app was killed.
+    await tester.tap(find.widgetWithText(TextField, 'Invite code'));
+    await tester.pump();
+    final invite = inviteField(tester);
+    expect(invite.focusNode!.hasFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(invite.focusNode!.hasFocus, isFalse,
+        reason: 'arrow-down must escape the invite field on TV');
+
+    // Same for the topmost field, where the IME-dismiss asymmetry
+    // stranded the focus (down from the scope lands on it).
+    await tester.tap(find.widgetWithText(TextField, 'Device name'));
+    await tester.pump();
+    final name = tester
+        .widget<TextField>(find.widgetWithText(TextField, 'Device name'));
+    expect(name.focusNode!.hasFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(name.focusNode!.hasFocus, isFalse,
+        reason: 'arrow-down must escape the name field on TV');
+    // Nothing typed/popped by the traversal keys.
+    expect(popped, isEmpty);
+  });
+
+  testWidgets('off TV: arrows stay caret movement inside a field',
+      (tester) async {
+    await show(tester);
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Invite code'), 'wtch1-abc');
+    final invite = inviteField(tester);
+    expect(invite.focusNode!.hasFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    // Desktop keyboards edit with arrows — the escape is TV-only.
+    expect(invite.focusNode!.hasFocus, isTrue);
   });
 }

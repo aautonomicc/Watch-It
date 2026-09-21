@@ -19,6 +19,7 @@ import '../services/x0x_cellular.dart';
 import '../theme/tokens.dart';
 import '../widgets/channel_avatar.dart';
 import '../widgets/channel_badge.dart';
+import '../widgets/tv_dpad_focus.dart';
 import '../widgets/poster_crop_dialog.dart';
 import 'channel_publish_screen.dart';
 import 'describe_item_screen.dart';
@@ -151,7 +152,10 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
-    return Scaffold(
+    // TvInitialFocus: on TV the screen opens with a visible focus ring
+    // instead of a dark screen the D-pad has to hunt across.
+    return TvInitialFocus(
+        child: Scaffold(
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
@@ -190,7 +194,7 @@ class _ChannelsScreenState extends State<ChannelsScreen> {
           ),
         ],
       ),
-    );
+    ));
   }
 
   /// Always-visible connection state of the channel gossip network, on
