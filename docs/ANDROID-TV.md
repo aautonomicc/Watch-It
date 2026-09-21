@@ -20,6 +20,18 @@ channel falls back to the ordinary interface.
 - The device-name dialog initially focuses Continue on TV. Up moves toward
   the name field; Left reaches Cancel. Phone keyboard Done also submits a
   nonempty name. The dialog owns and disposes its text controller.
+- Screens open with a visible starting focus (unreleased — ships next
+  release): the Settings, My W@tch, Channels and detail pages give the
+  scope's first control the focus once the first frame is up (an explicit
+  autofocus wins), and the pairing-code dialog focuses its Cancel button —
+  previously these surfaces opened with nothing focused, so the outline was
+  invisible until a first blind D-pad press hunted in from a screen edge.
+- Text fields never trap the D-pad (unreleased — ships next release): on TV
+  a vertical arrow inside a dialog text field (invite code, device name,
+  paste-captions) moves focus out of the field instead of being consumed as
+  caret movement. Before, a focused field swallowed all four arrows forever
+  — going Down past the invite field left Join unreachable until the app
+  was killed.
 - The video transport initially appears, then hides after six seconds while
   playing. Select or a direction reveals it and focuses Play/Pause; when
   visible, arrows move among actions and Select activates. Paused controls stay

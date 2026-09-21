@@ -25,6 +25,7 @@ import '../services/tv_settings.dart';
 import 'tv_display_screen.dart';
 import '../widgets/brand_mark.dart';
 import '../widgets/messenger.dart';
+import '../widgets/tv_dpad_focus.dart';
 import '../widgets/update_tile.dart';
 import 'channels_screen.dart';
 import 'data_screen.dart';
@@ -124,7 +125,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final info = await PackageInfo.fromPlatform();
       if (mounted) {
         setState(
-          () => _version = '${info.version} (build ${info.buildNumber})',
+          () => _version = displayVersion(info.version, info.buildNumber),
         );
       }
     } catch (_) {
@@ -383,7 +384,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
     final lists = _lists;
-    return Scaffold(
+    // TvInitialFocus: on TV the screen opens with a visible focus ring
+    // instead of a dark screen the D-pad has to hunt across.
+    return TvInitialFocus(
+        child: Scaffold(
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
@@ -928,6 +932,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _version ?? 'Unknown',
                       style: TextStyle(color: t.ash, fontSize: 12),
                     ),
+                    // Tappable so the row is FOCUSABLE: without onTap a
+                    // TV's D-pad scrolled straight past it, which read
+                    // as "Android no longer shows the version" (it also
+                    // shows exactly when /versions fails). Copy is the
+                    // useful tap for a bug report.
+                    onTap: () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      await Clipboard.setData(
+                        ClipboardData(text: _version ?? 'unknown'),
+                      );
+                      messenger.showSnackBar(
+                        const SnackBar(content: Text('Version copied')),
+                      );
+                    },
                   )
                 else
                   ExpansionTile(
@@ -1087,9 +1105,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 80),
               ],
             ),
-    );
+    ));
   }
 }
+
+/// The version string in the RELEASE naming — `v0.1.0-alpha.104` — not
+/// the raw pubspec fields. The Android tester read "0.1.0 (build 104)"
+/// as the version row having been removed: releases are only ever known
+/// by their `vX.Y.Z-alpha.N` tag (release_build.sh derives artifact
+/// names from pubspec's `version+build` the same way, so this stays in
+/// step with it by construction).
+String displayVersion(String version, String buildNumber) =>
+    buildNumber.isEmpty ? 'v$version' : 'v$version-alpha.$buildNumber';
 
 /// Single-field text prompt used for list titles and renames. An
 /// optional [note] renders as small print above the field.

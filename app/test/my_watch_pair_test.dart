@@ -9,6 +9,7 @@ import 'package:watchit/db/app_database.dart';
 import 'package:watchit/screens/my_watch_screen.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/my_watch_api.dart';
+import 'package:watchit/services/tv_settings.dart';
 import 'package:watchit/theme/tokens.dart';
 import 'package:watchit/widgets/pair_dialogs.dart';
 import 'package:watchit/widgets/wi_qr.dart';
@@ -92,6 +93,25 @@ void main() {
       expect(qr.data, fake.myWatchPairCode);
       expect(find.textContaining('Waiting for a linked device'),
           findsOneWidget);
+      await close(tester);
+    });
+
+    testWidgets('on TV the code dialog opens with Cancel focused '
+        '(no invisible default focus)', (tester) async {
+      TvSettings.instance = TvSettings(enabled: true);
+      addTearDown(() => TvSettings.instance = TvSettings());
+      await open(tester);
+      await tester.tap(find
+          .text('Show a pairing code (scan it with a linked phone)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Continue'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(PairCodeDialog), findsOneWidget);
+      // The dialog's only control holds the initial D-pad focus, so the
+      // TvFocusFrame ring is visible the moment the dialog opens.
+      final cancel = Focus.of(tester.element(find.text('Cancel')));
+      expect(cancel.hasPrimaryFocus, isTrue);
       await close(tester);
     });
 

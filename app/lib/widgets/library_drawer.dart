@@ -164,6 +164,7 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                 // up from below Settings): peers, My W@tch, Channels.
                 const SizedBox(height: 12),
                 WiDrawerStatus(
+                  pinned: widget.pinned,
                   healthProvider: widget.healthProvider,
                   channelsStatusProvider: widget.channelsStatusProvider,
                 ),

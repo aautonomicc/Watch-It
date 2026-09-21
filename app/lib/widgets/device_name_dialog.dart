@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/tv_settings.dart';
+import 'tv_dpad_focus.dart';
 
 /// Owns the controller until the dialog route is actually disposed.
 class DeviceNameDialog extends StatefulWidget {
@@ -17,6 +18,9 @@ class DeviceNameDialog extends StatefulWidget {
 
 class _DeviceNameDialogState extends State<DeviceNameDialog> {
   late final _controller = TextEditingController(text: widget.initialName);
+  // On TV vertical arrows leave the field as focus traversal instead of
+  // being swallowed as caret movement (D-pad trap, tester report).
+  final _focus = TvFieldFocusNode(debugLabel: 'device name');
 
   void _submit() {
     final name = _controller.text.trim();
@@ -26,6 +30,7 @@ class _DeviceNameDialogState extends State<DeviceNameDialog> {
   @override
   void dispose() {
     _controller.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
@@ -35,6 +40,7 @@ class _DeviceNameDialogState extends State<DeviceNameDialog> {
     scrollable: true,
     content: TextField(
       controller: _controller,
+      focusNode: _focus,
       autofocus: !TvSettings.instance.enabled,
       maxLength: 48,
       textInputAction: TextInputAction.done,

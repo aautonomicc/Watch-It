@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/caption_file.dart';
+import 'tv_dpad_focus.dart';
 
 /// A local alternative for TVs whose document picker is only a system stub.
 class CaptionTextDialog extends StatefulWidget {
@@ -14,12 +15,20 @@ class CaptionTextDialog extends StatefulWidget {
 class _CaptionTextDialogState extends State<CaptionTextDialog> {
   final _name = TextEditingController(text: 'Captions');
   final _text = TextEditingController();
+  // On TV vertical arrows leave a field as focus traversal instead of
+  // caret movement — this dialog exists FOR pickerless TVs, and a plain
+  // field (the multiline one especially) trapped the D-pad (tester
+  // report's class). Pasting is the intended input path there anyway.
+  final _nameFocus = TvFieldFocusNode(debugLabel: 'caption label');
+  final _textFocus = TvFieldFocusNode(debugLabel: 'caption text');
   String? _error;
 
   @override
   void dispose() {
     _name.dispose();
     _text.dispose();
+    _nameFocus.dispose();
+    _textFocus.dispose();
     super.dispose();
   }
 
@@ -93,6 +102,7 @@ class _CaptionTextDialogState extends State<CaptionTextDialog> {
             ),
             TextField(
               controller: _name,
+              focusNode: _nameFocus,
               decoration: const InputDecoration(
                 labelText: 'Label (for example: Latvian.lv)',
               ),
@@ -100,6 +110,7 @@ class _CaptionTextDialogState extends State<CaptionTextDialog> {
             ),
             TextField(
               controller: _text,
+              focusNode: _textFocus,
               minLines: 4,
               maxLines: 8,
               maxLength: CaptionFile.maxBytes,

@@ -21,9 +21,16 @@ import '../theme/tokens.dart';
 class WiDrawerStatus extends StatefulWidget {
   const WiDrawerStatus({
     super.key,
+    this.pinned = false,
     this.healthProvider,
     this.channelsStatusProvider,
   });
+
+  /// True inside the desktop pinned side panel. There is no modal drawer
+  /// route to close there, so a tap must not pop — popping removed the
+  /// HOME route under the pushed page, leaving it with no back arrow
+  /// (tester report: "lose the arrow to get back, have to close app").
+  final bool pinned;
 
   /// Test override for [EmbeddedClient.health].
   final Future<ClientHealth> Function()? healthProvider;
@@ -106,7 +113,7 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
 
   void _openPage(Widget page) {
     final navigator = Navigator.of(context);
-    navigator.pop(); // close the drawer
+    if (!widget.pinned) navigator.pop(); // close the modal drawer
     navigator.push(MaterialPageRoute<void>(builder: (_) => page));
   }
 

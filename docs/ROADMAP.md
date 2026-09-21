@@ -1065,7 +1065,16 @@ files stay install-global — a profile scopes only viewing state.
       (label bottoms cropped under the 1.15 text scale), and the
       pairing/invite/channel QR dialogs fit small TV viewports whole
       (wider dialog + the QR shrinks to the height it really has,
-      floor ~120px — the bottom third of the QR used to crop away)
+      floor ~120px — the bottom third of the QR used to crop away).
+      From the alpha.104 interface report (unreleased — ships next
+      release): Settings, My W@tch, Channels, detail pages and the
+      pairing dialog open with a VISIBLE starting focus (nothing was
+      focused on entry, so screens opened "dark" and the first D-pad
+      press hunted in from a screen edge), and dialog text fields no
+      longer trap the D-pad (a focused TextField consumed all four
+      arrows as caret movement — once focus dropped below the invite
+      dialog's Join button it could never get back; vertical arrows
+      now leave a field as focus traversal, TV only)
 - [x] Software video decoding toggle (alpha.102): a Settings switch
       directly below Buffer size forces
       CPU decoding (mpv `hwdec=no`) for devices where hardware decode
