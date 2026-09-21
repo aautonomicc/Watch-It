@@ -164,6 +164,93 @@ void main() {
       expect(check.macDmgAsset?.size, 40);
     }, skip: !Platform.isLinux && !Platform.isWindows && !Platform.isMacOS);
 
+    test('newer release persists; a throttled later launch restores it',
+        () async {
+      final check = UpdateCheck.instance
+        ..client = MockClient((request) async => http.Response(
+            jsonEncode({
+              'tag_name': 'v0.1.0-alpha.57',
+              'html_url': 'https://example.com/tag',
+              'assets': [
+                {
+                  'name': 'Watch-It-0.1.0-alpha.57.apk',
+                  'browser_download_url': 'https://example.com/app.apk',
+                  'size': 10,
+                  'digest': 'sha256:abcdef0123',
+                },
+              ],
+            }),
+            200));
+      await check.maybeCheck();
+      expect(check.availableTag, 'v0.1.0-alpha.57');
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(UpdateCheck.availablePref), isNotNull);
+
+      // "Next launch" inside the 24h throttle: no request runs, but the
+      // About row / snackbar state comes back from the persisted result
+      // (previously it was in-memory only — a rolling blind window).
+      UpdateCheck.resetForTesting();
+      final relaunch = UpdateCheck.instance
+        ..client = MockClient((_) async {
+          fail('throttled launch must not hit the network');
+        });
+      var notified = 0;
+      relaunch.addListener(() => notified++);
+      await relaunch.maybeCheck();
+      expect(relaunch.availableTag, 'v0.1.0-alpha.57');
+      expect(relaunch.releaseUrl, 'https://example.com/tag');
+      expect(relaunch.apkAsset?.url, 'https://example.com/app.apk');
+      expect(relaunch.apkAsset?.size, 10);
+      expect(relaunch.apkAsset?.sha256, 'abcdef0123');
+      expect(notified, 1);
+
+      // Same launch, second call (app resume): already restored — quiet.
+      await relaunch.maybeCheck();
+      expect(notified, 1);
+    }, skip: !Platform.isLinux && !Platform.isWindows && !Platform.isMacOS);
+
+    test('persisted update is dropped once the app has caught up',
+        () async {
+      // The stored tag equals the running version — installed some
+      // other way since the check that stored it.
+      SharedPreferences.setMockInitialValues({
+        UpdateCheck.lastCheckPref: DateTime.now().millisecondsSinceEpoch,
+        UpdateCheck.availablePref: jsonEncode({
+          'tag': 'v0.1.0-alpha.56',
+          'url': 'https://example.com/tag',
+          'assets': [],
+        }),
+      });
+      final check = UpdateCheck.instance
+        ..client = MockClient((_) async {
+          fail('throttled launch must not hit the network');
+        });
+      await check.maybeCheck();
+      expect(check.availableTag, null);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(UpdateCheck.availablePref), null);
+    }, skip: !Platform.isLinux && !Platform.isWindows && !Platform.isMacOS);
+
+    test('an up-to-date check clears a stale announced update', () async {
+      // Restored as available (newer than the running build), but the
+      // fresh check says the latest release IS the running build — the
+      // row and the stored value must both go.
+      SharedPreferences.setMockInitialValues({
+        UpdateCheck.availablePref: jsonEncode({
+          'tag': 'v0.1.0-alpha.57',
+          'url': 'https://example.com/tag',
+          'assets': [],
+        }),
+      });
+      final check = UpdateCheck.instance
+        ..client = releaseClient('v0.1.0-alpha.56');
+      await check.maybeCheck();
+      expect(check.availableTag, null);
+      expect(check.assets, isEmpty);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(UpdateCheck.availablePref), null);
+    }, skip: !Platform.isLinux && !Platform.isWindows && !Platform.isMacOS);
+
     test('failure is silent and does not stamp the check time', () async {
       final check = UpdateCheck.instance
         ..client = MockClient((_) async => throw const SocketException('offline'));

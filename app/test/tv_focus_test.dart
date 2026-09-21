@@ -68,6 +68,19 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('card labels keep clearance from the focus ring stroke',
+      (tester) async {
+    // WiCardInk's ring paints inside the card bounds; edge-to-edge text
+    // would have its first/last glyphs painted over while focused.
+    await tester.pumpWidget(page(twoCards()));
+    await tester.pump();
+    final card = tester.getTopLeft(find.byType(PosterCard).first);
+    final title = tester.getTopLeft(find.text('First Film (2001)'));
+    expect(title.dx - card.dx, kCardLabelPadding.left);
+    expect(kCardLabelPadding.left, greaterThanOrEqualTo(4));
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('D-pad select activates the focused card', (tester) async {
     var tapped = 0;
     await tester.pumpWidget(page(twoCards(onFirst: () => tapped++)));

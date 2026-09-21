@@ -128,6 +128,41 @@ void main() {
   );
 
   testWidgets(
+    'focus ring sits OUTSIDE the focused control, never over its content',
+    (tester) async {
+      await tester.pumpWidget(
+        app(
+          Scaffold(
+            body: Center(
+              child: FilledButton(
+                autofocus: true,
+                onPressed: () {},
+                child: const Text('Play'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      // The focused render object is the button's visual surface (its
+      // Material), not the padded tap-target wrapper around it.
+      final button = tester.getRect(find.descendant(
+        of: find.byType(FilledButton),
+        matching: find.byType(Material),
+      ));
+      final ring = tester.getRect(
+        find.byKey(const ValueKey('tv-focus-ring')),
+      );
+      // Inflated by 3 = exactly the ring's own stroke width, so the
+      // stroke paints entirely outside the control's bounds (a ring
+      // inside them crossed label glyphs on cards and tight buttons —
+      // the Streamer tester's clipping report).
+      expect(ring, button.inflate(3));
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
+  testWidgets(
     'remote can move from Continue to Cancel without submitting',
     (tester) async {
       String? result = 'pending';

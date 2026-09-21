@@ -37,3 +37,58 @@ class WiQr extends StatelessWidget {
     );
   }
 }
+
+/// Content width for a dialog holding a QR: the usual 300, widened on
+/// short viewports (a TV is 960×540 logical) so the surrounding text
+/// wraps into fewer lines and leaves the QR its scannable height.
+double wiQrDialogWidth(BuildContext context) =>
+    MediaQuery.sizeOf(context).height < 560 ? 460 : 300;
+
+/// The white QR card the share/pairing dialogs show, sized to the height
+/// it is actually given: at [size] when there is room, shrinking down to
+/// [minSize] on small dialog viewports (a TV at 960×540 logical minus
+/// overscan margins leaves the dialog ~300px of content height — a fixed
+/// 220px QR pushed its own bottom third out of view).
+///
+/// Callers put this inside a bounded column as `Flexible(child: …)`;
+/// the [LayoutBuilder] then sees the free height left after the fixed
+/// content. [minSize] keeps the code scannable — below ~120px a dense
+/// pairing code stops reading reliably. On a viewport too small even
+/// for the floor, the whole card scales down as one unit (modules,
+/// margin and logo in proportion) instead of squeezing out of shape.
+class WiQrCard extends StatelessWidget {
+  const WiQrCard({
+    super.key,
+    required this.data,
+    required this.size,
+    this.minSize = 120,
+  });
+
+  final String data;
+
+  /// Natural module size, used whenever the dialog has room for it.
+  final double size;
+
+  final double minSize;
+
+  /// The white quiet-zone margin around the modules.
+  static const padding = 8.0;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) {
+          var qr = size;
+          if (constraints.maxHeight.isFinite) {
+            qr = (constraints.maxHeight - 2 * padding).clamp(minSize, size);
+          }
+          return FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Container(
+              color: Colors.white,
+              padding: const EdgeInsets.all(padding),
+              child: WiQr(data: data, size: qr),
+            ),
+          );
+        },
+      );
+}

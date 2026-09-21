@@ -126,7 +126,12 @@ class _TvFocusFrameState extends State<TvFocusFrame>
             next.height > frame.size.height * .6) {
           next = null;
         } else {
-          next = next.intersect(Offset.zero & frame.size);
+          // The ring sits OUTSIDE the focused control (3px stroke drawn
+          // inside an inflated rect) so it never paints over the
+          // control's own content — a ring inside the bounds crossed
+          // label glyphs on cards and tight buttons. Clamp AFTER
+          // inflating so a control at the frame edge keeps a ring.
+          next = next.inflate(3).intersect(Offset.zero & frame.size);
           if (next.isEmpty) next = null;
         }
       }
@@ -156,7 +161,7 @@ class _TvFocusFrameState extends State<TvFocusFrame>
           widget.child,
           if (_rect case final rect?)
             Positioned.fromRect(
-              rect: rect.deflate(2),
+              rect: rect,
               child: IgnorePointer(
                 child: ExcludeSemantics(
                   child: DecoratedBox(

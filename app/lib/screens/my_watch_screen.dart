@@ -272,9 +272,11 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
       builder: (context) => AlertDialog(
         title: Text(fresh ? 'Link created' : 'Add another device'),
         content: SizedBox(
-          width: 300,
-          child: SingleChildScrollView(
-              child: Column(
+          width: wiQrDialogWidth(context),
+          // No scroll view: a D-pad can't scroll one, so on a small TV
+          // viewport the QR bottom cropped away — it shrinks to fit
+          // instead (WiQrCard).
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
@@ -285,18 +287,14 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                 style: TextStyle(fontSize: 13, color: t.boneDim),
               ),
               const SizedBox(height: 16),
-              Container(
-                color: Colors.white,
-                padding: const EdgeInsets.all(8),
-                child: WiQr(data: invite, size: 200),
-              ),
+              Flexible(child: WiQrCard(data: invite, size: 200)),
               const SizedBox(height: 12),
               SelectableText(
                 invite,
                 style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
               ),
             ],
-          )),
+          ),
         ),
         actions: [
           TextButton.icon(

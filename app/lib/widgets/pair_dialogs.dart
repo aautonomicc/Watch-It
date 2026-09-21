@@ -82,49 +82,46 @@ class _PairCodeDialogState extends State<PairCodeDialog> {
     return AlertDialog(
       title: const Text('Pair this device'),
       content: SizedBox(
-        width: 300,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+        width: wiQrDialogWidth(context),
+        // No scroll view: a D-pad can't scroll one (no focusable child),
+        // so on a small TV viewport the QR bottom simply cropped away.
+        // The QR itself shrinks to the height the dialog really has.
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'On a phone that is already linked, open My W@tch, '
+              'choose "Link a new device", and scan this code. This '
+              'device then joins the same My W@tch — nothing to type.',
+              style: TextStyle(fontSize: 13, color: t.boneDim),
+            ),
+            const SizedBox(height: 16),
+            Flexible(child: WiQrCard(data: widget.code, size: 220)),
+            const SizedBox(height: 12),
+            if (_failure != null)
               Text(
-                'On a phone that is already linked, open My W@tch, '
-                'choose "Link a new device", and scan this code. This '
-                'device then joins the same My W@tch — nothing to type.',
-                style: TextStyle(fontSize: 13, color: t.boneDim),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                color: Colors.white,
-                padding: const EdgeInsets.all(8),
-                child: WiQr(data: widget.code, size: 220),
-              ),
-              const SizedBox(height: 12),
-              if (_failure != null)
-                Text(
-                  _failure!,
-                  style: TextStyle(fontSize: 13, color: t.rust),
-                )
-              else
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2)),
-                    const SizedBox(width: 10),
-                    Flexible(
-                      child: Text(
-                        'Waiting for a linked device… linking can take '
-                        'a minute or two after the scan.',
-                        style: TextStyle(fontSize: 12.5, color: t.ash),
-                      ),
+                _failure!,
+                style: TextStyle(fontSize: 13, color: t.rust),
+              )
+            else
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2)),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Text(
+                      'Waiting for a linked device… linking can take '
+                      'a minute or two after the scan.',
+                      style: TextStyle(fontSize: 12.5, color: t.ash),
                     ),
-                  ],
-                ),
-            ],
-          ),
+                  ),
+                ],
+              ),
+          ],
         ),
       ),
       actions: [
