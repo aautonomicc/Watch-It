@@ -551,7 +551,16 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
       children: [
         if (_tmdbNudge)
           TmdbNudgeBanner(
-            onOpenSettings: _openSettings,
+            // Opening Settings counts as acknowledging the banner too:
+            // on a TV remote the whole bar is the natural Select target
+            // (the small close button rarely gets focused), and without
+            // this the bar came back on every return to the home
+            // screen. The Settings → Metadata tile remains the way in.
+            onOpenSettings: () {
+              unawaited(AppSettings.setTmdbNudgeDismissed());
+              setState(() => _tmdbNudge = false);
+              _openSettings();
+            },
             onDismiss: () async {
               await AppSettings.setTmdbNudgeDismissed();
               if (mounted) setState(() => _tmdbNudge = false);
