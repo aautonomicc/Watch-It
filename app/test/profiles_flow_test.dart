@@ -168,8 +168,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Switch profile'), findsOneWidget);
-    expect(find.text('Colour scheme'), findsOneWidget);
     expect(find.text('Buffer size'), findsOneWidget);
+    // Below the playback toggles — scroll it into the lazy ListView.
+    await tester.scrollUntilVisible(
+        find.text('Colour scheme'), 300,
+        scrollable: find.byType(Scrollable).first);
+    expect(find.text('Colour scheme'), findsOneWidget);
     // The admin sections are gone entirely.
     expect(find.text('CONTENT'), findsNothing);
     expect(find.text('My Media'), findsNothing);

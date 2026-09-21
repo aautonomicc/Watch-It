@@ -17,6 +17,7 @@ import 'screens/settings_screen.dart';
 import 'screens/show_screen.dart';
 import 'screens/terms_screen.dart';
 import 'services/app_settings.dart';
+import 'services/impeller.dart';
 import 'services/tv_settings.dart';
 import 'services/connectivity.dart';
 import 'services/download_foreground.dart';
@@ -61,6 +62,10 @@ import 'widgets/watch_progress.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await TvSettings.instance.initialize();
+  // Cache the Tegra/Shield Impeller default so Settings can show why
+  // Graphics compatibility mode is on (the launch decision itself is
+  // Kotlin's, made before Dart runs).
+  await ImpellerSettings.initialize();
   MediaKit.ensureInitialized();
   // Statically linked Rust crates (self_encryption is GPL-3.0) and the
   // native media libs aren't in Flutter's registry — add them so the

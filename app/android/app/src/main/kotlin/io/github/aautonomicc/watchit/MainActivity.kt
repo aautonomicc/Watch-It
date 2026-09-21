@@ -17,6 +17,7 @@ import android.provider.OpenableColumns
 import androidx.core.app.NotificationManagerCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.FlutterShellArgs
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
@@ -26,6 +27,30 @@ class MainActivity : FlutterActivity() {
         private const val SAVE_DOCUMENT_REQUEST = 7002
         private const val VOICE_SEARCH_REQUEST = 7003
     }
+
+    // Flutter's Impeller renderer draws video as a black picture on
+    // Tegra GPUs (Nvidia Shield family — confirmed by tester A/B
+    // builds), so the engine gets --enable-impeller=false when the
+    // Settings toggle says so, or by default on known Tegra devices.
+    // The flag must be decided before the Dart isolate exists, hence
+    // reading shared_preferences' backing store directly here.
+    override fun getFlutterShellArgs(): FlutterShellArgs {
+        val args = super.getFlutterShellArgs()
+        if (impellerDisabled()) {
+            args.add("--enable-impeller=false")
+        }
+        return args
+    }
+
+    private fun impellerDisabled(): Boolean {
+        val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
+        val key = "flutter.disable_impeller_v1"
+        return if (prefs.contains(key)) prefs.getBoolean(key, false) else isTegraDevice()
+    }
+
+    private fun isTegraDevice(): Boolean =
+        (Build.MANUFACTURER ?: "").equals("NVIDIA", ignoreCase = true) ||
+            (Build.HARDWARE ?: "").lowercase().contains("tegra")
 
     private var channel: MethodChannel? = null
     private var mediaChannel: MethodChannel? = null
@@ -40,11 +65,18 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "watchit/device")
             .setMethodCallHandler { call, result ->
-                if (call.method == "isTelevision") {
-                    val mode = getSystemService(UI_MODE_SERVICE) as UiModeManager
-                    result.success(mode.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION)
-                } else {
-                    result.notImplemented()
+                when (call.method) {
+                    "isTelevision" -> {
+                        val mode = getSystemService(UI_MODE_SERVICE) as UiModeManager
+                        result.success(
+                            mode.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+                        )
+                    }
+                    // Settings shows the Graphics compatibility toggle's
+                    // device default with the same detection the launch
+                    // path uses.
+                    "impellerDefaultOff" -> result.success(isTegraDevice())
+                    else -> result.notImplemented()
                 }
             }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "watchit/voice")

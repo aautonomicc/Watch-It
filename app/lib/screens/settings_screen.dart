@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io' show exit;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:package_info_plus/package_info_plus.dart';
@@ -13,6 +14,7 @@ import '../services/download_manager.dart';
 import '../services/library_store.dart';
 import '../services/embedded_client.dart';
 import '../services/exit_info.dart';
+import '../services/impeller.dart';
 import '../services/metadata_service.dart';
 import '../services/network_pause.dart';
 import '../services/profiles.dart';
@@ -53,6 +55,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _version;
   int _bufferSizeMb = AppSettings.defaultBufferSizeMb;
   bool _softwareVideoDecode = false;
+
+  /// Effective Impeller opt-out + whether it comes from the device
+  /// default (Tegra) rather than an explicit choice — Android only.
+  bool _disableImpeller = false;
+  bool _impellerAutoOff = false;
+  bool get _showImpellerTile =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
   TmdbKeySource _tmdbKeySource = TmdbKeySource.none;
   int? _dataSizeBytes;
   bool _dataSizeKnown = false;
@@ -87,6 +96,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final lists = await LibraryStore.load();
     final bufferSizeMb = await AppSettings.bufferSizeMb();
     final softwareVideoDecode = await AppSettings.softwareVideoDecode();
+    final impellerDefaultOff =
+        _showImpellerTile && ImpellerSettings.deviceDefaultOff;
+    final disableImpeller = _showImpellerTile
+        ? await ImpellerSettings.explicit() ?? impellerDefaultOff
+        : false;
     final tmdbKeySource = await AppSettings.tmdbKeySource();
     await NetworkPause.instance.ensureLoaded();
     // Data tile subtitle: the running period total (best-effort —
@@ -97,6 +111,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _lists = lists;
         _bufferSizeMb = bufferSizeMb;
         _softwareVideoDecode = softwareVideoDecode;
+        _disableImpeller = disableImpeller;
+        _impellerAutoOff = impellerDefaultOff;
         _tmdbKeySource = tmdbKeySource;
         _dataUsageTotal = usage == null ? null : formatBytes(usage.total.total);
       });
@@ -706,6 +722,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     if (mounted) setState(() => _softwareVideoDecode = v);
                   },
                 ),
+                // Second compatibility escape hatch, Android only:
+                // Flutter's Impeller renderer itself blacks out video on
+                // Tegra GPUs (Nvidia Shield) — those devices default ON
+                // here and MainActivity reads the pref at launch.
+                if (_showImpellerTile)
+                  SwitchListTile(
+                    secondary: Icon(Icons.brush_outlined, color: t.accent),
+                    title: Text(
+                      'Graphics compatibility mode',
+                      style: TextStyle(color: t.bone, fontSize: 15),
+                    ),
+                    subtitle: Text(
+                      'Draws the app with Flutter\'s older renderer. Fixes '
+                      'video that plays sound with a black picture on the '
+                      'Nvidia Shield and other Tegra devices'
+                      '${_impellerAutoOff ? ' — turned on automatically for this device' : ''}. '
+                      'Takes effect the next time W@tch starts.',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                    value: _disableImpeller,
+                    onChanged: (v) async {
+                      await ImpellerSettings.setDisabled(v);
+                      if (mounted) setState(() => _disableImpeller = v);
+                    },
+                  ),
                 if (_isAdmin) ...[
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),

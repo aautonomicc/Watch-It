@@ -1061,6 +1061,13 @@ files stay install-global — a profile scopes only viewing state.
       Shield (Tegra X1) report; default off. A/B test builds on the
       alpha.101 release page isolate hardware decode vs the Impeller
       renderer while the tester narrows it down
+- [x] Impeller opt-out for Tegra devices (unreleased — ships next
+      release): the Shield A/B confirmed Impeller as the black-video
+      culprit, so MainActivity passes `--enable-impeller=false` to the
+      engine at launch — on by default on known Tegra devices (Nvidia
+      Shield family), overridable via the new Android-only **Graphics
+      compatibility mode** Settings switch beside Software video
+      decoding; takes effect on the next app start
 - [ ] Android TV rest: 10-foot layout mode, focus polish on the
       remaining screens
 - [ ] iOS build + TestFlight (FFI path required if sidecar chosen elsewhere)
