@@ -13,6 +13,7 @@ import 'package:watchit/screens/settings_screen.dart';
 import 'package:watchit/screens/terms_screen.dart';
 import 'package:watchit/services/app_settings.dart';
 import 'package:watchit/services/bundle.dart' show kTmdbAttributionNotice;
+import 'package:watchit/services/impeller.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/licenses.dart';
 import 'package:watchit/services/storage_usage.dart';
@@ -210,5 +211,83 @@ void main() {
     await tester.tap(tile);
     await tester.pumpAndSettle();
     expect(await AppSettings.softwareVideoDecode(), false);
+  });
+
+  testWidgets('Graphics compatibility toggle stores an explicit choice', (
+    tester,
+  ) async {
+    addTearDown(() => ImpellerSettings.deviceDefaultOff = false);
+    ImpellerSettings.deviceDefaultOff = false;
+    await pumpSettings(tester);
+    final tile = find.text('Graphics compatibility mode');
+    await tester.ensureVisible(tile);
+    await tester.pump();
+    // Directly below its sibling escape hatch.
+    expect(
+      tester.getTopLeft(tile).dy,
+      greaterThan(tester.getTopLeft(find.text('Software video decoding')).dy),
+    );
+    expect(
+      tester
+          .widget<SwitchListTile>(
+            find.ancestor(of: tile, matching: find.byType(SwitchListTile)),
+          )
+          .value,
+      false,
+    );
+
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+    expect(await ImpellerSettings.explicit(), true);
+    expect(await ImpellerSettings.effectiveDisabled(), true);
+
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+    // An explicit false is stored, not removed — it must keep beating a
+    // Tegra device default.
+    expect(await ImpellerSettings.explicit(), false);
+  });
+
+  testWidgets('Graphics compatibility defaults on for Tegra devices', (
+    tester,
+  ) async {
+    addTearDown(() => ImpellerSettings.deviceDefaultOff = false);
+    ImpellerSettings.deviceDefaultOff = true;
+    await pumpSettings(tester);
+    final tile = find.text('Graphics compatibility mode');
+    await tester.ensureVisible(tile);
+    await tester.pump();
+    expect(
+      tester
+          .widget<SwitchListTile>(
+            find.ancestor(of: tile, matching: find.byType(SwitchListTile)),
+          )
+          .value,
+      true,
+    );
+    expect(
+      find.textContaining('turned on automatically for this device'),
+      findsOneWidget,
+    );
+    // No explicit pref yet — the ON state is the device default.
+    expect(await ImpellerSettings.explicit(), null);
+    expect(await ImpellerSettings.effectiveDisabled(), true);
+
+    // Switching it off writes an explicit false that overrides Tegra.
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+    expect(await ImpellerSettings.explicit(), false);
+    expect(await ImpellerSettings.effectiveDisabled(), false);
+  });
+
+  test('effectiveDisabled: explicit choice beats the device default', () async {
+    addTearDown(() => ImpellerSettings.deviceDefaultOff = false);
+    ImpellerSettings.deviceDefaultOff = true;
+    expect(await ImpellerSettings.effectiveDisabled(), true);
+    await ImpellerSettings.setDisabled(false);
+    expect(await ImpellerSettings.effectiveDisabled(), false);
+    ImpellerSettings.deviceDefaultOff = false;
+    await ImpellerSettings.setDisabled(true);
+    expect(await ImpellerSettings.effectiveDisabled(), true);
   });
 }

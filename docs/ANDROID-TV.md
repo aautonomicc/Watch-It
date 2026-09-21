@@ -109,6 +109,24 @@ Nvidia Shield (Tegra X1). Default off; the subtitle points at the
 symptom. A/B test builds attached to the alpha.101 release page
 isolate hardware decode vs the Impeller renderer.
 
+## Graphics compatibility mode (unreleased — ships next release)
+
+The Shield A/B came back: the Impeller renderer itself is the
+black-video culprit on the Shield (the no-Impeller test build showed a
+picture; software decoding made no difference). The real fix is a
+per-device Impeller opt-out: MainActivity overrides
+`getFlutterShellArgs()` and passes `--enable-impeller=false` to the
+Flutter engine when the **Graphics compatibility mode** Settings switch
+(Android only, directly below Software video decoding) says so — and by
+default on known Tegra devices (`Build.MANUFACTURER == "NVIDIA"` or
+`Build.HARDWARE` containing `tegra`, i.e. the Shield family), where the
+switch shows as on automatically. The decision happens before the Dart
+isolate exists, so Kotlin reads the preference
+(`flutter.disable_impeller_v1` in the shared_preferences store; unset =
+device default) and owns the Tegra detection; Settings asks it over the
+`watchit/device` channel to display the same default. Changing the
+switch takes effect the next time the app is fully closed and reopened.
+
 ## Voice search
 
 The Search screen's app bar shows a microphone action on Android only —
