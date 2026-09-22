@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -576,12 +577,14 @@ void main() {
       expect(datamapPosts(), 1);
       expect(MyWatchSync.status.value.pendingMaps, 1);
 
-      // Still offline: the backoff skips the import, the cycle reports
-      // "in sync" while the map stays pending — the user's exact report.
+      // Still offline: the backoff skips the import; the headline now
+      // says so instead of "Everything is in sync." (which was the
+      // user's exact report while a map was still missing).
       await sync2.cycleForTesting();
       expect(datamapPosts(), 1);
       expect(MyWatchSync.status.value.pendingMaps, 1);
-      expect(MyWatchSync.status.value.lastSummary, 'Everything is in sync.');
+      expect(MyWatchSync.status.value.lastSummary,
+          'Up to date — except 1 item(s) still arriving.');
 
       // Connectivity returns: the backoff is dropped, the very next
       // cycle retries and the map lands.
@@ -636,6 +639,158 @@ void main() {
       await sync2.cycleForTesting();
       expect(datamapPosts(), 1);
       expect(MyWatchSync.status.value.pendingMaps, 0);
+    });
+
+    test('pending artwork surfaces, backs off honestly, and Sync now '
+        'retries it immediately', () async {
+      final artBytes = List<int>.generate(3000, (i) => (i * 3) % 251);
+      final sha = crypto.sha256.convert(artBytes).toString();
+      int artPosts() => fake.requests
+          .where((r) => r == 'POST /mywatch/art/fetch')
+          .length;
+      fake.myWatchSyncDevices = [
+        {
+          'agent_id': 'bb' * 32,
+          'doc': {
+            'v': 1,
+            'lists': const [],
+            'meta': {
+              'v': 1,
+              'rows': [
+                {
+                  'key': 'movie:custom:2020',
+                  'updated_ms': 7777,
+                  'title': 'Custom cut',
+                  'art': {'sha256': sha, 'size': artBytes.length},
+                },
+              ],
+            },
+          },
+          'maps': const {},
+        },
+      ];
+      // The file is not served yet: the row lands, the artwork fetch
+      // fails, and the miss is COUNTED instead of only logged.
+      await sync.syncNow();
+      expect(artPosts(), 1);
+      expect(MyWatchSync.status.value.pendingArt, 1);
+
+      // Next background cycle: the failed fetch sits on backoff — no
+      // retry, still pending, and the quiet headline says so instead
+      // of "Everything is in sync." (the tester's exact confusion:
+      // "nothing to sync" while artwork was visibly missing).
+      await sync.cycleForTesting();
+      expect(artPosts(), 1);
+      expect(MyWatchSync.status.value.pendingArt, 1);
+      expect(MyWatchSync.status.value.lastSummary,
+          'Up to date — except 1 item(s) still arriving.');
+
+      // Sync now clears the artwork backoff too (it only cleared the
+      // map backoff before): the fetch retries at once and, with the
+      // file now served, lands.
+      final served = File('${tempDir.path}/late_art')
+        ..writeAsBytesSync(artBytes);
+      fake.myWatchArtFiles = {sha: served.path};
+      final summary = await sync.syncNow();
+      expect(artPosts(), 2);
+      expect(summary, contains('1 artwork file(s) fetched'));
+      expect(MyWatchSync.status.value.pendingArt, 0);
+    });
+
+    test('Sync now during a running cycle waits it out and runs a fresh '
+        'pass instead of reporting "Nothing to sync."', () async {
+      // The gate parks the first cycle inside its network probe.
+      var gate = Completer<ClientHealth>();
+      var gated = true;
+      final sync2 = MyWatchSync(
+        api: MyWatchApi(base: FakeEmbeddedHttp.base, token: 't'),
+        health: () {
+          if (gated) {
+            gated = false;
+            return gate.future;
+          }
+          return Future.value(const ClientHealth(state: 'ready', peers: 5));
+        },
+        clientBase: FakeEmbeddedHttp.base,
+      );
+      int syncPulls() =>
+          fake.requests.where((r) => r == 'GET /mywatch/sync').length;
+      final background = sync2.cycleForTesting();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(syncPulls(), 1); // mid-cycle, parked on the gate
+      var manualDone = false;
+      final manual = sync2.syncNow().whenComplete(() => manualDone = true);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      // The press neither joined the running cycle nor bailed with
+      // "Nothing to sync." — it is waiting the cycle out.
+      expect(manualDone, isFalse);
+      expect(syncPulls(), 1);
+      gate.complete(const ClientHealth(state: 'ready', peers: 5));
+      await background;
+      final summary = await manual;
+      expect(summary, isNot('Nothing to sync.'));
+      expect(syncPulls(), 2); // the manual pass pulled fresh docs
+    });
+
+    test('device doc stamps land on the status notifier', () async {
+      fake.myWatchSyncDevices = [
+        {
+          'agent_id': 'bb' * 32,
+          'doc': {'v': 1, 'updated_ms': 424242, 'lists': const []},
+          'maps': const {},
+        },
+      ];
+      await sync.syncNow();
+      expect(MyWatchSync.status.value.docMsByAgent, {'bb' * 32: 424242});
+    });
+
+    test('map fetching reports i of N, and only when there is work',
+        () async {
+      final activities = <String>[];
+      void listen() {
+        final a = MyWatchSync.status.value.activity;
+        if (a != null) activities.add(a);
+      }
+
+      MyWatchSync.status.addListener(listen);
+      addTearDown(() => MyWatchSync.status.removeListener(listen));
+      final sync2 = MyWatchSync(
+        api: MyWatchApi(base: FakeEmbeddedHttp.base, token: 't'),
+        health: () async => const ClientHealth(state: 'ready', peers: 5),
+        clientBase: FakeEmbeddedHttp.base,
+      );
+      final a7 = FakeEmbeddedHttp.addrForByte(7);
+      final a8 = FakeEmbeddedHttp.addrForByte(8);
+      fake.myWatchSyncDevices = [
+        {
+          'agent_id': 'bb' * 32,
+          'doc': {
+            'v': 1,
+            'lists': [
+              {
+                'title': 'Movies',
+                'entries': [
+                  {'name': 'M.mp4', 'address': a7, 'added_ms': 1000},
+                  {'name': 'N.mp4', 'address': a8, 'added_ms': 1000},
+                ],
+              },
+            ],
+          },
+          'maps': {a7: base64Encode(const [7]), a8: base64Encode(const [8])},
+        },
+      ];
+      await sync2.cycleForTesting();
+      expect(activities, contains('Fetching data maps… (1 of 2)'));
+      expect(activities, contains('Fetching data maps… (2 of 2)'));
+
+      // Both maps stored now: the stage stays silent instead of
+      // claiming "Fetching data maps…" every cycle with nothing to do.
+      activities.clear();
+      await sync2.cycleForTesting();
+      expect(
+        activities.where((a) => a.startsWith('Fetching data maps')),
+        isEmpty,
+      );
     });
   });
 }

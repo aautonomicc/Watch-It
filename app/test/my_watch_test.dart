@@ -11,14 +11,28 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/models/media_list.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+import 'package:flutter/services.dart' show SystemChannels;
 import 'package:watchit/screens/my_watch_screen.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/my_watch_sync.dart';
+import 'package:watchit/services/tv_settings.dart';
 import 'package:watchit/theme/tokens.dart';
+import 'package:watchit/widgets/tv_dpad_focus.dart';
 
 import 'fake_embedded_http.dart';
 
 String _addr(int i) => i.toRadixString(16).padLeft(64, '0');
+
+/// Counts [MyWatchSync.deviceCameOnline] pokes without running cycles.
+class _SyncSpy extends MyWatchSync {
+  int deviceCameOnlineCalls = 0;
+
+  @override
+  void deviceCameOnline() {
+    deviceCameOnlineCalls++;
+  }
+}
 
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
@@ -258,6 +272,138 @@ void main() {
           jsonDecode(fake.myWatchAnnounces.last) as Map<String, dynamic>;
       expect(body['lists'], 1);
       expect(body['entries'], 2);
+      await close(tester);
+    });
+
+    testWidgets('sync activity card reports pending artwork', (tester) async {
+      MyWatchSync.status.value = const MyWatchSyncStatus(
+        supported: true,
+        linked: true,
+        agentState: 'ready',
+        lastSummary: 'Up to date — except 2 item(s) still arriving.',
+        pendingArt: 2,
+      );
+      await open(tester);
+      expect(find.textContaining('2 artwork file(s) still arriving'),
+          findsOneWidget);
+      expect(find.textContaining('except 2 item(s) still arriving'),
+          findsOneWidget);
+      // The pending line clears with the count.
+      MyWatchSync.status.value = const MyWatchSyncStatus(
+        supported: true,
+        linked: true,
+        agentState: 'ready',
+        lastSummary: 'Everything is in sync.',
+      );
+      await tester.pump();
+      expect(find.textContaining('artwork file(s) still arriving'),
+          findsNothing);
+      MyWatchSync.status.value = const MyWatchSyncStatus();
+      await tester.pump();
+      await close(tester);
+    });
+
+    testWidgets('device tiles show how fresh each device\'s sync data is',
+        (tester) async {
+      MyWatchSync.status.value = MyWatchSyncStatus(
+        supported: true,
+        linked: true,
+        agentState: 'ready',
+        docMsByAgent: {
+          'bb' * 32: DateTime.now().millisecondsSinceEpoch - 5 * 60 * 1000,
+        },
+      );
+      await open(tester);
+      // The remote device's tile carries the doc-age line; the local
+      // device never does (its own doc age is meaningless here).
+      expect(find.textContaining('Sync data updated 5 min ago'),
+          findsOneWidget);
+      MyWatchSync.status.value = const MyWatchSyncStatus();
+      await tester.pump();
+      await close(tester);
+    });
+
+    testWidgets(
+        'info rows are tappable (focusable on TV) and the activity card '
+        'copies the sync report', (tester) async {
+      // Clipboard writes ride SystemChannels.platform — give it a mock
+      // handler so the copy's await completes in the test zone.
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform, (call) async => null);
+      addTearDown(() => tester.binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null));
+      MyWatchSync.status.value = const MyWatchSyncStatus(
+        supported: true,
+        linked: true,
+        agentState: 'ready',
+        lastSummary: 'Everything is in sync.',
+      );
+      await open(tester);
+      // Without onTap a ListTile is skipped by focus traversal entirely
+      // — the scroll-back bug: nothing focusable above the buttons.
+      expect(
+          tester
+              .widget<ListTile>(find.widgetWithText(ListTile, 'Last sync'))
+              .onTap,
+          isNotNull);
+      expect(
+          tester
+              .widget<ListTile>(find.widgetWithText(ListTile, 'Linked since'))
+              .onTap,
+          isNotNull);
+      expect(
+          tester
+              .widget<ListTile>(
+                  find.widgetWithText(ListTile, 'Living-room laptop'))
+              .onTap,
+          isNotNull);
+      await tester.tap(find.text('Everything is in sync.'));
+      await tester.pump();
+      expect(find.text('Sync report copied'), findsOneWidget);
+      MyWatchSync.status.value = const MyWatchSyncStatus();
+      await tester.pumpAndSettle();
+      await close(tester);
+    });
+
+    testWidgets('TV mode lays the whole page out so the D-pad can scroll '
+        'back up past the unfocusable stretch', (tester) async {
+      TvSettings.instance = TvSettings(enabled: true);
+      addTearDown(() => TvSettings.instance = TvSettings());
+      tester.view.physicalSize = const Size(1000, 400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await open(tester);
+      expect(
+        tester.widget<ListView>(find.byType(ListView)).scrollCacheExtent,
+        const ScrollCacheExtent.pixels(kTvListCacheExtent),
+      );
+      // The bottom buttons exist without any scrolling having happened.
+      expect(find.text('Unlink this device', skipOffstage: false),
+          findsOneWidget);
+      await close(tester);
+    });
+
+    testWidgets('a linked device flipping online triggers an immediate '
+        'sync cycle', (tester) async {
+      final spy = _SyncSpy();
+      final previous = MyWatchSync.instance;
+      MyWatchSync.instance = spy;
+      addTearDown(() => MyWatchSync.instance = previous);
+      await open(tester);
+      expect(spy.deviceCameOnlineCalls, 0);
+      // The offline laptop comes online; the page's 5s poll sees it.
+      final devices = fake.myWatchStatus['devices'] as List;
+      devices[1] = <String, Object>{
+        ...(devices[1] as Map).cast<String, Object>(),
+        'online': true,
+      };
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      expect(spy.deviceCameOnlineCalls, 1);
+      // No further flips → no further pokes.
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      expect(spy.deviceCameOnlineCalls, 1);
       await close(tester);
     });
   });

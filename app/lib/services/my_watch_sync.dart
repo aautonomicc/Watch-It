@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import '../db/app_database.dart';
 import '../models/media_list.dart';
 import 'channel_service.dart';
+import 'connectivity.dart';
 import 'datamap_import.dart';
 import 'embedded_client.dart';
 import 'library_store.dart';
@@ -93,7 +94,11 @@ class MyWatchSync {
   final String? _clientBase;
 
   Timer? _timer;
-  bool _cycling = false;
+
+  /// The in-flight cycle, when one is running. Background ticks join
+  /// it; [syncNow] waits it out and runs a fresh pass instead — joining
+  /// would report on work that started before the press.
+  Future<SyncCycleResult?>? _running;
 
   /// Problems collected while the current cycle runs — published into
   /// [status] at the cycle boundary.
@@ -163,6 +168,19 @@ class MyWatchSync {
   /// [MyWatchSyncStatus.pendingMaps].
   int _pendingMaps = 0;
 
+  /// Artwork files the last cycle still wanted but could not fetch
+  /// (fetch failed, waiting on backoff, or no owner published them
+  /// yet). Surfaced on [MyWatchSyncStatus.pendingArt] — without it the
+  /// card said "Everything is in sync." while posters were visibly
+  /// missing, the tester's "nothing to sync with artwork pending".
+  int _pendingArt = 0;
+
+  /// Per linked device, the `updated_ms` stamp of its last-seen sync
+  /// document — how fresh that device's shared data is, independent of
+  /// its heartbeat. Surfaced on [MyWatchSyncStatus.docMsByAgent] for
+  /// the device tiles.
+  Map<String, int> _docMsByAgent = const {};
+
   /// Failed artwork fetches retry with a PROGRESSIVE backoff — see
   /// [artRetryDelayMs]. Keyed by manifest sha256; the counter clears on
   /// success.
@@ -206,22 +224,69 @@ class MyWatchSync {
   /// One immediate cycle (the screen's Sync now action). Returns a
   /// user-readable summary, or throws [MyWatchApiException].
   ///
-  /// A manual sync is an explicit "try again now": the map-import
-  /// backoff is dropped first so a map that failed minutes ago is
-  /// retried this cycle instead of silently skipped (which read as
-  /// "Everything is in sync." while a map was still missing).
+  /// A background cycle may be mid-flight when the user presses Sync
+  /// now — a receiving cycle can run for minutes, and reporting
+  /// "Nothing to sync." while it worked was the tester's exact
+  /// confusion — so the press waits it out and then runs a fresh full
+  /// pass ([ChannelService.checkNow] precedent).
+  ///
+  /// A manual sync is also an explicit "try again now": the map-import
+  /// AND artwork retry backoffs are dropped first, so a map or poster
+  /// that failed minutes ago is retried this cycle instead of silently
+  /// skipped (which read as "Everything is in sync." while something
+  /// was still missing).
   Future<String> syncNow() async {
+    final running = _running;
+    if (running != null) {
+      try {
+        await running;
+      } catch (_) {
+        // The starter of that cycle owns its error.
+      }
+    }
     _mapRetryAt.clear();
+    _artRetryAt.clear();
+    _artFailures.clear();
     final result = await _cycle(rethrowErrors: true);
-    return result == null ? 'Nothing to sync.' : summarize(result);
+    return result == null
+        ? 'Nothing to sync.'
+        : summarize(result,
+            pendingMaps: _pendingMaps, pendingArt: _pendingArt);
+  }
+
+  /// The app just came back to the foreground: check right away instead
+  /// of waiting out the period (phones sit frozen between resumes, so
+  /// the periodic timer alone can leave the first sync a while away).
+  void onAppResumed() {
+    unawaited(_cycle());
+  }
+
+  /// Run a cycle the moment the Autonomi connection comes back — the
+  /// cycle's own connectivity transition also clears the retry
+  /// backoffs, so maps and artwork that failed offline retry at once.
+  void bindConnectivity(ConnectivityMonitor monitor) {
+    monitor.addListener(() {
+      if (!monitor.offline) unawaited(_cycle());
+    });
+  }
+
+  /// A linked device just flipped online (the My W@tch screen's poll
+  /// saw it): sync now, so a user watching both screens sees them
+  /// converge without waiting out the period.
+  void deviceCameOnline() {
+    unawaited(_cycle());
   }
 
   /// One plain background cycle, without the manual-sync backoff reset.
   @visibleForTesting
   Future<SyncCycleResult?> cycleForTesting() => _cycle();
 
-  /// One-line, user-readable outcome of a finished cycle.
-  static String summarize(SyncCycleResult result) {
+  /// One-line, user-readable outcome of a finished cycle. The quiet
+  /// outcome is only "Everything is in sync." when nothing is still
+  /// pending — with maps or artwork still on their way the honest
+  /// headline is "up to date, except…".
+  static String summarize(SyncCycleResult result,
+      {int pendingMaps = 0, int pendingArt = 0}) {
     final parts = <String>[
       if (result.entriesAdded > 0) '${result.entriesAdded} added',
       if (result.entriesRemoved > 0) '${result.entriesRemoved} removed',
@@ -239,7 +304,13 @@ class MyWatchSync {
       if (result.channelsChanged > 0)
         '${result.channelsChanged} channel subscription(s) updated',
     ];
-    return parts.isEmpty ? 'Everything is in sync.' : 'Synced: ${parts.join(', ')}.';
+    if (parts.isEmpty) {
+      final pending = pendingMaps + pendingArt;
+      return pending == 0
+          ? 'Everything is in sync.'
+          : 'Up to date — except $pending item(s) still arriving.';
+    }
+    return 'Synced: ${parts.join(', ')}.';
   }
 
   /// Update the live status mid-cycle: [what] is the stage now running,
@@ -257,13 +328,28 @@ class MyWatchSync {
       lastCycleAtMs: s.lastCycleAtMs,
       lastSummary: s.lastSummary,
       pendingMaps: s.pendingMaps,
+      pendingArt: s.pendingArt,
+      docMsByAgent: s.docMsByAgent,
       problems: s.problems,
     );
   }
 
-  Future<SyncCycleResult?> _cycle({bool rethrowErrors = false}) async {
-    if (_cycling) return null;
-    _cycling = true;
+  Future<SyncCycleResult?> _cycle({bool rethrowErrors = false}) {
+    final running = _running;
+    if (running != null) {
+      // A tick during a cycle joins it (never two at once); its error,
+      // if any, belongs to whoever started it.
+      return running.catchError((_) => null);
+    }
+    final run = _cycleBody(rethrowErrors: rethrowErrors);
+    _running = run;
+    unawaited(run.then((_) {}, onError: (_) {}).whenComplete(() {
+      _running = null;
+    }));
+    return run;
+  }
+
+  Future<SyncCycleResult?> _cycleBody({required bool rethrowErrors}) async {
     try {
       final link = await _api.status();
       if (!link.supported || !link.linked || link.state != 'ready') {
@@ -276,6 +362,8 @@ class MyWatchSync {
           lastCycleAtMs: status.value.lastCycleAtMs,
           lastSummary: status.value.lastSummary,
           pendingMaps: status.value.pendingMaps,
+          pendingArt: status.value.pendingArt,
+          docMsByAgent: status.value.docMsByAgent,
           problems: status.value.problems,
         );
         return null;
@@ -292,6 +380,8 @@ class MyWatchSync {
         lastCycleAtMs: status.value.lastCycleAtMs,
         lastSummary: status.value.lastSummary,
         pendingMaps: status.value.pendingMaps,
+        pendingArt: status.value.pendingArt,
+        docMsByAgent: status.value.docMsByAgent,
         problems: status.value.problems,
       );
       SyncCycleResult? result;
@@ -306,8 +396,13 @@ class MyWatchSync {
           agentState: link.state,
           lastSyncMs: link.lastSyncMs,
           lastCycleAtMs: DateTime.now().millisecondsSinceEpoch,
-          lastSummary: result == null ? null : summarize(result),
+          lastSummary: result == null
+              ? null
+              : summarize(result,
+                  pendingMaps: _pendingMaps, pendingArt: _pendingArt),
           pendingMaps: _pendingMaps,
+          pendingArt: _pendingArt,
+          docMsByAgent: _docMsByAgent,
           problems: List.unmodifiable(_problems),
         );
       }
@@ -324,6 +419,8 @@ class MyWatchSync {
         lastCycleAtMs: DateTime.now().millisecondsSinceEpoch,
         lastSummary: s.lastSummary,
         pendingMaps: s.pendingMaps,
+        pendingArt: s.pendingArt,
+        docMsByAgent: s.docMsByAgent,
         problems: List.unmodifiable(
             [...s.problems.where((p) => !p.startsWith('Sync failed:')),
                 'Sync failed: $e']),
@@ -331,8 +428,6 @@ class MyWatchSync {
       if (rethrowErrors) rethrow;
       debugPrint('mywatch sync cycle failed: $e');
       return null;
-    } finally {
-      _cycling = false;
     }
   }
 
@@ -353,6 +448,13 @@ class MyWatchSync {
 
     // 2. Merge every remote document in.
     final remote = await _api.syncDocs();
+    // Each device's doc stamp = how fresh its shared data is (its
+    // heartbeat proves presence, not that its library reached us) —
+    // shown on the device tiles.
+    _docMsByAgent = {
+      for (final d in remote)
+        if (d.doc['updated_ms'] case final int ms when ms > 0) d.agentId: ms,
+    };
     _setActivity('Merging changes from your devices…');
     final merge = mergeRemoteDocs(
       lists: lists,
@@ -391,7 +493,9 @@ class MyWatchSync {
     }
 
     // 4. Fetch missing data maps for entries we now hold, so they play.
-    _setActivity('Fetching data maps…');
+    // The activity line is set inside, per import ("i of N") — setting
+    // it unconditionally here showed "Fetching data maps…" every cycle
+    // even when there was nothing to fetch.
     try {
       result = result.copyWith(
         mapsImported: await _importMissingMaps(lists, remote, now),
@@ -469,18 +573,26 @@ class MyWatchSync {
 
     // 6. Artwork: the doc only carries manifests; pull missing bytes
     // from a linked device — user posters under fresh `user_` names,
-    // TMDB files under their original shared names.
+    // TMDB files under their original shared names. Wanted files that
+    // did NOT land (failed, backed off, no owner yet) are counted so
+    // the card can say so instead of "everything is in sync".
     var artFetched = 0;
+    var artPending = 0;
     try {
-      artFetched += await _fetchMissingArt(winners, remote, status, now);
+      final r = await _fetchMissingArt(winners, remote, status, now);
+      artFetched += r.fetched;
+      artPending += r.pending;
     } catch (e) {
       _problems.add('Fetching artwork failed: $e');
     }
     try {
-      artFetched += await _fetchMissingTmdbArt(remote, status, now);
+      final r = await _fetchMissingTmdbArt(remote, status, now);
+      artFetched += r.fetched;
+      artPending += r.pending;
     } catch (e) {
       _problems.add('Fetching artwork failed: $e');
     }
+    _pendingArt = artPending;
     result = result.copyWith(artFetched: artFetched);
 
     // 6b. Channel subscriptions travel between devices too — as
@@ -622,16 +734,23 @@ class MyWatchSync {
       }
     }
     // Child-map imports need the Autonomi network: when connectivity
-    // just came back, drop the backoff so maps that failed offline are
-    // retried right now instead of waiting out up to [mapRetryMs].
+    // just came back, drop the backoffs (artwork's too — its fetches
+    // fail the same way offline) so everything that failed while the
+    // network was down retries right now instead of waiting out up to
+    // [mapRetryMs].
     final netOk = await _networkOk();
-    if (netOk && _netWasOk == false && _mapRetryAt.isNotEmpty) {
+    if (netOk &&
+        _netWasOk == false &&
+        (_mapRetryAt.isNotEmpty || _artRetryAt.isNotEmpty)) {
       _mapRetryAt.clear();
-      debugPrint('mywatch sync: connectivity returned — retrying map imports');
+      _artRetryAt.clear();
+      _artFailures.clear();
+      debugPrint(
+          'mywatch sync: connectivity returned — retrying pending imports');
     }
     _netWasOk = netOk;
-    var imported = 0;
     var pending = 0;
+    final toImport = <MapEntry<String, String>>[];
     for (final entry in maps.entries) {
       final addr = entry.key;
       if (!held.contains(addr)) continue;
@@ -640,14 +759,19 @@ class MyWatchSync {
         pending++;
         continue;
       }
+      toImport.add(entry);
+    }
+    var imported = 0;
+    for (final (i, entry) in toImport.indexed) {
+      _setActivity('Fetching data maps… (${i + 1} of ${toImport.length})');
       try {
         await importDatamapBytes(base64.decode(entry.value),
             base: _clientBase);
         imported++;
       } catch (e) {
         pending++;
-        _mapRetryAt[addr] = nowMs + mapRetryMs;
-        debugPrint('mywatch sync: map import for $addr failed: $e');
+        _mapRetryAt[entry.key] = nowMs + mapRetryMs;
+        debugPrint('mywatch sync: map import for ${entry.key} failed: $e');
       }
     }
     _pendingMaps = pending;
@@ -786,7 +910,7 @@ class MyWatchSync {
   /// real networks (a reachable device often shows offline), so it must
   /// never gate the attempt — the transfer's own timeouts and the retry
   /// backoff bound the cost of a dead candidate.
-  Future<int> _fetchMissingArt(
+  Future<({int fetched, int pending})> _fetchMissingArt(
     List<RemoteMetaRow> winners,
     List<RemoteSyncDoc> remote,
     MyWatchStatus status,
@@ -797,6 +921,7 @@ class MyWatchSync {
         if (!d.isSelf && d.online) d.agentId,
     };
     var fetched = 0;
+    var pending = 0;
     for (final w in winners) {
       final art = w.art;
       if (art == null || art.size > maxArtBytes) continue;
@@ -810,14 +935,21 @@ class MyWatchSync {
         final info = await _posterInfo(current);
         if (info != null && info.sha256 == art.sha256) continue;
       }
-      if ((_artRetryAt[art.sha256] ?? 0) > nowMs) continue;
+      if ((_artRetryAt[art.sha256] ?? 0) > nowMs) {
+        pending++;
+        continue;
+      }
       final owners = [
         for (final d in remote)
           for (final r in remoteMetaWinners([d]))
             if (r.key == w.key && r.art?.sha256 == art.sha256) d.agentId,
       ]..sort((a, b) =>
           (online.contains(b) ? 1 : 0) - (online.contains(a) ? 1 : 0));
-      if (owners.isEmpty) continue;
+      if (owners.isEmpty) {
+        // Wanted, but no current doc names an owner — still on its way.
+        pending++;
+        continue;
+      }
       _setActivity('Fetching artwork…');
       Object? failure;
       // Two candidates bound the worst case — every dead one costs the
@@ -842,13 +974,14 @@ class MyWatchSync {
         }
       }
       if (failure != null) {
+        pending++;
         _artFetchFailed(art.sha256, nowMs);
         _problems.add(
             'Artwork for "${w.title ?? w.key}" could not be fetched: $failure');
         debugPrint('mywatch sync: artwork ${art.sha256} fetch failed: $failure');
       }
     }
-    return fetched;
+    return (fetched: fetched, pending: pending);
   }
 
   // ---- TMDB metadata for keyless devices --------------------------------
@@ -978,13 +1111,13 @@ class MyWatchSync {
   /// under the original TMDB name — episodes of one season share their
   /// season poster through it — with the same online-first owner
   /// ordering and retry backoff as the user-artwork pull.
-  Future<int> _fetchMissingTmdbArt(
+  Future<({int fetched, int pending})> _fetchMissingTmdbArt(
     List<RemoteSyncDoc> remote,
     MyWatchStatus status,
     int nowMs,
   ) async {
     final manifest = remoteTmdbFiles(remote);
-    if (manifest.isEmpty) return 0;
+    if (manifest.isEmpty) return (fetched: 0, pending: 0);
     final wanted = await _referencedArtFiles();
     final online = {
       for (final d in status.devices)
@@ -992,11 +1125,15 @@ class MyWatchSync {
     };
     final dir = await (postersDirOverride ?? defaultPostersDir)();
     var fetched = 0;
+    var pending = 0;
     for (final f in manifest.values) {
       if (!wanted.contains(f.name) || f.size > maxArtBytes) continue;
       final target = File('${dir.path}/${f.name}');
       if (target.existsSync()) continue;
-      if ((_artRetryAt[f.sha256] ?? 0) > nowMs) continue;
+      if ((_artRetryAt[f.sha256] ?? 0) > nowMs) {
+        pending++;
+        continue;
+      }
       _setActivity('Fetching artwork…');
       final owners = [...f.owners]..sort((a, b) =>
           (online.contains(b) ? 1 : 0) - (online.contains(a) ? 1 : 0));
@@ -1020,13 +1157,14 @@ class MyWatchSync {
         }
       }
       if (failure != null) {
+        pending++;
         _artFetchFailed(f.sha256, nowMs);
         _problems.add('Artwork "${f.name}" could not be fetched: $failure');
         debugPrint('mywatch sync: artwork ${f.sha256} fetch failed: $failure');
       }
     }
     if (fetched > 0) MetadataService.instance.notifyExternalSeed();
-    return fetched;
+    return (fetched: fetched, pending: pending);
   }
 
   /// TMDB-named artwork files any found cache row references — the set
@@ -2214,6 +2352,8 @@ class MyWatchSyncStatus {
     this.lastCycleAtMs,
     this.lastSummary,
     this.pendingMaps = 0,
+    this.pendingArt = 0,
+    this.docMsByAgent = const {},
     this.problems = const [],
   });
 
@@ -2247,6 +2387,15 @@ class MyWatchSyncStatus {
   /// after the last cycle (import failed or waiting on retry) — those
   /// titles cannot play on this device yet.
   final int pendingMaps;
+
+  /// Artwork files the last cycle still wanted but could not fetch
+  /// (failed, waiting on backoff, or no owner online yet) — the card
+  /// must not claim "everything is in sync" while these are missing.
+  final int pendingArt;
+
+  /// Per linked device (agent id), the `updated_ms` stamp of its
+  /// last-seen sync document — how fresh that device's shared data is.
+  final Map<String, int> docMsByAgent;
 
   /// What went wrong (or could not fit) in the last cycle.
   final List<String> problems;
