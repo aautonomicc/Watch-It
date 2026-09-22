@@ -770,8 +770,8 @@ implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → Channels.
       with the permanence trade-off on the publish page). Subscribe
       keeps working everywhere; iOS stays subscribe-only until the app
       ships there at all.
-- [ ] ~~Channel avatars~~ (shipped alpha.70), multi-owner channels,
-      comments (parking lot)
+- [x] Channel avatars (shipped alpha.70 — the channel profile:
+      circular avatar, author line, info card)
 
 ## Music (shipped from 2026-09-01, v0.1.0-alpha.76 onward)
 
@@ -1124,6 +1124,11 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
 - Channel directory (moved here 2026-09-22; deliberately NOT in v1 —
   codes only; a curated directory would be a separate repo/site with
   its own vetting)
+- Multi-owner channels (moved here 2026-09-22; a channel is a single
+  Ed25519 identity today — shared ownership needs a key-sharing or
+  multi-signature design)
+- Channel comments (moved here 2026-09-22; was tagged "parking lot"
+  inline on the channels checklist)
 - tvOS (Apple TV) layout — Android TV is now in Phase 4
 - Trakt scrobbling
 - ~~Music lists~~ — **shipped** (alpha.76–.79, see the Music section
