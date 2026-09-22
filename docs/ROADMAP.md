@@ -708,7 +708,6 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       on-screen keyboard, monospace field, Enter submits) and invite
       codes are case-insensitive end-to-end; the QR-scan button is
       hidden on cameraless TVs
-- [ ] My W@tch on iOS (stubbed out today)
 - [ ] Sync while apart: devices must currently be online together —
       no relay/mailbox in the middle (by design, for now)
 
@@ -1027,9 +1026,9 @@ files stay install-global — a profile scopes only viewing state.
 
 ## Phase 4 — Android TV & polish
 
-(The "iOS build + TestFlight" item was removed 2026-09-22 — re-add it
-when we go for an iOS version. The v1.0 six-platform goal below still
-includes iOS.)
+(The "iOS build + TestFlight" and "My W@tch on iOS (stubbed out
+today)" items were removed 2026-09-22 — re-add them when we go for an
+iOS version. The v1.0 six-platform goal below still includes iOS.)
 - [x] Android TV first cut (alpha.95): `LEANBACK_LAUNCHER` entry + TV
       banner (recomposed after the release into a centred
       bucket-and-wordmark lockup), leanback/touchscreen features marked
