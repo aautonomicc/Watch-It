@@ -701,4 +701,27 @@ void main() {
       expect(actions.stones, isEmpty);
     });
   });
+
+  group('summarize', () {
+    test('quiet cycle with nothing pending is "in sync"', () {
+      expect(MyWatchSync.summarize(const SyncCycleResult()),
+          'Everything is in sync.');
+    });
+
+    test('quiet cycle with pending maps/artwork is honest about it', () {
+      expect(
+        MyWatchSync.summarize(const SyncCycleResult(),
+            pendingMaps: 1, pendingArt: 2),
+        'Up to date — except 3 item(s) still arriving.',
+      );
+    });
+
+    test('a cycle that did work keeps the work summary', () {
+      expect(
+        MyWatchSync.summarize(const SyncCycleResult(entriesAdded: 2),
+            pendingArt: 1),
+        'Synced: 2 added.',
+      );
+    });
+  });
 }

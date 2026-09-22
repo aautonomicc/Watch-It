@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import '../widgets/wi_qr.dart';
 import '../widgets/device_name_dialog.dart';
@@ -62,11 +63,16 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
     super.dispose();
   }
 
+  /// Linked devices seen online at the previous poll — the flip
+  /// detector below compares against it.
+  Set<String>? _prevOnline;
+
   Future<void> _load({bool announce = false, bool quiet = false}) async {
     if (!quiet) setState(() => _error = null);
     try {
       if (announce) await _announceLibrary();
       final status = await _api.status();
+      _noteOnlineFlips(status);
       // Unchanged snapshot on a background refresh → no rebuild (also
       // lets widget tests settle despite the periodic timer).
       if (mounted && status.raw != _status?.raw) {
@@ -74,6 +80,23 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
       }
     } catch (e) {
       if (mounted && !quiet) setState(() => _error = '$e');
+    }
+  }
+
+  /// While this page polls (every 5s), a linked device flipping to
+  /// online triggers an immediate sync cycle — the user staring at both
+  /// screens should see them converge now, not after the background
+  /// period runs out.
+  void _noteOnlineFlips(MyWatchStatus status) {
+    final online = <String>{
+      for (final d in status.devices)
+        if (!d.isSelf && d.online) d.agentId,
+    };
+    final prev = _prevOnline;
+    _prevOnline = online;
+    if (!status.linked || prev == null) return;
+    if (online.difference(prev).isNotEmpty) {
+      MyWatchSync.instance.deviceCameOnline();
     }
   }
 
@@ -339,6 +362,12 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
       appBar: AppBar(title: const Text('My W@tch')),
       body: ListView(
         padding: const EdgeInsets.all(16),
+        // TV: lay the whole (short) list out — D-pad scrolling advances
+        // by focus, and a lazy list stops laying out rows past its
+        // cache (the Settings ABOUT fix, same class here).
+        scrollCacheExtent: TvSettings.instance.enabled
+            ? const ScrollCacheExtent.pixels(kTvListCacheExtent)
+            : null,
         children: [
           if (_error != null)
             Padding(
@@ -530,6 +559,11 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
               : relativeTime(status.lastSyncMs),
           style: TextStyle(color: t.boneDim),
         ),
+        // Tappable so the row is FOCUSABLE (the Settings version-row
+        // pattern): with nothing focusable above the bottom buttons, a
+        // TV D-pad could never scroll this page back up. The tap
+        // itself refreshes the view.
+        onTap: () => _load(),
       ),
       // Live activity: what the background cycle is doing right now,
       // then the last cycle's outcome and anything that went wrong.
@@ -549,6 +583,14 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                 .split('.')
                 .first,
             style: TextStyle(color: t.boneDim),
+          ),
+          // Focusable stepping stone for the TV D-pad; the tap copies
+          // the date for a bug report.
+          onTap: () => _copyLine(
+            DateTime.fromMillisecondsSinceEpoch(status.linkedSinceMs!)
+                .toLocal()
+                .toString(),
+            'Linked-since date copied',
           ),
         ),
       const SizedBox(height: 8),
@@ -574,7 +616,17 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
           ),
         )
       else
-        for (final device in status.devices) _deviceTile(t, device),
+        // Doc ages come from the sync service's notifier, so the tiles
+        // refresh when a cycle sees fresher data.
+        ValueListenableBuilder<MyWatchSyncStatus>(
+          valueListenable: MyWatchSync.status,
+          builder: (context, s, _) => Column(
+            children: [
+              for (final device in status.devices)
+                _deviceTile(t, device, s.docMsByAgent[device.agentId]),
+            ],
+          ),
+        ),
       const SizedBox(height: 16),
       OutlinedButton.icon(
         icon: const Icon(Icons.sync),
@@ -615,11 +667,34 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
     ];
   }
 
+  /// Copy [text] to the clipboard and confirm with [note] — the useful
+  /// tap for the info rows (and what makes them focusable on TV).
+  Future<void> _copyLine(String text, String note) async {
+    final messenger = ScaffoldMessenger.of(context);
+    await Clipboard.setData(ClipboardData(text: text));
+    messenger.showSnackBar(SnackBar(content: Text(note)));
+  }
+
+  /// The full sync report as plain text — for pasting into a bug
+  /// report.
+  static String syncReportText(MyWatchSyncStatus s) => [
+        s.syncing
+            ? (s.activity ?? 'Syncing…')
+            : (s.lastSummary ?? 'Waiting for the first sync cycle…'),
+        if (!s.syncing && s.lastCycleAtMs != null)
+          'Checked ${relativeTime(s.lastCycleAtMs)}',
+        if (s.pendingMaps > 0) '${s.pendingMaps} data map(s) pending',
+        if (s.pendingArt > 0) '${s.pendingArt} artwork file(s) pending',
+        ...s.problems,
+      ].join('\n');
+
   /// The sync progress card: a spinner + stage while a cycle runs, the
   /// last outcome with its time while idle, and every problem the last
   /// cycle hit (edits that did not fit the document, artwork that could
   /// not be fetched, publish failures) — sync trouble used to be
-  /// invisible outside the debug log.
+  /// invisible outside the debug log. Tappable (focusable on TV, where
+  /// this page otherwise could not scroll back up); the tap copies the
+  /// report for a bug report.
   Widget _syncActivityCard(WiTokens t, MyWatchSyncStatus s) {
     final headline = s.syncing
         ? (s.activity ?? 'Syncing…')
@@ -627,76 +702,101 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
     return Card(
       color: t.ink2,
       margin: const EdgeInsets.symmetric(vertical: 8),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                if (s.syncing)
-                  const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                else
-                  Icon(
-                    s.problems.isEmpty && s.pendingMaps == 0
-                        ? Icons.check_circle_outline
-                        : Icons.warning_amber_outlined,
-                    size: 16,
-                    color: s.problems.isNotEmpty
-                        ? t.rust
-                        : s.pendingMaps > 0
-                            ? WiTokens.channelAmber
-                            : t.signalOk,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _copyLine(syncReportText(s), 'Sync report copied'),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  if (s.syncing)
+                    const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                  else
+                    Icon(
+                      s.problems.isEmpty &&
+                              s.pendingMaps == 0 &&
+                              s.pendingArt == 0
+                          ? Icons.check_circle_outline
+                          : Icons.warning_amber_outlined,
+                      size: 16,
+                      color: s.problems.isNotEmpty
+                          ? t.rust
+                          : s.pendingMaps > 0 || s.pendingArt > 0
+                              ? WiTokens.channelAmber
+                              : t.signalOk,
+                    ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(headline,
+                        style: TextStyle(fontSize: 13, color: t.bone)),
                   ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(headline,
-                      style: TextStyle(fontSize: 13, color: t.bone)),
-                ),
-              ],
-            ),
-            if (!s.syncing && s.lastCycleAtMs != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4, left: 24),
-                child: Text(
-                  'Checked ${relativeTime(s.lastCycleAtMs)}',
-                  style: TextStyle(fontSize: 11.5, color: t.ash),
-                ),
+                ],
               ),
-            // Maps the library needs but this device could not fetch yet
-            // (usually a connection hiccup) — without this line the card
-            // says "Everything is in sync." while a title cannot play.
-            if (s.pendingMaps > 0)
-              Padding(
-                padding: const EdgeInsets.only(top: 6, left: 24),
-                child: Text(
-                  '${s.pendingMaps} data map(s) pending — those titles '
-                  "can't play on this device yet. Retrying automatically; "
-                  'Sync now retries immediately.',
-                  style: const TextStyle(
-                      fontSize: 11.5, color: WiTokens.channelAmber),
+              if (!s.syncing && s.lastCycleAtMs != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, left: 24),
+                  child: Text(
+                    'Checked ${relativeTime(s.lastCycleAtMs)}',
+                    style: TextStyle(fontSize: 11.5, color: t.ash),
+                  ),
                 ),
-              ),
-            for (final p in s.problems)
-              Padding(
-                padding: const EdgeInsets.only(top: 6, left: 24),
-                child: Text(p, style: TextStyle(fontSize: 11.5, color: t.rust)),
-              ),
-          ],
+              // Maps the library needs but this device could not fetch
+              // yet (usually a connection hiccup) — without this line
+              // the card says "Everything is in sync." while a title
+              // cannot play.
+              if (s.pendingMaps > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6, left: 24),
+                  child: Text(
+                    '${s.pendingMaps} data map(s) pending — those titles '
+                    "can't play on this device yet. Retrying automatically; "
+                    'Sync now retries immediately.',
+                    style: const TextStyle(
+                        fontSize: 11.5, color: WiTokens.channelAmber),
+                  ),
+                ),
+              // Same honesty for artwork still on its way — the
+              // tester's "nothing to sync while artwork was pending".
+              if (s.pendingArt > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6, left: 24),
+                  child: Text(
+                    '${s.pendingArt} artwork file(s) still arriving — '
+                    'retrying automatically; Sync now retries immediately.',
+                    style: const TextStyle(
+                        fontSize: 11.5, color: WiTokens.channelAmber),
+                  ),
+                ),
+              for (final p in s.problems)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6, left: 24),
+                  child:
+                      Text(p, style: TextStyle(fontSize: 11.5, color: t.rust)),
+                ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _deviceTile(WiTokens t, MyWatchDevice device) {
+  Widget _deviceTile(WiTokens t, MyWatchDevice device, int? docMs) {
     final subtitle = device.isSelf
         ? '${device.platform} · this device · '
             '${device.lists} lists · ${device.entries} items'
         : '${device.platform} · last heard ${relativeTime(device.updatedAtMs)}'
             ' · ${device.lists} lists · ${device.entries} items';
+    // The green dot only proves the device's heartbeat; the doc line
+    // says how fresh its SHARED DATA is — the two can disagree (online
+    // but its library never reached us), which the dot alone hid.
+    final docLine =
+        device.isSelf || docMs == null ? null : relativeTime(docMs);
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: Icon(
@@ -719,7 +819,17 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
           ),
         ],
       ),
-      subtitle: Text(subtitle, style: TextStyle(color: t.boneDim)),
+      subtitle: Text(
+        docLine == null ? subtitle : '$subtitle\nSync data updated $docLine',
+        style: TextStyle(color: t.boneDim),
+      ),
+      // Tappable so the row is FOCUSABLE on TV (scroll-back stepping
+      // stone); the tap copies the device line for a bug report.
+      onTap: () => _copyLine(
+        '${device.name} · $subtitle'
+        '${docLine == null ? '' : ' · sync data updated $docLine'}',
+        'Device info copied',
+      ),
     );
   }
 }

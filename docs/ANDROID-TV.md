@@ -42,6 +42,20 @@ channel falls back to the ordinary interface.
   throttle and reports its result in a snackbar (up to date / update
   found / could not reach GitHub) — the background check is deliberately
   silent, which on a TV read as "updates aren't working".
+- The My W@tch page scrolls back up on a D-pad (unreleased — ships next
+  release): everything above the bottom buttons (Last sync, the sync
+  activity card, Linked since, the device rows) was not focusable, so Up
+  from "Sync now" jumped straight to the app-bar back button and the page
+  stuck at the bottom — with the sync problem lines the tester needed to
+  read sitting exactly in the unreachable region. Those rows are now
+  tappable (tap copies the line/report for a bug report; Last sync
+  refreshes), which makes them focusable stepping stones, and the list is
+  fully laid out on TV like Settings. The sync activity card also counts
+  artwork still arriving (amber line + "Up to date — except N item(s)
+  still arriving." headline instead of a false "Everything is in sync."),
+  the data-map stage reports "i of N", and each device row shows how
+  fresh that device's sync data is — the green dot only proves a
+  heartbeat.
 - The video transport initially appears, then hides after six seconds while
   playing. Select or a direction reveals it and focuses Play/Pause; when
   visible, arrows move among actions and Select activates. Paused controls stay

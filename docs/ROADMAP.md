@@ -708,6 +708,27 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       on-screen keyboard, monospace field, Enter submits) and invite
       codes are case-insensitive end-to-end; the QR-scan button is
       hidden on cameraless TVs
+- [x] Honest sync reporting + faster convergence (unreleased — ships
+      next release; from the Google TV Streamer hotspot report
+      "phone says in sync while the TV says fetching data maps"):
+      **Sync now** waits out an in-flight cycle and runs a fresh full
+      pass instead of answering "Nothing to sync." mid-cycle, and it
+      clears the artwork retry backoff too (previously only the map
+      backoff — art in a long backoff looked stuck for minutes);
+      artwork still on its way is now **counted** (amber "N artwork
+      file(s) still arriving" line beside the pending-maps one, and
+      the quiet headline reads "Up to date — except N item(s) still
+      arriving." instead of claiming everything is in sync); the
+      "Fetching data maps…" stage reports **i of N** and only shows
+      when there is work; each device tile shows how fresh that
+      device's **sync data** is (its doc stamp — the green dot only
+      proves a heartbeat, not that its library reached us); and a
+      sync cycle fires immediately on app resume, on the Autonomi
+      connection returning (backoffs cleared), and when the My W@tch
+      page sees a linked device flip online — instead of waiting out
+      the 30 s period. Still open: publishing each device's own
+      pending counts into the doc so every device can also show the
+      OTHER side's remaining work
 ## Channels — public signed media lists (shipped 2026-08-27, v0.1.0-alpha.65; rounded out through alpha.70)
 
 Part 2+3 of [PLAN-personal-vs-channels.md](PLAN-personal-vs-channels.md);
@@ -1085,7 +1106,14 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
       row was never built and scrolling stopped dead — "there is no
       About section"), and Settings → About gains a **Check for
       updates now** row that bypasses the daily throttle and answers
-      out loud: up to date / update found / GitHub unreachable
+      out loud: up to date / update found / GitHub unreachable. From
+      the Google TV Streamer My W@tch report (unreleased — ships next
+      release): the My W@tch page scrolls back up on a D-pad — the
+      status/activity/device rows above the bottom buttons were not
+      focusable, so Up from "Sync now" jumped straight to the app
+      bar and the page stuck at the bottom; they are now tappable
+      stepping stones (tap = copy for a bug report / refresh) and the
+      list is fully laid out on TV like Settings
 - [x] Software video decoding toggle (alpha.102): a Settings switch
       directly below Buffer size forces
       CPU decoding (mpv `hwdec=no`) for devices where hardware decode

@@ -431,7 +431,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               // entire (short) list out keeps every row reachable;
               // touch/mouse platforms keep the lazy default.
               scrollCacheExtent: TvSettings.instance.enabled
-                  ? const ScrollCacheExtent.pixels(kTvSettingsCacheExtent)
+                  ? const ScrollCacheExtent.pixels(kTvListCacheExtent)
                   : null,
               children: [
                 // Admin-only (#3): margins and palette are device-wide, so
@@ -1162,12 +1162,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ));
   }
 }
-
-/// TV-mode cache extent for the settings list: comfortably taller than
-/// the whole list even at the 1.15 TV text scale, so every row is laid
-/// out and D-pad focus traversal can always find the next one (an
-/// unlaid-out row has no focus node — the D-pad stops dead instead).
-const double kTvSettingsCacheExtent = 10000;
 
 /// The version string in the RELEASE naming — `v0.1.0-alpha.104` — not
 /// the raw pubspec fields. The Android tester read "0.1.0 (build 104)"

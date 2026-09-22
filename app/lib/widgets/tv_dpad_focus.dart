@@ -52,6 +52,18 @@ class _TvInitialFocusState extends State<TvInitialFocus> {
 /// WiSeekSlider escape pattern; left/right stay caret movement (harmless
 /// within one line). Off TV it is a plain FocusNode, so desktop keyboard
 /// editing is untouched.
+/// Cache extent that lays a screen's whole (short) ListView out on TV.
+///
+/// D-pad scrolling only advances by moving focus to the next focusable
+/// row, and a lazy ListView never lays out children past its cache — a
+/// run of non-focusable content taller than the default cache leaves the
+/// next focusable row unbuilt, so focus (and with it scrolling) stops
+/// dead. Pass `ScrollCacheExtent.pixels(kTvListCacheExtent)` when
+/// `TvSettings.instance.enabled`; touch/mouse platforms keep the lazy
+/// default. First hit: the Settings ABOUT section; same class: the My
+/// W@tch page.
+const double kTvListCacheExtent = 10000;
+
 class TvFieldFocusNode extends FocusNode {
   TvFieldFocusNode({super.debugLabel}) : super(onKeyEvent: _escapeVertical);
 

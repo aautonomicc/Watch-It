@@ -144,8 +144,11 @@ Future<void> main() async {
   unawaited(UpdateCheck.instance.maybeCheck());
   // My W@tch background sync: publishes this device's lists/viewpoints
   // into the link store and merges the other devices' changes, every 30s
-  // while linked (a silent no-op otherwise).
+  // while linked (a silent no-op otherwise). A cycle also fires the
+  // moment the Autonomi connection comes back, so maps and artwork that
+  // failed offline retry at once instead of after the period.
   MyWatchSync.instance.start();
+  MyWatchSync.instance.bindConnectivity(ConnectivityMonitor.instance);
   // Channels auto-update: follows subscribed channels' signed heads and
   // imports newer manifests (a silent no-op with no subscriptions).
   ChannelService.instance.start();
@@ -249,6 +252,9 @@ class _LifecycleReconnector with WidgetsBindingObserver {
       // cold start, so a startup-only check never ran there. The 24h
       // throttle inside keeps this to one request a day.
       unawaited(UpdateCheck.instance.maybeCheck());
+      // My W@tch: sync right away instead of waiting out the 30s
+      // period (a no-op unless linked and ready).
+      MyWatchSync.instance.onAppResumed();
     }
   }
 }
