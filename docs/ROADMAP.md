@@ -1025,7 +1025,11 @@ files stay install-global — a profile scopes only viewing state.
       Autonomi address already works
 - v0.3 release + demo video (poster-wall streaming from Autonomi is the headline)
 
-## Phase 4 — Android TV, polish & iOS
+## Phase 4 — Android TV & polish
+
+(The "iOS build + TestFlight" item was removed 2026-09-22 — re-add it
+when we go for an iOS version. The v1.0 six-platform goal below still
+includes iOS.)
 - [x] Android TV first cut (alpha.95): `LEANBACK_LAUNCHER` entry + TV
       banner (recomposed after the release into a centred
       bucket-and-wordmark lockup), leanback/touchscreen features marked
@@ -1105,7 +1109,6 @@ files stay install-global — a profile scopes only viewing state.
       decoding; takes effect on the next app start
 - [ ] Android TV rest: 10-foot layout mode, focus polish on the
       remaining screens
-- [ ] iOS build + TestFlight (FFI path required if sidecar chosen elsewhere)
 - [ ] Chapter markers, playback speed, subtitle handling for streamed items
 - [ ] Light theme, poster size options, keyboard-map settings
 - [ ] Flatpak + notarized .dmg
