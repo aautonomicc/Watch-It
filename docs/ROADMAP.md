@@ -952,9 +952,6 @@ against the x0x project.
       Autonomi connection row plus Channels and My W@tch each on a
       3-way **Off | Wi-Fi | Wi-Fi + mobile** pill — and the mobile
       data policies (Streaming / Downloads pickers)
-- [ ] Idle x0x gossip baseline: still high while an agent is active —
-      an upstream x0x issue (leaf-mode relay opt-out); watched
-      upstream, no further in-app lever planned
 - [ ] Daily buckets/graph, Wi-Fi vs cellular tagging, budget alerts
       (deferred from the data-usage plan)
 
@@ -1132,6 +1129,13 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
   options become available: Pointer/Scratchpad-style mutable
   primitives returning to Autonomi ant-core (a dead-drop to poll), or
   an upstream x0x mailbox/store-and-forward layer)
+- Idle x0x gossip baseline (moved here 2026-09-22; idle traffic is
+  still high while an agent is active — an upstream x0x issue, and no
+  further in-app lever is planned. Deal with it when x0x releases fix
+  it: the opt-in Leaf egress byte-shed policy (x0x #736, merged
+  2026-09-21 on saorsa-gossip 0.5.84) ships enforcement in the next
+  x0x tag after 0.45.0 — bump then and re-run the idle window with
+  shed_normal)
 - tvOS (Apple TV) layout — Android TV is now in Phase 4
 - Trakt scrobbling
 - ~~Music lists~~ — **shipped** (alpha.76–.79, see the Music section
