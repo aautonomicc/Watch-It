@@ -763,8 +763,6 @@ implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → Channels.
       dialog, subscribed channel cards (alpha.88), and the channel
       page's info card (alpha.90, replacing the raw code line — the
       code stays copyable inside the dialog)
-- [ ] Channel directory (deliberately NOT in v1 — codes only; a curated
-      directory would be a separate repo/site with its own vetting)
 - [x] Mobile channel creation (alpha.102): the My Channel segment
       gates on the upload platforms
       (desktop + Android) instead of desktop-only — create, publish
@@ -1121,6 +1119,9 @@ files stay install-global — a profile scopes only viewing state.
   deliberate per-item public publishing, never a library export)
 - ~~Watch-state + list sync between devices~~ — **shipped** as My W@tch
   (alpha.61/.62, via x0x rather than Autonomi — see the section above)
+- Channel directory (moved here 2026-09-22; deliberately NOT in v1 —
+  codes only; a curated directory would be a separate repo/site with
+  its own vetting)
 - tvOS (Apple TV) layout — Android TV is now in Phase 4
 - Trakt scrobbling
 - ~~Music lists~~ — **shipped** (alpha.76–.79, see the Music section
