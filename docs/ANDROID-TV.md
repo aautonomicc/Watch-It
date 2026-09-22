@@ -32,6 +32,16 @@ channel falls back to the ordinary interface.
   caret movement. Before, a focused field swallowed all four arrows forever
   — going Down past the invite field left Join unreachable until the app
   was killed.
+- The Settings list is fully laid out on TV (unreleased — ships next
+  release): D-pad scrolling only advances by moving focus, and the ABOUT
+  section opens with a run of non-focusable content (brand tile +
+  attribution paragraphs) taller than a lazy list's default cache — the
+  next focusable row was never built, so on a Streamer scrolling stopped
+  dead at Wallet and ABOUT was unreachable. Settings → About also gains a
+  focusable **Check for updates now** row that bypasses the daily update
+  throttle and reports its result in a snackbar (up to date / update
+  found / could not reach GitHub) — the background check is deliberately
+  silent, which on a TV read as "updates aren't working".
 - The video transport initially appears, then hides after six seconds while
   playing. Select or a direction reveals it and focuses Play/Pause; when
   visible, arrows move among actions and Select activates. Paused controls stay

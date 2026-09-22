@@ -3,6 +3,7 @@ import 'dart:io' show exit;
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -67,6 +68,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int? _dataSizeBytes;
   bool _dataSizeKnown = false;
   bool _updateCheckEnabled = true;
+  bool _checkingUpdates = false;
 
   /// Formatted period total for the Data tile's subtitle (null while
   /// unknown / client unavailable).
@@ -352,6 +354,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ),
   );
 
+  /// User-triggered update check: bypasses the daily throttle and says
+  /// its result out loud — the background check is silent by design,
+  /// which reads as "is it even working?" on a device that never shows
+  /// the row. The found-update row itself appears via UpdateCheck's
+  /// notifyListeners (UpdateAvailableTile listens).
+  Future<void> _checkForUpdatesNow() async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _checkingUpdates = true);
+    final outcome = await UpdateCheck.instance.checkNow();
+    if (!mounted) return;
+    setState(() => _checkingUpdates = false);
+    final message = switch (outcome) {
+      UpdateCheckOutcome.updateFound =>
+        'Update available: ${UpdateCheck.instance.availableTag} — '
+            'see the Update available row above',
+      UpdateCheckOutcome.upToDate =>
+        'You are on the latest release (${_version ?? 'this version'})',
+      UpdateCheckOutcome.failed =>
+        'Could not reach GitHub — check the connection and try again',
+    };
+    messenger.showSnackBar(SnackBar(content: Text(message)));
+  }
+
   /// Everything a bug report wants, one clipboard payload.
   Future<void> _copyVersions() async {
     final v = _stackVersions;
@@ -396,6 +421,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: lists == null
           ? const Center(child: CircularProgressIndicator())
           : ListView(
+              // On TV the D-pad only scrolls by moving focus to the
+              // next focusable row, and a lazy ListView never lays out
+              // rows past its cache — the ABOUT section opens with a
+              // run of non-focusable content (brand tile + attribution
+              // paragraphs) taller than the default cache, so focus
+              // (and scrolling) stopped dead at WALLET and the whole
+              // ABOUT section was unreachable on a remote. Laying the
+              // entire (short) list out keeps every row reachable;
+              // touch/mouse platforms keep the lazy default.
+              scrollCacheExtent: TvSettings.instance.enabled
+                  ? const ScrollCacheExtent.pixels(kTvSettingsCacheExtent)
+                  : null,
               children: [
                 // Admin-only (#3): margins and palette are device-wide, so
                 // they sit outside the non-admin appearance scope.
@@ -1012,6 +1049,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 if (UpdateCheck.supportedPlatform) ...[
                   const UpdateAvailableTile(),
+                  // Manual check: the background check is silent and
+                  // at most daily, so a tester wondering "is updating
+                  // even working?" gets an immediate, spoken answer.
+                  ListTile(
+                    leading: Icon(Icons.refresh, color: t.accent),
+                    title: Text(
+                      'Check for updates now',
+                      style: TextStyle(color: t.bone, fontSize: 15),
+                    ),
+                    subtitle: Text(
+                      _checkingUpdates
+                          ? 'Checking…'
+                          : 'Ask GitHub for the latest release right away',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                    onTap: _checkingUpdates ? null : _checkForUpdatesNow,
+                  ),
                   SwitchListTile(
                     secondary: Icon(Icons.update, color: t.accent),
                     title: Text(
@@ -1108,6 +1162,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ));
   }
 }
+
+/// TV-mode cache extent for the settings list: comfortably taller than
+/// the whole list even at the 1.15 TV text scale, so every row is laid
+/// out and D-pad focus traversal can always find the next one (an
+/// unlaid-out row has no focus node — the D-pad stops dead instead).
+const double kTvSettingsCacheExtent = 10000;
 
 /// The version string in the RELEASE naming — `v0.1.0-alpha.104` — not
 /// the raw pubspec fields. The Android tester read "0.1.0 (build 104)"
