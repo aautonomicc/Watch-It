@@ -1,3 +1,5 @@
+![W@tch — stream from the Autonomi network. Movies · TV · Music — peer-to-peer, no servers](branding/social-preview.png)
+
 # W@tch
 
 *Formerly **watch-it** — rebranded 2026-07-31. The repository keeps the name
