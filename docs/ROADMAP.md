@@ -1074,7 +1074,15 @@ files stay install-global — a profile scopes only viewing state.
       longer trap the D-pad (a focused TextField consumed all four
       arrows as caret movement — once focus dropped below the invite
       dialog's Join button it could never get back; vertical arrows
-      now leave a field as focus traversal, TV only)
+      now leave a field as focus traversal, TV only). From the
+      Streamer follow-up (unreleased — ships next release): the
+      Settings list is fully laid out on TV so the D-pad scrolls past
+      WALLET into ABOUT (the run of non-focusable attribution content
+      was taller than the lazy list's cache, so the next focusable
+      row was never built and scrolling stopped dead — "there is no
+      About section"), and Settings → About gains a **Check for
+      updates now** row that bypasses the daily throttle and answers
+      out loud: up to date / update found / GitHub unreachable
 - [x] Software video decoding toggle (alpha.102): a Settings switch
       directly below Buffer size forces
       CPU decoding (mpv `hwdec=no`) for devices where hardware decode

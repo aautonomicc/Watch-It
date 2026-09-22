@@ -1,9 +1,13 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flutter/foundation.dart' show LicenseRegistry;
@@ -17,6 +21,7 @@ import 'package:watchit/services/impeller.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/licenses.dart';
 import 'package:watchit/services/storage_usage.dart';
+import 'package:watchit/services/tv_settings.dart';
 import 'package:watchit/services/update_check.dart';
 import 'package:watchit/theme/tokens.dart';
 
@@ -308,5 +313,103 @@ void main() {
     final tile =
         tester.widget<ListTile>(find.widgetWithText(ListTile, 'Version'));
     expect(tile.onTap, isNotNull);
+  });
+
+  testWidgets('TV mode lays out the whole list so the D-pad can reach '
+      'ABOUT past the unfocusable attribution stretch', (tester) async {
+    // The Streamer bug: D-pad scrolling only advances by moving focus,
+    // a lazy ListView never lays out rows past its cache, and the run
+    // of non-focusable ABOUT content (brand tile + attributions) after
+    // WALLET is taller than the default cache — so the next focusable
+    // row was never built and scrolling stopped dead at Wallet.
+    TvSettings.instance = TvSettings(enabled: true);
+    addTearDown(() => TvSettings.instance = TvSettings());
+    tester.view.physicalSize = const Size(1000, 600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: const SettingsScreen(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // Far-below-the-fold About rows are laid out (hence focusable)…
+    expect(
+      find.text('Terms of Use & Disclaimer', skipOffstage: false),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Check for updates now', skipOffstage: false),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('off TV the settings list keeps lazy layout', (tester) async {
+    tester.view.physicalSize = const Size(1000, 600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: const SettingsScreen(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Terms of Use & Disclaimer', skipOffstage: false),
+      findsNothing,
+    );
+  });
+
+  testWidgets('Check for updates now: reports up to date, then finds a '
+      'release bypassing the throttle', (tester) async {
+    UpdateCheck.resetForTesting();
+    addTearDown(UpdateCheck.resetForTesting);
+    PackageInfo.setMockInitialValues(
+      appName: 'watchit',
+      packageName: 'watchit',
+      version: '0.1.0',
+      buildNumber: '105',
+      buildSignature: '',
+    );
+    // Throttle armed — a background check would be skipped outright,
+    // the manual row must fetch anyway.
+    SharedPreferences.setMockInitialValues({
+      UpdateCheck.lastCheckPref: DateTime.now().millisecondsSinceEpoch,
+    });
+    http.Response release(String tag) => http.Response(
+          jsonEncode({
+            'tag_name': tag,
+            'html_url': 'https://example.com/$tag',
+          }),
+          200,
+        );
+    UpdateCheck.instance.client =
+        MockClient((_) async => release('v0.1.0-alpha.105'));
+    await pumpSettings(tester);
+    final row = find.text('Check for updates now');
+    await tester.ensureVisible(row);
+    await tester.pump();
+    await tester.tap(row);
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('You are on the latest release'),
+      findsOneWidget,
+    );
+    expect(find.text('Update available'), findsNothing);
+
+    // Let the first snackbar expire, then a newer release is found and
+    // the Update available row appears.
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    UpdateCheck.instance.client =
+        MockClient((_) async => release('v0.1.0-alpha.106'));
+    await tester.tap(row);
+    await tester.pumpAndSettle();
+    expect(find.text('Update available'), findsOneWidget);
+    expect(find.textContaining('v0.1.0-alpha.106'), findsWidgets);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
   });
 }

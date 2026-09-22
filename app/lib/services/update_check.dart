@@ -52,6 +52,10 @@ class UpdateAsset {
       };
 }
 
+/// What a user-triggered [UpdateCheck.checkNow] found, so Settings can
+/// answer out loud where the background check stays silent.
+enum UpdateCheckOutcome { updateFound, upToDate, failed }
+
 /// Update check-and-notify, and the asset list the in-app updater
 /// feeds from.
 ///
@@ -149,12 +153,31 @@ class UpdateCheck extends ChangeNotifier {
     final nowMs = now().millisecondsSinceEpoch;
     final last = prefs.getInt(lastCheckPref) ?? 0;
     if (nowMs - last < const Duration(hours: 24).inMilliseconds) return;
+    await _fetchAndCompare(prefs, nowMs);
+  }
+
+  /// Explicit "check now" from Settings → About: skips the 24h
+  /// throttle AND the startup-check toggle (pressing the button is its
+  /// own consent), and reports the outcome — the silent-failure rule
+  /// exists for background checks, not for a user asking directly.
+  Future<UpdateCheckOutcome> checkNow(
+      {DateTime Function() now = DateTime.now}) async {
+    if (!supportedPlatform) return UpdateCheckOutcome.failed;
+    final prefs = await SharedPreferences.getInstance();
+    return _fetchAndCompare(prefs, now().millisecondsSinceEpoch);
+  }
+
+  /// One real GitHub fetch + compare. Shared by the throttled
+  /// background path and [checkNow]; stamps [lastCheckPref] only on a
+  /// successful fetch so failures retry on the next launch.
+  Future<UpdateCheckOutcome> _fetchAndCompare(
+      SharedPreferences prefs, int nowMs) async {
     final ownsClient = client == null;
     final c = client ?? http.Client();
     try {
       final res = await c.get(Uri.parse(_api),
           headers: {'accept': 'application/vnd.github+json'});
-      if (res.statusCode != 200) return;
+      if (res.statusCode != 200) return UpdateCheckOutcome.failed;
       final json = jsonDecode(res.body) as Map<String, dynamic>;
       final tag = json['tag_name'] as String? ?? '';
       final info = await PackageInfo.fromPlatform();
@@ -176,6 +199,7 @@ class UpdateCheck extends ChangeNotifier {
               'assets': [for (final a in assets) a.toJson()],
             }));
         notifyListeners();
+        return UpdateCheckOutcome.updateFound;
       } else {
         // Up to date: a stale restored/announced update (the app was
         // updated some other way) must disappear again.
@@ -186,9 +210,11 @@ class UpdateCheck extends ChangeNotifier {
           assets = const [];
           notifyListeners();
         }
+        return UpdateCheckOutcome.upToDate;
       }
     } catch (_) {
-      // Silent by design.
+      // Silent by design (background path); checkNow surfaces this.
+      return UpdateCheckOutcome.failed;
     } finally {
       if (ownsClient) c.close();
     }

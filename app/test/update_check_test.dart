@@ -260,4 +260,67 @@ void main() {
       expect(prefs.getInt(UpdateCheck.lastCheckPref), null);
     }, skip: !Platform.isLinux && !Platform.isWindows && !Platform.isMacOS);
   });
+
+  group('checkNow', () {
+    setUp(() {
+      SharedPreferences.setMockInitialValues({});
+      PackageInfo.setMockInitialValues(
+        appName: 'watchit',
+        packageName: 'watchit',
+        version: '0.1.0',
+        buildNumber: '56',
+        buildSignature: '',
+      );
+      UpdateCheck.resetForTesting();
+    });
+
+    MockClient releaseClient(String tag, {int status = 200}) =>
+        MockClient((request) async => http.Response(
+            jsonEncode({
+              'tag_name': tag,
+              'html_url':
+                  'https://github.com/aautonomicc/Watch-It/releases/tag/$tag',
+            }),
+            status));
+
+    test('bypasses the 24h throttle and the startup toggle', () async {
+      // Both background-check gates armed: a fresh stamp AND the
+      // toggle off — a manual press must still fetch.
+      final now = DateTime(2026, 9, 22, 12);
+      SharedPreferences.setMockInitialValues({
+        UpdateCheck.lastCheckPref: now.millisecondsSinceEpoch,
+        UpdateCheck.enabledPref: false,
+      });
+      final check = UpdateCheck.instance
+        ..client = releaseClient('v0.1.0-alpha.57');
+      final outcome = await check.checkNow(now: () => now);
+      expect(outcome, UpdateCheckOutcome.updateFound);
+      expect(check.availableTag, 'v0.1.0-alpha.57');
+      // Found release persists exactly like the background path.
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(UpdateCheck.availablePref), isNotNull);
+    }, skip: !Platform.isLinux && !Platform.isWindows && !Platform.isMacOS);
+
+    test('up to date reports so and clears a stale announcement', () async {
+      final check = UpdateCheck.instance
+        ..client = releaseClient('v0.1.0-alpha.57');
+      await check.checkNow();
+      expect(check.availableTag, 'v0.1.0-alpha.57');
+      check.client = releaseClient('v0.1.0-alpha.56');
+      final outcome = await check.checkNow();
+      expect(outcome, UpdateCheckOutcome.upToDate);
+      expect(check.availableTag, null);
+    }, skip: !Platform.isLinux && !Platform.isWindows && !Platform.isMacOS);
+
+    test('failure is reported and never stamps the throttle', () async {
+      final check = UpdateCheck.instance
+        ..client = releaseClient('v0.1.0-alpha.57', status: 500);
+      expect(await check.checkNow(), UpdateCheckOutcome.failed);
+      check.client =
+          MockClient((_) async => throw const SocketException('offline'));
+      expect(await check.checkNow(), UpdateCheckOutcome.failed);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getInt(UpdateCheck.lastCheckPref), null);
+    }, skip: !Platform.isLinux && !Platform.isWindows && !Platform.isMacOS);
+  });
 }
