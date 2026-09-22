@@ -857,8 +857,16 @@ File naming convention (the audio parallel of the Plex/Jellyfin one) in
       page's Refresh action is the only refetch. The originally scoped
       TheAudioDB fanart banner was dropped by decision (2026-09-17):
       it was the only piece needing an API key
-- [ ] Top-level Video / Music home split (deferred by plan — lists
-      already separate the two in practice)
+- ~~Top-level Video / Music home split~~ — struck by decision
+      (2026-09-22): lists already separate video and music in
+      practice (Movies / TV Shows / Music land there by default and
+      each renders as its own shelf), the drawer's PLAYLISTS section,
+      the album wall and artist pages give music its own surfaces,
+      and a mode switch would fragment the shared rows (Continue
+      Watching, Recently Added, Downloads, Favourites) and mixed
+      playlists/marathons that deliberately span both. One wall the
+      user curates through list visibility and ordering stays the
+      design.
 
 ## Batch upload with auto-matching (shipped 2026-09-01/02, v0.1.0-alpha.77/.78/.79)
 
