@@ -708,9 +708,6 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       on-screen keyboard, monospace field, Enter submits) and invite
       codes are case-insensitive end-to-end; the QR-scan button is
       hidden on cameraless TVs
-- [ ] Sync while apart: devices must currently be online together —
-      no relay/mailbox in the middle (by design, for now)
-
 ## Channels — public signed media lists (shipped 2026-08-27, v0.1.0-alpha.65; rounded out through alpha.70)
 
 Part 2+3 of [PLAN-personal-vs-channels.md](PLAN-personal-vs-channels.md);
@@ -1129,6 +1126,12 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
   multi-signature design)
 - Channel comments (moved here 2026-09-22; was tagged "parking lot"
   inline on the channels checklist)
+- Sync while apart (moved here 2026-09-22; devices must currently be
+  online together — no relay/mailbox in the middle, and an always-on
+  linked device already bridges the gap today. Bring back when future
+  options become available: Pointer/Scratchpad-style mutable
+  primitives returning to Autonomi ant-core (a dead-drop to poll), or
+  an upstream x0x mailbox/store-and-forward layer)
 - tvOS (Apple TV) layout — Android TV is now in Phase 4
 - Trakt scrobbling
 - ~~Music lists~~ — **shipped** (alpha.76–.79, see the Music section
