@@ -1020,7 +1020,7 @@ files stay install-global — a profile scopes only viewing state.
       remembered across launches; narrow windows and mobile keep the
       modal drawer
 - [ ] Keyboard map, window polish, hover thumbnails on seek bar
-- [ ] Shared-list format v1 documented → plain text shipped (alpha.25/.31),
+- [x] Shared-list format v1 documented → plain text shipped (alpha.25/.31),
       bundle spec locked ([BUNDLE-FORMAT.md](BUNDLE-FORMAT.md)); import from an
       Autonomi address already works
 - v0.3 release + demo video (poster-wall streaming from Autonomi is the headline)
