@@ -157,6 +157,16 @@ class MaterialDesktopVideoControlsThemeData {
   /// [Color] of the seek bar thumb.
   final Color seekBarThumbColor;
 
+  /// Builder for a preview shown above the seek bar while the pointer
+  /// hovers (or drags) — receives the [Duration] under the pointer. The
+  /// preview is centered on the pointer, clamped to the bar's width, and
+  /// never intercepts pointer events. `null` (default) shows nothing.
+  ///
+  /// W@tch vendored addition (hover seek thumbnails): upstream computes
+  /// the hover percent but exposes no hook to render anything with it.
+  final Widget Function(BuildContext context, Duration position)?
+      seekBarHoverPreviewBuilder;
+
   // VOLUME BAR
 
   /// [Color] of the volume bar.
@@ -222,6 +232,7 @@ class MaterialDesktopVideoControlsThemeData {
     this.seekBarBufferColor = const Color(0x3DFFFFFF),
     this.seekBarThumbSize = 12.0,
     this.seekBarThumbColor = const Color(0xFFFF0000),
+    this.seekBarHoverPreviewBuilder,
     this.volumeBarColor = const Color(0x3DFFFFFF),
     this.volumeBarActiveColor = const Color(0xFFFFFFFF),
     this.volumeBarThumbSize = 12.0,
@@ -263,6 +274,8 @@ class MaterialDesktopVideoControlsThemeData {
     Color? seekBarBufferColor,
     double? seekBarThumbSize,
     Color? seekBarThumbColor,
+    Widget Function(BuildContext context, Duration position)?
+        seekBarHoverPreviewBuilder,
     Color? volumeBarColor,
     Color? volumeBarActiveColor,
     double? volumeBarThumbSize,
@@ -314,6 +327,8 @@ class MaterialDesktopVideoControlsThemeData {
       seekBarBufferColor: seekBarBufferColor ?? this.seekBarBufferColor,
       seekBarThumbSize: seekBarThumbSize ?? this.seekBarThumbSize,
       seekBarThumbColor: seekBarThumbColor ?? this.seekBarThumbColor,
+      seekBarHoverPreviewBuilder:
+          seekBarHoverPreviewBuilder ?? this.seekBarHoverPreviewBuilder,
       volumeBarColor: volumeBarColor ?? this.volumeBarColor,
       volumeBarActiveColor: volumeBarActiveColor ?? this.volumeBarActiveColor,
       volumeBarThumbSize: volumeBarThumbSize ?? this.volumeBarThumbSize,
@@ -1106,6 +1121,31 @@ class MaterialDesktopSeekBarState extends State<MaterialDesktopSeekBar> {
                       ),
                     ),
                   ),
+                  // W@tch vendored addition: hover/drag preview above the
+                  // bar, centered on the pointer and clamped to the bar's
+                  // width (see seekBarHoverPreviewBuilder).
+                  if (_theme(context).seekBarHoverPreviewBuilder != null &&
+                      (hover || click) &&
+                      duration > Duration.zero)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: _theme(context).seekBarContainerHeight,
+                      child: IgnorePointer(
+                        child: SizedBox(
+                          height: kSeekBarHoverPreviewSlotHeight,
+                          child: CustomSingleChildLayout(
+                            delegate: SeekBarPreviewLayoutDelegate(
+                              x: constraints.maxWidth * slider,
+                            ),
+                            child: _theme(context).seekBarHoverPreviewBuilder!(
+                              context,
+                              duration * slider,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -1114,6 +1154,36 @@ class MaterialDesktopSeekBarState extends State<MaterialDesktopSeekBar> {
       ),
     );
   }
+}
+
+/// Vertical room reserved above the seek bar for the hover preview
+/// (painted with `Clip.none`, so it overlays the video, not the layout).
+const double kSeekBarHoverPreviewSlotHeight = 140.0;
+
+/// Bottom-aligns the hover preview with its center at [x], clamped so the
+/// preview never leaves the seek bar's width. Public so the positioning
+/// math is unit-testable from the app.
+class SeekBarPreviewLayoutDelegate extends SingleChildLayoutDelegate {
+  final double x;
+
+  SeekBarPreviewLayoutDelegate({required this.x});
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
+      constraints.loosen();
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    final maxLeft = size.width - childSize.width;
+    final left = maxLeft <= 0
+        ? 0.0
+        : (x - childSize.width / 2).clamp(0.0, maxLeft);
+    return Offset(left, size.height - childSize.height);
+  }
+
+  @override
+  bool shouldRelayout(covariant SeekBarPreviewLayoutDelegate oldDelegate) =>
+      oldDelegate.x != x;
 }
 
 // BUTTON: PLAY/PAUSE

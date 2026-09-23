@@ -63,6 +63,7 @@ dependencies:
   # with the CLI — the desktop in-app batch uploader front-ends it.
   watchit_upload:
     path: ../cli
+  window_manager: ^0.5.2
 
 # Vendored media_kit_video 2.0.1 with a Linux H/W-rendering fix: upstream
 # reads Flutter's EGL display via eglGetCurrentDisplay() on the platform

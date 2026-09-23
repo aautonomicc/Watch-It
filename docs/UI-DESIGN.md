@@ -64,7 +64,9 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - Bottom bar: seek bar with chapter markers, play/pause, ±10s skip, audio track,
   subtitle track, speed, volume, fullscreen
 - Buffering indicator distinguishes network fetch from decode stalls
-- Desktop: full keyboard map (space, ←/→, f, m, s, numbers = percent-seek — mpv-style)
+- Desktop: full keyboard map (space, ←/→, f, m, s, numbers = percent-seek —
+  mpv-style; `?` shows the shortcut sheet — shipped 2026-09-23, with hover
+  seek thumbnails for downloaded files and remembered window geometry)
 - Mobile: gestures — swipe left edge = brightness, right edge = volume, horizontal =
   seek, double-tap sides = ±10s
 - TV (Android TV remote): select = play/pause, ←/→ = seek (hold to accelerate),

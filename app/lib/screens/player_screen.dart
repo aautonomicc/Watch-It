@@ -15,6 +15,7 @@ import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/network_pause.dart';
 import '../services/profiles.dart';
+import '../services/seek_preview.dart';
 import '../services/now_playing.dart';
 import '../services/screen_wake.dart';
 import '../services/season_grouping.dart' show episodeNameFromLabel;
@@ -22,6 +23,9 @@ import '../services/user_metadata.dart';
 import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../services/tv_settings.dart';
+import 'publish_screen.dart' show isDesktopPlatform;
+import '../widgets/player_shortcuts.dart';
+import '../widgets/seek_preview_card.dart';
 import '../widgets/seek_slider.dart';
 import '../widgets/tv_player_controls.dart';
 import '../widgets/tv_track_menu.dart';
@@ -143,6 +147,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late String _title;
   late bool _isLocal;
 
+  /// The playback source url for [_entry] — a file path when [_isLocal].
+  late String _url;
+
+  /// Keys the Video widget so keyboard shortcuts can drive fullscreen
+  /// through [VideoState] (the theme's shortcut callbacks run with this
+  /// screen's context, which sits ABOVE the video subtree the package's
+  /// own context-based fullscreen helpers need).
+  final _videoKey = GlobalKey<VideoState>();
+
+  /// Last non-zero volume, restored by the M (mute) shortcut.
+  double _lastVolume = 100;
+
+  /// Hover-thumbnail source for the desktop seek bar — created only for
+  /// LOCAL video on desktop (streamed sources would pay a network
+  /// prefetch window per hover point; see SeekPreview docs).
+  SeekPreview? _seekPreview;
+
   Duration _position = Duration.zero;
   DateTime _lastSave = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -175,6 +196,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _entry = widget.entry;
     _title = widget.title;
     _isLocal = widget.isLocal;
+    _url = widget.url;
+    _rebuildSeekPreview();
     _syncFullBleed();
     _player = Player(
       configuration: PlayerConfiguration(
@@ -423,6 +446,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _syncFullBleed();
       _title = playerTitle(meta);
       _isLocal = source.local;
+      _url = source.url;
       _upNext = null;
       _completed = false;
       _playbackStarted = false;
@@ -432,8 +456,79 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _position = Duration.zero;
       _duration = Duration.zero;
     });
+    _rebuildSeekPreview();
     _feedNowPlaying();
     _player.open(Media(source.url));
+  }
+
+  /// (Re)creates the hover-thumbnail source when the playing file
+  /// changes — local desktop video only, null otherwise.
+  void _rebuildSeekPreview() {
+    _seekPreview?.dispose();
+    _seekPreview = null;
+    if (_isLocal && isDesktopPlatform && !_isAudio) {
+      _seekPreview = SeekPreview(source: _url);
+    }
+  }
+
+  /// The vendored fork's seek-bar hover preview: thumbnails for local
+  /// files, a bare timestamp bubble for streamed ones (where a frame
+  /// grab would cost a network prefetch window per hover point).
+  Widget _buildSeekPreview(BuildContext context, Duration position) =>
+      SeekPreviewCard(preview: _seekPreview, position: position);
+
+  void _seekRelative(Duration delta) {
+    var target = _player.state.position + delta;
+    if (target < Duration.zero) target = Duration.zero;
+    final duration = _player.state.duration;
+    if (duration > Duration.zero && target > duration) target = duration;
+    unawaited(_player.seek(target));
+  }
+
+  void _seekToFraction(double fraction) {
+    final duration = _player.state.duration;
+    if (duration <= Duration.zero) return;
+    unawaited(_player.seek(duration * fraction));
+  }
+
+  void _volumeBy(double delta) {
+    final volume = (_player.state.volume + delta).clamp(0.0, 100.0);
+    unawaited(_player.setVolume(volume));
+  }
+
+  void _toggleMute() {
+    final volume = _player.state.volume;
+    if (volume > 0) {
+      _lastVolume = volume;
+      unawaited(_player.setVolume(0));
+    } else {
+      unawaited(_player.setVolume(_lastVolume > 0 ? _lastVolume : 100));
+    }
+  }
+
+  /// The desktop keyboard map (UI-DESIGN §5) — replaces the vendored
+  /// controls' stock bindings via the theme, so the app owns every key.
+  Map<ShortcutActivator, VoidCallback> _desktopShortcuts() {
+    final isKid = ProfileStore.instance.isKid;
+    return playerKeyboardShortcuts(
+      PlayerShortcutActions(
+        playOrPause: () => unawaited(_player.playOrPause()),
+        play: () => unawaited(_player.play()),
+        pause: () => unawaited(_player.pause()),
+        seekBy: _seekRelative,
+        seekToFraction: _seekToFraction,
+        volumeBy: _volumeBy,
+        toggleMute: _toggleMute,
+        toggleFullscreen: () =>
+            unawaited(_videoKey.currentState?.toggleFullscreen()),
+        exitFullscreen: () =>
+            unawaited(_videoKey.currentState?.exitFullscreen()),
+        showHelp: () => unawaited(
+          showPlayerShortcutHelp(context, showScreenshotRow: !isKid),
+        ),
+        screenshot: isKid ? null : () => unawaited(_useFrameAsPoster()),
+      ),
+    );
   }
 
   void _dismissUpNext() {
@@ -496,6 +591,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _durationSub?.cancel();
     _completedSub?.cancel();
     _videoParamsSub?.cancel();
+    _seekPreview?.dispose();
     _player.dispose();
     super.dispose();
   }
@@ -739,6 +835,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   child: MaterialDesktopVideoControlsTheme(
                     normal: desktopControlsTheme(
                       kDefaultMaterialDesktopVideoControlsThemeData,
+                      keyboardShortcuts: _desktopShortcuts(),
+                      seekBarHoverPreviewBuilder: _buildSeekPreview,
                       topButtonBar: [
                         const Spacer(),
                         if (!ProfileStore.instance.isKid)
@@ -750,6 +848,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     ),
                     fullscreen: desktopControlsTheme(
                       kDefaultMaterialDesktopVideoControlsThemeDataFullscreen,
+                      keyboardShortcuts: _desktopShortcuts(),
+                      seekBarHoverPreviewBuilder: _buildSeekPreview,
                       topButtonBar: [
                         const Spacer(),
                         if (!ProfileStore.instance.isKid)
@@ -759,7 +859,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           ),
                       ],
                     ),
-                    child: Video(controller: _controller),
+                    child: Video(key: _videoKey, controller: _controller),
                   ),
                 ),
               // The dim scrims stay full-bleed (their content is centered,
@@ -1090,12 +1190,20 @@ class AudioPlayerView extends StatelessWidget {
 /// Desktop controls theme tweaks: the branded overlay replaces the stock
 /// buffering spinner, and the mouse cursor fades out with the controls
 /// instead of sitting on the film forever. [topButtonBar] carries the
-/// screen's own buttons (frame-as-artwork capture).
+/// screen's own buttons (frame-as-artwork capture); [keyboardShortcuts]
+/// is the app-owned keyboard map (player_shortcuts.dart — replaces the
+/// package's stock bindings); [seekBarHoverPreviewBuilder] renders the
+/// hover thumbnail/timestamp above the seek bar (vendored-fork field).
 MaterialDesktopVideoControlsThemeData desktopControlsTheme(
   MaterialDesktopVideoControlsThemeData base, {
   List<Widget> topButtonBar = const [],
+  Map<ShortcutActivator, VoidCallback>? keyboardShortcuts,
+  Widget Function(BuildContext context, Duration position)?
+      seekBarHoverPreviewBuilder,
 }) => base.copyWith(
   bufferingIndicatorBuilder: (_) => const SizedBox.shrink(),
   hideMouseOnControlsRemoval: true,
   topButtonBar: topButtonBar,
+  keyboardShortcuts: keyboardShortcuts,
+  seekBarHoverPreviewBuilder: seekBarHoverPreviewBuilder,
 );
