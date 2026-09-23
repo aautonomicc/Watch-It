@@ -39,6 +39,11 @@ axum = "0.8"
 # over the rmp-serde-encoded shrunk data map) for offline map verification.
 blake3 = "1"
 bytes = "1"
+# Local-day keys for the data-usage daily buckets (Settings → Network →
+# Data graph). Already in the dependency tree via ant-core, so this
+# direct dep adds no new code to the build; the clock feature resolves
+# the device's real timezone (android-tzdata on Android).
+chrono = "0.4"
 futures = "0.3"
 hex = "0.4"
 rmp-serde = "1"
