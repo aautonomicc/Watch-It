@@ -45,6 +45,7 @@ import 'services/terms.dart';
 import 'services/update_check.dart';
 import 'services/update_install.dart';
 import 'services/watch_state.dart';
+import 'services/window_state.dart';
 import 'services/x0x_cellular.dart';
 import 'theme/tokens.dart';
 import 'widgets/brand_mark.dart';
@@ -67,6 +68,9 @@ Future<void> main() async {
   // Graphics compatibility mode is on (the launch decision itself is
   // Kotlin's, made before Dart runs).
   await ImpellerSettings.initialize();
+  // Desktop window polish: minimum size + remembered size/position/
+  // maximized across launches (no-op off desktop).
+  await WindowStateKeeper.instance.start();
   MediaKit.ensureInitialized();
   // Statically linked Rust crates (self_encryption is GPL-3.0) and the
   // native media libs aren't in Flutter's registry — add them so the

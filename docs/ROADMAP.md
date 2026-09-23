@@ -1044,7 +1044,16 @@ files stay install-global — a profile scopes only viewing state.
       panel beside the wall — the burger (far left) hides/shows it,
       remembered across launches; narrow windows and mobile keep the
       modal drawer
-- [ ] Keyboard map, window polish, hover thumbnails on seek bar
+- [x] Keyboard map, window polish, hover thumbnails on seek bar
+      (2026-09-23, unreleased — ships next release): app-owned mpv-style
+      desktop keyboard map (space/K, ←→ & J/L ±10s, 0–9 percent-seek,
+      ↑↓ volume, M mute, F/Esc fullscreen, S frame-as-artwork, `?` help
+      sheet); desktop windows enforce an 800×600 minimum and remember
+      size/position/maximized across launches (macOS default aligned to
+      1280×720); hovering the desktop seek bar shows a frame thumbnail +
+      timestamp — thumbnails for DOWNLOADED files only (a streamed
+      source would pay a network prefetch window per hover point, so
+      streams get the timestamp bubble alone)
 - [x] Shared-list format v1 documented → plain text shipped (alpha.25/.31),
       bundle spec locked ([BUNDLE-FORMAT.md](BUNDLE-FORMAT.md)); import from an
       Autonomi address already works
