@@ -22,6 +22,13 @@ const kAutoPauseOptionsMinutes = [0, 10, 20, 30, 60];
 String idleMinutesLabel(int minutes) =>
     minutes >= 60 ? '1 hour' : '$minutes minutes';
 
+/// Choices for the Daily data alert (whole GB per local day; 0 = off).
+/// Alert-only: passing the level shows one notice, pauses nothing.
+const kDataAlertOptionsGb = [0, 1, 2, 5, 10];
+
+/// How many day bars the usage graph shows (today + the six before).
+const kUsageGraphDays = 7;
+
 /// Where a built-in client's network use may happen — the three-way
 /// pill under each x0x client (2026-09-06 reorg): Off stops the agent
 /// entirely, Wi-Fi keeps it off cellular, Wi-Fi + mobile lets it run
@@ -73,6 +80,13 @@ class _DataScreenState extends State<DataScreen> {
   DataUsageStats? _prev;
   DateTime? _prevAt;
   DateTime? _statsAt;
+
+  /// Day the usage block is scoped to (a tapped graph bar), or null for
+  /// the whole period.
+  DateTime? _selectedDay;
+
+  /// Daily data alert level in GB (0 = off).
+  int _alertGb = 0;
 
   // -- Built-in clients. --
   ClientHealth? _health;
@@ -172,12 +186,14 @@ class _DataScreenState extends State<DataScreen> {
     final downloads = await AppSettings.downloadNetworkPolicy();
     final channels = await AppSettings.channelsOnCellular();
     final myWatch = await AppSettings.myWatchOnCellular();
+    final alertGb = await AppSettings.dataAlertGb();
     if (!mounted) return;
     setState(() {
       _streaming = streaming;
       _downloads = downloads;
       _channelsOnCellular = channels;
       _myWatchOnCellular = myWatch;
+      _alertGb = alertGb;
     });
   }
 
@@ -193,7 +209,8 @@ class _DataScreenState extends State<DataScreen> {
             style: TextStyle(color: t.bone, fontSize: 16)),
         content: Text(
           'All counters return to zero and a new period starts today. '
-          'This only affects these statistics — nothing else changes.',
+          'The daily graph keeps its history. This only affects these '
+          'statistics — nothing else changes.',
           style: TextStyle(color: t.boneDim, fontSize: 13.5),
         ),
         actions: [
@@ -283,6 +300,52 @@ class _DataScreenState extends State<DataScreen> {
     );
     if (picked == null) return;
     await NetworkPause.instance.setIdleMinutes(picked);
+  }
+
+  // ------------------------------------------------------------- data alert
+
+  Future<void> _pickDataAlert() async {
+    final t = WiTokens.of(context);
+    final picked = await showDialog<int>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        backgroundColor: t.ink2,
+        title: Text('Daily data alert',
+            style: TextStyle(color: t.bone, fontSize: 16)),
+        children: [
+          RadioGroup<int>(
+            groupValue: _alertGb,
+            onChanged: (v) => Navigator.of(context).pop(v),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final gb in kDataAlertOptionsGb)
+                  RadioListTile<int>(
+                    value: gb,
+                    activeColor: t.accent,
+                    title: Text(
+                      gb <= 0 ? 'Off  ·  default' : 'At $gb GB in one day',
+                      style: TextStyle(color: t.bone, fontSize: 14),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 4, 24, 8),
+            child: Text(
+              'One quiet notice per day when usage passes the level. '
+              'Nothing is paused or cut off — streaming, downloads and '
+              'sync all continue.',
+              style: TextStyle(color: t.ash, fontSize: 11.5),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (picked == null) return;
+    await AppSettings.setDataAlertGb(picked);
+    if (mounted) setState(() => _alertGb = picked);
   }
 
   // ---------------------------------------------------------------- clients
@@ -495,7 +558,9 @@ class _DataScreenState extends State<DataScreen> {
         ),
       );
 
-  Widget _totalCard(WiTokens t, DataUsageStats stats) => Container(
+  Widget _totalCard(WiTokens t,
+          {required String title, required UsageBytes usage}) =>
+      Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
         decoration: BoxDecoration(
@@ -504,11 +569,10 @@ class _DataScreenState extends State<DataScreen> {
         ),
         child: Column(
           children: [
-            Text('Total data usage',
-                style: TextStyle(color: t.ash, fontSize: 12.5)),
+            Text(title, style: TextStyle(color: t.ash, fontSize: 12.5)),
             const SizedBox(height: 6),
             Text(
-              formatBytes(stats.total.total),
+              formatBytes(usage.total),
               style: TextStyle(
                 color: t.bone,
                 fontSize: 34,
@@ -519,16 +583,168 @@ class _DataScreenState extends State<DataScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text('↑ ${formatBytes(stats.total.tx)}',
+                Text('↑ ${formatBytes(usage.tx)}',
                     style: TextStyle(color: t.ash, fontSize: 13)),
                 const SizedBox(width: 16),
-                Text('↓ ${formatBytes(stats.total.rx)}',
+                Text('↓ ${formatBytes(usage.rx)}',
                     style: TextStyle(color: t.ash, fontSize: 13)),
               ],
             ),
+            // The mobile-data share, only when there is one — desktops
+            // (and phones that never left Wi-Fi) never see this line.
+            if (usage.mobTotal > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  'Mobile data: ↑ ${formatBytes(usage.mobTx)} · '
+                  '↓ ${formatBytes(usage.mobRx)}',
+                  style: TextStyle(
+                      color: WiTokens.channelAmber, fontSize: 12.5),
+                ),
+              ),
           ],
         ),
       );
+
+  /// The seven days the graph shows, oldest first, ending today.
+  List<DateTime> _graphDays() {
+    final base = _now();
+    return [
+      for (var i = kUsageGraphDays - 1; i >= 0; i--)
+        DateTime(base.year, base.month, base.day - i),
+    ];
+  }
+
+  UsageBytes _usageOfDay(DataUsageStats stats, DateTime day) =>
+      stats.dayFor(day)?.total ?? const UsageBytes();
+
+  /// The compact 7-day bar chart under the total card: stacked bars
+  /// (mobile share in amber under the Wi-Fi/other share in accent),
+  /// today bright, a tapped day outlined; tapping re-scopes the whole
+  /// usage block to that day, tapping again returns to the period.
+  Widget _dayGraph(WiTokens t, DataUsageStats stats) {
+    final days = _graphDays();
+    final totals = [for (final d in days) _usageOfDay(stats, d)];
+    var max = 1;
+    for (final u in totals) {
+      if (u.total > max) max = u.total;
+    }
+    const barArea = 96.0;
+    final today = localDayKey(_now());
+    final selected =
+        _selectedDay == null ? null : localDayKey(_selectedDay!);
+    Widget bar(DateTime day, UsageBytes u) {
+      final key = localDayKey(day);
+      final isToday = key == today;
+      final isSelected = key == selected;
+      // With a selection, the selected day is the bright one; without,
+      // today is.
+      final bright = selected == null ? isToday : isSelected;
+      final wifi = (u.total - u.mobTotal).clamp(0, u.total);
+      final wifiH = barArea * wifi / max;
+      final mobH = barArea * u.mobTotal / max;
+      final alpha = bright ? 1.0 : 0.40;
+      return Expanded(
+        child: Semantics(
+          button: true,
+          label: '${dayDateLabel(day)}: ${formatBytes(u.total)}',
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setState(
+                () => _selectedDay = isSelected ? null : day),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Container(
+                  height: (wifiH + mobH) < 2 ? 2 : null,
+                  margin: const EdgeInsets.symmetric(horizontal: 5),
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(3)),
+                    border: isSelected
+                        ? Border.all(color: t.bone, width: 1.5)
+                        : null,
+                    color: (wifiH + mobH) < 2
+                        ? t.ash.withValues(alpha: 0.5)
+                        : null,
+                  ),
+                  child: (wifiH + mobH) < 2
+                      ? null
+                      : Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                                height: wifiH,
+                                color:
+                                    t.accent.withValues(alpha: alpha)),
+                            Container(
+                                height: mobH,
+                                color: WiTokens.channelAmber
+                                    .withValues(alpha: alpha)),
+                          ],
+                        ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  isToday ? 'Today' : '${day.day}',
+                  style: TextStyle(
+                    color: bright ? t.bone : t.ash,
+                    fontSize: 10.5,
+                    fontWeight:
+                        bright ? FontWeight.w700 : FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final anyMobile = totals.any((u) => u.mobTotal > 0);
+    Widget legendDot(Color color, String label) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration:
+                  BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 5),
+            Text(label, style: TextStyle(color: t.ash, fontSize: 11)),
+          ],
+        );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: Column(
+        children: [
+          SizedBox(
+            height: barArea + 20,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                for (var i = 0; i < days.length; i++)
+                  bar(days[i], totals[i]),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              legendDot(t.accent, 'Wi-Fi / other'),
+              if (anyMobile) ...[
+                const SizedBox(width: 14),
+                legendDot(WiTokens.channelAmber, 'Mobile data'),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _componentTile(
     WiTokens t, {
@@ -676,11 +892,47 @@ class _DataScreenState extends State<DataScreen> {
         ),
       ];
     }
+    // A tapped graph bar re-scopes the card + component rows to that
+    // day; null = the whole period (the graph itself always shows).
+    final selectedDay = _selectedDay;
+    final dayStats =
+        selectedDay == null ? null : stats.dayFor(selectedDay);
+    final todayUsage = _usageOfDay(stats, _now());
+    final alertBytes = _alertGb * 1024 * 1024 * 1024;
+    final overAlert = _alertGb > 0 && todayUsage.total >= alertBytes;
     return [
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-        child: _totalCard(t, stats),
+        child: selectedDay == null
+            ? _totalCard(t,
+                title: 'Total data usage', usage: stats.total)
+            : _totalCard(t,
+                title: 'Data used on ${dayDateLabel(selectedDay)}',
+                usage: dayStats?.total ?? const UsageBytes()),
       ),
+      // The daily graph — hidden on an old core whose /stats has no
+      // day history yet.
+      if (stats.days != null) _dayGraph(t, stats),
+      if (overAlert)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 16, 0),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.warning_amber_outlined,
+                  color: WiTokens.channelAmber, size: 16),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  "Today's usage is ${formatBytes(todayUsage.total)} — "
+                  'over your $_alertGb GB daily alert.',
+                  style: TextStyle(
+                      color: WiTokens.channelAmber, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
       const SizedBox(height: 8),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -690,31 +942,39 @@ class _DataScreenState extends State<DataScreen> {
               t,
               icon: Icons.cloud_outlined,
               name: 'Autonomi client',
-              usage: stats.ant,
-              extraLines: [
-                'of which media: ${formatBytes(stats.antMediaRx)}',
-                _antFreshnessLine(stats.antStaleSecs),
-              ],
+              usage: selectedDay != null
+                  ? (dayStats?.ant ?? const UsageBytes())
+                  : stats.ant,
+              extraLines: selectedDay != null
+                  ? const []
+                  : [
+                      'of which media: ${formatBytes(stats.antMediaRx)}',
+                      _antFreshnessLine(stats.antStaleSecs),
+                    ],
             ),
             _componentTile(
               t,
               icon: Icons.devices_outlined,
               name: 'My W@tch',
-              usage: stats.myWatch,
-              off: _myWatch?.enabled == false,
+              usage: selectedDay != null
+                  ? (dayStats?.myWatch ?? const UsageBytes())
+                  : stats.myWatch,
+              off: selectedDay == null && _myWatch?.enabled == false,
             ),
             _componentTile(
               t,
               icon: Icons.podcasts,
               iconColor: WiTokens.channelAmber,
               name: 'Channels',
-              usage: stats.channels,
-              off: _channels?.enabled == false,
+              usage: selectedDay != null
+                  ? (dayStats?.channels ?? const UsageBytes())
+                  : stats.channels,
+              off: selectedDay == null && _channels?.enabled == false,
             ),
           ],
         ),
       ),
-      if (_rateLine != null)
+      if (selectedDay == null && _rateLine != null)
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 6, 16, 0),
           child: Row(
@@ -728,31 +988,49 @@ class _DataScreenState extends State<DataScreen> {
         ),
       Padding(
         padding: const EdgeInsets.fromLTRB(20, 4, 16, 0),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Since ${sinceDateLabel(stats.periodStart)}',
-                style: TextStyle(color: t.ash, fontSize: 12.5),
+        child: selectedDay == null
+            ? Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Since ${sinceDateLabel(stats.periodStart)}'
+                      '${stats.days != null ? ' · tap a day for details' : ''}',
+                      style: TextStyle(color: t.ash, fontSize: 12.5),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _confirmReset,
+                    child: const Text('Reset'),
+                  ),
+                ],
+              )
+            : Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Showing ${dayDateLabel(selectedDay)} only',
+                      style: TextStyle(color: t.ash, fontSize: 12.5),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () =>
+                        setState(() => _selectedDay = null),
+                    child: const Text('Show whole period'),
+                  ),
+                ],
               ),
-            ),
-            TextButton(
-              onPressed: _confirmReset,
-              child: const Text('Reset'),
-            ),
-          ],
-        ),
       ),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 16, 8),
-        child: Text(
-          'Measured inside the app: the My W@tch and Channels rows '
-          'count raw connection bytes, the Autonomi row counts '
-          'protocol data. System-level meters read a few percent '
-          'higher.',
-          style: TextStyle(color: t.ash, fontSize: 11.5),
+      if (selectedDay == null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 16, 8),
+          child: Text(
+            'Measured inside the app: the My W@tch and Channels rows '
+            'count raw connection bytes, the Autonomi row counts '
+            'protocol data. System-level meters read a few percent '
+            'higher.',
+            style: TextStyle(color: t.ash, fontSize: 11.5),
+          ),
         ),
-      ),
     ];
   }
 
@@ -793,6 +1071,23 @@ class _DataScreenState extends State<DataScreen> {
                     trailing: Icon(Icons.chevron_right, color: t.ash),
                     onTap: _pickAutoPause,
                   ),
+                ),
+                // The daily alert directly below auto-pause — the same
+                // "rules about the counters" grouping.
+                ListTile(
+                  leading:
+                      Icon(Icons.notifications_none, color: t.accent),
+                  title: Text('Daily data alert',
+                      style: TextStyle(color: t.bone, fontSize: 15)),
+                  subtitle: Text(
+                    _alertGb <= 0
+                        ? 'Off — no usage notices'
+                        : 'At $_alertGb GB in one day — one notice, '
+                            'nothing is paused',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                  trailing: Icon(Icons.chevron_right, color: t.ash),
+                  onTap: _pickDataAlert,
                 ),
                 _sectionHeader(t, 'BUILT-IN CLIENTS'),
                 Padding(
@@ -917,11 +1212,20 @@ String downloadPolicyLabel(DownloadNetworkPolicy policy) =>
       DownloadNetworkPolicy.any => 'Wi-Fi + mobile data',
     };
 
+const _kMonthsShort = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+const _kWeekdays = [
+  'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+  'Friday', 'Saturday', 'Sunday',
+];
+
 /// `4 Sep 2026` — the period-start caption (no intl dependency).
-String sinceDateLabel(DateTime d) {
-  const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  ];
-  return '${d.day} ${months[d.month - 1]} ${d.year}';
-}
+String sinceDateLabel(DateTime d) =>
+    '${d.day} ${_kMonthsShort[d.month - 1]} ${d.year}';
+
+/// `Saturday 19 Sep` — the day-scope caption on the usage card.
+String dayDateLabel(DateTime d) =>
+    '${_kWeekdays[d.weekday - 1]} ${d.day} ${_kMonthsShort[d.month - 1]}';

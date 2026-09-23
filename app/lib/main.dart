@@ -20,6 +20,7 @@ import 'services/app_settings.dart';
 import 'services/impeller.dart';
 import 'services/tv_settings.dart';
 import 'services/connectivity.dart';
+import 'services/data_alert.dart';
 import 'services/download_foreground.dart';
 import 'services/media_session.dart';
 import 'services/now_playing.dart';
@@ -109,6 +110,13 @@ Future<void> main() async {
       unawaited(ConnectivityMonitor.instance.refresh());
     }
   });
+  // Data-usage transport tagging: tell the native counters whether the
+  // device is on mobile data (at startup and on every OS transport
+  // change) so the Data page can split Wi-Fi vs mobile bytes.
+  void reportTransport() => unawaited(
+      EmbeddedClient.reportMobileData(NetworkEvents.instance.onCellular));
+  NetworkEvents.instance.addListener(reportTransport);
+  reportTransport();
   // Bundled root data maps (the demo movie) seed the embedded client's
   // store so a fresh install skips the cold network resolve on first
   // play. Fire-and-forget: fully offline, idempotent, verified server-side.
@@ -157,6 +165,10 @@ Future<void> main() async {
   // only, resume when Wi-Fi returns. A no-op with the default
   // everything-allowed settings.
   X0xCellularGate.instance.start();
+  // Daily data alert (Settings → Network → Data): a quiet once-per-day
+  // snackbar when the day's usage passes the chosen level. Alert-only —
+  // it never pauses anything.
+  DataAlert.instance.start();
   // Profiles before the first frame: a pre-profile install silently
   // becomes the lone Admin profile here, and the launch profile
   // (single / auto-login / ask) decides what the gate shows. The

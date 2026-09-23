@@ -8313,6 +8313,7 @@ dependencies = [
  "bytes",
  "cc",
  "chacha20poly1305",
+ "chrono",
  "data-encoding",
  "ed25519-dalek",
  "futures",

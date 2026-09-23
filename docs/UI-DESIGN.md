@@ -95,9 +95,19 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   which absorbed the 2026-09-05 reorg's four sub-pages): **Offline
   mode** on top (the all-network pause switch), then **Data**, then
   **Buffer size**. The Data sub-page is the one place for everything
-  data, top to bottom: the live usage counters (total card,
-  per-component rows with Off tags, current-rate row, Since <date> +
-  Reset), the Auto-pause-when-idle tile, a BUILT-IN CLIENTS section —
+  data, top to bottom: the live usage counters (total card with an
+  amber "Mobile data: ↑ · ↓" line when any mobile bytes exist,
+  followed since 2026-09-23 — unreleased — by a compact 7-day
+  two-tone stacked bar graph: accent Wi-Fi/other over amber mobile,
+  today bright, tap a bar to re-scope the card + component rows to
+  that day with a "Show whole period" way back; per-component rows
+  with Off tags, current-rate row, Since <date> + tap-a-day hint +
+  Reset — Reset clears the period counters but the daily graph keeps
+  its history), the Auto-pause-when-idle tile, the **Daily data
+  alert** tile directly below it (Off default / 1/2/5/10 GB in one
+  day; alert-only — one quiet snackbar per day plus an amber line on
+  the page when today passes the level, nothing is ever paused), a
+  BUILT-IN CLIENTS section —
   Autonomi connection row with refresh, then Channels and My W@tch
   each on a compact 3-segment pill **Off | Wi-Fi | Wi-Fi + mobile**
   (replacing the old on/off switch + separate cellular toggle; links,

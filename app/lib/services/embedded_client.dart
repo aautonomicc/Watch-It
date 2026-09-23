@@ -196,6 +196,31 @@ class EmbeddedClient {
       _statsCall('POST', '/stats/reset',
           baseOverride: baseOverride, tokenOverride: tokenOverride);
 
+  /// Tell the native data-usage counters whether the device is on
+  /// mobile data (`POST /stats/transport`) — bytes counted from now on
+  /// carry the mobile tag for the Data page's Wi-Fi vs mobile split.
+  /// Fire-and-forget from main() at startup and on transport changes;
+  /// an old core without the route just answers 404, harmless.
+  static Future<void> reportMobileData(bool mobile,
+      {String? baseOverride, String? tokenOverride}) async {
+    final base = baseOverride ?? baseUrl();
+    if (base == null) return;
+    final token = tokenOverride ?? authToken();
+    final client = HttpClient();
+    try {
+      final req = await client.postUrl(Uri.parse(
+          '${base.replaceFirst(RegExp(r'/+$'), '')}/stats/transport'));
+      if (token != null) req.headers.set('x-watchit-auth', token);
+      req.add(utf8.encode(jsonEncode({'mobile': mobile})));
+      final res = await req.close();
+      await res.drain<void>();
+    } catch (_) {
+      // Embedded client unreachable — the next transport change retries.
+    } finally {
+      client.close();
+    }
+  }
+
   static Future<DataUsageStats?> _statsCall(String method, String path,
       {String? baseOverride, String? tokenOverride}) async {
     final base = baseOverride ?? baseUrl();
@@ -249,17 +274,71 @@ class ClientVersions {
       );
 }
 
-/// Up/down byte pair of one `GET /stats` component.
+/// Up/down byte pair of one `GET /stats` component, with the share
+/// moved while the device was on mobile data (zero on cores/periods
+/// that never saw a transport report).
 class UsageBytes {
-  const UsageBytes({this.rx = 0, this.tx = 0});
+  const UsageBytes({this.rx = 0, this.tx = 0, this.mobRx = 0, this.mobTx = 0});
   final int rx;
   final int tx;
+  final int mobRx;
+  final int mobTx;
   int get total => rx + tx;
+  int get mobTotal => mobRx + mobTx;
 
   factory UsageBytes.fromJson(dynamic json) => json is Map
-      ? UsageBytes(rx: json['rx'] as int? ?? 0, tx: json['tx'] as int? ?? 0)
+      ? UsageBytes(
+          rx: json['rx'] as int? ?? 0,
+          tx: json['tx'] as int? ?? 0,
+          mobRx: json['mob_rx'] as int? ?? 0,
+          mobTx: json['mob_tx'] as int? ?? 0,
+        )
       : const UsageBytes();
 }
+
+/// One local day's usage from the `/stats` `days` array (the Data
+/// page's daily graph; ~35 days kept, oldest first).
+class DayUsage {
+  const DayUsage({
+    required this.day,
+    this.ant = const UsageBytes(),
+    this.myWatch = const UsageBytes(),
+    this.channels = const UsageBytes(),
+  });
+
+  /// The local calendar day (midnight, no timezone math — the native
+  /// side buckets by the device's own local date).
+  final DateTime day;
+  final UsageBytes ant;
+  final UsageBytes myWatch;
+  final UsageBytes channels;
+
+  UsageBytes get total => UsageBytes(
+        rx: ant.rx + myWatch.rx + channels.rx,
+        tx: ant.tx + myWatch.tx + channels.tx,
+        mobRx: ant.mobRx + myWatch.mobRx + channels.mobRx,
+        mobTx: ant.mobTx + myWatch.mobTx + channels.mobTx,
+      );
+
+  static DayUsage? fromJson(dynamic json) {
+    if (json is! Map) return null;
+    final day = DateTime.tryParse(json['day'] as String? ?? '');
+    if (day == null) return null;
+    return DayUsage(
+      day: day,
+      ant: UsageBytes.fromJson(json['ant']),
+      myWatch: UsageBytes.fromJson(json['mywatch']),
+      channels: UsageBytes.fromJson(json['channels']),
+    );
+  }
+}
+
+/// The native side's day-bucket key for [d]'s LOCAL calendar day
+/// (`2026-09-23`) — must produce the same key Rust's chrono::Local does.
+String localDayKey(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-'
+    '${d.month.toString().padLeft(2, '0')}-'
+    '${d.day.toString().padLeft(2, '0')}';
 
 /// The `GET /stats` body: period data-usage totals per component (see
 /// native datausage.rs). All values are bytes since the period start.
@@ -272,6 +351,7 @@ class DataUsageStats {
     required this.channels,
     this.antMediaRx = 0,
     this.antStaleSecs,
+    this.days,
   });
 
   final DateTime periodStart;
@@ -279,6 +359,10 @@ class DataUsageStats {
   final UsageBytes ant;
   final UsageBytes myWatch;
   final UsageBytes channels;
+
+  /// Per-local-day history (oldest first), or null on an old core whose
+  /// `/stats` predates the daily buckets (UI hides the graph then).
+  final List<DayUsage>? days;
 
   /// Of the ant bytes: media chunk payload (live counter, no staleness).
   final int antMediaRx;
@@ -297,7 +381,22 @@ class DataUsageStats {
         channels: UsageBytes.fromJson(json['channels']),
         antMediaRx: (json['ant'] as Map?)?['media_rx'] as int? ?? 0,
         antStaleSecs: (json['ant'] as Map?)?['stale_secs'] as int?,
+        days: json['days'] is List
+            ? [
+                for (final d in json['days'] as List) ?DayUsage.fromJson(d),
+              ]
+            : null,
       );
+
+  /// The [days] entry for [d]'s local calendar day, if any bytes were
+  /// counted that day.
+  DayUsage? dayFor(DateTime d) {
+    final key = localDayKey(d);
+    for (final day in days ?? const <DayUsage>[]) {
+      if (localDayKey(day.day) == key) return day;
+    }
+    return null;
+  }
 }
 
 class ClientHealth {

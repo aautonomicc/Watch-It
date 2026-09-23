@@ -973,8 +973,19 @@ against the x0x project.
       Autonomi connection row plus Channels and My W@tch each on a
       3-way **Off | Wi-Fi | Wi-Fi + mobile** pill — and the mobile
       data policies (Streaming / Downloads pickers)
-- [ ] Daily buckets/graph, Wi-Fi vs cellular tagging, budget alerts
-      (deferred from the data-usage plan)
+- [x] Daily buckets/graph, Wi-Fi vs cellular tagging, daily alert
+      (2026-09-23, unreleased — ships next release; the trio deferred
+      from the data-usage plan, all on the existing Data page): the
+      native counters also bucket every add into per-local-day history
+      (~35 days, survives period Reset) split Wi-Fi vs mobile — the
+      app reports the OS transport over `POST /stats/transport` — and
+      `/stats` gains a `days` array; the Data page shows a 7-day
+      two-tone stacked bar graph under the total card (tap a day to
+      re-scope the card + component rows to that day), a
+      "Mobile data: ↑ · ↓" line on the total card when any mobile
+      bytes exist, and a **Daily data alert** tile (Off default /
+      1/2/5/10 GB per day) — alert-only: one quiet snackbar per day
+      plus an amber line on the page, nothing is ever paused
 
 ## Profiles — family viewing (shipped 2026-09-09, v0.1.0-alpha.93)
 

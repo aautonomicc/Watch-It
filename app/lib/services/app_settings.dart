@@ -239,6 +239,21 @@ class AppSettings {
     await prefs.setInt(_autoPauseMinutesKey, value);
   }
 
+  static const _dataAlertGbKey = 'data_alert_gb_v1';
+
+  /// Daily data alert level in whole GB (Settings → Network → Data);
+  /// 0 = off (the default). Alert-only — nothing is ever paused when
+  /// the day's usage passes it.
+  static Future<int> dataAlertGb() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_dataAlertGbKey) ?? 0;
+  }
+
+  static Future<void> setDataAlertGb(int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_dataAlertGbKey, value);
+  }
+
   static const _samsungTipDismissedKey = 'samsung_tip_dismissed_v1';
 
   /// One-time Samsung battery-management tip on Settings → Downloads.

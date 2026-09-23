@@ -30,8 +30,20 @@
 //! reset on `POST /stats/reset`. `media_rx` additionally folds the live
 //! [`crate::engine::FETCHED_BYTES`] counter into the period so the
 //! Autonomi tile can show "of which media".
+//!
+//! Beside the period, every add also lands in a **per-local-day
+//! bucket** (kept ~35 days, persisted alongside the period, NOT
+//! touched by reset — the Data page's daily graph survives a period
+//! reset by design). Each bucket splits per component into total and
+//! mobile-tagged bytes: the app reports the OS transport over
+//! `POST /stats/transport` (`{"mobile": bool}`) whenever it changes,
+//! and bytes added while the flag is set count as mobile data. The
+//! tagging is an attribution of the moment the bytes are *recorded* —
+//! the ant summary arrives every ~5 minutes cumulative, so a transport
+//! flip inside that window attributes the whole delta to the newer
+//! transport; an accepted approximation.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
@@ -65,28 +77,86 @@ const X0X_SAMPLE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(
 ))]
 const X0X_KEY_TTL: std::time::Duration = std::time::Duration::from_secs(600);
 
-/// Up/down period totals for one component.
+/// How many daily buckets are kept (rolling window; a 7-day graph with
+/// a month of scroll-back headroom).
+const DAYS_KEPT: usize = 35;
+
+/// Up/down period totals for one component, with the mobile-tagged
+/// share (`mob_* <= rx/tx` by construction).
 #[derive(Default)]
 pub struct ComponentUsage {
     pub rx: AtomicU64,
     pub tx: AtomicU64,
+    pub mob_rx: AtomicU64,
+    pub mob_tx: AtomicU64,
 }
 
 impl ComponentUsage {
-    fn add(&self, tx: u64, rx: u64) {
+    fn add(&self, tx: u64, rx: u64, mobile: bool) {
         self.tx.fetch_add(tx, Ordering::Relaxed);
         self.rx.fetch_add(rx, Ordering::Relaxed);
+        if mobile {
+            self.mob_tx.fetch_add(tx, Ordering::Relaxed);
+            self.mob_rx.fetch_add(rx, Ordering::Relaxed);
+        }
     }
     fn zero(&self) {
         self.tx.store(0, Ordering::Relaxed);
         self.rx.store(0, Ordering::Relaxed);
+        self.mob_tx.store(0, Ordering::Relaxed);
+        self.mob_rx.store(0, Ordering::Relaxed);
     }
     fn json(&self) -> serde_json::Value {
         serde_json::json!({
             "rx": self.rx.load(Ordering::Relaxed),
             "tx": self.tx.load(Ordering::Relaxed),
+            "mob_rx": self.mob_rx.load(Ordering::Relaxed),
+            "mob_tx": self.mob_tx.load(Ordering::Relaxed),
         })
     }
+}
+
+/// One component's share of a daily bucket.
+#[derive(Default, Clone, Copy)]
+struct DaySplit {
+    rx: u64,
+    tx: u64,
+    mob_rx: u64,
+    mob_tx: u64,
+}
+
+impl DaySplit {
+    fn add(&mut self, tx: u64, rx: u64, mobile: bool) {
+        self.tx += tx;
+        self.rx += rx;
+        if mobile {
+            self.mob_tx += tx;
+            self.mob_rx += rx;
+        }
+    }
+    fn json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "rx": self.rx, "tx": self.tx,
+            "mob_rx": self.mob_rx, "mob_tx": self.mob_tx,
+        })
+    }
+    fn from_json(v: &serde_json::Value) -> Self {
+        let g = |k: &str| v[k].as_u64().unwrap_or(0);
+        Self {
+            rx: g("rx"),
+            tx: g("tx"),
+            mob_rx: g("mob_rx"),
+            mob_tx: g("mob_tx"),
+        }
+    }
+}
+
+/// One local day's usage, per component.
+#[derive(Default, Clone, Copy)]
+struct DayBucket {
+    ant: DaySplit,
+    mywatch: DaySplit,
+    channels: DaySplit,
 }
 
 /// The three metered components.
@@ -94,6 +164,21 @@ impl ComponentUsage {
 pub enum Component {
     MyWatch,
     Channels,
+}
+
+/// Day-bucket slot (ant has no `Component` variant — it is not an x0x
+/// agent — but shares a day bucket).
+#[derive(Clone, Copy)]
+enum DaySlot {
+    Ant,
+    MyWatch,
+    Channels,
+}
+
+/// Today's bucket key, from the device's LOCAL calendar (`2026-09-23`).
+/// BTreeMap ordering == chronological ordering by construction.
+pub(crate) fn today_key() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
 }
 
 /// Process-wide period accounting. One global instance ([`usage()`]);
@@ -116,6 +201,14 @@ pub struct DataUsage {
     ant_last_at: Mutex<Option<Instant>>,
     /// Last seen `FETCHED_BYTES` value (process-cumulative).
     media_baseline: AtomicU64,
+    /// Whether the device is currently on mobile data, as last reported
+    /// by the app (`POST /stats/transport`). Not persisted: the app
+    /// re-reports at every launch, and the pre-report default (false)
+    /// only ever under-tags, never over-tags.
+    mobile: AtomicBool,
+    /// Per-local-day buckets, key `YYYY-MM-DD` (ascending == oldest
+    /// first). Survive `reset()`; pruned to [`DAYS_KEPT`].
+    days: Mutex<BTreeMap<String, DayBucket>>,
 }
 
 fn now_ms() -> u64 {
@@ -138,6 +231,8 @@ impl DataUsage {
             ant_baseline: Mutex::new(None),
             ant_last_at: Mutex::new(None),
             media_baseline: AtomicU64::new(0),
+            mobile: AtomicBool::new(false),
+            days: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -157,6 +252,10 @@ impl DataUsage {
                 let load = |c: &ComponentUsage, key: &str| {
                     c.tx.store(v[key]["tx"].as_u64().unwrap_or(0), Ordering::Relaxed);
                     c.rx.store(v[key]["rx"].as_u64().unwrap_or(0), Ordering::Relaxed);
+                    c.mob_tx
+                        .store(v[key]["mob_tx"].as_u64().unwrap_or(0), Ordering::Relaxed);
+                    c.mob_rx
+                        .store(v[key]["mob_rx"].as_u64().unwrap_or(0), Ordering::Relaxed);
                 };
                 load(&self.ant, "ant");
                 load(&self.mywatch, "mywatch");
@@ -167,9 +266,55 @@ impl DataUsage {
                     v["period_start_ms"].as_u64().unwrap_or_else(now_ms),
                     Ordering::Relaxed,
                 );
+                if let Some(saved) = v["days"].as_object() {
+                    let mut days = self.days.lock().unwrap();
+                    for (day, b) in saved {
+                        days.insert(
+                            day.clone(),
+                            DayBucket {
+                                ant: DaySplit::from_json(&b["ant"]),
+                                mywatch: DaySplit::from_json(&b["mywatch"]),
+                                channels: DaySplit::from_json(&b["channels"]),
+                            },
+                        );
+                    }
+                    while days.len() > DAYS_KEPT {
+                        days.pop_first();
+                    }
+                }
             }
         }
         *self.path.lock().unwrap() = Some(file);
+    }
+
+    /// The app reported the OS transport (`POST /stats/transport`).
+    pub fn set_mobile(&self, mobile: bool) {
+        self.mobile.store(mobile, Ordering::Relaxed);
+    }
+
+    /// Whether adds are currently tagged as mobile data.
+    pub fn on_mobile(&self) -> bool {
+        self.mobile.load(Ordering::Relaxed)
+    }
+
+    /// Fold bytes into a day bucket (today's unless a test passes its
+    /// own key), pruning the window.
+    fn add_day_keyed(&self, day: &str, slot: DaySlot, tx: u64, rx: u64, mobile: bool) {
+        let mut days = self.days.lock().unwrap();
+        let bucket = days.entry(day.to_string()).or_default();
+        match slot {
+            DaySlot::Ant => bucket.ant.add(tx, rx, mobile),
+            DaySlot::MyWatch => bucket.mywatch.add(tx, rx, mobile),
+            DaySlot::Channels => bucket.channels.add(tx, rx, mobile),
+        }
+        while days.len() > DAYS_KEPT {
+            days.pop_first();
+        }
+        self.dirty.store(true, Ordering::Relaxed);
+    }
+
+    fn add_day(&self, slot: DaySlot, tx: u64, rx: u64, mobile: bool) {
+        self.add_day_keyed(&today_key(), slot, tx, rx, mobile);
     }
 
     /// Add x0x sampler deltas for one agent.
@@ -177,7 +322,13 @@ impl DataUsage {
         if tx == 0 && rx == 0 {
             return;
         }
-        self.component(component).add(tx, rx);
+        let mobile = self.on_mobile();
+        self.component(component).add(tx, rx, mobile);
+        let slot = match component {
+            Component::MyWatch => DaySlot::MyWatch,
+            Component::Channels => DaySlot::Channels,
+        };
+        self.add_day(slot, tx, rx, mobile);
         self.dirty.store(true, Ordering::Relaxed);
     }
 
@@ -197,7 +348,11 @@ impl DataUsage {
             *base = Some((tx_cum, rx_cum));
             delta
         };
-        self.ant.add(dtx, drx);
+        let mobile = self.on_mobile();
+        self.ant.add(dtx, drx, mobile);
+        if dtx > 0 || drx > 0 {
+            self.add_day(DaySlot::Ant, dtx, drx, mobile);
+        }
         *self.ant_last_at.lock().unwrap() = Some(Instant::now());
         self.dirty.store(true, Ordering::Relaxed);
     }
@@ -228,34 +383,47 @@ impl DataUsage {
     /// paused.
     pub fn stats_json(&self) -> serde_json::Value {
         self.fold_media();
-        let (ant_rx, ant_tx) = (
-            self.ant.rx.load(Ordering::Relaxed),
-            self.ant.tx.load(Ordering::Relaxed),
-        );
-        let (mw_rx, mw_tx) = (
-            self.mywatch.rx.load(Ordering::Relaxed),
-            self.mywatch.tx.load(Ordering::Relaxed),
-        );
-        let (ch_rx, ch_tx) = (
-            self.channels.rx.load(Ordering::Relaxed),
-            self.channels.tx.load(Ordering::Relaxed),
-        );
+        let sum = |pick: fn(&ComponentUsage) -> &AtomicU64| {
+            pick(&self.ant).load(Ordering::Relaxed)
+                + pick(&self.mywatch).load(Ordering::Relaxed)
+                + pick(&self.channels).load(Ordering::Relaxed)
+        };
+        let mut ant = self.ant.json();
+        ant["media_rx"] = self.media_rx.load(Ordering::Relaxed).into();
+        ant["stale_secs"] = serde_json::json!(self.ant_stale_secs());
+        let days: Vec<serde_json::Value> = self
+            .days
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(day, b)| {
+                serde_json::json!({
+                    "day": day,
+                    "ant": b.ant.json(),
+                    "mywatch": b.mywatch.json(),
+                    "channels": b.channels.json(),
+                })
+            })
+            .collect();
         serde_json::json!({
             "period_start_ms": self.period_start_ms.load(Ordering::Relaxed),
-            "total": { "rx": ant_rx + mw_rx + ch_rx, "tx": ant_tx + mw_tx + ch_tx },
-            "ant": {
-                "rx": ant_rx,
-                "tx": ant_tx,
-                "media_rx": self.media_rx.load(Ordering::Relaxed),
-                "stale_secs": self.ant_stale_secs(),
+            "total": {
+                "rx": sum(|c| &c.rx),
+                "tx": sum(|c| &c.tx),
+                "mob_rx": sum(|c| &c.mob_rx),
+                "mob_tx": sum(|c| &c.mob_tx),
             },
+            "ant": ant,
             "mywatch": self.mywatch.json(),
             "channels": self.channels.json(),
+            "days": days,
         })
     }
 
     /// `POST /stats/reset`: zero every component at once (one period,
-    /// one mental model), stamp a fresh period start, persist.
+    /// one mental model), stamp a fresh period start, persist. The
+    /// daily buckets deliberately SURVIVE — reset means "start counting
+    /// the period from now", not "forget the history graph".
     pub fn reset(&self) {
         // Re-baseline media first so bytes fetched before the reset
         // can't leak into the new period on the next fold.
@@ -279,12 +447,29 @@ impl DataUsage {
         let Some(path) = self.path.lock().unwrap().clone() else {
             return;
         };
+        let days: serde_json::Map<String, serde_json::Value> = self
+            .days
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(day, b)| {
+                (
+                    day.clone(),
+                    serde_json::json!({
+                        "ant": b.ant.json(),
+                        "mywatch": b.mywatch.json(),
+                        "channels": b.channels.json(),
+                    }),
+                )
+            })
+            .collect();
         let body = serde_json::json!({
             "period_start_ms": self.period_start_ms.load(Ordering::Relaxed),
             "ant": self.ant.json(),
             "mywatch": self.mywatch.json(),
             "channels": self.channels.json(),
             "media_rx": self.media_rx.load(Ordering::Relaxed),
+            "days": days,
         });
         if let Err(e) = std::fs::write(&path, body.to_string()) {
             tracing::warn!("datausage save failed: {e}");
@@ -539,7 +724,9 @@ mod tests {
         let u = DataUsage::new();
         u.init_storage(&dir);
         u.add_x0x(Component::MyWatch, 11, 22);
+        u.set_mobile(true);
         u.add_x0x(Component::Channels, 33, 44);
+        u.set_mobile(false);
         u.record_ant_summary(55, 66);
         u.save_if_dirty();
 
@@ -547,8 +734,12 @@ mod tests {
         loaded.init_storage(&dir);
         assert_eq!(loaded.mywatch.tx.load(Ordering::Relaxed), 11);
         assert_eq!(loaded.mywatch.rx.load(Ordering::Relaxed), 22);
+        assert_eq!(loaded.mywatch.mob_tx.load(Ordering::Relaxed), 0);
         assert_eq!(loaded.channels.tx.load(Ordering::Relaxed), 33);
         assert_eq!(loaded.channels.rx.load(Ordering::Relaxed), 44);
+        // The mobile-tagged share survives the reload.
+        assert_eq!(loaded.channels.mob_tx.load(Ordering::Relaxed), 33);
+        assert_eq!(loaded.channels.mob_rx.load(Ordering::Relaxed), 44);
         assert_eq!(loaded.ant.tx.load(Ordering::Relaxed), 55);
         assert_eq!(loaded.ant.rx.load(Ordering::Relaxed), 66);
         assert_eq!(
@@ -557,19 +748,78 @@ mod tests {
         );
         // A fresh process has no summary yet: stale is unknown.
         assert!(loaded.ant_stale_secs().is_none());
+        // The daily buckets came back too.
+        {
+            let days = loaded.days.lock().unwrap();
+            let today = days.get(&today_key()).copied().unwrap();
+            assert_eq!(today.mywatch.rx, 22);
+            assert_eq!(today.channels.mob_rx, 44);
+            assert_eq!(today.ant.rx, 66);
+        }
 
-        // Reset zeroes everything and stamps a new period.
+        // Reset zeroes the period (mobile share included) and stamps a
+        // new period — but the daily history SURVIVES.
         loaded.reset();
         assert_eq!(loaded.ant.tx.load(Ordering::Relaxed), 0);
         assert_eq!(loaded.mywatch.rx.load(Ordering::Relaxed), 0);
         assert_eq!(loaded.channels.tx.load(Ordering::Relaxed), 0);
+        assert_eq!(loaded.channels.mob_rx.load(Ordering::Relaxed), 0);
         let v = loaded.stats_json();
         assert_eq!(v["total"]["rx"].as_u64(), Some(0));
-        // The reset persisted: a re-load sees zeros too.
+        assert_eq!(v["total"]["mob_rx"].as_u64(), Some(0));
+        assert_eq!(v["days"].as_array().unwrap().len(), 1);
+        // The reset persisted: a re-load sees zeros AND the history.
         let reloaded = DataUsage::new();
         reloaded.init_storage(&dir);
         assert_eq!(reloaded.ant.rx.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            reloaded.days.lock().unwrap().get(&today_key()).unwrap().ant.rx,
+            66
+        );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn transport_tagging_splits_mobile_bytes_and_days() {
+        let u = DataUsage::new();
+        u.add_x0x(Component::MyWatch, 10, 20);
+        u.set_mobile(true);
+        u.add_x0x(Component::MyWatch, 1, 2);
+        u.record_ant_summary(100, 200);
+        u.set_mobile(false);
+        u.add_x0x(Component::Channels, 5, 6);
+        let v = u.stats_json();
+        assert_eq!(v["mywatch"]["tx"].as_u64(), Some(11));
+        assert_eq!(v["mywatch"]["mob_tx"].as_u64(), Some(1));
+        assert_eq!(v["mywatch"]["mob_rx"].as_u64(), Some(2));
+        assert_eq!(v["ant"]["mob_rx"].as_u64(), Some(200));
+        assert_eq!(v["channels"]["mob_rx"].as_u64(), Some(0));
+        assert_eq!(v["total"]["mob_rx"].as_u64(), Some(202));
+        assert_eq!(v["total"]["mob_tx"].as_u64(), Some(101));
+        // Everything above landed in today's single day bucket.
+        let days = v["days"].as_array().unwrap();
+        assert_eq!(days.len(), 1);
+        let d = &days[0];
+        assert_eq!(d["day"].as_str(), Some(today_key().as_str()));
+        assert_eq!(d["mywatch"]["rx"].as_u64(), Some(22));
+        assert_eq!(d["mywatch"]["mob_rx"].as_u64(), Some(2));
+        assert_eq!(d["ant"]["rx"].as_u64(), Some(200));
+        assert_eq!(d["ant"]["mob_rx"].as_u64(), Some(200));
+        assert_eq!(d["channels"]["rx"].as_u64(), Some(6));
+        assert_eq!(d["channels"]["mob_rx"].as_u64(), Some(0));
+    }
+
+    #[test]
+    fn day_buckets_prune_to_the_window() {
+        let u = DataUsage::new();
+        for i in 0..(DAYS_KEPT + 5) {
+            u.add_day_keyed(&format!("day-{i:03}"), DaySlot::Ant, 1, 1, false);
+        }
+        let days = u.days.lock().unwrap();
+        assert_eq!(days.len(), DAYS_KEPT);
+        // Oldest keys were dropped, newest kept.
+        assert!(!days.contains_key("day-000"));
+        assert!(days.contains_key(&format!("day-{:03}", DAYS_KEPT + 4)));
     }
 
     #[test]

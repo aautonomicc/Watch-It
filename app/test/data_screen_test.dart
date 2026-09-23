@@ -223,6 +223,183 @@ void main() {
       expect(sinceDateLabel(DateTime(2026, 9, 4)), '4 Sep 2026');
       expect(sinceDateLabel(DateTime(2025, 12, 31)), '31 Dec 2025');
       expect(sinceDateLabel(DateTime(2027, 1, 1)), '1 Jan 2027');
+      expect(dayDateLabel(DateTime(2026, 9, 19)), 'Saturday 19 Sep');
+      expect(dayDateLabel(DateTime(2026, 9, 23)), 'Wednesday 23 Sep');
+    });
+
+    test('DataUsageStats parses days and the mobile split', () {
+      final stats = DataUsageStats.fromJson({
+        'period_start_ms': 1,
+        'total': {'rx': 10, 'tx': 2, 'mob_rx': 4, 'mob_tx': 1},
+        'ant': {'rx': 10, 'tx': 2, 'media_rx': 0, 'stale_secs': null},
+        'mywatch': {'rx': 0, 'tx': 0},
+        'channels': {'rx': 0, 'tx': 0},
+        'days': [
+          {
+            'day': '2026-09-23',
+            'ant': {'rx': 7, 'tx': 1, 'mob_rx': 3, 'mob_tx': 1},
+            'mywatch': {'rx': 2, 'tx': 0},
+            'channels': {'rx': 1, 'tx': 1},
+          },
+          {'day': 'garbage'}, // malformed entries are dropped, not fatal
+        ],
+      });
+      expect(stats.total.mobRx, 4);
+      expect(stats.total.mobTotal, 5);
+      expect(stats.days, hasLength(1));
+      final day = stats.days!.single;
+      expect(localDayKey(day.day), '2026-09-23');
+      expect(day.total.rx, 10);
+      expect(day.total.mobRx, 3);
+      expect(stats.dayFor(DateTime(2026, 9, 23, 15)), isNotNull);
+      expect(stats.dayFor(DateTime(2026, 9, 22)), isNull);
+      // No days key at all (old core) parses as null, not empty.
+      final old = DataUsageStats.fromJson({
+        'period_start_ms': 1,
+        'total': {'rx': 0, 'tx': 0},
+        'ant': {'rx': 0, 'tx': 0},
+        'mywatch': {'rx': 0, 'tx': 0},
+        'channels': {'rx': 0, 'tx': 0},
+      });
+      expect(old.days, isNull);
+    });
+
+    test('reportMobileData posts the transport flag', () async {
+      await EmbeddedClient.reportMobileData(true,
+          baseOverride: FakeEmbeddedHttp.base, tokenOverride: 'sekrit');
+      await EmbeddedClient.reportMobileData(false,
+          baseOverride: FakeEmbeddedHttp.base, tokenOverride: 'sekrit');
+      expect(fake.transportPosts,
+          ['{"mobile":true}', '{"mobile":false}']);
+    });
+  });
+
+  group('daily graph & alert', () {
+    Map<String, dynamic> split(int rx, int tx,
+            {int mobRx = 0, int mobTx = 0}) =>
+        {'rx': rx, 'tx': tx, 'mob_rx': mobRx, 'mob_tx': mobTx};
+    const mb = 1024 * 1024;
+
+    /// Wednesday 23 Sep 2026 as "today"; Saturday the 19th holds a
+    /// 12 MB My W@tch bucket to tap into.
+    void seedDays() {
+      fake.stats = {
+        'period_start_ms': DateTime(2026, 9, 1).millisecondsSinceEpoch,
+        'total':
+            split(300 * mb, 30 * mb, mobRx: 40 * mb, mobTx: 5 * mb),
+        'ant': {
+          ...split(250 * mb, 20 * mb, mobRx: 40 * mb, mobTx: 5 * mb),
+          'media_rx': 0,
+          'stale_secs': 120,
+        },
+        'mywatch': split(40 * mb, 6 * mb),
+        'channels': split(10 * mb, 4 * mb),
+        'days': [
+          {
+            'day': '2026-09-19',
+            'ant': split(0, 0),
+            'mywatch': split(10 * mb, 2 * mb),
+            'channels': split(0, 0),
+          },
+          {
+            'day': '2026-09-23',
+            'ant': split(100 * mb, 10 * mb, mobRx: 40 * mb, mobTx: 5 * mb),
+            'mywatch': split(0, 0),
+            'channels': split(0, 0),
+          },
+        ],
+      };
+    }
+
+    testWidgets(
+        'graph renders with legend + mobile line, a tapped day '
+        're-scopes the block, Show whole period returns',
+        (tester) async {
+      seedDays();
+      await open(tester, clock: () => DateTime(2026, 9, 23, 12));
+
+      // Period view: graph with today's bar labelled, both legend dots,
+      // the amber mobile line on the card, and the tap hint.
+      expect(find.text('Today'), findsOneWidget);
+      expect(find.text('Wi-Fi / other'), findsOneWidget);
+      expect(find.text('Mobile data: ↑ 5.0 MB · ↓ 40.0 MB'),
+          findsOneWidget);
+      expect(find.text('Since 1 Sep 2026 · tap a day for details'),
+          findsOneWidget);
+      // The legend's "Mobile data" sits beside the MOBILE DATA section
+      // header and the intro copy — match the exact legend label.
+      expect(find.text('Mobile data'), findsOneWidget);
+
+      // Tap Saturday the 19th (its bar is labelled by day number).
+      await tester.tap(find.text('19'));
+      await tester.pumpAndSettle();
+      expect(find.text('Data used on Saturday 19 Sep'), findsOneWidget);
+      // 12 MB day total on the card and as the My W@tch row's total.
+      expect(find.text('12.0 MB'), findsNWidgets(2));
+      expect(find.text('↓ 10.0 MB'), findsNWidgets(2));
+      expect(find.text('Showing Saturday 19 Sep only'), findsOneWidget);
+      // Period-only furniture is gone in the day view.
+      expect(find.text('Reset'), findsNothing);
+      expect(find.textContaining('Measured inside the app'),
+          findsNothing);
+      expect(find.textContaining('of which media'), findsNothing);
+
+      await tester.tap(find.text('Show whole period'));
+      await tester.pumpAndSettle();
+      expect(find.text('Total data usage'), findsOneWidget);
+      expect(find.text('Reset'), findsOneWidget);
+      await close(tester);
+    });
+
+    testWidgets('old core without day history hides graph and hint',
+        (tester) async {
+      await open(tester);
+      expect(find.text('Wi-Fi / other'), findsNothing);
+      expect(find.textContaining('tap a day for details'), findsNothing);
+      expect(find.text('Since 1 Sep 2026'), findsOneWidget);
+      await close(tester);
+    });
+
+    testWidgets(
+        'daily alert: warning line when today is over, tile picks and '
+        'persists the level', (tester) async {
+      SharedPreferences.setMockInitialValues({'data_alert_gb_v1': 5});
+      const gb = 1024 * 1024 * 1024;
+      fake.stats = {
+        'period_start_ms': DateTime(2026, 9, 1).millisecondsSinceEpoch,
+        'total': split(6 * gb, 0),
+        'ant': {...split(6 * gb, 0), 'media_rx': 0, 'stale_secs': null},
+        'mywatch': split(0, 0),
+        'channels': split(0, 0),
+        'days': [
+          {
+            'day': '2026-09-23',
+            'ant': split(6 * gb, 0),
+            'mywatch': split(0, 0),
+            'channels': split(0, 0),
+          },
+        ],
+      };
+      await open(tester, clock: () => DateTime(2026, 9, 23, 12));
+
+      expect(
+          find.text(
+              "Today's usage is 6.00 GB — over your 5 GB daily alert."),
+          findsOneWidget);
+      expect(
+          find.text('At 5 GB in one day — one notice, nothing is paused'),
+          findsOneWidget);
+
+      await tester.tap(find.text('Daily data alert'));
+      await tester.pumpAndSettle();
+      expect(find.text('Off  ·  default'), findsOneWidget);
+      await tester.tap(find.text('At 2 GB in one day'));
+      await tester.pumpAndSettle();
+      expect(await AppSettings.dataAlertGb(), 2);
+      expect(
+          find.text('At 2 GB in one day — one notice, nothing is paused'),
+          findsOneWidget);
+      await close(tester);
     });
   });
 

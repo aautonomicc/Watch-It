@@ -165,6 +165,10 @@ class FakeEmbeddedHttp extends HttpOverrides {
   };
   int statsResets = 0;
 
+  /// Raw bodies posted to `POST /stats/transport` (the mobile-data
+  /// transport reports).
+  final List<String> transportPosts = [];
+
   /// The `GET /versions` body (network-stack versions baked into the
   /// native library). Deliberately fake numbers — nothing may hardcode
   /// the real ones, the route is the single source of truth.
@@ -219,6 +223,10 @@ class FakeEmbeddedHttp extends HttpOverrides {
     }
     if (method == 'GET' && path == '/stats') {
       return (200, utf8.encode(jsonEncode(stats)));
+    }
+    if (method == 'POST' && path == '/stats/transport') {
+      transportPosts.add(utf8.decode(body));
+      return (200, utf8.encode(jsonEncode({'mobile': true})));
     }
     if (method == 'GET' && path == '/versions') {
       return (200, utf8.encode(jsonEncode(versions)));

@@ -79,6 +79,10 @@ fn protected_router(engine: &'static Engine) -> Router {
         .route("/stats", get(stats))
         .route("/stats/reset", post(stats_reset))
         .route(
+            "/stats/transport",
+            post(move |body: Bytes| stats_transport(body)),
+        )
+        .route(
             "/upload/estimate",
             post(move |body: Bytes| upload_estimate(engine, body)),
         )
@@ -269,11 +273,29 @@ async fn stats() -> Response {
 }
 
 /// `POST /stats/reset` — zero every component, stamp a fresh period
-/// start, persist; returns the fresh `/stats` body.
+/// start, persist; returns the fresh `/stats` body. The daily history
+/// buckets deliberately survive (the Data page's graph).
 async fn stats_reset() -> Response {
     crate::datausage::usage().reset();
     tracing::info!("data-usage period reset");
     stats().await
+}
+
+/// `POST /stats/transport` — `{"mobile": bool}`: the app reports
+/// whether the device is on mobile data, so bytes counted from now on
+/// carry the mobile tag (the Data page's Wi-Fi vs mobile split). The
+/// app posts at startup and on every OS transport change.
+async fn stats_transport(body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    let Some(mobile) = v["mobile"].as_bool() else {
+        return (StatusCode::BAD_REQUEST, "\"mobile\" must be a boolean")
+            .into_response();
+    };
+    crate::datausage::usage().set_mobile(mobile);
+    let body = serde_json::json!({ "mobile": mobile });
+    ([(header::CONTENT_TYPE, "application/json")], body.to_string()).into_response()
 }
 
 /// Kick the reconnect supervisor: cancel its current backoff sleep (or
@@ -1768,7 +1790,16 @@ mod wallet_api_tests {
         assert!(json["ant"].get("stale_secs").is_some());
         assert!(json["ant"].get("media_rx").is_some());
         assert!(json["channels"].is_object());
-        // Reset returns the fresh zeroed body and a new period start.
+        assert!(json["mywatch"].get("mob_rx").is_some());
+        // The seeded add landed in today's daily bucket too.
+        let has_today = |json: &serde_json::Value| {
+            json["days"].as_array().unwrap().iter().any(|d| {
+                d["day"].as_str() == Some(&crate::datausage::today_key())
+            })
+        };
+        assert!(has_today(&json));
+        // Reset returns the fresh zeroed body and a new period start —
+        // with the daily history kept.
         let (status, body) =
             send_auth(&app, "POST", "/stats/reset", vec![], Some("sekrit")).await;
         assert_eq!(status, StatusCode::OK);
@@ -1777,6 +1808,34 @@ mod wallet_api_tests {
         assert_eq!(json["mywatch"]["rx"].as_u64(), Some(0));
         assert_eq!(json["ant"]["rx"].as_u64(), Some(0));
         assert_eq!(json["total"]["rx"].as_u64(), Some(0));
+        assert!(has_today(&json));
+        // Transport report: tokenless 401, bad body 400, then a valid
+        // flip echoes back (and is flipped straight back — the flag is
+        // process-global and other tests' bytes must not be tagged).
+        let mob = |b: bool| {
+            serde_json::json!({ "mobile": b }).to_string().into_bytes()
+        };
+        let (status, _) =
+            send_auth(&app, "POST", "/stats/transport", mob(true), None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) = send_auth(
+            &app, "POST", "/stats/transport", b"{}".to_vec(), Some("sekrit"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, body) = send_auth(
+            &app, "POST", "/stats/transport", mob(true), Some("sekrit"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["mobile"], serde_json::json!(true));
+        assert!(crate::datausage::usage().on_mobile());
+        let (_, _) = send_auth(
+            &app, "POST", "/stats/transport", mob(false), Some("sekrit"),
+        )
+        .await;
+        assert!(!crate::datausage::usage().on_mobile());
         engine.set_paused(false);
     }
 
