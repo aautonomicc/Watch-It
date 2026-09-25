@@ -35,7 +35,8 @@ with no account and no cloud.
 *The W@tch home screen on desktop: Continue Watching, Recently Added and your
 own lists — with your playlists a click away in the library panel — streamed
 straight from Autonomi: no key, no account, no server.
-(Sample library — the titles shown are invented for the screenshot.)*
+(Sample library — the titles are invented and the poster and album artwork is
+AI-generated for the screenshots.)*
 
 Want a ready-made library? It's a one-file download:
 [**Public Domain.watch-list**](catalog/README.md) — 40 public-domain
