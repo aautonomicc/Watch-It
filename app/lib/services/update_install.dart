@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import '../models/media_list.dart' show formatBytes;
 import 'update_check.dart';
 
 /// Where the in-app updater stands.
@@ -53,7 +54,11 @@ class _Cancelled implements Exception {}
 /// Android: downloads the release APK to the app cache and hands it to
 /// the system package installer (FileProvider + ACTION_VIEW; same
 /// signing cert, so data is kept). The OS owns the actual install and
-/// its one-time "install unknown apps" grant.
+/// its one-time "install unknown apps" grant. Free storage is checked
+/// BEFORE the download ([apkRequiredBytes] — download + installer
+/// staging + install), because short of it the installer only says a
+/// generic "App not installed"; [cleanupApkCache] drops the cached APK
+/// on the next launch.
 ///
 /// Linux (AppImage runs only): downloads the new AppImage beside the
 /// running one, sets it executable, and atomically renames it over the
@@ -95,6 +100,8 @@ class UpdateInstaller extends ChangeNotifier {
   http.Client? client;
   @visibleForTesting
   Future<void> Function(String apkPath)? apkInstallLauncher;
+  @visibleForTesting
+  Future<int?> Function()? freeBytesProvider;
   @visibleForTesting
   static String? appImagePathOverride;
   @visibleForTesting
@@ -216,6 +223,26 @@ class UpdateInstaller extends ChangeNotifier {
     if (busy) _cancelled = true;
   }
 
+  /// What an APK update needs free on the data partition: the download
+  /// in the cache, the installer's staged copy, and roughly the
+  /// installed app again — short of any of it, the system installer
+  /// fails with only a generic "App not installed".
+  static int apkRequiredBytes(int assetSize) =>
+      assetSize <= 0 ? 0 : assetSize * 3;
+
+  /// Free bytes where the update lands (Android), or null when the
+  /// platform side can't say — then the download proceeds and the
+  /// installer is the judge, as before.
+  Future<int?> _queryFreeBytes() async {
+    try {
+      final v = await _channel.invokeMethod<Object?>('freeBytes');
+      if (v is int && v > 0) return v;
+    } catch (_) {
+      // Older platform side without the method — skip the check.
+    }
+    return null;
+  }
+
   /// Android: download [asset] into the app cache and hand it to the
   /// system installer.
   Future<void> downloadAndInstallApk(UpdateAsset asset) async {
@@ -225,8 +252,19 @@ class UpdateInstaller extends ChangeNotifier {
     try {
       final root = cacheDirOverride ?? await getTemporaryDirectory();
       final dir = Directory('${root.path}/updates');
-      // One update at a time — drop any earlier download first.
+      // One update at a time — drop any earlier download first. This
+      // can itself free a whole update's worth of space, so it runs
+      // before the free-space check.
       if (dir.existsSync()) dir.deleteSync(recursive: true);
+      final free = await (freeBytesProvider ?? _queryFreeBytes)();
+      final required = apkRequiredBytes(asset.size);
+      if (free != null && required > 0 && free < required) {
+        throw UpdateInstallException(
+            'Not enough free storage for the update — it needs about '
+            '${formatBytes(required)} free to download and install, but '
+            'this device has ${formatBytes(free)}. Clear some space, '
+            'then try again.');
+      }
       dir.createSync(recursive: true);
       target = File('${dir.path}/${_safeName(asset.name)}');
       await _download(asset, target);
@@ -294,6 +332,22 @@ class UpdateInstaller extends ChangeNotifier {
       _reset(deleting: part);
     } catch (e) {
       _fail(e, deleting: part);
+    }
+  }
+
+  /// Startup housekeeping (Android): a downloaded update APK stays in
+  /// the cache after the system installer finishes with it, and the
+  /// ready-to-install state doesn't survive a restart — so at launch
+  /// the cached APK is dead weight (~the app's own size) on devices
+  /// that are often short on storage. Drop it. Silent, fire-and-forget.
+  Future<void> cleanupApkCache() async {
+    if (!onAndroid) return;
+    try {
+      final root = cacheDirOverride ?? await getTemporaryDirectory();
+      final dir = Directory('${root.path}/updates');
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    } catch (_) {
+      // Best effort only.
     }
   }
 

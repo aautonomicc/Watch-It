@@ -139,6 +139,9 @@ Future<void> main() async {
   // version as `.old` — this launch proves the new one, drop it.
   unawaited(UpdateInstaller.cleanupOldAppImage());
   unawaited(UpdateInstaller.cleanupOldMacApp());
+  // Android: an applied update's APK stays in the cache — dead weight
+  // on storage-starved devices, drop it.
+  unawaited(UpdateInstaller.instance.cleanupApkCache());
   UpdateCheck.instance.addListener(() {
     final tag = UpdateCheck.instance.availableTag;
     if (tag == null) return;

@@ -17,10 +17,12 @@ void main() {
     tmp = Directory.systemTemp.createTempSync('wi-update-test');
     UpdateInstaller.resetForTesting();
     UpdateInstaller.appImagePathOverride = null;
+    UpdateInstaller.androidPlatformOverride = null;
   });
 
   tearDown(() {
     UpdateInstaller.appImagePathOverride = null;
+    UpdateInstaller.androidPlatformOverride = null;
     try {
       tmp.deleteSync(recursive: true);
     } catch (_) {}
@@ -592,6 +594,87 @@ void main() {
 
       expect(installer.stage, UpdateInstallStage.failed);
       expect(installer.error, contains('installer'));
+    });
+
+    test('needs download + staging + install worth of free space', () {
+      expect(UpdateInstaller.apkRequiredBytes(158 * 1024 * 1024),
+          474 * 1024 * 1024);
+      // Unknown asset size — nothing sensible to demand.
+      expect(UpdateInstaller.apkRequiredBytes(0), 0);
+      expect(UpdateInstaller.apkRequiredBytes(-1), 0);
+    });
+
+    test('too little free storage refuses BEFORE downloading, but still '
+        'sweeps the stale earlier download first', () async {
+      final bytes = utf8.encode('apk-bytes');
+      // The sweep of a previous update can itself free space, so it
+      // must run before the check.
+      Directory('${tmp.path}/updates').createSync(recursive: true);
+      File('${tmp.path}/updates/stale.apk').writeAsStringSync('stale');
+      var requests = 0;
+      final launched = <String>[];
+      final installer = UpdateInstaller.instance
+        ..client = MockClient((req) async {
+          requests++;
+          return http.Response.bytes(bytes, 200);
+        })
+        ..cacheDirOverride = tmp
+        ..freeBytesProvider = (() async => bytes.length * 3 - 1)
+        ..apkInstallLauncher = (p) async => launched.add(p);
+
+      await installer.downloadAndInstallApk(assetFor(bytes, 'W.apk'));
+
+      expect(installer.stage, UpdateInstallStage.failed);
+      expect(installer.error, contains('Not enough free storage'));
+      expect(requests, 0, reason: 'nothing should be downloaded');
+      expect(launched, isEmpty);
+      expect(Directory('${tmp.path}/updates').existsSync(), false,
+          reason: 'the stale download is swept even when refusing');
+    });
+
+    test('exactly enough free storage proceeds; unknown skips the check',
+        () async {
+      final bytes = utf8.encode('apk-bytes');
+      final launched = <String>[];
+      final installer = UpdateInstaller.instance
+        ..client = bytesClient(bytes)
+        ..cacheDirOverride = tmp
+        ..freeBytesProvider = (() async => bytes.length * 3)
+        ..apkInstallLauncher = (p) async => launched.add(p);
+      await installer.downloadAndInstallApk(assetFor(bytes, 'W.apk'));
+      expect(installer.stage, UpdateInstallStage.readyToInstall);
+      expect(launched, hasLength(1));
+
+      // A platform side that can't say leaves the installer the judge.
+      UpdateInstaller.resetForTesting();
+      final installer2 = UpdateInstaller.instance
+        ..client = bytesClient(bytes)
+        ..cacheDirOverride = tmp
+        ..freeBytesProvider = (() async => null)
+        ..apkInstallLauncher = (p) async => launched.add(p);
+      await installer2.downloadAndInstallApk(assetFor(bytes, 'W.apk'));
+      expect(installer2.stage, UpdateInstallStage.readyToInstall);
+      expect(launched, hasLength(2));
+    });
+
+    test('startup cleanup drops the cached update APK on Android only',
+        () async {
+      final dir = Directory('${tmp.path}/updates')
+        ..createSync(recursive: true);
+      File('${dir.path}/W.apk').writeAsStringSync('apk-bytes');
+      final installer = UpdateInstaller.instance..cacheDirOverride = tmp;
+
+      UpdateInstaller.androidPlatformOverride = false;
+      await installer.cleanupApkCache();
+      expect(dir.existsSync(), true,
+          reason: 'non-Android platforms are untouched');
+
+      UpdateInstaller.androidPlatformOverride = true;
+      await installer.cleanupApkCache();
+      expect(dir.existsSync(), false);
+
+      // A launch with nothing cached is a quiet no-op.
+      await installer.cleanupApkCache();
     });
   });
 }
