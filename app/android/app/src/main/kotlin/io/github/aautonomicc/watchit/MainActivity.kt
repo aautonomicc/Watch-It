@@ -328,6 +328,18 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                 }
+                "freeBytes" -> {
+                    // Storage pre-check before the update download: the
+                    // APK lands in cacheDir and the installer stages on
+                    // the same data partition.
+                    result.success(
+                        try {
+                            cacheDir.usableSpace
+                        } catch (e: Exception) {
+                            0L
+                        }
+                    )
+                }
                 else -> result.notImplemented()
             }
         }
