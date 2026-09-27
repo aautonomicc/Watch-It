@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:drift/drift.dart' show driftRuntimeOptions;
@@ -11,6 +12,7 @@ import 'package:watchit/main.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/screens/detail_screen.dart';
 import 'package:watchit/screens/profile_picker_screen.dart';
+import 'package:watchit/screens/profiles_screen.dart';
 import 'package:watchit/services/connectivity.dart';
 import 'package:watchit/services/download_manager.dart';
 import 'package:watchit/services/embedded_client.dart';
@@ -370,5 +372,54 @@ void main() {
         tester.element(find.text('Settings').first));
     await tester.pumpAndSettle();
     expect(find.text('Who\'s w@tching?'), findsOneWidget);
+  });
+
+  testWidgets(
+      '"Show on this device" hides a profile from the picker; it stays '
+      'listed (and marked) in Settings → Profiles', (tester) async {
+    await boot();
+    final store = ProfileStore.instance;
+    final kid = await store.create(name: 'Ellie', kind: ProfileKind.kid);
+
+    // Flip the edit screen's per-device visibility toggle and Save.
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: const Scaffold(body: SizedBox()),
+    ));
+    final nav = tester.state<NavigatorState>(find.byType(Navigator));
+    unawaited(nav.push(MaterialPageRoute(
+        builder: (_) => ProfileEditScreen(
+            profile: store.profiles.firstWhere((p) => p.id == kid.id)))));
+    await tester.pumpAndSettle();
+    // The toggle sits below the test viewport in the lazy ListView —
+    // scroll it into existence first.
+    await tester.scrollUntilVisible(find.text('Show on this device'), 200,
+        scrollable: find.byType(Scrollable).first);
+    await tester.pump();
+    await tester.tap(find.widgetWithText(SwitchListTile,
+        'Show on this device'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(store.isHidden(kid.id), isTrue);
+
+    // The picker no longer offers her on THIS device…
+    store.signOut();
+    await tester.pumpWidget(const WatchItApp());
+    await tester.pumpAndSettle();
+    expect(find.text('Who\'s w@tching?'), findsOneWidget);
+    expect(find.text('Admin'), findsOneWidget);
+    expect(find.text('Ellie'), findsNothing);
+    await tester.tap(find.text('Admin'));
+    await tester.pumpAndSettle();
+
+    // …but Settings → Profiles still lists her, marked.
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: const ProfilesScreen(),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Ellie'), findsOneWidget);
+    expect(find.textContaining('hidden on this device'), findsOneWidget);
   });
 }

@@ -3227,6 +3227,27 @@ class $ProfilesTable extends Profiles
     requiredDuringInsert: false,
     defaultValue: const Constant(0),
   );
+  static const VerificationMeta _updatedMsMeta = const VerificationMeta(
+    'updatedMs',
+  );
+  @override
+  late final GeneratedColumn<int> updatedMs = GeneratedColumn<int>(
+    'updated_ms',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _syncIdMeta = const VerificationMeta('syncId');
+  @override
+  late final GeneratedColumn<String> syncId = GeneratedColumn<String>(
+    'sync_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -3236,6 +3257,8 @@ class $ProfilesTable extends Profiles
     pinHash,
     autoLogin,
     position,
+    updatedMs,
+    syncId,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -3294,6 +3317,18 @@ class $ProfilesTable extends Profiles
         position.isAcceptableOrUnknown(data['position']!, _positionMeta),
       );
     }
+    if (data.containsKey('updated_ms')) {
+      context.handle(
+        _updatedMsMeta,
+        updatedMs.isAcceptableOrUnknown(data['updated_ms']!, _updatedMsMeta),
+      );
+    }
+    if (data.containsKey('sync_id')) {
+      context.handle(
+        _syncIdMeta,
+        syncId.isAcceptableOrUnknown(data['sync_id']!, _syncIdMeta),
+      );
+    }
     return context;
   }
 
@@ -3331,6 +3366,14 @@ class $ProfilesTable extends Profiles
         DriftSqlType.int,
         data['${effectivePrefix}position'],
       )!,
+      updatedMs: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_ms'],
+      )!,
+      syncId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sync_id'],
+      ),
     );
   }
 
@@ -3357,6 +3400,18 @@ class ProfileRow extends DataClass implements Insertable<ProfileRow> {
   /// At most one profile auto-selects at launch (the kids' TV case).
   final bool autoLogin;
   final int position;
+
+  /// LWW stamp for My W@tch profile sync: when the synced fields
+  /// (name/kind/PIN/avatar/allowed lists) last changed — here, or on
+  /// the device this row was adopted from. 0 = never edited (always
+  /// loses a merge).
+  final int updatedMs;
+
+  /// Stable cross-device identity for My W@tch profile sync (local
+  /// [id]s differ per device — matching by name alone would duplicate
+  /// a renamed profile everywhere). Minted lazily at first publish;
+  /// the admin profile never needs one (it matches by kind).
+  final String? syncId;
   const ProfileRow({
     required this.id,
     required this.name,
@@ -3365,6 +3420,8 @@ class ProfileRow extends DataClass implements Insertable<ProfileRow> {
     this.pinHash,
     required this.autoLogin,
     required this.position,
+    required this.updatedMs,
+    this.syncId,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -3380,6 +3437,10 @@ class ProfileRow extends DataClass implements Insertable<ProfileRow> {
     }
     map['auto_login'] = Variable<bool>(autoLogin);
     map['position'] = Variable<int>(position);
+    map['updated_ms'] = Variable<int>(updatedMs);
+    if (!nullToAbsent || syncId != null) {
+      map['sync_id'] = Variable<String>(syncId);
+    }
     return map;
   }
 
@@ -3396,6 +3457,10 @@ class ProfileRow extends DataClass implements Insertable<ProfileRow> {
           : Value(pinHash),
       autoLogin: Value(autoLogin),
       position: Value(position),
+      updatedMs: Value(updatedMs),
+      syncId: syncId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(syncId),
     );
   }
 
@@ -3412,6 +3477,8 @@ class ProfileRow extends DataClass implements Insertable<ProfileRow> {
       pinHash: serializer.fromJson<String?>(json['pinHash']),
       autoLogin: serializer.fromJson<bool>(json['autoLogin']),
       position: serializer.fromJson<int>(json['position']),
+      updatedMs: serializer.fromJson<int>(json['updatedMs']),
+      syncId: serializer.fromJson<String?>(json['syncId']),
     );
   }
   @override
@@ -3425,6 +3492,8 @@ class ProfileRow extends DataClass implements Insertable<ProfileRow> {
       'pinHash': serializer.toJson<String?>(pinHash),
       'autoLogin': serializer.toJson<bool>(autoLogin),
       'position': serializer.toJson<int>(position),
+      'updatedMs': serializer.toJson<int>(updatedMs),
+      'syncId': serializer.toJson<String?>(syncId),
     };
   }
 
@@ -3436,6 +3505,8 @@ class ProfileRow extends DataClass implements Insertable<ProfileRow> {
     Value<String?> pinHash = const Value.absent(),
     bool? autoLogin,
     int? position,
+    int? updatedMs,
+    Value<String?> syncId = const Value.absent(),
   }) => ProfileRow(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -3444,6 +3515,8 @@ class ProfileRow extends DataClass implements Insertable<ProfileRow> {
     pinHash: pinHash.present ? pinHash.value : this.pinHash,
     autoLogin: autoLogin ?? this.autoLogin,
     position: position ?? this.position,
+    updatedMs: updatedMs ?? this.updatedMs,
+    syncId: syncId.present ? syncId.value : this.syncId,
   );
   ProfileRow copyWithCompanion(ProfilesCompanion data) {
     return ProfileRow(
@@ -3454,6 +3527,8 @@ class ProfileRow extends DataClass implements Insertable<ProfileRow> {
       pinHash: data.pinHash.present ? data.pinHash.value : this.pinHash,
       autoLogin: data.autoLogin.present ? data.autoLogin.value : this.autoLogin,
       position: data.position.present ? data.position.value : this.position,
+      updatedMs: data.updatedMs.present ? data.updatedMs.value : this.updatedMs,
+      syncId: data.syncId.present ? data.syncId.value : this.syncId,
     );
   }
 
@@ -3466,14 +3541,25 @@ class ProfileRow extends DataClass implements Insertable<ProfileRow> {
           ..write('avatar: $avatar, ')
           ..write('pinHash: $pinHash, ')
           ..write('autoLogin: $autoLogin, ')
-          ..write('position: $position')
+          ..write('position: $position, ')
+          ..write('updatedMs: $updatedMs, ')
+          ..write('syncId: $syncId')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, name, kind, avatar, pinHash, autoLogin, position);
+  int get hashCode => Object.hash(
+    id,
+    name,
+    kind,
+    avatar,
+    pinHash,
+    autoLogin,
+    position,
+    updatedMs,
+    syncId,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -3484,7 +3570,9 @@ class ProfileRow extends DataClass implements Insertable<ProfileRow> {
           other.avatar == this.avatar &&
           other.pinHash == this.pinHash &&
           other.autoLogin == this.autoLogin &&
-          other.position == this.position);
+          other.position == this.position &&
+          other.updatedMs == this.updatedMs &&
+          other.syncId == this.syncId);
 }
 
 class ProfilesCompanion extends UpdateCompanion<ProfileRow> {
@@ -3495,6 +3583,8 @@ class ProfilesCompanion extends UpdateCompanion<ProfileRow> {
   final Value<String?> pinHash;
   final Value<bool> autoLogin;
   final Value<int> position;
+  final Value<int> updatedMs;
+  final Value<String?> syncId;
   final Value<int> rowid;
   const ProfilesCompanion({
     this.id = const Value.absent(),
@@ -3504,6 +3594,8 @@ class ProfilesCompanion extends UpdateCompanion<ProfileRow> {
     this.pinHash = const Value.absent(),
     this.autoLogin = const Value.absent(),
     this.position = const Value.absent(),
+    this.updatedMs = const Value.absent(),
+    this.syncId = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   ProfilesCompanion.insert({
@@ -3514,6 +3606,8 @@ class ProfilesCompanion extends UpdateCompanion<ProfileRow> {
     this.pinHash = const Value.absent(),
     this.autoLogin = const Value.absent(),
     this.position = const Value.absent(),
+    this.updatedMs = const Value.absent(),
+    this.syncId = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
@@ -3526,6 +3620,8 @@ class ProfilesCompanion extends UpdateCompanion<ProfileRow> {
     Expression<String>? pinHash,
     Expression<bool>? autoLogin,
     Expression<int>? position,
+    Expression<int>? updatedMs,
+    Expression<String>? syncId,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -3536,6 +3632,8 @@ class ProfilesCompanion extends UpdateCompanion<ProfileRow> {
       if (pinHash != null) 'pin_hash': pinHash,
       if (autoLogin != null) 'auto_login': autoLogin,
       if (position != null) 'position': position,
+      if (updatedMs != null) 'updated_ms': updatedMs,
+      if (syncId != null) 'sync_id': syncId,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -3548,6 +3646,8 @@ class ProfilesCompanion extends UpdateCompanion<ProfileRow> {
     Value<String?>? pinHash,
     Value<bool>? autoLogin,
     Value<int>? position,
+    Value<int>? updatedMs,
+    Value<String?>? syncId,
     Value<int>? rowid,
   }) {
     return ProfilesCompanion(
@@ -3558,6 +3658,8 @@ class ProfilesCompanion extends UpdateCompanion<ProfileRow> {
       pinHash: pinHash ?? this.pinHash,
       autoLogin: autoLogin ?? this.autoLogin,
       position: position ?? this.position,
+      updatedMs: updatedMs ?? this.updatedMs,
+      syncId: syncId ?? this.syncId,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -3586,6 +3688,12 @@ class ProfilesCompanion extends UpdateCompanion<ProfileRow> {
     if (position.present) {
       map['position'] = Variable<int>(position.value);
     }
+    if (updatedMs.present) {
+      map['updated_ms'] = Variable<int>(updatedMs.value);
+    }
+    if (syncId.present) {
+      map['sync_id'] = Variable<String>(syncId.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -3602,6 +3710,8 @@ class ProfilesCompanion extends UpdateCompanion<ProfileRow> {
           ..write('pinHash: $pinHash, ')
           ..write('autoLogin: $autoLogin, ')
           ..write('position: $position, ')
+          ..write('updatedMs: $updatedMs, ')
+          ..write('syncId: $syncId, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -6285,6 +6395,8 @@ typedef $$ProfilesTableCreateCompanionBuilder =
       Value<String?> pinHash,
       Value<bool> autoLogin,
       Value<int> position,
+      Value<int> updatedMs,
+      Value<String?> syncId,
       Value<int> rowid,
     });
 typedef $$ProfilesTableUpdateCompanionBuilder =
@@ -6296,6 +6408,8 @@ typedef $$ProfilesTableUpdateCompanionBuilder =
       Value<String?> pinHash,
       Value<bool> autoLogin,
       Value<int> position,
+      Value<int> updatedMs,
+      Value<String?> syncId,
       Value<int> rowid,
     });
 
@@ -6340,6 +6454,16 @@ class $$ProfilesTableFilterComposer
 
   ColumnFilters<int> get position => $composableBuilder(
     column: $table.position,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedMs => $composableBuilder(
+    column: $table.updatedMs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get syncId => $composableBuilder(
+    column: $table.syncId,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -6387,6 +6511,16 @@ class $$ProfilesTableOrderingComposer
     column: $table.position,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get updatedMs => $composableBuilder(
+    column: $table.updatedMs,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get syncId => $composableBuilder(
+    column: $table.syncId,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$ProfilesTableAnnotationComposer
@@ -6418,6 +6552,12 @@ class $$ProfilesTableAnnotationComposer
 
   GeneratedColumn<int> get position =>
       $composableBuilder(column: $table.position, builder: (column) => column);
+
+  GeneratedColumn<int> get updatedMs =>
+      $composableBuilder(column: $table.updatedMs, builder: (column) => column);
+
+  GeneratedColumn<String> get syncId =>
+      $composableBuilder(column: $table.syncId, builder: (column) => column);
 }
 
 class $$ProfilesTableTableManager
@@ -6458,6 +6598,8 @@ class $$ProfilesTableTableManager
                 Value<String?> pinHash = const Value.absent(),
                 Value<bool> autoLogin = const Value.absent(),
                 Value<int> position = const Value.absent(),
+                Value<int> updatedMs = const Value.absent(),
+                Value<String?> syncId = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ProfilesCompanion(
                 id: id,
@@ -6467,6 +6609,8 @@ class $$ProfilesTableTableManager
                 pinHash: pinHash,
                 autoLogin: autoLogin,
                 position: position,
+                updatedMs: updatedMs,
+                syncId: syncId,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -6478,6 +6622,8 @@ class $$ProfilesTableTableManager
                 Value<String?> pinHash = const Value.absent(),
                 Value<bool> autoLogin = const Value.absent(),
                 Value<int> position = const Value.absent(),
+                Value<int> updatedMs = const Value.absent(),
+                Value<String?> syncId = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ProfilesCompanion.insert(
                 id: id,
@@ -6487,6 +6633,8 @@ class $$ProfilesTableTableManager
                 pinHash: pinHash,
                 autoLogin: autoLogin,
                 position: position,
+                updatedMs: updatedMs,
+                syncId: syncId,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

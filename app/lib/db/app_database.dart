@@ -111,6 +111,18 @@ class Profiles extends Table {
   BoolColumn get autoLogin => boolean().withDefault(const Constant(false))();
   IntColumn get position => integer().withDefault(const Constant(0))();
 
+  /// LWW stamp for My W@tch profile sync: when the synced fields
+  /// (name/kind/PIN/avatar/allowed lists) last changed — here, or on
+  /// the device this row was adopted from. 0 = never edited (always
+  /// loses a merge).
+  IntColumn get updatedMs => integer().withDefault(const Constant(0))();
+
+  /// Stable cross-device identity for My W@tch profile sync (local
+  /// [id]s differ per device — matching by name alone would duplicate
+  /// a renamed profile everywhere). Minted lazily at first publish;
+  /// the admin profile never needs one (it matches by kind).
+  TextColumn get syncId => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -275,7 +287,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 17;
+  int get schemaVersion => 18;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -416,6 +428,21 @@ class AppDatabase extends _$AppDatabase {
                   '(SELECT id FROM media_lists)');
             }
           }
+        }
+      }
+      if (from >= 13 && from < 18) {
+        // Profiles sync over My W@tch: the per-profile LWW stamp and
+        // the stable cross-device sync id. A from<13 upgrade created
+        // the profiles table with both columns already in it; the
+        // existence guard covers partial fixture DBs (v14 precedent).
+        final hasProfiles = await customSelect(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name='profiles'")
+            .get()
+            .then((rows) => rows.isNotEmpty);
+        if (hasProfiles) {
+          await m.addColumn(profiles, profiles.updatedMs);
+          await m.addColumn(profiles, profiles.syncId);
         }
       }
       if (from >= 4 && from < 9) {

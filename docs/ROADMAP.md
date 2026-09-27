@@ -982,6 +982,26 @@ files stay install-global — a profile scopes only viewing state.
       app versions simply ignore the extra bundle members
 - [x] Android TV first cut for the family-TV case (alpha.95) — see
       Phase 4
+- [x] Profiles sync over My W@tch (2026-09-27, unreleased — ships next
+      release; closes the TV import gap: a TV can't file-import, now
+      it never needs to for profiles): every profile rides the sync
+      doc's `profiles` section automatically — name/kind, avatar
+      (manifest + the existing x0x art transfer, full quality), PIN
+      hashes (the admin PIN only ever together with its recovery-code
+      hash, as a pair), kid allow-lists as list titles, and EVERY
+      profile's own watch points (a kid's Continue Watching follows
+      them phone → TV; the admin's keep riding the doc's top-level
+      watch section for old builds). Merging is last-writer-wins per
+      profile on an edit stamp (schema v18: `updated_ms` + a stable
+      cross-device `sync_id`, so renames never duplicate); deleting a
+      profile on ANY device deletes it — with its viewing state — on
+      every linked device via tombstones, while a strictly newer edit
+      still beats a stale deletion. Old builds ignore the section
+      entirely. Per-device complement: an admin-gated **"Show on this
+      device"** toggle on each profile (Settings → Profiles → profile)
+      hides it from "Who's w@tching?" locally without unsyncing it —
+      the hide-vs-delete pair; auto-select-at-launch and visibility
+      deliberately never sync (per-device choices)
 - [ ] TV 10-foot layouts + real-TV-box testing (phase 4)
 
 ## Phase 3 — All desktop platforms

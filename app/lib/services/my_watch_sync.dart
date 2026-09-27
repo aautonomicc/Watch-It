@@ -15,6 +15,7 @@ import 'library_store.dart';
 import 'metadata.dart';
 import 'metadata_service.dart';
 import 'my_watch_api.dart';
+import 'profile_sync.dart';
 import 'profiles.dart';
 import 'user_metadata.dart';
 import 'watch_state.dart';
@@ -290,6 +291,8 @@ class MyWatchSync {
         '${result.detailsApplied} detail edit(s) applied',
       if (result.tmdbApplied > 0)
         '${result.tmdbApplied} title detail(s) synced',
+      if (result.profilesChanged > 0)
+        '${result.profilesChanged} profile(s) updated',
       if (result.artFetched > 0) '${result.artFetched} artwork file(s) fetched',
     ];
     if (parts.isEmpty) {
@@ -480,6 +483,22 @@ class MyWatchSync {
       }
     }
 
+    // 3b. Profiles: the whole family syncs — every profile with its
+    // avatar, PIN, kid allow-list and watch points; deletions travel
+    // as tombstones (see profile_sync.dart). Avatar bytes are fetched
+    // with the rest of the artwork in stage 6.
+    var wantedAvatars = const <WantedAvatar>[];
+    try {
+      final r = await _syncProfiles(remote, lists);
+      wantedAvatars = r.wanted;
+      result = result.copyWith(
+        profilesChanged: r.changed,
+        watchStatesApplied: result.watchStatesApplied + r.watchApplied,
+      );
+    } catch (e) {
+      _problems.add('Syncing profiles failed: $e');
+    }
+
     // 4. Fetch missing data maps for entries we now hold, so they play.
     // The activity line is set inside, per import ("i of N") — setting
     // it unconditionally here showed "Fetching data maps…" every cycle
@@ -580,6 +599,13 @@ class MyWatchSync {
     } catch (e) {
       _problems.add('Fetching artwork failed: $e');
     }
+    try {
+      final r = await _fetchMissingAvatars(wantedAvatars, remote, status, now);
+      artFetched += r.fetched;
+      artPending += r.pending;
+    } catch (e) {
+      _problems.add('Fetching profile avatars failed: $e');
+    }
     _pendingArt = artPending;
     result = result.copyWith(artFetched: artFetched);
 
@@ -593,6 +619,18 @@ class MyWatchSync {
     // Newest-first from the store, so a budget trim drops the stalest.
     final ourWatchStates =
         await WatchStateStore.instance.all(profileId: kAdminProfileId);
+    Map<String, dynamic>? profilesSection;
+    try {
+      profilesSection = await buildLocalProfilesSection(
+        lists: lists,
+        nowMs: now,
+        avatarInfo: _posterInfo,
+        tombstoneTtlMs: tombstoneTtlMs,
+        maxWatchStatesPerProfile: maxDocWatchStates,
+      );
+    } catch (e) {
+      _problems.add('Publishing profiles failed: $e');
+    }
     final built = buildDocParts(
       lists: lists,
       tombstones: state.tombstones,
@@ -601,6 +639,7 @@ class MyWatchSync {
       metaRows: metaRows,
       haveHashes: haveHashes,
       tmdbSection: tmdbSection,
+      profilesSection: profilesSection,
       entryRotation: state.entryRot,
       metaRotation: state.metaRot,
     );
@@ -813,6 +852,18 @@ class MyWatchSync {
         if (info == null || info.size > maxArtBytes) continue;
         files.add((sha256: info.sha256, path: '${dir.path}/$name'));
       }
+    }
+    // Profile avatars serve to linked peers too — their manifests ride
+    // the doc's `profiles` section.
+    for (final p in ProfileStore.instance.profiles) {
+      final avatar = p.avatar;
+      if (avatar == null || avatar.startsWith('preset:') ||
+          !seen.add(avatar)) {
+        continue;
+      }
+      final info = await _posterInfo(avatar);
+      if (info == null || info.size > maxArtBytes) continue;
+      files.add((sha256: info.sha256, path: '${dir.path}/$avatar'));
     }
     files.sort((a, b) => a.sha256.compareTo(b.sha256));
     final fingerprint = [for (final f in files) '${f.sha256}:${f.path}'].join();
@@ -1087,6 +1138,115 @@ class MyWatchSync {
       }
     }
     if (fetched > 0) MetadataService.instance.notifyExternalSeed();
+    return (fetched: fetched, pending: pending);
+  }
+
+  // ---- profiles ----------------------------------------------------------
+
+  /// Stage 3b: merge every remote `profiles` section in (items,
+  /// tombstones, per-profile watch states). Returns what changed plus
+  /// the file avatars whose bytes still need fetching (stage 6).
+  Future<({int changed, int watchApplied, List<WantedAvatar> wanted})>
+      _syncProfiles(List<RemoteSyncDoc> remote, List<MediaList> lists) async {
+    final actions = profileActionsFrom(remote);
+    final watchByKey = remoteProfileWatch(remote);
+    if (actions.isEmpty && watchByKey.isEmpty) {
+      return (changed: 0, watchApplied: 0, wanted: const <WantedAvatar>[]);
+    }
+    _setActivity('Syncing profiles…');
+    final apply = await applyProfileActions(
+      items: actions.items,
+      remoteStones: actions.stones,
+      lists: lists,
+      avatarInfo: _posterInfo,
+    );
+    var watchApplied = 0;
+    for (final e in watchByKey.entries) {
+      final localId = apply.localIdByKey[e.key];
+      if (localId == null || e.value.isEmpty) continue;
+      watchApplied += await WatchStateStore.instance
+          .mergeAll(e.value, profileId: localId);
+    }
+    return (
+      changed: apply.changed,
+      watchApplied: watchApplied,
+      wanted: apply.wantedAvatars,
+    );
+  }
+
+  /// Pull the avatar bytes stage 3b still wants from the devices whose
+  /// `profiles` items name the same hash — the same transfer, owner
+  /// ordering and retry backoff as the other artwork pulls. A landed
+  /// file is stored under the local profile id WITHOUT touching the
+  /// profile's LWW stamp (the fetch must never win a merge).
+  Future<({int fetched, int pending})> _fetchMissingAvatars(
+    List<WantedAvatar> wanted,
+    List<RemoteSyncDoc> remote,
+    MyWatchStatus status,
+    int nowMs,
+  ) async {
+    if (wanted.isEmpty) return (fetched: 0, pending: 0);
+    final online = {
+      for (final d in status.devices)
+        if (!d.isSelf && d.online) d.agentId,
+    };
+    var fetched = 0;
+    var pending = 0;
+    for (final w in wanted) {
+      if (w.size > maxArtBytes) continue;
+      if ((_artRetryAt[w.sha256] ?? 0) > nowMs) {
+        pending++;
+        continue;
+      }
+      final owners = <String>[
+        for (final d in remote)
+          if (((d.doc['profiles'] as Map?)?['items'] as Map?)?[w.key]
+              case final Map item
+              when ((item['art'] as Map?)?['sha256'] as String?)
+                      ?.toLowerCase() ==
+                  w.sha256)
+            d.agentId,
+      ]..sort((a, b) =>
+          (online.contains(b) ? 1 : 0) - (online.contains(a) ? 1 : 0));
+      if (owners.isEmpty) {
+        pending++;
+        continue;
+      }
+      _setActivity('Fetching profile avatars…');
+      Object? failure;
+      for (final owner in owners.take(2)) {
+        try {
+          final path =
+              await _api.fetchArt(agentId: owner, sha256: w.sha256);
+          final file = File(path);
+          final bytes = await file.readAsBytes();
+          final member =
+              await ProfileStore.saveAvatarImage(w.profileId, bytes);
+          final store = ProfileStore.instance;
+          final p =
+              store.profiles.where((p) => p.id == w.profileId).firstOrNull;
+          if (p != null) {
+            await store.updateProfile(p.copyWith(avatar: member),
+                updatedMs: p.updatedMs);
+          }
+          try {
+            file.deleteSync();
+          } catch (_) {}
+          fetched++;
+          _artFailures.remove(w.sha256);
+          failure = null;
+          break;
+        } catch (e) {
+          failure = e;
+        }
+      }
+      if (failure != null) {
+        pending++;
+        _artFetchFailed(w.sha256, nowMs);
+        _problems.add('A profile avatar could not be fetched: $failure');
+        debugPrint('mywatch sync: avatar ${w.sha256} fetch failed: $failure');
+      }
+    }
     return (fetched: fetched, pending: pending);
   }
 
@@ -1376,6 +1536,7 @@ class MyWatchSync {
     List<Map<String, dynamic>> metaRows = const [],
     List<String> haveHashes = const [],
     Map<String, dynamic>? tmdbSection,
+    Map<String, dynamic>? profilesSection,
     int entryCap = maxDocEntries,
     int entryOffset = 0,
   }) {
@@ -1457,6 +1618,9 @@ class MyWatchSync {
       ],
       if (metaRows.isNotEmpty) 'meta': {'v': 1, 'rows': metaRows},
       'tmdb': ?tmdbSection,
+      // Old builds ignore the key; its presence marks a profile-sync
+      // capable build (see profile_sync.dart).
+      'profiles': ?profilesSection,
     };
   }
 
@@ -1482,6 +1646,7 @@ class MyWatchSync {
     int metaDropped,
     int tmdbDropped,
     int entriesDropped,
+    int profileWatchDropped,
   }) buildDocWithinBudget({
     required List<MediaList> lists,
     required Map<String, Map<String, int>> tombstones,
@@ -1490,10 +1655,12 @@ class MyWatchSync {
     List<Map<String, dynamic>> metaRows = const [],
     List<String> haveHashes = const [],
     Map<String, dynamic>? tmdbSection,
+    Map<String, dynamic>? profilesSection,
     int entryOffset = 0,
     int? entryLimit,
   }) {
     final tmdbRows = (tmdbSection?['rows'] as List?)?.length ?? 0;
+    final profileWatchTotal = profilesWatchCount(profilesSection);
     var totalEntries = 0;
     for (final l in lists) {
       totalEntries += l.entries.length;
@@ -1502,6 +1669,7 @@ class MyWatchSync {
     var have = haveHashes;
     var meta = metaRows;
     var tmdb = tmdbSection;
+    var profiles = profilesSection;
     final wanted = (entryLimit ?? totalEntries).clamp(0, totalEntries);
     var entryCap = wanted.clamp(0, maxDocEntries);
     Map<String, dynamic> build() => buildDoc(
@@ -1512,6 +1680,7 @@ class MyWatchSync {
           metaRows: meta,
           haveHashes: have,
           tmdbSection: tmdb,
+          profilesSection: profiles,
           entryCap: entryCap,
           entryOffset: entryOffset,
         );
@@ -1521,6 +1690,12 @@ class MyWatchSync {
       if (watch.isNotEmpty) {
         watch = watch.sublist(
             0, watch.length - (watch.length / 4).ceil().clamp(1, watch.length));
+      } else if (profilesWatchCount(profiles) > 0) {
+        // The other profiles' watch states trim exactly like the
+        // admin's — the stalest quarter drops and returns once the doc
+        // has room; the profile items and tombstones themselves are
+        // tiny and never dropped.
+        profiles = shrunkenProfilesWatch(profiles!);
       } else if (tmdb != null) {
         tmdb = shrunkenTmdbSection(tmdb);
       } else if (have.isNotEmpty) {
@@ -1545,7 +1720,48 @@ class MyWatchSync {
       metaDropped: metaRows.length - meta.length,
       tmdbDropped: tmdbRows - ((tmdb?['rows'] as List?)?.length ?? 0),
       entriesDropped: wanted - docEntryCount(doc),
+      profileWatchDropped: profileWatchTotal - profilesWatchCount(profiles),
     );
+  }
+
+  /// How many per-profile watch states a `profiles` doc section holds.
+  static int profilesWatchCount(Map<String, dynamic>? section) {
+    final watch = section?['watch'];
+    if (watch is! Map<String, dynamic>) return 0;
+    var n = 0;
+    for (final v in watch.values) {
+      n += (v as List? ?? const []).length;
+    }
+    return n;
+  }
+
+  /// [section] with the stalest quarter of its combined per-profile
+  /// watch states dropped (globally by `updated_ms`, so one profile's
+  /// fresh points never starve behind another's stale backlog).
+  /// Everything else in the section is kept as-is.
+  static Map<String, dynamic> shrunkenProfilesWatch(
+      Map<String, dynamic> section) {
+    final watch = section['watch'];
+    if (watch is! Map<String, dynamic>) return section;
+    final flat = <(String, Map<String, dynamic>)>[
+      for (final e in watch.entries)
+        for (final row in e.value as List? ?? const [])
+          if (row is Map<String, dynamic>) (e.key, row),
+    ];
+    flat.sort((a, b) => ((b.$2['updated_ms'] as int?) ?? 0)
+        .compareTo((a.$2['updated_ms'] as int?) ?? 0));
+    final keep = flat.length - (flat.length / 4).ceil().clamp(1, flat.length);
+    final regrouped = <String, dynamic>{};
+    for (final (key, row) in flat.take(keep < 0 ? 0 : keep)) {
+      (regrouped.putIfAbsent(key, () => <Map<String, dynamic>>[])
+              as List<Map<String, dynamic>>)
+          .add(row);
+    }
+    return {
+      for (final e in section.entries)
+        if (e.key != 'watch') e.key: e.value,
+      if (regrouped.isNotEmpty) 'watch': regrouped,
+    };
   }
 
   /// How many list entries a built doc carries.
@@ -1576,6 +1792,7 @@ class MyWatchSync {
     int tmdbDropped,
     int entriesDropped,
     int entriesKept,
+    int profileWatchDropped,
   }) buildDocParts({
     required List<MediaList> lists,
     required Map<String, Map<String, int>> tombstones,
@@ -1584,6 +1801,7 @@ class MyWatchSync {
     List<Map<String, dynamic>> metaRows = const [],
     List<String> haveHashes = const [],
     Map<String, dynamic>? tmdbSection,
+    Map<String, dynamic>? profilesSection,
     int entryRotation = 0,
     int metaRotation = 0,
     int maxParts = maxSyncParts,
@@ -1604,21 +1822,26 @@ class MyWatchSync {
     final parts = <Map<String, dynamic>>[];
     var offset = totalEntries == 0 ? 0 : entryRotation % totalEntries;
     var entriesLeft = totalEntries;
+    var profileWatchDropped = 0;
     while (parts.length < maxParts) {
       final first = parts.isEmpty;
       final built = buildDocWithinBudget(
         lists: lists,
         // Tombstones ride only the main doc — that is the part old
-        // builds read, and repeating them would waste bytes.
+        // builds read, and repeating them would waste bytes. The
+        // profiles section rides there too (items and stones are tiny;
+        // budget-trimmed watch states return in later cycles).
         tombstones: first ? tombstones : const {},
         watchStates: watch,
         nowMs: nowMs,
         metaRows: meta,
         haveHashes: have,
         tmdbSection: tmdb,
+        profilesSection: first ? profilesSection : null,
         entryOffset: offset,
         entryLimit: entriesLeft,
       );
+      if (first) profileWatchDropped = built.profileWatchDropped;
       final doc = built.doc;
       // What this part actually carried — each section keeps its head,
       // so the remainder for the next part is a plain tail slice.
@@ -1662,6 +1885,7 @@ class MyWatchSync {
           totalTmdbRows == 0 ? 0 : (tmdb?['rows'] as List?)?.length ?? 0,
       entriesDropped: entriesLeft,
       entriesKept: totalEntries - entriesLeft,
+      profileWatchDropped: profileWatchDropped,
     );
   }
 
@@ -2209,6 +2433,7 @@ class SyncCycleResult {
     this.mapsImported = 0,
     this.detailsApplied = 0,
     this.tmdbApplied = 0,
+    this.profilesChanged = 0,
     this.artFetched = 0,
   });
 
@@ -2220,6 +2445,9 @@ class SyncCycleResult {
   final int mapsImported;
   final int detailsApplied;
   final int tmdbApplied;
+
+  /// Profiles created, updated or deleted from remote docs.
+  final int profilesChanged;
   final int artFetched;
 
   SyncCycleResult copyWith({
@@ -2227,6 +2455,7 @@ class SyncCycleResult {
     int? mapsImported,
     int? detailsApplied,
     int? tmdbApplied,
+    int? profilesChanged,
     int? artFetched,
   }) =>
       SyncCycleResult(
@@ -2238,6 +2467,7 @@ class SyncCycleResult {
         mapsImported: mapsImported ?? this.mapsImported,
         detailsApplied: detailsApplied ?? this.detailsApplied,
         tmdbApplied: tmdbApplied ?? this.tmdbApplied,
+        profilesChanged: profilesChanged ?? this.profilesChanged,
         artFetched: artFetched ?? this.artFetched,
       );
 }

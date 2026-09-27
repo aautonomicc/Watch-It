@@ -103,7 +103,9 @@ class _ProfilesScreenState extends State<ProfilesScreen> {
                   'Everyone shares this device\'s library, downloads and '
                   'network connection — each profile keeps its own viewing '
                   'positions, favourites and look. Kid profiles see only '
-                  'the lists you choose, and no downloads.',
+                  'the lists you choose, and no downloads. On My W@tch '
+                  'linked devices, profiles and their viewing positions '
+                  'sync automatically.',
                   style: TextStyle(fontSize: 12, color: t.ash),
                 ),
               ),
@@ -127,6 +129,7 @@ class _ProfilesScreenState extends State<ProfilesScreen> {
                       },
                       if (p.hasPin) 'PIN set',
                       if (p.autoLogin) 'auto-selected at launch',
+                      if (store.isHidden(p.id)) 'hidden on this device',
                     ].join(' · '),
                     style: TextStyle(color: t.ash, fontSize: 12),
                   ),
@@ -190,6 +193,12 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   /// Freshly cropped avatar image, staged until Save.
   Uint8List? _stagedAvatarBytes;
   late bool _autoLogin = widget.profile?.autoLogin ?? false;
+
+  /// Per-DEVICE visibility (never synced): a hidden profile stays fully
+  /// synced over My W@tch, it just doesn't appear when picking who's
+  /// watching on this device.
+  late bool _shown = widget.profile == null ||
+      !ProfileStore.instance.isHidden(widget.profile!.id);
   Set<String> _allowed = {};
   List<MediaList> _lists = const [];
   bool _saving = false;
@@ -270,6 +279,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     }
     if (_autoLogin != (widget.profile?.autoLogin ?? false)) {
       await store.setAutoLogin(_autoLogin ? profile.id : null);
+    }
+    if (!_isAdmin) {
+      await store.setHidden(profile.id, !_shown);
     }
     if (!mounted) return;
     // The agreed nudge: creating the first extra profile (and again the
@@ -378,8 +390,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         ),
         content: Text(
           'Removes this profile with its viewing positions and '
-          'favourites. The library, downloads and other profiles are '
-          'not affected.',
+          'favourites — here and, through My W@tch, on every linked '
+          'device. The library, downloads and other profiles are not '
+          'affected. To keep the profile but not show it on this '
+          'device, use "Show on this device" instead.',
           style: TextStyle(color: t.boneDim, fontSize: 13),
         ),
         actions: [
@@ -614,6 +628,24 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
             value: _autoLogin,
             onChanged: (v) => setState(() => _autoLogin = v),
           ),
+          if (!_isAdmin)
+            SwitchListTile(
+              secondary: Icon(Icons.visibility_outlined, color: t.accent),
+              title: Text(
+                'Show on this device',
+                style: TextStyle(color: t.bone, fontSize: 15),
+              ),
+              subtitle: Text(
+                'This device only. A hidden profile keeps syncing and '
+                'keeps its viewing positions — it just doesn\'t appear '
+                'when picking who\'s watching here. Handy for keeping '
+                'the kids\' profiles off a work machine, or everyone '
+                'else\'s off the kids\' TV.',
+                style: TextStyle(color: t.ash, fontSize: 12),
+              ),
+              value: _shown,
+              onChanged: (v) => setState(() => _shown = v),
+            ),
           if (!_isNew && !_isAdmin)
             ListTile(
               leading: Icon(Icons.password, color: t.accent),

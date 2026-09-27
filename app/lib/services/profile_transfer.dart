@@ -340,7 +340,10 @@ Future<ProfileImportSummary> importProfilesData(
         final existing = await store.allowedListIds(target.id);
         final union = {...existing, ...resolveLists(backup.allowedLists)};
         if (union.length > existing.length) {
-          await store.setAllowedListIds(target.id, union);
+          // Stamp: the widened allow-list must win the My W@tch LWW
+          // merge, or a linked device's older row would undo it.
+          await store.setAllowedListIds(target.id, union,
+              stampMs: DateTime.now().millisecondsSinceEpoch);
         }
       }
       await mergeHistory(backup, target.id);

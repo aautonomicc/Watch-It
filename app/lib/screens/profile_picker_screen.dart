@@ -49,7 +49,11 @@ class ProfilePickerScreen extends StatelessWidget {
         child: ListenableBuilder(
           listenable: ProfileStore.instance,
           builder: (context, _) {
-            final profiles = ProfileStore.instance.profiles;
+            // Only the profiles shown on THIS device (Settings →
+            // Profiles → "Show on this device"); hidden ones stay
+            // synced, they just don't appear here. The admin is always
+            // visible.
+            final profiles = ProfileStore.instance.visibleProfiles;
             return Center(
               child: SingleChildScrollView(
                 child: Column(

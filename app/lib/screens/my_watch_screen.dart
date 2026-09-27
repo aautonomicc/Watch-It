@@ -19,8 +19,9 @@ import '../theme/tokens.dart';
 import 'qr_scan_screen.dart';
 
 /// My W@tch: link this device with your other devices. Linked devices
-/// sync watch lists and viewing positions automatically in the
-/// background ([MyWatchSync]) and show each other's presence here.
+/// sync watch lists, viewing positions and family profiles
+/// automatically in the background ([MyWatchSync]) and show each
+/// other's presence here.
 ///
 /// Unlinked, the page offers "create a link" (mints the invite, shows it
 /// as QR + copyable code) or "join with a code" (paste the invite from
@@ -451,8 +452,8 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
       Text(
         'Link your own devices into a private "My W@tch". Linked '
         'devices find each other over the network (or the local '
-        'Wi-Fi) and keep your watch lists and viewing positions in '
-        'sync automatically.',
+        'Wi-Fi) and keep your watch lists, viewing positions and '
+        'family profiles in sync automatically.',
         style: TextStyle(fontSize: 14, color: t.boneDim, height: 1.4),
       ),
       const SizedBox(height: 8),

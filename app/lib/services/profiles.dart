@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -54,6 +55,8 @@ class Profile {
     this.pinHash,
     this.autoLogin = false,
     this.position = 0,
+    this.updatedMs = 0,
+    this.syncId,
   });
 
   final String id;
@@ -68,6 +71,15 @@ class Profile {
   final bool autoLogin;
   final int position;
 
+  /// LWW stamp for My W@tch profile sync — when the synced fields last
+  /// changed (here, or on the device this row was adopted from).
+  final int updatedMs;
+
+  /// Stable cross-device identity for My W@tch profile sync; null until
+  /// the first publish mints one. The admin profile never needs one
+  /// (it matches by kind — every install has exactly one).
+  final String? syncId;
+
   bool get isAdmin => kind == ProfileKind.admin;
   bool get isKid => kind == ProfileKind.kid;
   bool get hasPin => pinHash != null;
@@ -79,6 +91,8 @@ class Profile {
     Object? pinHash = _sentinel,
     bool? autoLogin,
     int? position,
+    int? updatedMs,
+    Object? syncId = _sentinel,
   }) => Profile(
     id: id,
     name: name ?? this.name,
@@ -87,6 +101,8 @@ class Profile {
     pinHash: pinHash == _sentinel ? this.pinHash : pinHash as String?,
     autoLogin: autoLogin ?? this.autoLogin,
     position: position ?? this.position,
+    updatedMs: updatedMs ?? this.updatedMs,
+    syncId: syncId == _sentinel ? this.syncId : syncId as String?,
   );
 
   static const _sentinel = Object();
@@ -110,6 +126,19 @@ class ProfileStore extends ChangeNotifier {
   static const _pinFailPrefix = 'pin_fails_';
   static const _pinLockPrefix = 'pin_lock_until_';
 
+  /// Per-DEVICE visibility (never synced): local profile ids hidden
+  /// from "Who's w@tching?" on this device. A hidden profile stays
+  /// fully synced — it just doesn't appear when picking who's watching
+  /// here (the kid's TV shows only the kid, the office desktop skips
+  /// the kids). The admin profile can never be hidden.
+  static const _hiddenKey = 'profile_hidden_v1';
+
+  /// My W@tch profile deletion tombstones: JSON `{syncId: removedMs}`.
+  /// A deleted profile's stone rides the sync doc so the deletion
+  /// reaches every linked device (and a newer remote EDIT can still
+  /// beat a stale stone — last writer wins).
+  static const _stonesKey = 'profile_stones_v1';
+
   /// Wrong tries before the PIN locks, and for how long.
   static const maxPinAttempts = 5;
   static const pinLockSeconds = 60;
@@ -117,6 +146,9 @@ class ProfileStore extends ChangeNotifier {
   List<Profile> _profiles = const [];
   String? _activeId;
   bool _loaded = false;
+
+  /// Local profile ids hidden on THIS device (see [_hiddenKey]).
+  Set<String> _hidden = const {};
 
   /// The active KID profile's allowed list ids; null = no restriction
   /// (adult/admin active, or not loaded).
@@ -129,6 +161,33 @@ class ProfileStore extends ChangeNotifier {
 
   bool get loaded => _loaded;
   List<Profile> get profiles => _profiles;
+
+  /// The profiles shown when picking who's watching on THIS device —
+  /// everything not hidden here. The admin is always visible (hiding
+  /// it could lock the family out of managing profiles at all).
+  List<Profile> get visibleProfiles => [
+        for (final p in _profiles)
+          if (p.isAdmin || !_hidden.contains(p.id)) p,
+      ];
+
+  bool isHidden(String id) => _hidden.contains(id);
+
+  /// Show/hide [id] on this device (per-device, never synced; the
+  /// admin profile is never hidden).
+  Future<void> setHidden(String id, bool hidden) async {
+    if (id == kAdminProfileId) return;
+    final next = {..._hidden};
+    if (hidden) {
+      next.add(id);
+    } else {
+      next.remove(id);
+    }
+    if (setEquals(next, _hidden)) return;
+    _hidden = next;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_hiddenKey, next.toList()..sort());
+    notifyListeners();
+  }
 
   /// More than one profile exists — the point where the profile UI
   /// (picker, switch button, per-profile scoping) becomes visible.
@@ -187,15 +246,20 @@ class ProfileStore extends ChangeNotifier {
       rows = await db.select(db.profiles).get();
     }
     _profiles = [for (final r in rows) _fromRow(r)];
+    final prefs = await SharedPreferences.getInstance();
+    _hidden = (prefs.getStringList(_hiddenKey) ?? const []).toSet();
     _loaded = true;
     if (_profiles.length == 1) {
       _activeId = _profiles.first.id;
     } else {
-      final auto = _profiles.where((p) => p.autoLogin).firstOrNull;
+      // Only a VISIBLE profile may auto-select — a profile hidden on
+      // this device must not silently open here.
+      final auto = _profiles
+          .where((p) => p.autoLogin && !_hidden.contains(p.id))
+          .firstOrNull;
       _activeId = auto?.id;
     }
     await _loadActiveAccess();
-    final prefs = await SharedPreferences.getInstance();
     if (_activeId != null) {
       await prefs.setString(_activeKey, _activeId!);
     }
@@ -208,6 +272,8 @@ class ProfileStore extends ChangeNotifier {
       db.profiles,
     )..orderBy([(t) => OrderingTerm.asc(t.position)])).get();
     _profiles = [for (final r in rows) _fromRow(r)];
+    final prefs = await SharedPreferences.getInstance();
+    _hidden = (prefs.getStringList(_hiddenKey) ?? const []).toSet();
     if (_activeId != null && !_profiles.any((p) => p.id == _activeId)) {
       _activeId = _profiles.isEmpty ? null : _profiles.first.id;
     }
@@ -273,6 +339,8 @@ class ProfileStore extends ChangeNotifier {
     required ProfileKind kind,
     String? avatar,
     Set<String> allowedLists = const {},
+    String? syncId,
+    int? updatedMs,
   }) async {
     assert(kind != ProfileKind.admin, 'only the migrated admin is admin');
     final db = await LibraryStore.database();
@@ -289,6 +357,9 @@ class ProfileStore extends ChangeNotifier {
             kind: kind.name,
             avatar: Value(avatar),
             position: Value(position),
+            updatedMs: Value(
+                updatedMs ?? DateTime.now().millisecondsSinceEpoch),
+            syncId: Value(syncId),
           ),
         );
     if (kind == ProfileKind.kid) {
@@ -298,7 +369,12 @@ class ProfileStore extends ChangeNotifier {
     return _profiles.firstWhere((p) => p.id == id);
   }
 
-  Future<void> updateProfile(Profile profile) async {
+  /// Write [profile] back. Every save freshens the profile's LWW sync
+  /// stamp (it IS an edit) unless the caller pins one — the My W@tch
+  /// sync apply passes the remote stamp so comparisons converge, and
+  /// passes the current stamp for changes that must not win a merge
+  /// (landing a fetched avatar file).
+  Future<void> updateProfile(Profile profile, {int? updatedMs}) async {
     final db = await LibraryStore.database();
     await (db.update(db.profiles)..where((t) => t.id.equals(profile.id))).write(
       ProfilesCompanion(
@@ -308,6 +384,9 @@ class ProfileStore extends ChangeNotifier {
         pinHash: Value(profile.pinHash),
         autoLogin: Value(profile.autoLogin),
         position: Value(profile.position),
+        updatedMs:
+            Value(updatedMs ?? DateTime.now().millisecondsSinceEpoch),
+        syncId: Value(profile.syncId),
       ),
     );
     await _reload();
@@ -315,8 +394,15 @@ class ProfileStore extends ChangeNotifier {
 
   /// Delete a (never the admin) profile and everything only it owned:
   /// its watch states, list access, favourites and prefs slots, and a
-  /// file avatar.
-  Future<void> deleteProfile(String id) async {
+  /// file avatar. By default the deletion also writes a My W@tch
+  /// tombstone (when the profile ever synced) so it propagates to
+  /// every linked device; the sync apply passes [recordStone] false —
+  /// it manages the stone set itself.
+  Future<void> deleteProfile(
+    String id, {
+    bool recordStone = true,
+    int? stoneMs,
+  }) async {
     if (id == kAdminProfileId) return;
     final db = await LibraryStore.database();
     final row = _profiles.where((p) => p.id == id).firstOrNull;
@@ -332,12 +418,61 @@ class ProfileStore extends ChangeNotifier {
     await prefs.remove('theme_mode_v1_p_$id');
     await prefs.remove('$_pinFailPrefix$id');
     await prefs.remove('$_pinLockPrefix$id');
+    if (_hidden.contains(id)) {
+      _hidden = {..._hidden}..remove(id);
+      await prefs.setStringList(_hiddenKey, _hidden.toList()..sort());
+    }
+    // A profile that never synced (no sync id yet) needs no stone —
+    // no other device has ever heard of it.
+    if (recordStone && row?.syncId != null) {
+      final stones = await profileStones();
+      stones[row!.syncId!] =
+          stoneMs ?? DateTime.now().millisecondsSinceEpoch;
+      await saveProfileStones(stones);
+    }
     final avatar = row?.avatar;
     if (avatar != null && !avatar.startsWith('preset:')) {
       await deleteAvatarFile(avatar);
     }
     if (_activeId == id) _activeId = null;
     await _reload();
+  }
+
+  /// Mint the stable cross-device sync id for every non-admin profile
+  /// still missing one (called before each My W@tch publish; the ids
+  /// are minted lazily so unlinked installs never pay for them).
+  Future<void> ensureSyncIds() async {
+    final missing = [
+      for (final p in _profiles)
+        if (!p.isAdmin && p.syncId == null) p,
+    ];
+    if (missing.isEmpty) return;
+    final db = await LibraryStore.database();
+    for (final p in missing) {
+      await (db.update(db.profiles)..where((t) => t.id.equals(p.id)))
+          .write(ProfilesCompanion(syncId: Value(newProfileId())));
+    }
+    await _reload();
+  }
+
+  /// The My W@tch profile deletion tombstones (`syncId → removedMs`).
+  static Future<Map<String, int>> profileStones() async {
+    final prefs = await SharedPreferences.getInstance();
+    try {
+      final raw = prefs.getString(_stonesKey);
+      if (raw == null) return {};
+      return {
+        for (final e in (jsonDecode(raw) as Map<String, dynamic>).entries)
+          if (e.value is int) e.key: e.value as int,
+      };
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Future<void> saveProfileStones(Map<String, int> stones) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_stonesKey, jsonEncode(stones));
   }
 
   /// Designate [id] (or nobody, with null) as the launch auto-login
@@ -365,10 +500,16 @@ class ProfileStore extends ChangeNotifier {
     return {for (final r in rows) r.listId};
   }
 
+  /// Replace [profileId]'s kid allow-list. [stampMs] freshens the
+  /// profile's LWW sync stamp for callers where the allow-list change
+  /// is the whole edit (the family import's union) — the edit screen
+  /// saves through [updateProfile] which stamps anyway, and the sync
+  /// apply must not stamp at all.
   Future<void> setAllowedListIds(
     String profileId,
     Set<String> listIds, {
     bool reload = true,
+    int? stampMs,
   }) async {
     final db = await LibraryStore.database();
     await db.transaction(() async {
@@ -384,6 +525,10 @@ class ProfileStore extends ChangeNotifier {
                 listId: id,
               ),
             );
+      }
+      if (stampMs != null) {
+        await (db.update(db.profiles)..where((t) => t.id.equals(profileId)))
+            .write(ProfilesCompanion(updatedMs: Value(stampMs)));
       }
     });
     if (reload) await _reload();
@@ -504,15 +649,25 @@ class ProfileStore extends ChangeNotifier {
   }
 
   /// Adopt an imported admin PIN hash and recovery-code hash TOGETHER
-  /// (they are a pair — the code recovers exactly this PIN). Only the
-  /// family import calls this, and only when the device admin has no
-  /// PIN of its own; both values are already salted hashes.
-  Future<void> adoptAdminPinPair(String pinHash, String recoveryHash) async {
+  /// (they are a pair — the code recovers exactly this PIN). The family
+  /// import calls this when the device admin has no PIN of its own;
+  /// the My W@tch sync apply calls it when the remote admin row wins
+  /// the LWW round (pinning [updatedMs] to the remote stamp). Both
+  /// values are already salted hashes.
+  Future<void> adoptAdminPinPair(String pinHash, String recoveryHash,
+      {int? updatedMs}) async {
     final p = _profiles.firstWhere((p) => p.isAdmin);
-    await updateProfile(p.copyWith(pinHash: pinHash));
+    await updateProfile(p.copyWith(pinHash: pinHash), updatedMs: updatedMs);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_recoveryKey, recoveryHash);
     await _clearFailures(p.id);
+  }
+
+  /// Drop the stored admin recovery-code hash (the sync apply clears it
+  /// together with the PIN when a remote admin row without a PIN wins).
+  Future<void> clearAdminRecovery() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_recoveryKey);
   }
 
   static String _newRecoveryCode() {
@@ -591,5 +746,7 @@ class ProfileStore extends ChangeNotifier {
     pinHash: r.pinHash,
     autoLogin: r.autoLogin,
     position: r.position,
+    updatedMs: r.updatedMs,
+    syncId: r.syncId,
   );
 }

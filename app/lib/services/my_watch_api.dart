@@ -257,12 +257,55 @@ Map<String, dynamic> combinedSyncDoc(
   final tmdbFiles = <String, dynamic>{
     ...(baseTmdb?['files'] as Map? ?? const {}),
   };
+  // Profiles ride only the main doc today, but fold defensively:
+  // items/stones newest-wins, per-profile watch concatenates.
+  Map<String, dynamic>? profiles =
+      (doc['profiles'] as Map?)?.cast<String, dynamic>();
+  void addProfiles(dynamic raw) {
+    if (raw is! Map) return;
+    final extra = raw.cast<String, dynamic>();
+    final base = profiles;
+    if (base == null) {
+      profiles = extra;
+      return;
+    }
+    final items = (base['items'] as Map?)?.cast<String, dynamic>() ??
+        <String, dynamic>{};
+    for (final e in ((extra['items'] as Map?) ?? const {}).entries) {
+      final cur = items['${e.key}'];
+      final curMs = cur is Map ? cur['updated_ms'] as int? ?? 0 : -1;
+      final nextMs =
+          e.value is Map ? (e.value as Map)['updated_ms'] as int? ?? 0 : 0;
+      if (cur == null || nextMs > curMs) items['${e.key}'] = e.value;
+    }
+    base['items'] = items;
+    final removed = (base['removed'] as Map?)?.cast<String, dynamic>() ??
+        <String, dynamic>{};
+    for (final e in ((extra['removed'] as Map?) ?? const {}).entries) {
+      final cur = removed['${e.key}'];
+      if (cur is! num || (e.value is num && (e.value as num) > cur)) {
+        removed['${e.key}'] = e.value;
+      }
+    }
+    if (removed.isNotEmpty) base['removed'] = removed;
+    final watch = (base['watch'] as Map?)?.cast<String, dynamic>() ??
+        <String, dynamic>{};
+    for (final e in ((extra['watch'] as Map?) ?? const {}).entries) {
+      watch['${e.key}'] = [
+        ...(watch['${e.key}'] as List? ?? const []),
+        ...(e.value as List? ?? const []),
+      ];
+    }
+    if (watch.isNotEmpty) base['watch'] = watch;
+  }
+
   var updated = doc['updated_ms'] as int? ?? 0;
   for (final p in parts) {
     if (p is! Map) continue;
     for (final l in p['lists'] as List? ?? const []) {
       addList(l);
     }
+    addProfiles(p['profiles']);
     watch.addAll(p['watch'] as List? ?? const []);
     for (final h in p['have'] as List? ?? const []) {
       if (haveSeen.add(h)) have.add(h);
@@ -295,6 +338,7 @@ Map<String, dynamic> combinedSyncDoc(
       if (tmdbFiles.isNotEmpty) 'files': tmdbFiles,
     };
   }
+  if (profiles != null) out['profiles'] = profiles;
   if (updated > 0) out['updated_ms'] = updated;
   return out;
 }

@@ -264,7 +264,12 @@ LAN plus public bootstrap for remote devices), implemented in
   File renames travel too (alpha.97, newest-stamp-wins by rename time),
   playlists arrive as playlists, and a playlist's drag-reordered play
   order follows (alpha.98, newest-reorder-wins with a deterministic
-  tie-break so devices converge).
+  tie-break so devices converge). Since 2026-09-27 (unreleased) the
+  whole family of viewing profiles syncs too — every profile, its
+  avatar (via the artwork transfer), PIN pair, kid allow-list and its
+  OWN watch points, with delete-everywhere tombstones — see the
+  Profiles bullet under "Data & state" and
+  `app/lib/services/profile_sync.dart`.
 - **Capacity — sharding + rotation (alpha.96/.98)**: store values are
   byte-capped, and a large library's doc doesn't fit in one. Since
   alpha.96 the doc builder trims until the doc ALWAYS fits (down to
@@ -353,12 +358,20 @@ v17 dropped the channel columns and lists. History in
   and colour scheme are keyed per profile (drift schema v13 —
   `profiles` + `profile_list_access` tables, `watch_states.profile_id`),
   while the library, downloads, wallet and the network
-  identity stay install-global; My W@tch sync stays pinned to the
-  Admin profile's state. PINs are salted-hashed and rate-limited; the
+  identity stay install-global. PINs are salted-hashed and rate-limited; the
   admin PIN has a one-time recovery code, itself stored hashed. Since
   alpha.95 profiles can optionally ride a library bundle (export
   checkbox → `profiles.json` + avatar members; import merges by name,
-  device wins — old importers ignore the members).
+  device wins — old importers ignore the members). Since 2026-09-27
+  (unreleased) profiles also sync automatically over My W@tch: the
+  sync doc's `profiles` section carries every profile (name/kind,
+  avatar manifest, PIN pair, kid allow-list titles) plus EACH
+  profile's own watch points, merged last-writer-wins on a per-profile
+  edit stamp with deletion tombstones (schema v18: `updated_ms` +
+  stable cross-device `sync_id`); the admin profile's watch states
+  keep riding the doc's top-level `watch` section for old builds. A
+  per-device "Show on this device" toggle (never synced) hides a
+  profile from the picker locally without unsyncing it.
 - No accounts, no cloud. Lists, watch state, and user edits sync between a
   user's own linked devices via My W@tch (above) — device-to-device, no
   third party holds anything.

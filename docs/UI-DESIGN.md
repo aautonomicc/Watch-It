@@ -249,6 +249,17 @@ second profile exists (a pre-profile install is silently the lone
 - Watch positions, favourites and colour scheme are per profile;
   library, downloads, wallet and the network identity are
   shared (profiles, not accounts)
+- **Profiles sync over My W@tch** (2026-09-27, unreleased): profiles
+  and their own watch points reach every linked device automatically —
+  no export needed (a kid set up on the phone appears on the TV, with
+  her Continue Watching). Deleting a profile deletes it everywhere
+  (the delete dialog says so); the per-device complement is a **"Show
+  on this device"** toggle on each profile's edit page — a hidden
+  profile keeps syncing and keeps its viewing positions, it just
+  doesn't appear in "Who's w@tching?" here (kids' profiles off the
+  work machine, everyone else's off the kids' TV). Hidden profiles
+  stay listed (marked) in Settings → Profiles; auto-select and
+  visibility never sync — both are per-device choices
 - **Family export/import** (alpha.95): the Export-library dialog gains
   an opt-in **Include profiles** checkbox (default off, "Never share
   this bundle"); the import dialog then offers **Profiles (N)**.
