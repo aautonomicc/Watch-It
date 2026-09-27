@@ -12,8 +12,9 @@ page, told apart by `sizeBytes`/`videoInfo`. 3 catalog entries, 3
 bundled root maps (+2 legacy, below).
 
 **Licence:** BBB is CC-BY 3.0 Blender Foundation — *not* public
-domain. It is therefore **seed-only**: never added to
-`catalog/Public Domain.watch-list` (or any published list), and the
+domain. It is therefore **seed-only**: never added to any published
+list (the repo-hosted `Public Domain.watch-list` bundle was withdrawn
+2026-09-27), and the
 attribution ("© 2008 Blender Foundation | www.bigbuckbunny.org …
 Creative Commons Attribution 3.0") is appended to its description both
 in the bundled seed metadata (via `kOverviewAttribution` in

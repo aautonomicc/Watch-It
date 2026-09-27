@@ -38,10 +38,6 @@ straight from Autonomi: no key, no account, no server.
 (Sample library — the titles are invented and the poster and album artwork is
 AI-generated for the screenshots.)*
 
-Want a ready-made library? It's a one-file download:
-[**Public Domain.watch-list**](catalog/README.md) — 40 public-domain
-films and episodes, posters and descriptions included, ready to import.
-
 <p>
   <img src="docs/screenshots/detail-linux.jpg" width="49%" alt="A film's detail page in W@tch — poster, rating, version picker, Resume, Start over and Download buttons, favourite heart" />
   <img src="docs/screenshots/season-linux.jpg" width="49%" alt="A season page in W@tch — season poster, rating, Download remaining button, and the episode list with stills, air dates and descriptions" />
@@ -458,16 +454,12 @@ Alpha.48–.50 bundled a 48-title public-domain catalog; alpha.51
 trimmed the bundle to *Night of the Living Dead* (1968), and
 alpha.93 replaced NOTLD with Big Buck Bunny — installs that
 already seeded earlier catalogs keep them, and the old uploads remain
-playable on the network — and the full catalog
-(now 40 titles — *The Lady Vanishes* was removed 2026-08-11 after its
-US copyright turned out to have been restored by the URAA, and
-*The Hunchback of Notre Dame* (1939) plus *Petticoat Junction*
-S01E16–E21 were removed the same day because their public-domain
-status could not be confirmed with enough confidence) is
-available as a downloadable
-[`Public Domain.watch-list` bundle](catalog/README.md) you can import
-in a couple of taps. The film was verified
-public domain **in the United States** (released without a copyright
-notice). Copyright terms differ elsewhere — in much of Europe
-protection runs for 70 years after the death of the last author — so
-outside the US, check your local rules before treating it as free.
+playable on the network. A downloadable `Public Domain.watch-list`
+bundle of that catalog was hosted in this repository until 2026-09-27,
+when it was withdrawn as a precaution: the titles were verified public
+domain **in the United States**, but copyright terms differ elsewhere —
+in much of Europe protection runs for 70 years after the death of the
+last author — and distributing the bundle worldwide from here couldn't
+honour that distinction. Anyone who already imported it keeps their
+library; the media itself lives on the Autonomi network, not in this
+repository.
