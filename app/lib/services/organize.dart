@@ -25,15 +25,14 @@ bool isUnsortedAudio(MediaEntry entry) {
   return p.isAudio && !p.isTrack;
 }
 
-/// Every unsorted audio entry across the library's own lists (channels
-/// mirror someone else's manifest and are read-only; playlists hold
-/// copies of entries that also live in a regular list), deduplicated by
-/// (address, name) and sorted by name.
+/// Every unsorted audio entry across the library's own lists
+/// (playlists hold copies of entries that also live in a regular
+/// list), deduplicated by (address, name) and sorted by name.
 List<MediaEntry> unsortedAudioEntries(List<MediaList> lists) {
   final seen = <(String, String)>{};
   final out = <MediaEntry>[];
   for (final l in lists) {
-    if (l.isChannel || l.isPlaylist) continue;
+    if (l.isPlaylist) continue;
     for (final e in l.entries) {
       if (!isUnsortedAudio(e)) continue;
       if (seen.add((e.address.toLowerCase(), e.name))) out.add(e);
@@ -61,7 +60,6 @@ int highestTrackNumberIn(List<MediaList> lists,
   final albumLower = album.trim().toLowerCase();
   var highest = 0;
   for (final l in lists) {
-    if (l.isChannel) continue;
     for (final e in l.entries) {
       final p = parseMediaName(e.name);
       if (!p.isTrack) continue;
@@ -125,7 +123,6 @@ Future<OrganizePlan> planOrganize(
   final albumLower = cleanAlbum.trim().toLowerCase();
   final taken = <int, String>{};
   for (final l in all) {
-    if (l.isChannel) continue;
     for (final e in l.entries) {
       if (selected.contains((e.address.toLowerCase(), e.name))) continue;
       final p = parseMediaName(e.name);

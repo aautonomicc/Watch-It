@@ -142,8 +142,8 @@ class _ListEditScreenState extends State<ListEditScreen> {
     ]));
   }
 
-  /// Move or copy [entries] into a picked target: any other non-channel
-  /// list, or a freshly created one. A copy leaves this list untouched
+  /// Move or copy [entries] into a picked target: any other list, or a
+  /// freshly created one. A copy leaves this list untouched
   /// (for building custom playlists); a move removes the entries here.
   /// Duplicates already in the target are dropped, not doubled.
   Future<void> _transferEntries(List<MediaEntry> entries, String what,
@@ -169,7 +169,6 @@ class _ListEditScreenState extends State<ListEditScreen> {
     // as the import flow's "Create new list" pseudo-rows.
     final targetIndex = updated.indexWhere((l) =>
         l.id != list.id &&
-        !l.isChannel &&
         !l.isPlaylist &&
         l.title.toLowerCase() == trimmed.toLowerCase());
     var duplicates = 0;
@@ -201,7 +200,7 @@ class _ListEditScreenState extends State<ListEditScreen> {
     ));
   }
 
-  /// Target picker for a move or copy: the other non-channel lists plus
+  /// Target picker for a move or copy: the other lists plus
   /// "Create new list". Returns the chosen list title, or null on cancel.
   Future<String?> _pickTransferTarget(String what,
       {required bool copy}) async {
@@ -211,7 +210,7 @@ class _ListEditScreenState extends State<ListEditScreen> {
     // shows/movies moved between shelves.
     final others = [
       for (final l in _lists ?? <MediaList>[])
-        if (l.id != widget.listId && !l.isChannel && !l.isPlaylist) l,
+        if (l.id != widget.listId && !l.isPlaylist) l,
     ];
     return showDialog<String>(
       context: context,

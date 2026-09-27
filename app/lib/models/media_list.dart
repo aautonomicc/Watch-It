@@ -88,9 +88,6 @@ class MediaList {
     required this.title,
     this.entries = const [],
     this.enabled = true,
-    this.channelPubkey,
-    this.channelAuthor,
-    this.channelAvatar,
     this.kind,
     this.orderedAt,
   });
@@ -103,19 +100,6 @@ class MediaList {
   /// screen (toggled in Settings → Media Lists).
   final bool enabled;
 
-  /// Non-null marks a subscribed CHANNEL list (the channel's public key,
-  /// lowercase hex): read-only, badged amber, mirrors the channel's
-  /// published manifest and updates when a newer signed head arrives.
-  final String? channelPubkey;
-
-  /// Channel lists only — the profile from the last imported manifest:
-  /// the optional "by `<author>`" name/handle…
-  final String? channelAuthor;
-
-  /// …and the avatar's file name in the posters dir
-  /// (`channel_avatar_<sha8>.img`), null when the channel has none.
-  final String? channelAvatar;
-
   /// [kListKindPlaylist] marks a playlist: an ordered set of individual
   /// tracks rendered as track rows (never album-folded), listed in the
   /// drawer's Playlists section instead of the home wall. Null = normal
@@ -127,7 +111,6 @@ class MediaList {
   /// play order newest-stamp-wins across linked devices.
   final int? orderedAt;
 
-  bool get isChannel => channelPubkey != null;
   bool get isPlaylist => kind == kListKindPlaylist;
 
   MediaList copyWith({
@@ -141,9 +124,6 @@ class MediaList {
         title: title ?? this.title,
         entries: entries ?? this.entries,
         enabled: enabled ?? this.enabled,
-        channelPubkey: channelPubkey,
-        channelAuthor: channelAuthor,
-        channelAvatar: channelAvatar,
         kind: kind,
         orderedAt: orderedAt ?? this.orderedAt,
       );
@@ -153,9 +133,6 @@ class MediaList {
         'title': title,
         'entries': entries.map((e) => e.toJson()).toList(),
         'enabled': enabled,
-        if (channelPubkey != null) 'channelPubkey': channelPubkey,
-        if (channelAuthor != null) 'channelAuthor': channelAuthor,
-        if (channelAvatar != null) 'channelAvatar': channelAvatar,
         if (kind != null) 'kind': kind,
         if (orderedAt != null && orderedAt != 0) 'orderedAt': orderedAt,
       };
@@ -167,9 +144,6 @@ class MediaList {
             .map((e) => MediaEntry.fromJson(e as Map<String, dynamic>))
             .toList(),
         enabled: json['enabled'] as bool? ?? true,
-        channelPubkey: json['channelPubkey'] as String?,
-        channelAuthor: json['channelAuthor'] as String?,
-        channelAvatar: json['channelAvatar'] as String?,
         kind: json['kind'] as String?,
         orderedAt: json['orderedAt'] as int?,
       );

@@ -42,7 +42,7 @@ String newProfileId() {
 enum ProfileKind { admin, adult, kid }
 
 /// One viewing profile. Profiles are NOT accounts: the network
-/// identity, wallet, channels, lists and downloaded files are
+/// identity, wallet, lists and downloaded files are
 /// install-global — a profile only scopes viewing state (watch points,
 /// favourites, theme, list access).
 class Profile {

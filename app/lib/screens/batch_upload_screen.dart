@@ -113,10 +113,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
     final lists = await LibraryStore.load();
     if (!mounted) return;
     setState(() {
-      _libraryLists = [
-        for (final l in lists)
-          if (!l.isChannel) l.title,
-      ];
+      _libraryLists = [for (final l in lists) l.title];
     });
   }
 

@@ -10,7 +10,6 @@ import '../services/metadata_service.dart';
 import '../services/season_grouping.dart';
 import '../services/tv_settings.dart';
 import '../theme/tokens.dart';
-import '../widgets/channel_info_card.dart';
 import '../widgets/library_drawer.dart';
 import '../widgets/poster_cards.dart';
 import 'album_screen.dart';
@@ -120,23 +119,18 @@ class _ListHomeScreenState extends State<ListHomeScreen> {
         // drop the back affordance entirely — keep back on the left, the
         // drawer opens from the menu action on the right.
         leading: BackButton(color: t.boneDim),
-        // Channel pages carry the full-width info card below, which owns
-        // the entry count — the app bar stays plain there.
-        title: _list.isChannel
-            ? Text(_list.title,
-                style: TextStyle(color: t.bone, fontSize: 18))
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(_list.title,
-                      style: TextStyle(color: t.bone, fontSize: 18)),
-                  Text(
-                    '$count ${count == 1 ? 'entry' : 'entries'}',
-                    style: TextStyle(color: t.ash, fontSize: 11),
-                  ),
-                ],
-              ),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_list.title,
+                style: TextStyle(color: t.bone, fontSize: 18)),
+            Text(
+              '$count ${count == 1 ? 'entry' : 'entries'}',
+              style: TextStyle(color: t.ash, fontSize: 11),
+            ),
+          ],
+        ),
         actions: [
           // The pushed route puts a back arrow in `leading`, so the
           // drawer needs its own handle here.
@@ -158,46 +152,33 @@ class _ListHomeScreenState extends State<ListHomeScreen> {
   }
 
   Widget _body(WiTokens t) {
-    // The channel's face — profile card above the grid (a grid cell is
-    // poster-shaped; a profile crammed into one would fight the grid).
-    final infoCard = _list.isChannel
-        ? ChannelInfoCard(list: _list, onEdited: _reload)
-        : null;
     if (_list.entries.isEmpty) {
-      final empty = Center(
+      return Center(
         child: Text(
           'This list is empty.',
           style: TextStyle(fontSize: 13, color: t.boneDim),
         ),
       );
-      return infoCard == null
-          ? empty
-          : Column(children: [infoCard, Expanded(child: empty)]);
     }
     final items = groupShows(_list.entries);
-    // Channel lists carry no category tags by design — manifests are
-    // published without them, and a subscriber's own TMDB matches must
-    // not sneak genre chips back onto the channel's page.
     final chips = <String>[];
-    if (!_list.isChannel) {
-      final genres = <String>{};
-      var hasUncategorised = false;
-      for (final item in items) {
-        final g = _genresOf(item);
-        if (g.isEmpty) {
-          hasUncategorised = true;
-        } else {
-          genres.addAll(g);
-        }
+    final genres = <String>{};
+    var hasUncategorised = false;
+    for (final item in items) {
+      final g = _genresOf(item);
+      if (g.isEmpty) {
+        hasUncategorised = true;
+      } else {
+        genres.addAll(g);
       }
-      chips.addAll([
-        ...genres.toList()..sort(),
-        // Only worth a chip when it narrows anything: a list where
-        // nothing is categorised would show a lone Uncategorised chip
-        // that filters nothing.
-        if (hasUncategorised && genres.isNotEmpty) kUncategorised,
-      ]);
     }
+    chips.addAll([
+      ...genres.toList()..sort(),
+      // Only worth a chip when it narrows anything: a list where
+      // nothing is categorised would show a lone Uncategorised chip
+      // that filters nothing.
+      if (hasUncategorised && genres.isNotEmpty) kUncategorised,
+    ]);
     // Ignore stale selections (a chip can vanish when a better TMDB
     // match lands) without mutating state during build.
     final active = {
@@ -210,7 +191,6 @@ class _ListHomeScreenState extends State<ListHomeScreen> {
     ];
     return Column(
       children: [
-        ?infoCard,
         if (chips.isNotEmpty) _chipRow(t, chips, active),
         Expanded(
           child: filtered.isEmpty

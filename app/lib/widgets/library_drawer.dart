@@ -10,10 +10,8 @@ import '../services/library_arrangement.dart';
 import '../services/library_store.dart';
 import '../services/metadata_service.dart';
 import '../services/profiles.dart';
-import '../services/channels_api.dart';
 import '../services/embedded_client.dart';
 import '../theme/tokens.dart';
-import 'channel_avatar.dart';
 import 'drawer_status.dart';
 import 'playlist_picker.dart' show playlistContentIcon;
 
@@ -40,7 +38,6 @@ class WiLibraryDrawer extends StatefulWidget {
     this.currentListId,
     this.pinned = false,
     this.healthProvider,
-    this.channelsStatusProvider,
   });
 
   /// Id of the list page the drawer is mounted on; null on home.
@@ -52,8 +49,6 @@ class WiLibraryDrawer extends StatefulWidget {
   /// Test override for [EmbeddedClient.health] (status rows).
   final Future<ClientHealth> Function()? healthProvider;
 
-  /// Test override for [ChannelsApi.status] (status rows).
-  final Future<ChannelsStatus> Function()? channelsStatusProvider;
 
   @override
   State<WiLibraryDrawer> createState() => _WiLibraryDrawerState();
@@ -125,11 +120,8 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
     _openPlaylist(playlist);
   }
 
-  /// Channel rows lead with the channel's mini avatar (podcasts-icon
-  /// fallback keeps the old look); plain lists keep the library icon.
-  Widget _leadingFor(MediaList list, WiTokens t) => list.isChannel
-      ? ChannelAvatar(memberName: list.channelAvatar, size: 20)
-      : Icon(Icons.video_library_outlined,
+  Widget _leadingFor(MediaList list, WiTokens t) =>
+      Icon(Icons.video_library_outlined,
           color: list.id == widget.currentListId ? t.accent : t.boneDim,
           size: 20);
 
@@ -161,12 +153,11 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
             return ListView(
               children: [
                 // Connection status leads the drawer (2026-08-30, moved
-                // up from below Settings): peers, My W@tch, Channels.
+                // up from below Settings): peers, My W@tch.
                 const SizedBox(height: 12),
                 WiDrawerStatus(
                   pinned: widget.pinned,
                   healthProvider: widget.healthProvider,
-                  channelsStatusProvider: widget.channelsStatusProvider,
                 ),
                 Divider(color: t.line, height: 24),
                 Padding(
@@ -262,7 +253,7 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                   ),
                 ],
                 Divider(color: t.line, height: 24),
-                // My Media, Channels, My W@tch, Upload, and Downloads
+                // My Media, My W@tch, Upload, and Downloads
                 // live under Settings → CONTENT — the drawer is slimmed
                 // down to status rows + list navigation + Settings.
                 ListTile(

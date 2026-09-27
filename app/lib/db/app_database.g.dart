@@ -53,39 +53,6 @@ class $MediaListsTable extends MediaLists
     ),
     defaultValue: const Constant(true),
   );
-  static const VerificationMeta _channelPubkeyMeta = const VerificationMeta(
-    'channelPubkey',
-  );
-  @override
-  late final GeneratedColumn<String> channelPubkey = GeneratedColumn<String>(
-    'channel_pubkey',
-    aliasedName,
-    true,
-    type: DriftSqlType.string,
-    requiredDuringInsert: false,
-  );
-  static const VerificationMeta _channelAuthorMeta = const VerificationMeta(
-    'channelAuthor',
-  );
-  @override
-  late final GeneratedColumn<String> channelAuthor = GeneratedColumn<String>(
-    'channel_author',
-    aliasedName,
-    true,
-    type: DriftSqlType.string,
-    requiredDuringInsert: false,
-  );
-  static const VerificationMeta _channelAvatarMeta = const VerificationMeta(
-    'channelAvatar',
-  );
-  @override
-  late final GeneratedColumn<String> channelAvatar = GeneratedColumn<String>(
-    'channel_avatar',
-    aliasedName,
-    true,
-    type: DriftSqlType.string,
-    requiredDuringInsert: false,
-  );
   static const VerificationMeta _kindMeta = const VerificationMeta('kind');
   @override
   late final GeneratedColumn<String> kind = GeneratedColumn<String>(
@@ -113,9 +80,6 @@ class $MediaListsTable extends MediaLists
     title,
     position,
     enabled,
-    channelPubkey,
-    channelAuthor,
-    channelAvatar,
     kind,
     orderedAt,
   ];
@@ -158,33 +122,6 @@ class $MediaListsTable extends MediaLists
         enabled.isAcceptableOrUnknown(data['enabled']!, _enabledMeta),
       );
     }
-    if (data.containsKey('channel_pubkey')) {
-      context.handle(
-        _channelPubkeyMeta,
-        channelPubkey.isAcceptableOrUnknown(
-          data['channel_pubkey']!,
-          _channelPubkeyMeta,
-        ),
-      );
-    }
-    if (data.containsKey('channel_author')) {
-      context.handle(
-        _channelAuthorMeta,
-        channelAuthor.isAcceptableOrUnknown(
-          data['channel_author']!,
-          _channelAuthorMeta,
-        ),
-      );
-    }
-    if (data.containsKey('channel_avatar')) {
-      context.handle(
-        _channelAvatarMeta,
-        channelAvatar.isAcceptableOrUnknown(
-          data['channel_avatar']!,
-          _channelAvatarMeta,
-        ),
-      );
-    }
     if (data.containsKey('kind')) {
       context.handle(
         _kindMeta,
@@ -222,18 +159,6 @@ class $MediaListsTable extends MediaLists
         DriftSqlType.bool,
         data['${effectivePrefix}enabled'],
       )!,
-      channelPubkey: attachedDatabase.typeMapping.read(
-        DriftSqlType.string,
-        data['${effectivePrefix}channel_pubkey'],
-      ),
-      channelAuthor: attachedDatabase.typeMapping.read(
-        DriftSqlType.string,
-        data['${effectivePrefix}channel_author'],
-      ),
-      channelAvatar: attachedDatabase.typeMapping.read(
-        DriftSqlType.string,
-        data['${effectivePrefix}channel_avatar'],
-      ),
       kind: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}kind'],
@@ -259,20 +184,6 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
   /// Disabled lists are hidden from the home screen but kept intact.
   final bool enabled;
 
-  /// Non-null marks this list as a subscribed CHANNEL: a read-only,
-  /// auto-updating mirror of that channel's published manifest (the
-  /// value is the channel's Ed25519 public key, lowercase hex). Channel
-  /// lists are managed by unsubscribing, never by editing.
-  final String? channelPubkey;
-
-  /// Channel profile (channel lists only), refreshed from every imported
-  /// manifest: the optional "by `<author>`" display name/handle…
-  final String? channelAuthor;
-
-  /// …and the avatar's member file name in the posters dir
-  /// (`channel_avatar_<sha8>.img`; resolved to a path at render time).
-  final String? channelAvatar;
-
   /// `'playlist'` marks a PLAYLIST: an ordered set of individual tracks
   /// rendered as track rows (never album-folded), living in the drawer's
   /// own Playlists section instead of the home wall. Null = a normal
@@ -289,9 +200,6 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     required this.title,
     required this.position,
     required this.enabled,
-    this.channelPubkey,
-    this.channelAuthor,
-    this.channelAvatar,
     this.kind,
     required this.orderedAt,
   });
@@ -302,15 +210,6 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     map['title'] = Variable<String>(title);
     map['position'] = Variable<int>(position);
     map['enabled'] = Variable<bool>(enabled);
-    if (!nullToAbsent || channelPubkey != null) {
-      map['channel_pubkey'] = Variable<String>(channelPubkey);
-    }
-    if (!nullToAbsent || channelAuthor != null) {
-      map['channel_author'] = Variable<String>(channelAuthor);
-    }
-    if (!nullToAbsent || channelAvatar != null) {
-      map['channel_avatar'] = Variable<String>(channelAvatar);
-    }
     if (!nullToAbsent || kind != null) {
       map['kind'] = Variable<String>(kind);
     }
@@ -324,15 +223,6 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       title: Value(title),
       position: Value(position),
       enabled: Value(enabled),
-      channelPubkey: channelPubkey == null && nullToAbsent
-          ? const Value.absent()
-          : Value(channelPubkey),
-      channelAuthor: channelAuthor == null && nullToAbsent
-          ? const Value.absent()
-          : Value(channelAuthor),
-      channelAvatar: channelAvatar == null && nullToAbsent
-          ? const Value.absent()
-          : Value(channelAvatar),
       kind: kind == null && nullToAbsent ? const Value.absent() : Value(kind),
       orderedAt: Value(orderedAt),
     );
@@ -348,9 +238,6 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       title: serializer.fromJson<String>(json['title']),
       position: serializer.fromJson<int>(json['position']),
       enabled: serializer.fromJson<bool>(json['enabled']),
-      channelPubkey: serializer.fromJson<String?>(json['channelPubkey']),
-      channelAuthor: serializer.fromJson<String?>(json['channelAuthor']),
-      channelAvatar: serializer.fromJson<String?>(json['channelAvatar']),
       kind: serializer.fromJson<String?>(json['kind']),
       orderedAt: serializer.fromJson<int>(json['orderedAt']),
     );
@@ -363,9 +250,6 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       'title': serializer.toJson<String>(title),
       'position': serializer.toJson<int>(position),
       'enabled': serializer.toJson<bool>(enabled),
-      'channelPubkey': serializer.toJson<String?>(channelPubkey),
-      'channelAuthor': serializer.toJson<String?>(channelAuthor),
-      'channelAvatar': serializer.toJson<String?>(channelAvatar),
       'kind': serializer.toJson<String?>(kind),
       'orderedAt': serializer.toJson<int>(orderedAt),
     };
@@ -376,9 +260,6 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     String? title,
     int? position,
     bool? enabled,
-    Value<String?> channelPubkey = const Value.absent(),
-    Value<String?> channelAuthor = const Value.absent(),
-    Value<String?> channelAvatar = const Value.absent(),
     Value<String?> kind = const Value.absent(),
     int? orderedAt,
   }) => MediaListRow(
@@ -386,15 +267,6 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
     title: title ?? this.title,
     position: position ?? this.position,
     enabled: enabled ?? this.enabled,
-    channelPubkey: channelPubkey.present
-        ? channelPubkey.value
-        : this.channelPubkey,
-    channelAuthor: channelAuthor.present
-        ? channelAuthor.value
-        : this.channelAuthor,
-    channelAvatar: channelAvatar.present
-        ? channelAvatar.value
-        : this.channelAvatar,
     kind: kind.present ? kind.value : this.kind,
     orderedAt: orderedAt ?? this.orderedAt,
   );
@@ -404,15 +276,6 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
       title: data.title.present ? data.title.value : this.title,
       position: data.position.present ? data.position.value : this.position,
       enabled: data.enabled.present ? data.enabled.value : this.enabled,
-      channelPubkey: data.channelPubkey.present
-          ? data.channelPubkey.value
-          : this.channelPubkey,
-      channelAuthor: data.channelAuthor.present
-          ? data.channelAuthor.value
-          : this.channelAuthor,
-      channelAvatar: data.channelAvatar.present
-          ? data.channelAvatar.value
-          : this.channelAvatar,
       kind: data.kind.present ? data.kind.value : this.kind,
       orderedAt: data.orderedAt.present ? data.orderedAt.value : this.orderedAt,
     );
@@ -425,9 +288,6 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
           ..write('title: $title, ')
           ..write('position: $position, ')
           ..write('enabled: $enabled, ')
-          ..write('channelPubkey: $channelPubkey, ')
-          ..write('channelAuthor: $channelAuthor, ')
-          ..write('channelAvatar: $channelAvatar, ')
           ..write('kind: $kind, ')
           ..write('orderedAt: $orderedAt')
           ..write(')'))
@@ -435,17 +295,8 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
   }
 
   @override
-  int get hashCode => Object.hash(
-    id,
-    title,
-    position,
-    enabled,
-    channelPubkey,
-    channelAuthor,
-    channelAvatar,
-    kind,
-    orderedAt,
-  );
+  int get hashCode =>
+      Object.hash(id, title, position, enabled, kind, orderedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -454,9 +305,6 @@ class MediaListRow extends DataClass implements Insertable<MediaListRow> {
           other.title == this.title &&
           other.position == this.position &&
           other.enabled == this.enabled &&
-          other.channelPubkey == this.channelPubkey &&
-          other.channelAuthor == this.channelAuthor &&
-          other.channelAvatar == this.channelAvatar &&
           other.kind == this.kind &&
           other.orderedAt == this.orderedAt);
 }
@@ -466,9 +314,6 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
   final Value<String> title;
   final Value<int> position;
   final Value<bool> enabled;
-  final Value<String?> channelPubkey;
-  final Value<String?> channelAuthor;
-  final Value<String?> channelAvatar;
   final Value<String?> kind;
   final Value<int> orderedAt;
   final Value<int> rowid;
@@ -477,9 +322,6 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     this.title = const Value.absent(),
     this.position = const Value.absent(),
     this.enabled = const Value.absent(),
-    this.channelPubkey = const Value.absent(),
-    this.channelAuthor = const Value.absent(),
-    this.channelAvatar = const Value.absent(),
     this.kind = const Value.absent(),
     this.orderedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -489,9 +331,6 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     required String title,
     required int position,
     this.enabled = const Value.absent(),
-    this.channelPubkey = const Value.absent(),
-    this.channelAuthor = const Value.absent(),
-    this.channelAvatar = const Value.absent(),
     this.kind = const Value.absent(),
     this.orderedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -503,9 +342,6 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     Expression<String>? title,
     Expression<int>? position,
     Expression<bool>? enabled,
-    Expression<String>? channelPubkey,
-    Expression<String>? channelAuthor,
-    Expression<String>? channelAvatar,
     Expression<String>? kind,
     Expression<int>? orderedAt,
     Expression<int>? rowid,
@@ -515,9 +351,6 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
       if (title != null) 'title': title,
       if (position != null) 'position': position,
       if (enabled != null) 'enabled': enabled,
-      if (channelPubkey != null) 'channel_pubkey': channelPubkey,
-      if (channelAuthor != null) 'channel_author': channelAuthor,
-      if (channelAvatar != null) 'channel_avatar': channelAvatar,
       if (kind != null) 'kind': kind,
       if (orderedAt != null) 'ordered_at': orderedAt,
       if (rowid != null) 'rowid': rowid,
@@ -529,9 +362,6 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     Value<String>? title,
     Value<int>? position,
     Value<bool>? enabled,
-    Value<String?>? channelPubkey,
-    Value<String?>? channelAuthor,
-    Value<String?>? channelAvatar,
     Value<String?>? kind,
     Value<int>? orderedAt,
     Value<int>? rowid,
@@ -541,9 +371,6 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
       title: title ?? this.title,
       position: position ?? this.position,
       enabled: enabled ?? this.enabled,
-      channelPubkey: channelPubkey ?? this.channelPubkey,
-      channelAuthor: channelAuthor ?? this.channelAuthor,
-      channelAvatar: channelAvatar ?? this.channelAvatar,
       kind: kind ?? this.kind,
       orderedAt: orderedAt ?? this.orderedAt,
       rowid: rowid ?? this.rowid,
@@ -565,15 +392,6 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
     if (enabled.present) {
       map['enabled'] = Variable<bool>(enabled.value);
     }
-    if (channelPubkey.present) {
-      map['channel_pubkey'] = Variable<String>(channelPubkey.value);
-    }
-    if (channelAuthor.present) {
-      map['channel_author'] = Variable<String>(channelAuthor.value);
-    }
-    if (channelAvatar.present) {
-      map['channel_avatar'] = Variable<String>(channelAvatar.value);
-    }
     if (kind.present) {
       map['kind'] = Variable<String>(kind.value);
     }
@@ -593,9 +411,6 @@ class MediaListsCompanion extends UpdateCompanion<MediaListRow> {
           ..write('title: $title, ')
           ..write('position: $position, ')
           ..write('enabled: $enabled, ')
-          ..write('channelPubkey: $channelPubkey, ')
-          ..write('channelAuthor: $channelAuthor, ')
-          ..write('channelAvatar: $channelAvatar, ')
           ..write('kind: $kind, ')
           ..write('orderedAt: $orderedAt, ')
           ..write('rowid: $rowid')
@@ -4727,9 +4542,6 @@ typedef $$MediaListsTableCreateCompanionBuilder =
       required String title,
       required int position,
       Value<bool> enabled,
-      Value<String?> channelPubkey,
-      Value<String?> channelAuthor,
-      Value<String?> channelAvatar,
       Value<String?> kind,
       Value<int> orderedAt,
       Value<int> rowid,
@@ -4740,9 +4552,6 @@ typedef $$MediaListsTableUpdateCompanionBuilder =
       Value<String> title,
       Value<int> position,
       Value<bool> enabled,
-      Value<String?> channelPubkey,
-      Value<String?> channelAuthor,
-      Value<String?> channelAvatar,
       Value<String?> kind,
       Value<int> orderedAt,
       Value<int> rowid,
@@ -4797,21 +4606,6 @@ class $$MediaListsTableFilterComposer
 
   ColumnFilters<bool> get enabled => $composableBuilder(
     column: $table.enabled,
-    builder: (column) => ColumnFilters(column),
-  );
-
-  ColumnFilters<String> get channelPubkey => $composableBuilder(
-    column: $table.channelPubkey,
-    builder: (column) => ColumnFilters(column),
-  );
-
-  ColumnFilters<String> get channelAuthor => $composableBuilder(
-    column: $table.channelAuthor,
-    builder: (column) => ColumnFilters(column),
-  );
-
-  ColumnFilters<String> get channelAvatar => $composableBuilder(
-    column: $table.channelAvatar,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4880,21 +4674,6 @@ class $$MediaListsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<String> get channelPubkey => $composableBuilder(
-    column: $table.channelPubkey,
-    builder: (column) => ColumnOrderings(column),
-  );
-
-  ColumnOrderings<String> get channelAuthor => $composableBuilder(
-    column: $table.channelAuthor,
-    builder: (column) => ColumnOrderings(column),
-  );
-
-  ColumnOrderings<String> get channelAvatar => $composableBuilder(
-    column: $table.channelAvatar,
-    builder: (column) => ColumnOrderings(column),
-  );
-
   ColumnOrderings<String> get kind => $composableBuilder(
     column: $table.kind,
     builder: (column) => ColumnOrderings(column),
@@ -4926,21 +4705,6 @@ class $$MediaListsTableAnnotationComposer
 
   GeneratedColumn<bool> get enabled =>
       $composableBuilder(column: $table.enabled, builder: (column) => column);
-
-  GeneratedColumn<String> get channelPubkey => $composableBuilder(
-    column: $table.channelPubkey,
-    builder: (column) => column,
-  );
-
-  GeneratedColumn<String> get channelAuthor => $composableBuilder(
-    column: $table.channelAuthor,
-    builder: (column) => column,
-  );
-
-  GeneratedColumn<String> get channelAvatar => $composableBuilder(
-    column: $table.channelAvatar,
-    builder: (column) => column,
-  );
 
   GeneratedColumn<String> get kind =>
       $composableBuilder(column: $table.kind, builder: (column) => column);
@@ -5006,9 +4770,6 @@ class $$MediaListsTableTableManager
                 Value<String> title = const Value.absent(),
                 Value<int> position = const Value.absent(),
                 Value<bool> enabled = const Value.absent(),
-                Value<String?> channelPubkey = const Value.absent(),
-                Value<String?> channelAuthor = const Value.absent(),
-                Value<String?> channelAvatar = const Value.absent(),
                 Value<String?> kind = const Value.absent(),
                 Value<int> orderedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -5017,9 +4778,6 @@ class $$MediaListsTableTableManager
                 title: title,
                 position: position,
                 enabled: enabled,
-                channelPubkey: channelPubkey,
-                channelAuthor: channelAuthor,
-                channelAvatar: channelAvatar,
                 kind: kind,
                 orderedAt: orderedAt,
                 rowid: rowid,
@@ -5030,9 +4788,6 @@ class $$MediaListsTableTableManager
                 required String title,
                 required int position,
                 Value<bool> enabled = const Value.absent(),
-                Value<String?> channelPubkey = const Value.absent(),
-                Value<String?> channelAuthor = const Value.absent(),
-                Value<String?> channelAvatar = const Value.absent(),
                 Value<String?> kind = const Value.absent(),
                 Value<int> orderedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -5041,9 +4796,6 @@ class $$MediaListsTableTableManager
                 title: title,
                 position: position,
                 enabled: enabled,
-                channelPubkey: channelPubkey,
-                channelAuthor: channelAuthor,
-                channelAvatar: channelAvatar,
                 kind: kind,
                 orderedAt: orderedAt,
                 rowid: rowid,

@@ -1,5 +1,11 @@
 # Roadmap
 
+**Channels removed (2026-09-27):** the whole public-channels feature
+(alpha.65–.107) was taken out after a publishing-liability review —
+private Upload and My W@tch stay. Channel mentions in the release
+history below are historical; the Channels section itself is collapsed
+to a dated note.
+
 **Status (2026-09-20):** latest release is **v0.1.0-alpha.103**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
 a release ships **four artifacts**: a signed APK (dual-ABI
@@ -14,9 +20,9 @@ remote — with the unlinked screen regrouped by intent (first device
 vs adding to an existing My W@tch), a TV-friendly invite dialog with
 case-insensitive codes, a Settings "Software video decoding" toggle
 for devices that play sound over a black picture, an ant-core 0.9.0
-bump, and **mobile channel creation** — the My Channel segment
-(create, publish items, publish updates, edit, restore) opens on
-Android; files publish as-is there (no ffmpeg, no encode tiers),
+bump, and **mobile channel creation** (since removed with the whole
+Channels feature — see the note above) — the My Channel segment
+opened on Android, with files publishing as-is there,
 mirroring Android uploads. Alpha.102 is also the first release
 installable from inside the app — alpha.101's self-updaters download
 and digest-verify its exact assets. Alpha.103 makes the startup
@@ -108,8 +114,8 @@ as a desktop screen — also available as a standalone CLI — alpha.78
 reviews music one whole album at a time and adds the inline album
 player, and alpha.79 merges everything into one upload flow (quality
 tiers on the review page, match carousel, needs-attention resume,
-auto-add to the chosen list). Before that, **Channels** (its own
-section below): alpha.64 renamed Publish → Upload to reserve the word
+auto-add to the chosen list). Before that, **Channels** (since removed
+entirely — see its section below): alpha.64 renamed Publish → Upload to reserve the word
 *publish* for the public act, alpha.65 shipped public signed media
 lists (Ed25519 identity from a 12-word phrase, `wchn1-…` codes, amber
 badging + rights attestation), alpha.66–.68 rounded them out
@@ -461,7 +467,7 @@ migrated — so the cleanup landed in one release:
       bundle's network address *is* a public XOR address — the thing this
       plan removed — and a publicly addressed bundle re-leaks every
       datamap inside it anyway. Curated/PD libraries travel as
-      `.watch-list` files, which any channel can carry.
+      `.watch-list` files.
 
 Honest scope (also in the docs/UI): a datamap **is** full access — the gain
 is non-discoverability by third parties, not confidentiality against list
@@ -595,8 +601,7 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       picking stays desktop-only; SAF tree URIs aren't enumerable).
       The wallet key uses the 0600 file fallback (no desktop keyring),
       which the wallet screen already surfaces. iOS is deferred until
-      the app ships there at all; channel publishing followed in
-      alpha.102 (see the Channels section).
+      the app ships there at all.
 - ~~External signer / WalletConnect~~ — struck by decision
       (2026-09-18): the app's own hot wallet stays the only signing
       path. MetaMask has no desktop integration a Flutter app can
@@ -729,67 +734,18 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       the 30 s period. Still open: publishing each device's own
       pending counts into the doc so every device can also show the
       OTHER side's remaining work
-## Channels — public signed media lists (shipped 2026-08-27, v0.1.0-alpha.65; rounded out through alpha.70)
 
-Part 2+3 of [PLAN-personal-vs-channels.md](PLAN-personal-vs-channels.md);
-implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → Channels.
+## Channels (alpha.65–.107): REMOVED 2026-09-27
 
-- [x] Channel identity: Ed25519 key from its own 12-word phrase
-      (SLIP-0010) via the wallet-style backup ceremony; code
-      `wchn1-<base32(pubkey)>`; key in the OS keychain
-- [x] Signed manifests (bundle spec v2 + channel.json) uploaded
-      publicly; head records gossiped + signature-verified on an x0x
-      topic derived from the pubkey; restore-from-phrase resumes
-      publishing and recovers the item list from the network
-- [x] Subscribe everywhere: read-only amber-badged channel lists on the
-      home wall, auto-updating on a newer signed head
-- [x] Safety rails: Describe-this-item (required title/description/
-      artwork), per-item rights attestation, first-publish typed-name
-      gate, cost preview, Terms v2, amber/PUBLIC vs blue/private
-- [x] Check TMDB on Describe-this-item: look the item up with the
-      typed title/year (public-domain classics are in the database),
-      preview, and fill title/description/artwork + rating/genres from
-      the match — subscribers get the full metadata keylessly
-- [x] Publish an item straight from a file (2026-08-27): the channel
-      flow now mirrors Upload — choose a local file, encode the quality
-      tiers, describe (TMDB check included), attest, upload; finished
-      uploads are auto-staged and can optionally join a library list
-      (already-uploaded library items keep a secondary picker path)
-- [x] The creator's own channel shows as its amber list too
-      (2026-08-27): empty at creation, mirroring each published
-      manifest via the subscriber import path
-- [x] Channel subscriptions sync over My W@tch (2026-08-27): the sync
-      doc carries codes + unsubscribe tombstones, so a channel arrives
-      on linked devices amber-badged and auto-updating — never as a
-      copy of a personal list; the own channel is announced the same
-      way and followed by the user's other devices
-- [x] Paid public publish verified end-to-end (2026-08-28, on alpha.66):
-      a real funded channel publish from the Linux AppImage was received
-      on an Android subscriber — no open channel verification gaps
-- [x] Delta-aware channel updates (alpha.68): a new head fetches only
-      the manifest members that changed (ranged zip reads; posters the
-      subscriber already holds are never re-downloaded)
-- [x] Channel profile (alpha.70): circular avatar (forced 1:1 crop) +
-      optional author byline; channel info card with the copyable
-      `wchn1-…` code above the poster grid, mini avatars on cards,
-      drawer rows, and the home wall; profile rides every publish so
-      edits reach subscribers with the next head
-- [x] QR sharing everywhere (alpha.87–.90): QR codes are branded
-      (blue modules + centred W@tch logo, verified scannable), and a
-      QR share button sits on the My W@tch invite, the own-channel
-      dialog, subscribed channel cards (alpha.88), and the channel
-      page's info card (alpha.90, replacing the raw code line — the
-      code stays copyable inside the dialog)
-- [x] Mobile channel creation (alpha.102): the My Channel segment
-      gates on the upload platforms
-      (desktop + Android) instead of desktop-only — create, publish
-      items, publish updates, edit and restore all work on Android;
-      files publish as-is (no ffmpeg → no quality tiers, said plainly
-      with the permanence trade-off on the publish page). Subscribe
-      keeps working everywhere; iOS stays subscribe-only until the app
-      ships there at all.
-- [x] Channel avatars (shipped alpha.70 — the channel profile:
-      circular avatar, author line, info card)
+The whole public-channels feature — Ed25519 channel identities with
+`wchn1-…` codes, publicly uploaded signed manifests, gossiped heads,
+subscribe-by-code amber channel lists, channel profiles, mobile channel
+creation, the QR-shared codes — was taken out (publishing-liability
+review; user decision). Private Upload and My W@tch stay; QR sharing
+survives on the My W@tch invite. The Terms of Use dropped their
+public-channels section (v3). Feature history in
+[PLAN-personal-vs-channels.md](PLAN-personal-vs-channels.md)
+(historical) and this file's git history.
 
 ## Music (shipped from 2026-09-01, v0.1.0-alpha.76 onward)
 
@@ -938,7 +894,7 @@ canonical names automatically. CLI docs in [UPLOAD-CLI.md](UPLOAD-CLI.md).
 ## Network & data control (shipped 2026-09-03→06, v0.1.0-alpha.85–.92)
 
 A measured idle-traffic campaign turned into a full set of data
-controls. Background: the x0x gossip agents (Channels / My W@tch) have
+controls. Background: the x0x gossip agent (My W@tch) has
 a substantial idle baseline that is upstream behaviour — W@tch's own
 levers (below) are all shipped, and the remaining idle cost is tracked
 against the x0x project.
@@ -955,8 +911,8 @@ against the x0x project.
       uploading, the full pause engages; pressing Play lifts it —
       a manual pause is never auto-resumed
 - [x] Data usage screen (alpha.86): per-component up/down counters
-      (Autonomi client with an "of which media" line, My W@tch,
-      Channels), live rate, Since-date period + Reset — persisted
+      (Autonomi client with an "of which media" line, My W@tch),
+      live rate, Since-date period + Reset — persisted
       across restarts
 - [x] Live network-stack versions (alpha.90): ant-core / x0x /
       saorsa-core / saorsa-gossip / ant-quic versions baked out of
@@ -965,12 +921,12 @@ against the x0x project.
       Copy-versions button for bug reports (moved there in alpha.92)
 - [x] Pausing never wedges (alpha.91): x0x agent shutdown is bounded
       at 10 s and no longer blocks the status routes — switching
-      Channels/My W@tch off (including via auto-pause) stays
+      My W@tch off (including via auto-pause) stays
       responsive even when the agent hangs disconnecting
 - [x] One **Data** page (alpha.92): Settings → Network is just
       Offline mode · Data · Buffer size; the Data page merges the
       usage counters, Auto-pause when idle, the built-in clients —
-      Autonomi connection row plus Channels and My W@tch each on a
+      Autonomi connection row plus My W@tch on a
       3-way **Off | Wi-Fi | Wi-Fi + mobile** pill — and the mobile
       data policies (Streaming / Downloads pickers)
 - [x] Daily buckets/graph, Wi-Fi vs cellular tagging, daily alert
@@ -990,7 +946,7 @@ against the x0x project.
 ## Profiles — family viewing (shipped 2026-09-09, v0.1.0-alpha.93)
 
 Netflix-style profiles for shared/family devices. Profiles are NOT
-accounts: the network identity, wallet, channels, lists and downloaded
+accounts: the network identity, wallet, lists and downloaded
 files stay install-global — a profile scopes only viewing state.
 
 - [x] Silent migration: every existing install becomes a lone "Admin"
@@ -1107,11 +1063,11 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
       cards' own focus ring (highlight no longer clips title text),
       the Continue shelf and browse grid get the TV cell-height bump
       (label bottoms cropped under the 1.15 text scale), and the
-      pairing/invite/channel QR dialogs fit small TV viewports whole
+      pairing/invite QR dialogs fit small TV viewports whole
       (wider dialog + the QR shrinks to the height it really has,
       floor ~120px — the bottom third of the QR used to crop away).
       From the alpha.104 interface report (unreleased — ships next
-      release): Settings, My W@tch, Channels, detail pages and the
+      release): Settings, My W@tch, detail pages and the
       pairing dialog open with a VISIBLE starting focus (nothing was
       focused on entry, so screens opened "dark" and the first D-pad
       press hunted in from a screen edge), and dialog text fields no
@@ -1156,21 +1112,14 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
 - v1.0: all six platforms
 
 ## Later / ideas parking lot
-- Publish/subscribe community lists on Autonomi (curated "channels") —
-  now PLANNED as the public Channels feature: signed manifests + x0x
-  head distribution, see PLAN-personal-vs-channels.md (a datamap list
-  published at a public address re-leaks every title, so channels use
-  deliberate per-item public publishing, never a library export)
+- ~~Publish/subscribe community lists on Autonomi (curated
+  "channels")~~ — shipped as the public Channels feature (alpha.65),
+  then **removed entirely 2026-09-27** with the whole feature
+  (publishing-liability review); not planned again in this form. The
+  formerly parked channel-directory / multi-owner / comments ideas
+  went with it (moot)
 - ~~Watch-state + list sync between devices~~ — **shipped** as My W@tch
   (alpha.61/.62, via x0x rather than Autonomi — see the section above)
-- Channel directory (moved here 2026-09-22; deliberately NOT in v1 —
-  codes only; a curated directory would be a separate repo/site with
-  its own vetting)
-- Multi-owner channels (moved here 2026-09-22; a channel is a single
-  Ed25519 identity today — shared ownership needs a key-sharing or
-  multi-signature design)
-- Channel comments (moved here 2026-09-22; was tagged "parking lot"
-  inline on the channels checklist)
 - Sync while apart (moved here 2026-09-22; devices must currently be
   online together — no relay/mailbox in the middle, and an always-on
   linked device already bridges the gap today. Bring back when future

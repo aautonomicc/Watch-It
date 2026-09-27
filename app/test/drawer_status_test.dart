@@ -6,9 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/main.dart';
-import 'package:watchit/screens/channels_screen.dart';
 import 'package:watchit/screens/my_watch_screen.dart';
-import 'package:watchit/services/channels_api.dart';
 import 'package:watchit/services/embedded_client.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/my_watch_sync.dart';
@@ -22,9 +20,6 @@ import 'package:watchit/widgets/library_drawer.dart';
 Widget _status({
   String state = 'ready',
   int peers = 5,
-  String channelsState = 'off',
-  bool channelsSupported = true,
-  bool channelsEnabled = true,
   bool pinned = false,
 }) =>
     MaterialApp(
@@ -33,10 +28,6 @@ Widget _status({
         body: WiDrawerStatus(
           pinned: pinned,
           healthProvider: () async => ClientHealth(state: state, peers: peers),
-          channelsStatusProvider: () async => ChannelsStatus(
-              supported: channelsSupported,
-              enabled: channelsEnabled,
-              state: channelsState),
         ),
       ),
     );
@@ -171,8 +162,6 @@ void main() {
           drawer: Drawer(
             child: WiDrawerStatus(
               healthProvider: () async => ClientHealth(state: 'ready'),
-              channelsStatusProvider: () async =>
-                  ChannelsStatus(supported: false, state: 'off'),
             ),
           ),
         ),
@@ -191,37 +180,13 @@ void main() {
     });
   });
 
-  group('WiDrawerStatus Channels row', () {
-    testWidgets('off, starting, and ready states', (tester) async {
-      await tester.pumpWidget(_status(channelsState: 'off'));
-      await tester.pump();
-      expect(find.text('Channels: not connected'), findsOneWidget);
-      await tester.pumpWidget(const SizedBox());
-
-      await tester.pumpWidget(_status(channelsState: 'starting'));
-      await tester.pump();
-      expect(find.text('Channels: connecting…'), findsOneWidget);
-      await tester.pumpWidget(const SizedBox());
-
-      await tester.pumpWidget(_status(channelsState: 'ready'));
-      await tester.pump();
-      expect(find.text('Channels: connected'), findsOneWidget);
-      await tester.pumpWidget(const SizedBox());
-
-      // The Settings switch wins over every state.
-      await tester.pumpWidget(
-          _status(channelsState: 'off', channelsEnabled: false));
-      await tester.pump();
-      expect(find.text('Channels: switched off'), findsOneWidget);
-      await tester.pumpWidget(const SizedBox());
-    });
-
+  group('WiDrawerStatus pause states', () {
     testWidgets('a mobile-data pause reads paused, not switched off',
         (tester) async {
-      // Both agents disabled by the cellular gate, not the user.
+      // The agent disabled by the cellular gate, not the user.
       SharedPreferences.setMockInitialValues({
         'terms_accepted_version_v1': kTermsVersion,
-        'x0x_cellular_paused_v1': ['myWatch', 'channels'],
+        'x0x_cellular_paused_v1': ['myWatch'],
       });
       X0xCellularGate.instance = X0xCellularGate();
       await X0xCellularGate.instance.ensureLoaded();
@@ -229,12 +194,10 @@ void main() {
 
       MyWatchSync.status.value = const MyWatchSyncStatus(
           supported: true, linked: true, enabled: false, agentState: 'off');
-      await tester.pumpWidget(
-          _status(channelsState: 'off', channelsEnabled: false));
+      await tester.pumpWidget(_status());
       await tester.pump();
       expect(
           find.text('My W@tch: paused on mobile data'), findsOneWidget);
-      expect(find.text('Channels: paused on mobile data'), findsOneWidget);
       expect(find.textContaining('switched off'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
@@ -251,10 +214,10 @@ void main() {
 
     testWidgets('an all-network pause reads paused with the network',
         (tester) async {
-      // Both agents disabled by the network pause, not the user.
+      // The agent disabled by the network pause, not the user.
       SharedPreferences.setMockInitialValues({
         'terms_accepted_version_v1': kTermsVersion,
-        'network_pause_x0x_v1': ['myWatch', 'channels'],
+        'network_pause_x0x_v1': ['myWatch'],
       });
       NetworkPause.instance = NetworkPause();
       await NetworkPause.instance.ensureLoaded();
@@ -262,31 +225,11 @@ void main() {
 
       MyWatchSync.status.value = const MyWatchSyncStatus(
           supported: true, linked: true, enabled: false, agentState: 'off');
-      await tester.pumpWidget(_status(
-          state: 'paused', channelsState: 'off', channelsEnabled: false));
+      await tester.pumpWidget(_status(state: 'paused'));
       await tester.pump();
       expect(
           find.text('My W@tch: paused with the network'), findsOneWidget);
-      expect(
-          find.text('Channels: paused with the network'), findsOneWidget);
       expect(find.textContaining('switched off'), findsNothing);
-      await tester.pumpWidget(const SizedBox());
-    });
-
-    testWidgets('hidden when the build has no channels support',
-        (tester) async {
-      await tester.pumpWidget(_status(channelsSupported: false));
-      await tester.pump();
-      expect(find.textContaining('Channels'), findsNothing);
-      await tester.pumpWidget(const SizedBox());
-    });
-
-    testWidgets('tapping opens the Channels page', (tester) async {
-      await tester.pumpWidget(_status(channelsState: 'ready'));
-      await tester.pump();
-      await tester.tap(find.text('Channels: connected'));
-      await tester.pumpAndSettle();
-      expect(find.byType(ChannelsScreen), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
   });
@@ -302,8 +245,6 @@ void main() {
           drawer: WiLibraryDrawer(
             healthProvider: () async =>
                 const ClientHealth(state: 'ready', peers: 3),
-            channelsStatusProvider: () async =>
-                const ChannelsStatus(supported: true, state: 'ready'),
           ),
           body: const SizedBox(),
         ),
@@ -315,17 +256,13 @@ void main() {
 
       expect(find.text('Connected · 3 peers'), findsOneWidget);
       expect(find.text('My W@tch: linked'), findsOneWidget);
-      expect(find.text('Channels: connected'), findsOneWidget);
 
       final libraryY = tester.getTopLeft(find.text('Library')).dy;
       final settingsY = tester.getTopLeft(find.text('Settings')).dy;
       final peersY = tester.getTopLeft(find.text('Connected · 3 peers')).dy;
       final watchY = tester.getTopLeft(find.text('My W@tch: linked')).dy;
-      final channelsY =
-          tester.getTopLeft(find.text('Channels: connected')).dy;
       expect(watchY, greaterThan(peersY));
-      expect(channelsY, greaterThan(watchY));
-      expect(libraryY, greaterThan(channelsY));
+      expect(libraryY, greaterThan(watchY));
       expect(settingsY, greaterThan(libraryY));
       await tester.pumpWidget(const SizedBox());
     });
@@ -344,8 +281,8 @@ void main() {
 
   group('Settings → Library', () {
     testWidgets(
-        'My W@tch tile sits below Channels in the Library section and '
-        'navigates', (tester) async {
+        'My W@tch tile leads the CONTENT section and navigates',
+        (tester) async {
       await tester.pumpWidget(const WatchItApp());
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Browse lists'));

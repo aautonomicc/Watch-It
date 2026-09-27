@@ -12,7 +12,7 @@ const kUncategorised = 'Uncategorised';
 /// The lists a drawer/list page can browse: the enabled user lists, in
 /// the home screen's row order. [stored] is the raw persisted order from
 /// AppSettings.homeSections; it's reconciled here so the drawer always
-/// mirrors the wall — same order, same visibility, fresh channels on
+/// mirrors the wall — same order, same visibility, fresh lists on
 /// top. With nothing stored the reconcile yields library order, the
 /// pre-customization behaviour.
 List<MediaList> browsableLists(

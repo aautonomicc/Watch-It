@@ -42,7 +42,7 @@ String sanitizeDownloadName(String name) {
 /// Folder name a download of [entry] belongs in: the first enabled list
 /// in library position order holding the entry's address (an entry in
 /// several lists lands with the first, matching how the home wall
-/// attributes entries). Channel lists count like any list.
+/// attributes entries).
 String downloadListFolderFor(MediaEntry entry, List<MediaList> lists) {
   final addr = DownloadManager.normalize(entry.address);
   for (final list in lists) {

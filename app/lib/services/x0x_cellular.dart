@@ -4,15 +4,16 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_settings.dart';
-import 'channels_api.dart';
 import 'my_watch_api.dart';
 import 'network_events.dart';
 
-/// The two features riding x0x gossip agents.
-enum X0xAgent { myWatch, channels }
+/// The feature(s) riding x0x gossip agents. (Channels rode here too
+/// until the feature's removal, 2026-09-27 — the enum stays so the
+/// persisted paused-set names keep parsing.)
+enum X0xAgent { myWatch }
 
-/// Enforces the Settings → Network → Mobile data switches for the two
-/// x0x agents: while the device is on cellular and a feature is set to
+/// Enforces the Settings → Network → Mobile data switch for the
+/// x0x agent: while the device is on cellular and the feature is set to
 /// Wi-Fi only, its agent is paused (all gossip/relay traffic stops) and
 /// switched back on the moment Wi-Fi returns.
 ///
@@ -25,7 +26,7 @@ enum X0xAgent { myWatch, channels }
 /// flip (or the core's auto-re-enable on subscribe/link) always wins
 /// until the next change.
 class X0xCellularGate extends ChangeNotifier {
-  X0xCellularGate({this._myWatchApi, this._channelsApi, this._network});
+  X0xCellularGate({this._myWatchApi, this._network});
 
   /// Replaceable for tests (fresh instance per test).
   static X0xCellularGate instance = X0xCellularGate();
@@ -33,7 +34,6 @@ class X0xCellularGate extends ChangeNotifier {
   static const _pausedKey = 'x0x_cellular_paused_v1';
 
   final MyWatchApi? _myWatchApi;
-  final ChannelsApi? _channelsApi;
   final NetworkEvents? _network;
 
   NetworkEvents get _net => _network ?? NetworkEvents.instance;
@@ -99,13 +99,11 @@ class X0xCellularGate extends ChangeNotifier {
   Future<void> _applyAll() async {
     await ensureLoaded();
     await _apply(X0xAgent.myWatch);
-    await _apply(X0xAgent.channels);
   }
 
   Future<void> _apply(X0xAgent agent) async {
     final allowed = switch (agent) {
       X0xAgent.myWatch => await AppSettings.myWatchOnCellular(),
-      X0xAgent.channels => await AppSettings.channelsOnCellular(),
     };
     final wantPaused = _net.onCellular && !allowed;
     if (wantPaused == _paused.contains(agent)) return;
@@ -137,15 +135,11 @@ class X0xCellularGate extends ChangeNotifier {
       case X0xAgent.myWatch:
         final s = await (_myWatchApi ?? MyWatchApi()).status();
         return (s.supported, s.enabled);
-      case X0xAgent.channels:
-        final s = await (_channelsApi ?? ChannelsApi()).status();
-        return (s.supported, s.enabled);
     }
   }
 
   Future<void> _setEnabled(X0xAgent agent, bool on) => switch (agent) {
         X0xAgent.myWatch => (_myWatchApi ?? MyWatchApi()).setEnabled(on),
-        X0xAgent.channels => (_channelsApi ?? ChannelsApi()).setEnabled(on),
       };
 
   Future<void> _persist() async {

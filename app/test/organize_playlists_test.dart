@@ -57,17 +57,12 @@ void main() {
 
   group('unsorted audio detection', () {
     test('audio outside the track convention needs sorting; tracks, '
-        'video, channels and playlists do not', () async {
+        'video and playlists do not', () async {
       final mix = unsorted(1, 'summer megamix 2024.mp3');
       final sorted = track(2, 1, 'First');
       final video = unsorted(3, 'Home Movie (2020).mp4');
       final lists = [
         MediaList(id: 'a', title: 'Music', entries: [mix, sorted, video]),
-        MediaList(
-            id: 'c',
-            title: 'Chan',
-            channelPubkey: 'f' * 64,
-            entries: [unsorted(4, 'channel mix.mp3')]),
         MediaList(
             id: 'p',
             title: 'Playlist',
@@ -78,7 +73,7 @@ void main() {
       expect(isUnsortedAudio(sorted), isFalse);
       expect(isUnsortedAudio(video), isFalse);
       final found = unsortedAudioEntries(lists);
-      // The mix once (playlist copy deduplicated), never the channel's.
+      // The mix once (playlist copy deduplicated).
       expect(found.map((e) => e.address), [addr(1)]);
     });
   });

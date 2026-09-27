@@ -325,14 +325,13 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     if (mounted) Navigator.of(context).pop();
   }
 
-  /// Every entry in the library's own lists (not channels, not
-  /// playlists) — audio AND video — deduplicated by address: the
-  /// Add-media picker's pool.
+  /// Every entry in the library's own lists (not playlists) — audio
+  /// AND video — deduplicated by address: the Add-media picker's pool.
   static List<MediaEntry> _allMedia(List<MediaList> lists) {
     final seen = <String>{};
     final out = <MediaEntry>[];
     for (final l in lists) {
-      if (l.isChannel || l.isPlaylist) continue;
+      if (l.isPlaylist) continue;
       for (final e in l.entries) {
         if (seen.add(e.address.toLowerCase())) out.add(e);
       }

@@ -32,15 +32,6 @@ void main() {
     expect(browsableLists(lists, stored).map((l) => l.id), ['l2', 'l1']);
   });
 
-  test('browsableLists puts channels missing from the order first', () {
-    final lists = [
-      MediaList(id: 'l1', title: 'One'),
-      MediaList(id: 'ch', title: 'Chan', channelPubkey: 'aa' * 32),
-    ];
-    const stored = [HomeSection(id: 'list:l1')];
-    expect(browsableLists(lists, stored).map((l) => l.id), ['ch', 'l1']);
-  });
-
   test('genreNames splits the category string', () {
     expect(genreNames('Horror · Thriller'), ['Horror', 'Thriller']);
     expect(genreNames('Comedy'), ['Comedy']);

@@ -8,7 +8,6 @@ import 'package:path_provider/path_provider.dart';
 
 import '../db/app_database.dart';
 import '../models/media_list.dart';
-import 'channel_service.dart';
 import 'connectivity.dart';
 import 'datamap_import.dart';
 import 'embedded_client.dart';
@@ -60,15 +59,6 @@ import 'watch_state.dart';
 /// fill only missing rows and cached misses (a user edit or an own
 /// TMDB match always wins) and pull the artwork bytes over the same
 /// x0x transfer, saved under the original TMDB file names.
-///
-/// Channels sync as *subscriptions*, never as content: channel lists
-/// (the amber read-only mirrors of a channel manifest) stay out of the
-/// personal doc, and a `channels` section carries each subscription's
-/// `wchn1-` code + subscribe time and unsubscribe tombstones instead.
-/// A linked device subscribes by code, so the channel arrives with its
-/// badge and auto-updates from the channel's own signed heads; a
-/// device's OWN channel is announced the same way, so the user's other
-/// devices follow it as subscribers.
 ///
 /// The service is quiet unless the device is linked; every cycle checks.
 class MyWatchSync {
@@ -228,7 +218,7 @@ class MyWatchSync {
   /// now — a receiving cycle can run for minutes, and reporting
   /// "Nothing to sync." while it worked was the tester's exact
   /// confusion — so the press waits it out and then runs a fresh full
-  /// pass ([ChannelService.checkNow] precedent).
+  /// pass.
   ///
   /// A manual sync is also an explicit "try again now": the map-import
   /// AND artwork retry backoffs are dropped first, so a map or poster
@@ -301,8 +291,6 @@ class MyWatchSync {
       if (result.tmdbApplied > 0)
         '${result.tmdbApplied} title detail(s) synced',
       if (result.artFetched > 0) '${result.artFetched} artwork file(s) fetched',
-      if (result.channelsChanged > 0)
-        '${result.channelsChanged} channel subscription(s) updated',
     ];
     if (parts.isEmpty) {
       final pending = pendingMaps + pendingArt;
@@ -595,32 +583,6 @@ class MyWatchSync {
     _pendingArt = artPending;
     result = result.copyWith(artFetched: artFetched);
 
-    // 6b. Channel subscriptions travel between devices too — as
-    // subscriptions, so a channel arrives amber-badged and auto-updating
-    // instead of as a copy of its content (channel lists themselves stay
-    // out of the personal doc entirely).
-    ChannelSyncView? channelView;
-    try {
-      channelView = await ChannelService.instance.syncView();
-      if (channelView != null) {
-        final actions = channelActions(
-          localSubs: channelView.subs,
-          localStones: channelView.stones,
-          ownPubkey: channelView.ownPubkey,
-          remote: remote,
-        );
-        if (!actions.isEmpty) {
-          _setActivity('Syncing channel subscriptions…');
-          result = result.copyWith(
-              channelsChanged: await _applyChannelActions(actions));
-          // Republish what the actions just changed.
-          channelView = await ChannelService.instance.syncView();
-        }
-      }
-    } catch (e) {
-      _problems.add('Syncing channel subscriptions failed: $e');
-    }
-
     // 7. Publish our (possibly just-merged) state.
     _setActivity("Sending this device's library to your devices…");
     state.snapshot = membershipOf(lists);
@@ -639,14 +601,6 @@ class MyWatchSync {
       metaRows: metaRows,
       haveHashes: haveHashes,
       tmdbSection: tmdbSection,
-      channelSubs: {
-        ...?channelView?.subs,
-        ?channelView?.ownPubkey: ChannelSyncSub(
-          code: channelView!.ownCode!,
-          addedMs: channelView.ownAddedMs,
-        ),
-      },
-      channelStones: channelView?.stones ?? const {},
       entryRotation: state.entryRot,
       metaRotation: state.metaRot,
     );
@@ -787,37 +741,6 @@ class MyWatchSync {
     } catch (_) {
       return false;
     }
-  }
-
-  /// Apply the merged channel-subscription actions through
-  /// [ChannelService] (which handles the core, the records, and the
-  /// amber lists). Individual failures surface as problems; the rest
-  /// still applies.
-  Future<int> _applyChannelActions(ChannelSyncActions actions) async {
-    final service = ChannelService.instance;
-    if (actions.stones.isNotEmpty) {
-      await service.adoptSubStones(actions.stones);
-    }
-    var changed = 0;
-    for (final s in actions.subscribe) {
-      try {
-        await service.subscribe(s.code, addedMs: s.addedMs);
-        changed++;
-      } catch (e) {
-        _problems.add('Subscribing to a synced channel failed: $e');
-      }
-    }
-    for (final e in actions.unsubscribe.entries) {
-      try {
-        // The tombstone's own time, not "now" — a racing re-subscribe on
-        // another device must still beat this stone.
-        await service.unsubscribe(e.key, removedMs: e.value);
-        changed++;
-      } catch (e) {
-        _problems.add('Unsubscribing a synced channel failed: $e');
-      }
-    }
-    return changed;
   }
 
   Future<bool> _mapStored(String addr) async {
@@ -1185,20 +1108,14 @@ class MyWatchSync {
 
   /// `title(lower) → address(lower) → added_ms` for the whole library.
   /// A pre-column add time of 0/null publishes as 1, so any real
-  /// tombstone beats it. Channel lists are not the device's own content
-  /// — they mirror a channel manifest and sync as *subscriptions* (the
-  /// doc's `channels` section), so they stay out of the personal
-  /// membership entirely. (On upgrade, a channel list vanishing from
-  /// this snapshot tombstones the badge-less copies older builds synced
-  /// — deliberate cleanup.)
+  /// tombstone beats it.
   static Map<String, Map<String, int>> membershipOf(List<MediaList> lists) => {
         for (final l in lists)
-          if (!l.isChannel)
-            l.title.toLowerCase(): {
-              for (final e in l.entries)
-                e.address.toLowerCase():
-                    (e.addedAt == null || e.addedAt == 0) ? 1 : e.addedAt!,
-            },
+          l.title.toLowerCase(): {
+            for (final e in l.entries)
+              e.address.toLowerCase():
+                  (e.addedAt == null || e.addedAt == 0) ? 1 : e.addedAt!,
+          },
       };
 
   /// Splits an episode lookup key (`tv:title:year:sN:eM`) into its show
@@ -1206,12 +1123,10 @@ class MyWatchSync {
   static final episodeKeyPattern = RegExp(r'^(.+):s(\d+):e\d+$');
 
   /// The lookup keys the library's entries resolve under — the keys
-  /// whose metadata is worth syncing. Channel entries are excluded:
-  /// their metadata travels inside the channel manifest itself.
+  /// whose metadata is worth syncing.
   static Set<String> libraryLookupKeys(List<MediaList> lists) => {
         for (final l in lists)
-          if (!l.isChannel)
-            for (final e in l.entries) parseMediaName(e.name).lookupKey,
+          for (final e in l.entries) parseMediaName(e.name).lookupKey,
       };
 
   /// Backoff before retrying a failed artwork fetch: 1 min after the
@@ -1461,14 +1376,12 @@ class MyWatchSync {
     List<Map<String, dynamic>> metaRows = const [],
     List<String> haveHashes = const [],
     Map<String, dynamic>? tmdbSection,
-    Map<String, ChannelSyncSub> channelSubs = const {},
-    Map<String, int> channelStones = const {},
     int entryCap = maxDocEntries,
     int entryOffset = 0,
   }) {
     var totalEntries = 0;
     for (final l in lists) {
-      if (!l.isChannel) totalEntries += l.entries.length;
+      totalEntries += l.entries.length;
     }
     final cap = entryCap.clamp(0, totalEntries);
     final offset = totalEntries == 0 ? 0 : entryOffset % totalEntries;
@@ -1479,9 +1392,6 @@ class MyWatchSync {
         cap > 0 && (globalIdx - offset) % totalEntries < cap;
     final listDocs = <Map<String, dynamic>>[];
     for (final l in lists) {
-      // Channel lists sync as subscriptions (`channels` below), never as
-      // copies of their content.
-      if (l.isChannel) continue;
       final title = l.title.toLowerCase();
       final take = <(int, MediaEntry)>[];
       for (final (idx, e) in l.entries.indexed) {
@@ -1522,8 +1432,7 @@ class MyWatchSync {
     // Tombstoned lists we no longer hold at all still need their stones
     // published, or the deletion never reaches the other devices.
     final held = {
-      for (final l in lists)
-        if (!l.isChannel) l.title.toLowerCase(),
+      for (final l in lists) l.title.toLowerCase(),
     };
     for (final e in tombstones.entries) {
       if (held.contains(e.key) || e.value.isEmpty) continue;
@@ -1548,18 +1457,6 @@ class MyWatchSync {
       ],
       if (metaRows.isNotEmpty) 'meta': {'v': 1, 'rows': metaRows},
       'tmdb': ?tmdbSection,
-      // Channel subscriptions (own channel included, announced by its
-      // creator): the receiving device subscribes by code, so the
-      // channel arrives amber-badged and auto-updating.
-      if (channelSubs.isNotEmpty || channelStones.isNotEmpty)
-        'channels': {
-          if (channelSubs.isNotEmpty)
-            'subs': {
-              for (final e in channelSubs.entries)
-                e.key: {'code': e.value.code, 'added_ms': e.value.addedMs},
-            },
-          if (channelStones.isNotEmpty) 'removed': channelStones,
-        },
     };
   }
 
@@ -1593,15 +1490,13 @@ class MyWatchSync {
     List<Map<String, dynamic>> metaRows = const [],
     List<String> haveHashes = const [],
     Map<String, dynamic>? tmdbSection,
-    Map<String, ChannelSyncSub> channelSubs = const {},
-    Map<String, int> channelStones = const {},
     int entryOffset = 0,
     int? entryLimit,
   }) {
     final tmdbRows = (tmdbSection?['rows'] as List?)?.length ?? 0;
     var totalEntries = 0;
     for (final l in lists) {
-      if (!l.isChannel) totalEntries += l.entries.length;
+      totalEntries += l.entries.length;
     }
     var watch = watchStates;
     var have = haveHashes;
@@ -1617,8 +1512,6 @@ class MyWatchSync {
           metaRows: meta,
           haveHashes: have,
           tmdbSection: tmdb,
-          channelSubs: channelSubs,
-          channelStones: channelStones,
           entryCap: entryCap,
           entryOffset: entryOffset,
         );
@@ -1667,7 +1560,7 @@ class MyWatchSync {
   /// The library sync state sharded into up to [maxParts] value-capped
   /// doc parts (fix for large libraries that can never fit one doc):
   /// part 0 is the main `<agent>/sync` doc — it alone carries the
-  /// tombstones and channel subscriptions and is what old builds read —
+  /// tombstones and is what old builds read —
   /// and each further part carries what the previous parts could not
   /// fit (later windows of list entries, staler watch states, older
   /// detail edits, the TMDB tail). Whatever still does not fit after
@@ -1691,15 +1584,13 @@ class MyWatchSync {
     List<Map<String, dynamic>> metaRows = const [],
     List<String> haveHashes = const [],
     Map<String, dynamic>? tmdbSection,
-    Map<String, ChannelSyncSub> channelSubs = const {},
-    Map<String, int> channelStones = const {},
     int entryRotation = 0,
     int metaRotation = 0,
     int maxParts = maxSyncParts,
   }) {
     var totalEntries = 0;
     for (final l in lists) {
-      if (!l.isChannel) totalEntries += l.entries.length;
+      totalEntries += l.entries.length;
     }
     var meta = metaRows;
     if (meta.isNotEmpty && metaRotation != 0) {
@@ -1717,16 +1608,14 @@ class MyWatchSync {
       final first = parts.isEmpty;
       final built = buildDocWithinBudget(
         lists: lists,
-        // Tombstones and channels ride only the main doc — that is the
-        // part old builds read, and repeating them would waste bytes.
+        // Tombstones ride only the main doc — that is the part old
+        // builds read, and repeating them would waste bytes.
         tombstones: first ? tombstones : const {},
         watchStates: watch,
         nowMs: nowMs,
         metaRows: meta,
         haveHashes: have,
         tmdbSection: tmdb,
-        channelSubs: first ? channelSubs : const {},
-        channelStones: first ? channelStones : const {},
         entryOffset: offset,
         entryLimit: entriesLeft,
       );
@@ -1916,9 +1805,6 @@ class MyWatchSync {
           final stone = stones[titleLower]?[addr] ?? 0;
           if (stone >= addedMs) continue; // removed later than added
           final i = indexOf(titleLower);
-          // A channel list mirrors its manifest — remote personal lists
-          // (e.g. an older build's badge-less copy) never merge into it.
-          if (i != -1 && out[i].isChannel) continue;
           final j = i == -1
               ? -1
               : out[i]
@@ -1986,7 +1872,7 @@ class MyWatchSync {
         final orderMs = rl['order_ms'] as int? ?? 0;
         if (orderMs > 0) {
           final i = indexOf(titleLower);
-          if (i != -1 && out[i].isPlaylist && !out[i].isChannel) {
+          if (i != -1 && out[i].isPlaylist) {
             final posByAddr = <String, int>{};
             for (final re in rl['entries'] as List? ?? const []) {
               if (re is! Map<String, dynamic>) continue;
@@ -2032,7 +1918,6 @@ class MyWatchSync {
     // Apply the (merged) tombstones to what we hold: anything removed
     // more recently than it was added goes.
     for (var i = out.length - 1; i >= 0; i--) {
-      if (out[i].isChannel) continue; // immune to personal tombstones
       final titleLower = out[i].title.toLowerCase();
       final listStones = stones[titleLower];
       if (listStones == null || listStones.isEmpty) continue;
@@ -2063,93 +1948,6 @@ class MyWatchSync {
       entriesRemoved: removed,
       entriesRenamed: renamed,
       listsReordered: reordered,
-    );
-  }
-
-  static final _channelPubkeyPattern = RegExp(r'^[0-9a-f]{64}$');
-  static final _channelCodePattern = RegExp(r'^wchn1-[a-z0-9]{1,120}$');
-
-  /// Actions implied by the remote docs' `channels` sections: per pubkey
-  /// the newest add (subscribe, anywhere) races the newest unsubscribe
-  /// tombstone, ties going to the tombstone — the same LWW the list
-  /// entries use. This device's own channel is skipped (it is the owner
-  /// there, not a subscriber); remote tombstones newer than ours are
-  /// adopted so they keep propagating.
-  static ChannelSyncActions channelActions({
-    required Map<String, ChannelSyncSub> localSubs,
-    required Map<String, int> localStones,
-    required String? ownPubkey,
-    required List<RemoteSyncDoc> remote,
-  }) {
-    final bestAdd = <String, ChannelSyncSub>{};
-    final remoteStones = <String, int>{};
-    for (final d in remote) {
-      final section = d.doc['channels'];
-      if (section is! Map<String, dynamic>) continue;
-      final subs = section['subs'];
-      if (subs is Map<String, dynamic>) {
-        for (final e in subs.entries) {
-          final pubkey = e.key.toLowerCase();
-          final v = e.value;
-          if (v is! Map<String, dynamic>) continue;
-          final code = (v['code'] as String? ?? '').toLowerCase();
-          final addedMs = v['added_ms'] as int? ?? 0;
-          if (!_channelPubkeyPattern.hasMatch(pubkey) ||
-              !_channelCodePattern.hasMatch(code) ||
-              addedMs <= 0) {
-            continue;
-          }
-          final cur = bestAdd[pubkey];
-          if (cur == null || addedMs > cur.addedMs) {
-            bestAdd[pubkey] = ChannelSyncSub(code: code, addedMs: addedMs);
-          }
-        }
-      }
-      final removed = section['removed'];
-      if (removed is Map<String, dynamic>) {
-        for (final e in removed.entries) {
-          final pubkey = e.key.toLowerCase();
-          final ms = e.value as int? ?? 0;
-          if (!_channelPubkeyPattern.hasMatch(pubkey) || ms <= 0) continue;
-          if (ms > (remoteStones[pubkey] ?? 0)) remoteStones[pubkey] = ms;
-        }
-      }
-    }
-    int stoneFor(String pubkey) {
-      final r = remoteStones[pubkey] ?? 0;
-      final l = localStones[pubkey] ?? 0;
-      return r > l ? r : l;
-    }
-
-    final subscribe = <ChannelSyncSubscribe>[];
-    for (final e in bestAdd.entries) {
-      final pubkey = e.key;
-      if (pubkey == ownPubkey || localSubs.containsKey(pubkey)) continue;
-      if (e.value.addedMs > stoneFor(pubkey)) {
-        subscribe.add(ChannelSyncSubscribe(
-          pubkey: pubkey,
-          code: e.value.code,
-          addedMs: e.value.addedMs,
-        ));
-      }
-    }
-    final unsubscribe = <String, int>{};
-    for (final e in localSubs.entries) {
-      final pubkey = e.key;
-      if (pubkey == ownPubkey) continue;
-      final remoteAdd = bestAdd[pubkey]?.addedMs ?? 0;
-      final newestAdd =
-          remoteAdd > e.value.addedMs ? remoteAdd : e.value.addedMs;
-      final stone = stoneFor(pubkey);
-      if (stone >= newestAdd) unsubscribe[pubkey] = stone;
-    }
-    return ChannelSyncActions(
-      subscribe: subscribe,
-      unsubscribe: unsubscribe,
-      stones: {
-        for (final e in remoteStones.entries)
-          if (e.value > (localStones[e.key] ?? 0)) e.key: e.value,
-      },
     );
   }
 
@@ -2412,7 +2210,6 @@ class SyncCycleResult {
     this.detailsApplied = 0,
     this.tmdbApplied = 0,
     this.artFetched = 0,
-    this.channelsChanged = 0,
   });
 
   final int entriesAdded;
@@ -2424,7 +2221,6 @@ class SyncCycleResult {
   final int detailsApplied;
   final int tmdbApplied;
   final int artFetched;
-  final int channelsChanged;
 
   SyncCycleResult copyWith({
     int? watchStatesApplied,
@@ -2432,7 +2228,6 @@ class SyncCycleResult {
     int? detailsApplied,
     int? tmdbApplied,
     int? artFetched,
-    int? channelsChanged,
   }) =>
       SyncCycleResult(
         entriesAdded: entriesAdded,
@@ -2444,38 +2239,6 @@ class SyncCycleResult {
         detailsApplied: detailsApplied ?? this.detailsApplied,
         tmdbApplied: tmdbApplied ?? this.tmdbApplied,
         artFetched: artFetched ?? this.artFetched,
-        channelsChanged: channelsChanged ?? this.channelsChanged,
       );
 }
 
-/// One channel another device subscribed to that this device should
-/// subscribe to as well.
-class ChannelSyncSubscribe {
-  const ChannelSyncSubscribe({
-    required this.pubkey,
-    required this.code,
-    required this.addedMs,
-  });
-
-  final String pubkey;
-  final String code;
-  final int addedMs;
-}
-
-/// What [MyWatchSync.channelActions] decided: subscriptions to add,
-/// subscriptions to drop (`pubkey → the winning tombstone's ms`), and
-/// remote tombstones to adopt locally.
-class ChannelSyncActions {
-  const ChannelSyncActions({
-    this.subscribe = const [],
-    this.unsubscribe = const {},
-    this.stones = const {},
-  });
-
-  final List<ChannelSyncSubscribe> subscribe;
-  final Map<String, int> unsubscribe;
-  final Map<String, int> stones;
-
-  bool get isEmpty =>
-      subscribe.isEmpty && unsubscribe.isEmpty && stones.isEmpty;
-}

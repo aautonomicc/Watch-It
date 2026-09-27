@@ -15,20 +15,6 @@ class MediaLists extends Table {
   /// Disabled lists are hidden from the home screen but kept intact.
   BoolColumn get enabled => boolean().withDefault(const Constant(true))();
 
-  /// Non-null marks this list as a subscribed CHANNEL: a read-only,
-  /// auto-updating mirror of that channel's published manifest (the
-  /// value is the channel's Ed25519 public key, lowercase hex). Channel
-  /// lists are managed by unsubscribing, never by editing.
-  TextColumn get channelPubkey => text().nullable()();
-
-  /// Channel profile (channel lists only), refreshed from every imported
-  /// manifest: the optional "by `<author>`" display name/handle…
-  TextColumn get channelAuthor => text().nullable()();
-
-  /// …and the avatar's member file name in the posters dir
-  /// (`channel_avatar_<sha8>.img`; resolved to a path at render time).
-  TextColumn get channelAvatar => text().nullable()();
-
   /// `'playlist'` marks a PLAYLIST: an ordered set of individual tracks
   /// rendered as track rows (never album-folded), living in the drawer's
   /// own Playlists section instead of the home wall. Null = a normal
@@ -289,7 +275,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 16;
+  int get schemaVersion => 17;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -328,17 +314,9 @@ class AppDatabase extends _$AppDatabase {
         await m.addColumn(mediaEntries, mediaEntries.sizeBytes);
         await m.addColumn(mediaEntries, mediaEntries.videoInfo);
       }
-      if (from < 10) {
-        // Channels: subscribed channels land as read-only lists
-        // marked with the channel public key.
-        await m.addColumn(mediaLists, mediaLists.channelPubkey);
-      }
-      if (from < 11) {
-        // Channel profile: author + avatar member name on channel
-        // lists (refreshed from each imported manifest).
-        await m.addColumn(mediaLists, mediaLists.channelAuthor);
-        await m.addColumn(mediaLists, mediaLists.channelAvatar);
-      }
+      // (v10/v11 used to add the channel columns here; the feature was
+      // removed in v17, so pre-v10 databases never gain them and the
+      // v17 branch below only has to drop what a v10+ database holds.)
       if (from >= 4 && from < 12) {
         // Music edits: album artist on music rows. (An older `from`
         // created or recreated the table with the column in it.)
@@ -399,6 +377,46 @@ class AppDatabase extends _$AppDatabase {
         // Artist pages: pull-once cache of the keyless MusicBrainz →
         // Wikidata → Wikipedia artist info chain.
         await m.createTable(artistMeta);
+      }
+      if (from < 17) {
+        // Channels feature REMOVED (2026-09-27): subscribed-channel
+        // lists (read-only manifest mirrors) are deleted outright and
+        // the channel columns dropped. Existence-guarded like v13–v15;
+        // the column check covers partial fixture DBs and the pre-v10
+        // path above, which never added the columns.
+        final hasMediaLists = await customSelect(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name='media_lists'")
+            .get()
+            .then((rows) => rows.isNotEmpty);
+        if (hasMediaLists) {
+          final cols =
+              await customSelect("PRAGMA table_info('media_lists')").get();
+          final hasPubkey =
+              cols.any((r) => r.data['name'] == 'channel_pubkey');
+          if (hasPubkey) {
+            await customStatement(
+                'DELETE FROM media_lists WHERE channel_pubkey IS NOT NULL');
+            // Recreate media_lists from the current definition (drops
+            // the three channel columns, copies everything else).
+            await m.alterTable(TableMigration(mediaLists));
+            // FK cascades may be off mid-migration: sweep entries and
+            // kid-allow-list rows that pointed at deleted lists.
+            await customStatement(
+                'DELETE FROM media_entries WHERE list_id NOT IN '
+                '(SELECT id FROM media_lists)');
+            final hasAccess = await customSelect(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name='profile_list_access'")
+                .get()
+                .then((rows) => rows.isNotEmpty);
+            if (hasAccess) {
+              await customStatement(
+                  'DELETE FROM profile_list_access WHERE list_id NOT IN '
+                  '(SELECT id FROM media_lists)');
+            }
+          }
+        }
       }
       if (from >= 4 && from < 9) {
         // alpha.57: Edit details — user-authored metadata rows are

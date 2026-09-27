@@ -728,7 +728,7 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                       color: s.problems.isNotEmpty
                           ? t.rust
                           : s.pendingMaps > 0 || s.pendingArt > 0
-                              ? WiTokens.channelAmber
+                              ? WiTokens.warnAmber
                               : t.signalOk,
                     ),
                   const SizedBox(width: 8),
@@ -758,7 +758,7 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                     "can't play on this device yet. Retrying automatically; "
                     'Sync now retries immediately.',
                     style: const TextStyle(
-                        fontSize: 11.5, color: WiTokens.channelAmber),
+                        fontSize: 11.5, color: WiTokens.warnAmber),
                   ),
                 ),
               // Same honesty for artwork still on its way — the
@@ -770,7 +770,7 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                     '${s.pendingArt} artwork file(s) still arriving — '
                     'retrying automatically; Sync now retries immediately.',
                     style: const TextStyle(
-                        fontSize: 11.5, color: WiTokens.channelAmber),
+                        fontSize: 11.5, color: WiTokens.warnAmber),
                   ),
                 ),
               for (final p in s.problems)

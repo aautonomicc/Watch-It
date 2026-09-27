@@ -191,7 +191,7 @@ class ArtistScreen extends StatelessWidget {
   }
 }
 
-/// Circular artist portrait (the channel-avatar idiom: circles mark
+/// Circular artist portrait (the profile-avatar idiom: circles mark
 /// identity, rectangles mark media); a music-note person placeholder
 /// until the chain lands one.
 class _Portrait extends StatelessWidget {
@@ -225,7 +225,7 @@ class _Portrait extends StatelessWidget {
 }
 
 /// The bio paragraph, collapsed to four lines with a More/Less toggle
-/// when it is long (the channel-description expandable idiom).
+/// when it is long (the expandable-description idiom).
 class ExpandableBio extends StatefulWidget {
   const ExpandableBio({super.key, required this.text, required this.tokens});
 

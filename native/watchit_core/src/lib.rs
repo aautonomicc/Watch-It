@@ -6,8 +6,6 @@
 //! streams `http://127.0.0.1:{port}/xor/{address}` like any HTTP source.
 
 pub mod cache;
-pub mod channel;
-pub mod channels;
 pub mod datausage;
 pub mod engine;
 pub mod mapstore;
@@ -225,9 +223,6 @@ pub fn start(peers_override: Option<&str>, data_dir: Option<&str>) -> Result<i32
         tokio::spawn(engine.supervise());
         // Resume an existing My W@tch link (no-op on never-linked devices).
         tokio::spawn(engine.mywatch.autostart());
-        // Resume channel topics (own channel + subscriptions; no-op when
-        // this device has neither).
-        tokio::spawn(engine.channels.autostart());
         // Persist the Data usage period accumulators (60s dirty-save).
         tokio::spawn(crate::datausage::save_task());
         if let Err(e) = axum::serve(listener, app).await {

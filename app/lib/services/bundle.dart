@@ -185,8 +185,7 @@ class BundleSeedSummary {
 String _normalizeAddr(String address) =>
     address.trim().toLowerCase().replaceFirst('0x', '');
 
-/// Where poster members land (and where the channel delta import checks
-/// for already-held posters): the app support dir's posters/.
+/// Where poster members land: the app support dir's posters/.
 Future<Directory> defaultBundlePostersDir() async {
   final support = await getApplicationSupportDirectory();
   return Directory('${support.path}/posters');
@@ -202,7 +201,6 @@ class BundleExportOptions {
     required this.includeHistory,
     this.includeLibrary = false,
     this.includeProfiles = false,
-    this.omitCategories = false,
   });
 
   /// Default OFF — shared lists shouldn't leak viewing habits; a
@@ -217,11 +215,6 @@ class BundleExportOptions {
   /// per-profile histories (services/profile_transfer.dart). Explicit
   /// opt-in like history: a shared bundle must not leak the household.
   final bool includeProfiles;
-
-  /// Channel manifests set this: channels carry no category tags —
-  /// metadata rows travel with `category` nulled so subscribers never
-  /// see genre chips on a channel list (2026-08-29 user decision).
-  final bool omitCategories;
 }
 
 class BundleBuildResult {
@@ -268,18 +261,9 @@ Future<BundleBuildResult> buildBundle(
   BundleExportOptions options, {
   String? base,
   Future<Directory> Function()? postersDirProvider,
-  Map<String, String> extraTextMembers = const {},
-  Map<String, Uint8List> extraPosterMembers = const {},
 }) async {
   base ??= EmbeddedClient.baseUrl();
   final archive = Archive();
-  // Extra members first (channel manifests add channel.json here);
-  // unknown members are ignored by every importer, so plain bundle
-  // consumers never notice them.
-  for (final extra in extraTextMembers.entries) {
-    archive.addFile(ArchiveFile.string(extra.key, extra.value));
-  }
-
   // datamaps/ members + list.txt, built together so the list only names
   // members that exist. One member may be referenced by several lists
   // (same address → first member name wins).
@@ -358,7 +342,7 @@ Future<BundleBuildResult> buildBundle(
       'title': row.title,
       'year': row.year,
       'overview': row.overview,
-      'category': options.omitCategories ? null : row.category,
+      'category': row.category,
       'episodeLabel': row.episodeLabel,
       'posterFile': row.posterFile,
       'mediaType': row.mediaType,
@@ -401,14 +385,6 @@ Future<BundleBuildResult> buildBundle(
         ArchiveFile.noCompress('posters/$name', file.lengthSync(),
             await file.readAsBytes()));
   }
-  // Extra image members (the channel avatar) ride with the posters —
-  // content-hash names keep the delta import's already-on-disk skip and
-  // the gap-fill's existing-file-wins correct for them too.
-  for (final extra in extraPosterMembers.entries) {
-    archive.addFile(ArchiveFile.noCompress(
-        'posters/${extra.key}', extra.value.length, extra.value));
-  }
-
   if (options.includeLibrary) {
     archive.addFile(ArchiveFile.string(
       'library.json',
@@ -504,7 +480,7 @@ String? _datamapBaseName(String memberName) {
 
 /// One zip member as the bundle parser consumes it: the name plus a
 /// size-capped reader. Backed either by a decoded [Archive] file (the
-/// whole-zip paths) or by bytes the channel delta import extracted from
+/// whole-zip paths) or by pre-extracted bytes taken from
 /// ranged reads — the parser cannot tell the difference.
 class BundleZipMember {
   BundleZipMember({
@@ -533,7 +509,7 @@ class BundleZipMember {
 }
 
 /// Decode a zip into parser members, wrapping decoder errors in
-/// [error]. Shared by the bundle and channel-manifest whole-zip paths.
+/// [error].
 List<BundleZipMember> zipBundleMembers(Uint8List bytes, String error) {
   final Archive archive;
   try {
@@ -569,9 +545,7 @@ ParsedBundle parseBundle(Uint8List bytes) {
       '.watch-list bundle.'));
 }
 
-/// [parseBundle] after zip decoding — the channel delta import calls
-/// this directly with members assembled from ranged reads (already-held
-/// posters simply absent; the poster gap-fill never misses them).
+/// [parseBundle] after zip decoding.
 ParsedBundle parseBundleMembers(List<BundleZipMember> members) {
   String? listText;
   final datamapMembers = <String, Uint8List>{};

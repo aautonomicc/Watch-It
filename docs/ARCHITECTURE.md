@@ -270,7 +270,7 @@ LAN plus public bootstrap for remote devices), implemented in
   alpha.96 the doc builder trims until the doc ALWAYS fits (down to
   list entries, last); since alpha.98 the doc additionally **shards**
   across up to three store keys (`sync` + `sync/N` — part 0 alone
-  carries tombstones and channel subscriptions, so older builds see a
+  carries the removal tombstones, so older builds see a
   safe partial view) and **rotates** whatever still doesn't fit, so
   the dropped tail leads the next cycle and everything reaches the
   other devices over the following cycles — nothing starves. Receivers
@@ -299,17 +299,9 @@ LAN plus public bootstrap for remote devices), implemented in
   match always wins) and pull the artwork bytes over the same x0x
   transfer, saved under the original TMDB file names — a synced
   device re-serves both rows and files to devices joining later.
-- **Channel subscriptions (post-alpha.65)**: channels sync *as
-  subscriptions*, never as content. Channel lists (the amber read-only
-  mirrors of a channel manifest) stay out of the personal sync doc
-  entirely; instead a `channels` section carries each subscription's
-  `wchn1-` code + subscribe time and unsubscribe tombstones, merged
-  last-writer-wins per channel. A linked device subscribes by code, so
-  the channel arrives with its badge and auto-updates from the
-  channel's own signed heads — and a device's OWN channel is announced
-  the same way, so the user's other devices follow it as subscribers.
-  Unsubscribing anywhere unsubscribes everywhere (tombstone), and a
-  later re-subscribe wins back.
+- *(Historical: from alpha.65 to 2026-09-27 the sync doc also carried a
+  `channels` section syncing public-channel subscriptions between
+  linked devices — removed together with the whole Channels feature.)*
 - **Presence & status**: 60 s heartbeats drive the My W@tch screen's
   per-device online dots, last-heard times, and the persisted "Last sync"
   stamp. Server routes (`GET/DELETE /mywatch`, `POST /mywatch/link|join|
@@ -322,116 +314,18 @@ LAN plus public bootstrap for remote devices), implemented in
   now. Devices must be online *together* for changes to travel — there is
   no relay in the middle, by design.
 
-### Channels — public signed media lists (shipped 2026-08-27, v0.1.0-alpha.65)
+### Channels — public signed media lists (REMOVED 2026-09-27)
 
-The PUBLIC content space (docs/PLAN-personal-vs-channels.md; My W@tch +
-Upload are the private space). A **channel** is an Ed25519 identity:
-its code `wchn1-<base32(pubkey)>` is the subscribe handle, its secret
-key is derived from the channel's own 12-word BIP-39 phrase (SLIP-0010
-ed25519 master key — deliberately a separate phrase from the disposable
-hot wallet) via the same show-words → retype-3 ceremony the wallet
-ships, and stored in the OS keychain beside the wallet key
-(`native/watchit_core/src/channel.rs`, `channels.rs`; Dart side
-`services/channel_service.dart` + `channels_api.dart`,
-`screens/channels_screen.dart` + `describe_item_screen.dart`).
-
-- **Manifest**: a bundle-spec-v2 zip (datamap members + metadata.json +
-  posters — the required Describe-this-item edits travel as `userEdited`
-  rows, so keyless subscribers render fully offline) plus
-  `channel.json` (name/description/pubkey + advisory seq/previous
-  history chain, and since 2026-08-29 the optional profile keys:
-  `author` — free-text name/handle rendered as "by <author>" — and
-  `avatar`, the member name of a circular avatar image that travels as
-  one more content-hash-named `posters/channel_avatar_<sha8>.img`
-  member, so the delta fetch skips an unchanged avatar and re-fetches a
-  changed one with zero extra machinery; both keys absent = unset, old
-  clients ignore them, old manifests render with the icon fallback and
-  no author line; media_lists.channel_author/channel_avatar, schema
-  v11, refresh from every imported manifest). Uploaded PUBLICLY —
-  ant-core's
-  `file_upload_public_with_progress` stores the serialized data map as
-  a fetchable chunk in the same payment batch, so anyone holding the
-  address fetches it via `data_map_fetch`
-  (`GET /channel/manifest/{addr}` — the only network data-map fetch in
-  the app; entries themselves stay datamap-first). The route stores the
-  fetched root map (manifests are content-addressed and immutable) and
-  streams through the chunk cache honouring `Range`/`HEAD`, exactly
-  like `/xor`.
-- **Head distribution** (the mutability layer): the owner gossips a
-  signed head record `{seq, manifest, sig}` into a self-keyed CRDT KV
-  store on an x0x topic derived from the channel pubkey. The topic is
-  public by construction; the store accepts strangers' writes, so heads
-  are trusted purely by Ed25519 signature — readers verify and follow
-  the highest valid seq. Subscribers replicate the store, so late
-  joiners get the newest head from any online subscriber; the owner
-  need not stay online. The channels agent lives under
-  `<data>/channels/` with its own identity, independent of the My W@tch
-  agent.
-- **Subscribing** (`POST /channel/subscribe`, works on every platform):
-  the app follows the verified head, fetches + imports the manifest as
-  a read-only amber-badged **channel list** (media_lists.channel_pubkey,
-  schema v10) that renders on the normal home wall/drawer and replaces
-  wholesale when a newer signed head arrives (5-min background check +
-  manual refresh). Updates import DELTA-AWARE
-  (channel_manifest_delta.dart): the zip's central directory is read
-  from a ranged tail request and poster members whose file already sits
-  in the posters directory are skipped from the download entirely
-  (their bytes would lose the import's existing-file-wins gap-fill
-  anyway) — since buildBundle writes posters last, an updated channel
-  re-fetches only its head members, changed posters, and the directory,
-  not every poster it ever shipped. Any structural surprise or an older
-  core answering 200 falls back to the plain whole-manifest fetch;
-  correctness never depends on the delta path. Unsubscribe deletes the
-  list + replicated store.
-  The creator's own machine shows the same amber list for its OWN
-  channel — empty the moment the channel is created, mirroring the
-  manifest after each published update (imported through the exact
-  subscriber fetch+verify path), gone when the channel is removed.
-- **Publishing** (upload platforms — desktop and, since alpha.102,
-  Android; needs the wallet): items enter one
-  explicit pick at a time, starting from a LOCAL FILE (the Upload
-  flow's shape, screens/channel_publish_screen.dart): choose a file →
-  quality tiers to encode (same ffmpeg tiers/planning as Upload; tiers
-  fold into one channel item via the version picker — Android bundles
-  no ffmpeg, so files publish as-is, no tiers) → required
-  Describe-this-item (title, description, artwork mandatory — the page
-  runs against the local file, so frame-grab artwork samples it
-  directly; saved as a normal Edit-details row keyed by the parsed file
-  name, which the tier outputs share; a **Check TMDB** button looks the
-  item up with the typed title/year when a TMDB key is configured —
-  public-domain classics ARE in the database — previews the match, and
-  on accept stores the full row incl. rating/genres/poster through the
-  normal metadata pipeline, so those extras reach keyless subscribers
-  via the manifest) → per-item rights attestation → encode + upload
-  (private-visibility uploads; the datamaps only go public inside the
-  manifest) → auto-staged on the item list, with an optional
-  add-to-library leg. "Add an item already in the library" keeps the
-  picker path for existing uploads (describe + attestation unchanged).
-  Publish update builds the manifest, shows a live cost preview
-  (`/upload/estimate` + balance), runs the paid public upload job
-  (`POST /channel/publish`, same job surface as Upload + an
-  `announcing` phase for the head) and bumps the seq; a failed job
-  offers Try again, which re-publishes the same built manifest
-  (already-stored chunks are free). Since self-encryption is
-  deterministic, chunks of an already-uploaded item cost nothing —
-  only the manifest is new. When the channels agent is down (the x0x
-  switch is off, or it is still starting) the publish still finishes:
-  the signed head is saved as pending (`pending_head.json` beside the
-  channels dir, surfaced as `pending_announce` in the status and
-  `announced: false` on the job result) and gossiped automatically on
-  the next Ready transition — re-signed above any newer head another
-  device published meanwhile.
-- **Safety rails** (plan Part 3): "publish" is reserved for channels
-  ("upload" = private); every channel surface is amber with a PUBLIC
-  badge (blue = private); separate drawer doors (never a toggle on
-  Upload); full-screen public/permanent/attributable gate with
-  type-the-channel-name confirm before the channel exists; Terms v2
-  adds the channel-publishing section (kTermsVersion 2 → re-prompt).
-- **Recovery**: losing the key freezes the channel at its last head
-  forever, so backup IS creation (the ceremony runs before the channel
-  exists). "Restore channel" re-derives the same key/code from the
-  phrase, learns its own newest head from the gossip store, and pulls
-  the manifest back to repopulate the item list.
+The public content space (Ed25519 channel identities with `wchn1-…`
+codes, publicly uploaded signed manifests, heads gossiped on an x0x
+topic, subscribe-by-code amber channel lists, channel publishing)
+shipped in alpha.65 and was **removed entirely on 2026-09-27** after a
+publishing-liability review — W@tch has no public publishing surface
+anymore. My W@tch + Upload (both private) are unaffected; the Terms of
+Use dropped their public-channels section (now v3), and drift schema
+v17 dropped the channel columns and lists. History in
+[PLAN-personal-vs-channels.md](PLAN-personal-vs-channels.md)
+(historical) and the git history of this file.
 
 ### Playback
 
@@ -458,7 +352,7 @@ ships, and stored in the OS keychain beside the wallet key
   a *viewing-state scope*, not accounts: watch positions, favourites
   and colour scheme are keyed per profile (drift schema v13 —
   `profiles` + `profile_list_access` tables, `watch_states.profile_id`),
-  while the library, downloads, wallet, channels and the network
+  while the library, downloads, wallet and the network
   identity stay install-global; My W@tch sync stays pinned to the
   Admin profile's state. PINs are salted-hashed and rate-limited; the
   admin PIN has a one-time recovery code, itself stored hashed. Since

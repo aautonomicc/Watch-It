@@ -69,7 +69,7 @@ class PosterCropDialog extends StatefulWidget {
   final Uint8List bytes;
 
   /// Selector-box aspect (width : height). Posters use the default 2:3;
-  /// channel avatars pass 1 — forced square, so the circular render
+  /// profile avatars pass 1 — forced square, so the circular render
   /// never surprises.
   final double aspect;
   final String title;

@@ -75,9 +75,9 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - "Up next" card in the last 30 seconds of an episode
 
 ### 6. Settings
-- CONTENT section (renamed from LIBRARY 2026-08-30) order: Channels
-  (public, amber, on top) · My W@tch (the two sharing surfaces sit
-  together, public above private) · My Media (renamed from Media) ·
+- CONTENT section (renamed from LIBRARY 2026-08-30) order: My W@tch
+  (on top since the public Channels tile above it was removed with the
+  whole feature 2026-09-27) · My Media (renamed from Media) ·
   Upload (desktop + Android since 2026-09-18 — Android uploads
   originals only, no encode tiers; moved out of the home drawer) ·
   Downloads
@@ -87,10 +87,9 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   Settings: since 2026-08-30 the dot-style status rows lead the drawer
   ABOVE the Library list section (they sat below Settings 2026-08-29,
   and on the home screen's bar before that) — Autonomi peers
-  ("Connected · N peers"), My W@tch (sync state, tap opens the page,
+  ("Connected · N peers") and My W@tch (sync state, tap opens the page,
   "not linked" when unlinked, "switched off" when disabled in the x0x
-  client page), and a Channels row (gossip network state, tap opens
-  Channels, "switched off" when disabled); the home screen has no
+  client page); the home screen has no
   status bar anymore
 - Lists (manage, import/export)
 - Network (slimmed to three tiles in the 2026-09-06 Data-page merge,
@@ -110,13 +109,11 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   day; alert-only — one quiet snackbar per day plus an amber line on
   the page when today passes the level, nothing is ever paused), a
   BUILT-IN CLIENTS section —
-  Autonomi connection row with refresh, then Channels and My W@tch
-  each on a compact 3-segment pill **Off | Wi-Fi | Wi-Fi + mobile**
-  (replacing the old on/off switch + separate cellular toggle; links,
-  keys and subscriptions are kept while Off, joining / creating /
-  subscribing flips the matching switch back on automatically, and a
-  channel update published while Channels is off waits and is
-  announced on re-enable) — and a MOBILE DATA section (Streaming Ask
+  Autonomi connection row with refresh, then My W@tch
+  on a compact 3-segment pill **Off | Wi-Fi | Wi-Fi + mobile**
+  (replacing the old on/off switch + separate cellular toggle; the
+  link and keys are kept while Off, and joining / creating a link
+  flips the switch back on automatically) — and a MOBILE DATA section (Streaming Ask
   first / Allowed / Wi-Fi only + Downloads pickers). A feature set to
   Wi-Fi is paused on cellular by the X0xCellularGate and resumed the
   moment Wi-Fi returns — its pill then reads Wi-Fi with a "Paused on
@@ -129,8 +126,7 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   time so they can never drift from what actually shipped
 - Wallet (renamed from Publishing 2026-08-27: create with 12-word
   ceremony + retype confirm, import key/phrase, live ANT/ETH balances,
-  remove; one wallet will fund both private uploads and the planned
-  public Channels)
+  remove; funds the private uploads)
 - Playback (hardware decode, default subtitle language, skip amounts)
 - Appearance (Colour scheme; sits below Metadata since 2026-08-30)
 - About / licenses (incl. TMDB attribution notice + logo; the Terms of
@@ -153,7 +149,7 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 ###    one flow since 2026-09-02)
 - Settings → CONTENT tile below My Media (desktop-only; lived in the
   home drawer until 2026-08-29), subtitle "Private · only your
-  devices" — the word "publish" is reserved for the public Channels
+  devices"
 - ONE way in: "Upload files or folders" opens the batch uploader
   (auto naming/metadata via MusicBrainz/TMDB, content-hash ledger
   dedup, unattended paid batch, .watch-list bundle). The old separate
@@ -193,8 +189,8 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   batch where it stands
 
 ### 8. My W@tch (alpha.61/.62)
-- Lives under Settings → CONTENT, directly below Channels, since
-  2026-08-29 (was Settings → Network since alpha.63; desktop +
+- Lives under Settings → CONTENT since 2026-08-29, at the top of the
+  section (was Settings → Network since alpha.63; desktop +
   Android). When its pill is set to Off in Settings → Network → Data
   (the Built-in x0x client switch until 2026-09-06), the linked view
   shows a "switched off" card instead of the connecting spinner.
@@ -215,66 +211,16 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   positions, edits, and artwork current whenever linked devices are
   online together — the page never needs to be open
 
-### 9. Channels (shipped 2026-08-27, alpha.65)
-- Settings → CONTENT tile **Channels** at the top of the section
-  (amber icon, "Public · anyone with the code") — a separate door from
-  the blue Upload tile on purpose; every channel surface carries an
-  amber PUBLIC/CHANNEL badge
-- Always-visible connection bar under the segment switch (2026-08-29):
-  green dot "Connected to the channel network" / amber spinner
-  "Connecting…" / grey "Not connected — connects when you create or
-  add a channel"
-- Channels carry NO category tags (2026-08-29): the Describe page has
-  no genre chips, manifests publish `category: null`, and channel list
-  pages never show the genre chip row
-- **Channel profile** (2026-08-29): a channel has a face — a circular
-  avatar (still image, forced 1:1 crop, ≤2 MB — the FIRST and ONLY
-  circular artwork in the app: circles mean channel identity,
-  rectangles mean media), an optional author name-or-handle rendered
-  as "by <author>" wherever set (unset → the line simply doesn't
-  render), plus the existing name/description. Create form = profile
-  form (96px circular picker with amber ring + camera badge, author
-  field marked optional/public/permanent); My Channel gains **Edit
-  channel details** — edits are staged locally and go public with the
-  next publish (the manifest is rebuilt on every head, so the profile
-  rides it; a changed avatar is a new content-hash member, an
-  unchanged one is skipped by the delta fetch). A channel's list page
-  opens with the full-width **channel info card** above the poster
-  grid: 72px avatar, name, "by author · N entries", description (2
-  lines, tap to expand), and the copyable `wchn1-` code in amber mono
-  — deliberate anti-impersonation UI: there is no handle registry and
-  no uniqueness, anyone can type any author name, so the code stays
-  the only real identity and is always in sight (the app bar drops its
-  entry-count subtitle there; the card owns it). Mini avatars
-  (podcasts-icon fallback) on the channels-screen cards, the drawer's
-  channel rows, the My Media rows, and the home wall's channel row
-  titles (18px beside the CHANNEL badge). The FirstPublishGate warning
-  list includes the profile: channel name — and author/avatar if set —
-  are published publicly and permanently.
-- **Subscribed** segment (default, all platforms): channel cards with
-  name/description/item count/update state, Add channel (paste
-  `wchn1-…` or scan QR on mobile, with the content-comes-from-the-owner
-  note); subscribed channels render on the home wall + drawer as
-  read-only amber-badged lists that update automatically — a freshly
-  added channel surfaces at the TOP of both until reordered in
-  Settings → Home screen (the drawer always mirrors the home screen's
-  row order and visibility)
-- **My Channel** segment (upload platforms — desktop, and Android
-  since alpha.102; files publish as-is there, no encode tiers):
-  Create channel → name/description →
-  12-word key ceremony (show → retype 3) → full-screen
-  public/permanent/attributable gate confirmed by typing the channel
-  name; then code + QR to share, backup-status row, the item list
-  subscribers see, "Publish an item" (a LOCAL FILE first, the Upload
-  flow's shape: choose a file → quality tiers to encode → required
-  Describe-this-item, whose Check TMDB button fills title/description/
-  artwork from a previewed TMDB match → rights attestation → encode +
-  upload → staged, with an optional add-to-library leg; "Add an item
-  already in the library" keeps the picker for existing uploads —
-  list first, then the list's items as the editor's nested tree:
-  artist → album → track, show → season → episode, versions folded) and
-  "Publish update" with a live cost preview; Restore channel by phrase
-- Settings is untouched — publishing is an activity, not a setting
+### 9. Channels (alpha.65–.107 — REMOVED 2026-09-27)
+
+The public-channels surfaces — the Settings → CONTENT Channels tile,
+the Subscribed / My Channel screen, amber-badged read-only channel
+lists on the wall and drawer, channel profiles and info cards — were
+removed entirely with the feature (publishing-liability review; user
+decision). The amber token survives as a general **warning** colour
+(`warnAmber`, formerly `channelAmber`) — e.g. the Data page's
+mobile-data lines and the sync warnings. Everything in the app is
+private again: blue needs no public counterpart.
 
 ### 10. Profiles (alpha.93)
 
@@ -301,7 +247,7 @@ second profile exists (a pre-profile install is silently the lone
 - **Non-admin settings**: Switch profile + Appearance + Buffer size +
   About (minus Clear all data)
 - Watch positions, favourites and colour scheme are per profile;
-  library, downloads, wallet, channels and the network identity are
+  library, downloads, wallet and the network identity are
   shared (profiles, not accounts)
 - **Family export/import** (alpha.95): the Export-library dialog gains
   an opt-in **Include profiles** checkbox (default off, "Never share
@@ -433,17 +379,14 @@ device presence, Sync now) with camera QR scanning on Android;
 alpha.62 makes edits and full-quality artwork ride the same sync,
 and alpha.63 extends it to TMDB metadata + posters for keyless
 devices. Alpha.64/.65 split the content spaces: the private flow is
-renamed Upload, and **Channels** arrive — amber-badged public signed
-lists with a create ceremony, rights attestation, and subscribe-by-code
-— rounded out in alpha.66–.70 with file-first publishing (Check TMDB
-included), channel profiles (circular avatar + author on an info card,
-mini avatars on cards/drawer/wall), and the own channel on the
-creator's wall. Alpha.67/.68 rebuild curation: the list editor is a
+renamed Upload, and public **Channels** arrive (removed again
+2026-09-27 with the whole feature — see section 9).
+Alpha.67/.68 rebuild curation: the list editor is a
 show → season → episode tree with move/copy-to-list and version
-nesting, Media + Channels live under Settings → CONTENT, and Settings →
+nesting, Media lives under Settings → CONTENT, and Settings →
 Appearance adds dark/light/system colour schemes. Alpha.71 deletes the
-home status bar in favour of three dot-status rows at the top of the
-drawer (Autonomi / My W@tch / Channels, tap to navigate) plus a
+home status bar in favour of dot-status rows at the top of the
+drawer (Autonomi / My W@tch, tap to navigate) plus a
 Built-in x0x client screen with independent agent switches (merged into the Built-in clients page 2026-09-05, then into the Data page's 3-way pills 2026-09-06); alpha.74
 consolidates cellular policy under Settings → Mobile data. Alpha.76–.79
 add the music surfaces: square album cards (and artist collage cards
@@ -491,7 +434,7 @@ Android, and turns the About update row into an in-place self-update
 on all four platforms. Alpha.102 regroups the My W@tch unlinked
 screen by intent, adds reverse-QR pairing (a TV/desktop joins by
 showing a code a linked phone scans) and the TV-friendly invite
-dialog, opens My Channel on Android, and adds the Software video
+dialog, and adds the Software video
 decoding toggle; alpha.103 points the update snackbar at the in-app
 updater and makes TV audio seeking work from any focus with the seek
 bar autofocused in the full-screen audio player.

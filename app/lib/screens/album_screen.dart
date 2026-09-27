@@ -148,7 +148,7 @@ class _AlbumScreenState extends State<AlbumScreen>
     final lists = await LibraryStore.load();
     HomeAlbum? found;
     for (final l in lists) {
-      if (l.isChannel || l.isPlaylist) continue;
+      if (l.isPlaylist) continue;
       for (final item in groupSeasons(l.entries)) {
         if (item is! HomeAlbum) continue;
         if (item.tracks

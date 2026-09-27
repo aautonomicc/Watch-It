@@ -1,6 +1,6 @@
 //! Period data-usage accounting (Settings → Network → Data usage).
 //!
-//! Three network components are metered separately:
+//! Two network components are metered separately:
 //!
 //! * **ant** — the Autonomi client (streaming, downloads, uploads, DHT).
 //!   ant-core exposes no public byte counters (saorsa-core's
@@ -15,10 +15,10 @@
 //!   deletable. The field contract (`wire_tx_bytes` / `wire_rx_bytes`
 //!   u64s on that target) is pinned by `layer_parses_traffic_summary`
 //!   below — re-verify against the saorsa-core source on every bump.
-//! * **mywatch** / **channels** — the two x0x agents. Exact per-agent
+//! * **mywatch** — the x0x agent. Exact per-agent
 //!   UDP wire bytes from per-connection quinn counters
 //!   (`connection_transport_stats`), delta-folded on `(peer,
-//!   generation)` by a 15 s sampler task per agent (the pool evicts idle
+//!   generation)` by a 15 s sampler task (the pool evicts idle
 //!   connections; `generation` detects reconnects). Bytes moved in the
 //!   final window before an eviction are lost — a small, accepted
 //!   undercount. (`NetworkNode::stats()` is NOT usable: its
@@ -156,14 +156,12 @@ impl DaySplit {
 struct DayBucket {
     ant: DaySplit,
     mywatch: DaySplit,
-    channels: DaySplit,
 }
 
-/// The three metered components.
+/// The metered x0x component(s).
 #[derive(Clone, Copy)]
 pub enum Component {
     MyWatch,
-    Channels,
 }
 
 /// Day-bucket slot (ant has no `Component` variant — it is not an x0x
@@ -172,7 +170,6 @@ pub enum Component {
 enum DaySlot {
     Ant,
     MyWatch,
-    Channels,
 }
 
 /// Today's bucket key, from the device's LOCAL calendar (`2026-09-23`).
@@ -186,7 +183,6 @@ pub(crate) fn today_key() -> String {
 pub struct DataUsage {
     pub ant: ComponentUsage,
     pub mywatch: ComponentUsage,
-    pub channels: ComponentUsage,
     /// Media chunk payload downloaded this period (folded from the
     /// process-lifetime `FETCHED_BYTES`).
     media_rx: AtomicU64,
@@ -223,7 +219,6 @@ impl DataUsage {
         Self {
             ant: ComponentUsage::default(),
             mywatch: ComponentUsage::default(),
-            channels: ComponentUsage::default(),
             media_rx: AtomicU64::new(0),
             period_start_ms: AtomicU64::new(now_ms()),
             dirty: AtomicBool::new(false),
@@ -239,7 +234,6 @@ impl DataUsage {
     fn component(&self, c: Component) -> &ComponentUsage {
         match c {
             Component::MyWatch => &self.mywatch,
-            Component::Channels => &self.channels,
         }
     }
 
@@ -259,7 +253,6 @@ impl DataUsage {
                 };
                 load(&self.ant, "ant");
                 load(&self.mywatch, "mywatch");
-                load(&self.channels, "channels");
                 self.media_rx
                     .store(v["media_rx"].as_u64().unwrap_or(0), Ordering::Relaxed);
                 self.period_start_ms.store(
@@ -274,7 +267,6 @@ impl DataUsage {
                             DayBucket {
                                 ant: DaySplit::from_json(&b["ant"]),
                                 mywatch: DaySplit::from_json(&b["mywatch"]),
-                                channels: DaySplit::from_json(&b["channels"]),
                             },
                         );
                     }
@@ -305,7 +297,6 @@ impl DataUsage {
         match slot {
             DaySlot::Ant => bucket.ant.add(tx, rx, mobile),
             DaySlot::MyWatch => bucket.mywatch.add(tx, rx, mobile),
-            DaySlot::Channels => bucket.channels.add(tx, rx, mobile),
         }
         while days.len() > DAYS_KEPT {
             days.pop_first();
@@ -326,7 +317,6 @@ impl DataUsage {
         self.component(component).add(tx, rx, mobile);
         let slot = match component {
             Component::MyWatch => DaySlot::MyWatch,
-            Component::Channels => DaySlot::Channels,
         };
         self.add_day(slot, tx, rx, mobile);
         self.dirty.store(true, Ordering::Relaxed);
@@ -386,7 +376,6 @@ impl DataUsage {
         let sum = |pick: fn(&ComponentUsage) -> &AtomicU64| {
             pick(&self.ant).load(Ordering::Relaxed)
                 + pick(&self.mywatch).load(Ordering::Relaxed)
-                + pick(&self.channels).load(Ordering::Relaxed)
         };
         let mut ant = self.ant.json();
         ant["media_rx"] = self.media_rx.load(Ordering::Relaxed).into();
@@ -401,7 +390,6 @@ impl DataUsage {
                     "day": day,
                     "ant": b.ant.json(),
                     "mywatch": b.mywatch.json(),
-                    "channels": b.channels.json(),
                 })
             })
             .collect();
@@ -415,7 +403,6 @@ impl DataUsage {
             },
             "ant": ant,
             "mywatch": self.mywatch.json(),
-            "channels": self.channels.json(),
             "days": days,
         })
     }
@@ -431,7 +418,6 @@ impl DataUsage {
             .store(crate::engine::FETCHED_BYTES.load(Ordering::Relaxed), Ordering::Relaxed);
         self.ant.zero();
         self.mywatch.zero();
-        self.channels.zero();
         self.media_rx.store(0, Ordering::Relaxed);
         self.period_start_ms.store(now_ms(), Ordering::Relaxed);
         self.dirty.store(true, Ordering::Relaxed);
@@ -458,7 +444,6 @@ impl DataUsage {
                     serde_json::json!({
                         "ant": b.ant.json(),
                         "mywatch": b.mywatch.json(),
-                        "channels": b.channels.json(),
                     }),
                 )
             })
@@ -467,7 +452,6 @@ impl DataUsage {
             "period_start_ms": self.period_start_ms.load(Ordering::Relaxed),
             "ant": self.ant.json(),
             "mywatch": self.mywatch.json(),
-            "channels": self.channels.json(),
             "media_rx": self.media_rx.load(Ordering::Relaxed),
             "days": days,
         });
@@ -725,21 +709,18 @@ mod tests {
         u.init_storage(&dir);
         u.add_x0x(Component::MyWatch, 11, 22);
         u.set_mobile(true);
-        u.add_x0x(Component::Channels, 33, 44);
+        u.add_x0x(Component::MyWatch, 33, 44);
         u.set_mobile(false);
         u.record_ant_summary(55, 66);
         u.save_if_dirty();
 
         let loaded = DataUsage::new();
         loaded.init_storage(&dir);
-        assert_eq!(loaded.mywatch.tx.load(Ordering::Relaxed), 11);
-        assert_eq!(loaded.mywatch.rx.load(Ordering::Relaxed), 22);
-        assert_eq!(loaded.mywatch.mob_tx.load(Ordering::Relaxed), 0);
-        assert_eq!(loaded.channels.tx.load(Ordering::Relaxed), 33);
-        assert_eq!(loaded.channels.rx.load(Ordering::Relaxed), 44);
+        assert_eq!(loaded.mywatch.tx.load(Ordering::Relaxed), 44);
+        assert_eq!(loaded.mywatch.rx.load(Ordering::Relaxed), 66);
         // The mobile-tagged share survives the reload.
-        assert_eq!(loaded.channels.mob_tx.load(Ordering::Relaxed), 33);
-        assert_eq!(loaded.channels.mob_rx.load(Ordering::Relaxed), 44);
+        assert_eq!(loaded.mywatch.mob_tx.load(Ordering::Relaxed), 33);
+        assert_eq!(loaded.mywatch.mob_rx.load(Ordering::Relaxed), 44);
         assert_eq!(loaded.ant.tx.load(Ordering::Relaxed), 55);
         assert_eq!(loaded.ant.rx.load(Ordering::Relaxed), 66);
         assert_eq!(
@@ -752,8 +733,8 @@ mod tests {
         {
             let days = loaded.days.lock().unwrap();
             let today = days.get(&today_key()).copied().unwrap();
-            assert_eq!(today.mywatch.rx, 22);
-            assert_eq!(today.channels.mob_rx, 44);
+            assert_eq!(today.mywatch.rx, 66);
+            assert_eq!(today.mywatch.mob_rx, 44);
             assert_eq!(today.ant.rx, 66);
         }
 
@@ -762,8 +743,7 @@ mod tests {
         loaded.reset();
         assert_eq!(loaded.ant.tx.load(Ordering::Relaxed), 0);
         assert_eq!(loaded.mywatch.rx.load(Ordering::Relaxed), 0);
-        assert_eq!(loaded.channels.tx.load(Ordering::Relaxed), 0);
-        assert_eq!(loaded.channels.mob_rx.load(Ordering::Relaxed), 0);
+        assert_eq!(loaded.mywatch.mob_rx.load(Ordering::Relaxed), 0);
         let v = loaded.stats_json();
         assert_eq!(v["total"]["rx"].as_u64(), Some(0));
         assert_eq!(v["total"]["mob_rx"].as_u64(), Some(0));
@@ -787,13 +767,12 @@ mod tests {
         u.add_x0x(Component::MyWatch, 1, 2);
         u.record_ant_summary(100, 200);
         u.set_mobile(false);
-        u.add_x0x(Component::Channels, 5, 6);
+        u.add_x0x(Component::MyWatch, 5, 6);
         let v = u.stats_json();
-        assert_eq!(v["mywatch"]["tx"].as_u64(), Some(11));
+        assert_eq!(v["mywatch"]["tx"].as_u64(), Some(16));
         assert_eq!(v["mywatch"]["mob_tx"].as_u64(), Some(1));
         assert_eq!(v["mywatch"]["mob_rx"].as_u64(), Some(2));
         assert_eq!(v["ant"]["mob_rx"].as_u64(), Some(200));
-        assert_eq!(v["channels"]["mob_rx"].as_u64(), Some(0));
         assert_eq!(v["total"]["mob_rx"].as_u64(), Some(202));
         assert_eq!(v["total"]["mob_tx"].as_u64(), Some(101));
         // Everything above landed in today's single day bucket.
@@ -801,12 +780,10 @@ mod tests {
         assert_eq!(days.len(), 1);
         let d = &days[0];
         assert_eq!(d["day"].as_str(), Some(today_key().as_str()));
-        assert_eq!(d["mywatch"]["rx"].as_u64(), Some(22));
+        assert_eq!(d["mywatch"]["rx"].as_u64(), Some(28));
         assert_eq!(d["mywatch"]["mob_rx"].as_u64(), Some(2));
         assert_eq!(d["ant"]["rx"].as_u64(), Some(200));
         assert_eq!(d["ant"]["mob_rx"].as_u64(), Some(200));
-        assert_eq!(d["channels"]["rx"].as_u64(), Some(6));
-        assert_eq!(d["channels"]["mob_rx"].as_u64(), Some(0));
     }
 
     #[test]
@@ -826,14 +803,12 @@ mod tests {
     fn stats_json_shape() {
         let u = DataUsage::new();
         u.add_x0x(Component::MyWatch, 1, 2);
-        u.add_x0x(Component::Channels, 3, 4);
         u.record_ant_summary(5, 6);
         let v = u.stats_json();
-        assert_eq!(v["total"]["tx"].as_u64(), Some(9));
-        assert_eq!(v["total"]["rx"].as_u64(), Some(12));
+        assert_eq!(v["total"]["tx"].as_u64(), Some(6));
+        assert_eq!(v["total"]["rx"].as_u64(), Some(8));
         assert_eq!(v["ant"]["tx"].as_u64(), Some(5));
         assert_eq!(v["mywatch"]["rx"].as_u64(), Some(2));
-        assert_eq!(v["channels"]["rx"].as_u64(), Some(4));
         assert_eq!(v["ant"]["stale_secs"].as_u64(), Some(0));
         assert!(v["period_start_ms"].as_u64().unwrap() > 0);
         assert!(v["ant"]["media_rx"].is_u64());

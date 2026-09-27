@@ -298,25 +298,4 @@ void main() {
         findsOneWidget);
   });
 
-  testWidgets('channel lists are not offered as move targets',
-      (tester) async {
-    await seed(extra: [
-      MediaList(
-          id: 'ch',
-          title: 'A Channel',
-          channelPubkey: 'f' * 64,
-          entries: const []),
-    ]);
-    await tester.pumpWidget(page());
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.descendant(
-        of: find.widgetWithText(ListTile, 'Alpha (2020).mkv'),
-        matching: find.byTooltip('Options')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Move to another list…'));
-    await tester.pumpAndSettle();
-    expect(find.text('A Channel'), findsNothing);
-    expect(find.text('Create new list'), findsOneWidget);
-  });
 }

@@ -139,21 +139,10 @@ for you. (As above, the titles shown are invented for the screenshots.)*
    discoverable on the network; the invite code *is* the key, so share it
    only with your own devices.
 
-6. **Channels (optional, public).** A channel is a public, signed media
-   list — "a YouTube channel" for the Autonomi network. Create one on
-   desktop (its own 12-word recovery phrase IS the channel), then
-   publish items straight from files on your computer: pick a file,
-   choose the qualities to encode, describe it — a Check TMDB button
-   fills in title, description, and artwork for known films, handy for
-   a public-domain channel — and share the `wchn1-…` code; anyone who adds
-   the code sees the channel as a read-only list that updates
-   automatically when you publish a new version. Channels are the ONLY
-   public thing in W@tch, and the app makes that impossible to miss:
-   every channel surface is amber and badged PUBLIC, publishing takes a
-   per-item rights attestation, and everything published is permanent —
-   the network has no delete. Uploads (step 1) stay private.
-
-No server, no accounts, no telemetry. There is deliberately **no Plex/Emby/Jellyfin
+No server, no accounts, no telemetry. Everything in W@tch is private:
+uploads, lists, and sync are yours and your own devices' only — the app
+has no public publishing surface (a public "Channels" feature existed
+alpha.65–.107 and was removed 2026-09-27). There is deliberately **no Plex/Emby/Jellyfin
 server compatibility** — Autonomi *is* the backend.
 
 ## Status
@@ -276,23 +265,16 @@ between linked devices as well — artwork travels at **full quality**,
 byte-identical, fetched directly from whichever linked device has it.
 Alpha.63 completes keyless sync: full TMDB metadata and posters travel
 to linked devices without their own key. Alpha.64 renames Publish to
-**Upload** (uploads are private; the word *publish* is reserved for the
-public act), and alpha.65 ships that public act: **Channels** (see How
-it works step 6) — public signed media lists with their own 12-word
-recovery phrase, shared as `wchn1-…` codes, amber-badged and gated
-behind a rights attestation. Alpha.66–.68 round channels and the
-library out: publish an item straight from a local file with a
-Check-TMDB helper, the creator's own channel on their home wall,
-channel subscriptions syncing over My W@tch, a list editor that curates
+**Upload** (uploads are private), and alpha.65 shipped public
+**Channels** — the feature removed again on 2026-09-27, see the note at
+the end of this section. Alpha.66–.68 round the
+library out: a list editor that curates
 entries in a show → season → episode tree with move/copy between lists,
-same-title versions folded into one expandable row, colour schemes
-(dark / light / system), and channel updates that download only what
-changed. Alpha.69 fixes an Android file-picker crash and adds a
-"Why did the app close?" diagnostic page; alpha.70 gives channels a
-face (circular avatar + author byline on an info card, mini avatars
-everywhere). Alpha.71/.72 move connection status into the library
-drawer, add independent on/off switches for the My W@tch and Channels
-background agents, and make upload batches survive navigating away —
+same-title versions folded into one expandable row, and colour schemes
+(dark / light / system). Alpha.69 fixes an Android file-picker crash and adds a
+"Why did the app close?" diagnostic page. Alpha.71/.72 move connection status into the library
+drawer, add independent on/off switches for the background sync
+agents, and make upload batches survive navigating away —
 with Try again / Skip / Stop on errors. Alpha.73 surfaces sync problems
 honestly (pending data maps, real Sync-now buttons on both sync
 screens); alpha.74 consolidates every cellular consumer under one
@@ -420,9 +402,7 @@ have a My W@tch?"), and **reverse-QR pairing** lets a device with a
 screen but no camera — a TV or desktop — join by *showing* a pairing
 code that an already linked phone scans, so nothing is typed on a
 remote; the typed invite path keeps a TV-friendly dialog with
-case-insensitive codes. The same release opens **channel creation on
-Android** (create, publish, edit and restore a channel from a phone
-or TV box — files publish as-is there, like Android uploads) and
+case-insensitive codes. The same release
 adds a **Software video decoding** toggle for devices where hardware
 decode plays sound over a black picture. Alpha.103 rounds off the
 loop: the startup "Update available" notification now starts the
@@ -430,6 +410,12 @@ in-app update itself where the app can apply it (it used to open the
 release page), and TV audio seeking works from any focus — the
 remote's fast-forward/rewind keys seek ±10 s wherever focus sits and
 the music player opens with its seek bar focused.
+
+**2026-09-27:** the public **Channels** feature (signed shareable media
+lists, alpha.65–.107) was removed entirely after a publishing-liability
+review — W@tch no longer has any public publishing surface. Private
+Upload, My W@tch device sync, the wallet, playlists and profiles are
+all unaffected; the Terms of Use were updated (v3) to match.
 
 Docs:
 

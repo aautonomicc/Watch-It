@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:watchit/screens/channels_screen.dart';
 import 'package:watchit/services/my_watch_api.dart';
 import 'package:watchit/services/tv_settings.dart';
 import 'package:watchit/theme/tokens.dart';
@@ -31,7 +30,6 @@ void main() {
   const pairCode =
       'wtchp1-000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f'
       '202122232425262728292a2b2c2d2e2f';
-  const channelCode = 'wchn1-gnidyresagnidyresagnidyresagnidyresagnidyresa';
 
   void tvViewport(WidgetTester tester) {
     tester.view.physicalSize = const Size(1920, 1080);
@@ -99,25 +97,30 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('channel share-code dialog fits a 960×540 TV whole',
-      (tester) async {
-    tvViewport(tester);
-    await showOnTv(tester, (_) => const ChannelQrDialog(code: channelCode));
-    expect(find.text(channelCode), findsOneWidget);
-    expectQrFitsWithActions(tester, 'Copy & close');
-  });
-
   testWidgets('with room to spare the QR keeps its natural size',
       (tester) async {
-    // Default 800×600 test viewport, no TV frame.
+    // A tall desktop-like viewport, no TV frame (the pair dialog carries
+    // more chrome than the QR alone, so 600px would already shrink it).
     TvSettings.instance.enabled = false;
+    tester.view.physicalSize = const Size(900, 1100);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       MaterialApp(
         theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
-        home: const Scaffold(body: ChannelQrDialog(code: channelCode)),
+        home: Scaffold(
+          body: PairCodeDialog(
+            api: MyWatchApi(base: 'http://127.0.0.1:1'),
+            code: pairCode,
+            pollInterval: const Duration(days: 1),
+          ),
+        ),
       ),
     );
     await tester.pump();
     expect(tester.widget<WiQr>(find.byType(WiQr)).size, 220);
+    // Cancels the poll timer.
+    await tester.pumpWidget(const SizedBox());
   });
 }

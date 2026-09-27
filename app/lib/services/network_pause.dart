@@ -7,7 +7,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_settings.dart';
 import 'batch_upload.dart';
-import 'channels_api.dart';
 import 'download_manager.dart';
 import 'embedded_client.dart';
 import 'my_watch_api.dart';
@@ -44,14 +43,12 @@ class NetworkPause extends ChangeNotifier {
     String? base,
     String? token,
     MyWatchApi? myWatchApi,
-    ChannelsApi? channelsApi,
     DateTime Function()? now,
     bool Function()? downloadsActive,
     bool Function()? uploadsActive,
   })  : _baseOverride = base,
         _tokenOverride = token,
         _myWatchApiOverride = myWatchApi,
-        _channelsApiOverride = channelsApi,
         _now = now ?? DateTime.now,
         _downloadsActiveOverride = downloadsActive,
         _uploadsActiveOverride = uploadsActive {
@@ -67,7 +64,6 @@ class NetworkPause extends ChangeNotifier {
   final String? _baseOverride;
   final String? _tokenOverride;
   final MyWatchApi? _myWatchApiOverride;
-  final ChannelsApi? _channelsApiOverride;
   final DateTime Function() _now;
   final bool Function()? _downloadsActiveOverride;
   final bool Function()? _uploadsActiveOverride;
@@ -222,7 +218,6 @@ class NetworkPause extends ChangeNotifier {
   }
 
   MyWatchApi get _myWatch => _myWatchApiOverride ?? MyWatchApi();
-  ChannelsApi get _channels => _channelsApiOverride ?? ChannelsApi();
 
   /// Switch off each agent that is actually on, remembering it — a
   /// user's own "off" stays theirs and is not re-enabled on resume.
@@ -236,13 +231,6 @@ class NetworkPause extends ChangeNotifier {
     } catch (_) {
       // Embedded client unreachable — nothing running to pause.
     }
-    try {
-      final s = await _channels.status();
-      if (s.supported && s.enabled) {
-        await _channels.setEnabled(false);
-        _pausedAgents.add(X0xAgent.channels);
-      }
-    } catch (_) {}
     await _persistAgents();
     notifyListeners();
   }
@@ -253,8 +241,6 @@ class NetworkPause extends ChangeNotifier {
         switch (agent) {
           case X0xAgent.myWatch:
             await _myWatch.setEnabled(true);
-          case X0xAgent.channels:
-            await _channels.setEnabled(true);
         }
         _pausedAgents.remove(agent);
       } catch (_) {

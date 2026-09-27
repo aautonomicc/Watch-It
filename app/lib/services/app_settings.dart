@@ -180,10 +180,9 @@ class AppSettings {
   }
 
   static const _myWatchCellularKey = 'mywatch_cellular_v1';
-  static const _channelsCellularKey = 'channels_cellular_v1';
 
   /// Whether the My W@tch x0x agent may run on mobile data (Settings →
-  /// Network → Mobile data). Default ON: the agents always ran on
+  /// Network → Mobile data). Default ON: the agent always ran on
   /// cellular before this setting existed, so existing installs keep
   /// behaving the same. Off = [X0xCellularGate] pauses the agent while
   /// on cellular and resumes it on Wi-Fi.
@@ -195,18 +194,6 @@ class AppSettings {
   static Future<void> setMyWatchOnCellular(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_myWatchCellularKey, value);
-  }
-
-  /// Whether the Channels x0x agent may run on mobile data. Same
-  /// default-ON reasoning as [myWatchOnCellular].
-  static Future<bool> channelsOnCellular() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_channelsCellularKey) ?? true;
-  }
-
-  static Future<void> setChannelsOnCellular(bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_channelsCellularKey, value);
   }
 
   static const _networkPausedKey = 'network_paused_v1';

@@ -279,11 +279,6 @@ Map<String, dynamic> combinedSyncDoc(
       (pt['files'] as Map? ?? const {})
           .forEach((k, v) => tmdbFiles['$k'] = v);
     }
-    // The builder only puts `channels` in the main doc; tolerate a
-    // part carrying it (main doc wins).
-    if (out['channels'] == null && p['channels'] is Map) {
-      out['channels'] = p['channels'];
-    }
     final u = p['updated_ms'];
     if (u is int && u > updated) updated = u;
   }

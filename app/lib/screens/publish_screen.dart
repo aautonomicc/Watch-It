@@ -17,8 +17,7 @@ import 'wallet_screen.dart';
 /// Upload: put media files on the Autonomi network from the app.
 ///
 /// User-facing name is "Upload" (formerly "Publish" — renamed so the
-/// word "publish" stays reserved for the genuinely-public Channels
-/// feature; docs/PLAN-personal-vs-channels.md). Uploads are PRIVATE:
+/// docs/PLAN-personal-vs-channels.md). Uploads are PRIVATE:
 /// Visibility::Private keeps the datamap off the network. Internal
 /// identifiers keep the Publish* names.
 ///
@@ -307,14 +306,14 @@ class _PublishScreenState extends State<PublishScreen> {
 }
 
 /// Desktop platforms — where quality-tier encoding (bundled ffmpeg) and
-/// folder picking exist. Upload, the wallet, and channel publishing are
-/// gated on [isUploadPlatform] instead.
+/// folder picking exist. Upload and the wallet are gated on
+/// [isUploadPlatform] instead.
 bool get isDesktopPlatform =>
     debugDesktopPlatformOverride ??
     (Platform.isLinux || Platform.isMacOS || Platform.isWindows);
 
 /// Where Upload — and the wallet that funds it — exists: desktop and,
-/// since 2026-09-18, Android (channel publishing joined 2026-09-20).
+/// since 2026-09-18, Android.
 /// Phones bundle no ffmpeg, so the no-ffmpeg path carries them: files
 /// upload exactly as picked, no quality-tier encoding and no QUALITY
 /// section. iOS stays out until the app ships there at all.
@@ -330,14 +329,11 @@ bool? debugUploadPlatformOverride;
 
 /// Checkbox picker over the existing lists plus a create-new option —
 /// the import flow's picker pattern (its original is private to the
-/// Media page). Shared by the batch-upload and channel-publish done
-/// pages.
+/// Media page). Used by the batch-upload done page.
 Future<List<String>?> pickTargetLists(
     BuildContext context, List<MediaList> allLists) async {
   final t = WiTokens.of(context);
-  // Channel lists mirror someone's manifest and are read-only — never
-  // add targets.
-  final lists = [for (final l in allLists) if (!l.isChannel) l];
+  final lists = allLists;
   if (lists.isEmpty) {
     final title = await promptForText(
       context,

@@ -231,34 +231,6 @@ void main() {
     expect(find.byType(PosterCard), findsNWidgets(2));
   });
 
-  testWidgets('channel lists never show genre chips, even with matched '
-      'categories', (tester) async {
-    // Channels carry no category tags (2026-08-29) — a subscriber's own
-    // TMDB matches must not sneak chips onto a channel's page either.
-    final channel = MediaList(
-      id: 'c1',
-      title: 'Nature Films',
-      channelPubkey: 'ab' * 32,
-      entries: [
-        _movie,
-        MediaEntry(name: 'Beta (2021).mkv', address: _addr(5)),
-      ],
-    );
-    await LibraryStore.save([channel]);
-    await seedCategory('Alpha (2020).mkv',
-        category: 'Science Fiction', mediaType: 'movie');
-    await seedCategory('Beta (2021).mkv',
-        category: 'Comedy', mediaType: 'movie');
-
-    await tester.pumpWidget(page(ListHomeScreen(list: channel)));
-    await tester.pumpAndSettle();
-
-    expect(find.text('All'), findsNothing);
-    expect(find.text('Science Fiction'), findsNothing);
-    expect(find.text('Comedy'), findsNothing);
-    expect(find.byType(PosterCard), findsNWidgets(2));
-  });
-
   testWidgets('show cards filter by the show genres', (tester) async {
     await seedLibrary();
     await seedCategory('Showname.S01E01.mkv',

@@ -21,7 +21,7 @@ channel falls back to the ordinary interface.
   the name field; Left reaches Cancel. Phone keyboard Done also submits a
   nonempty name. The dialog owns and disposes its text controller.
 - Screens open with a visible starting focus (unreleased — ships next
-  release): the Settings, My W@tch, Channels and detail pages give the
+  release): the Settings, My W@tch and detail pages give the
   scope's first control the focus once the first frame is up (an explicit
   autofocus wins), and the pairing-code dialog focuses its Cancel button —
   previously these surfaces opened with nothing focused, so the outline was
@@ -83,7 +83,7 @@ banner inset to the safe area (the standard TV convention).
 
 TV text scaling is at least 1.15; larger accessibility text scaling is retained.
 The optional Grove palette uses soft green surfaces and retains W@tch blue,
-its wordmark and the separate amber identity for public channels. It applies
+its wordmark and the amber warning accent. It applies
 in dark mode and is off by default; phone/profile appearance is unchanged.
 
 ## Audio and captions
@@ -132,7 +132,7 @@ path comes first as the filled-primary button: the TV displays a
 "Add a device — scan its pairing code" and scans the TV's screen, and
 the TV joins the existing My W@tch — nothing is typed on a remote.
 Codes expire after ten minutes and each attempt is an independent
-handshake. Since alpha.104 the pairing, invite and channel-code QR
+handshake. Since alpha.104 the pairing and invite QR
 dialogs fit small TV viewports whole: the dialog widens so its text
 wraps into fewer lines and the QR shrinks (floor ~120px, still
 scannable) to the height the dialog really has — previously a fixed

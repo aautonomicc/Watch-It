@@ -16,7 +16,6 @@ import '../services/bundle.dart';
 import '../services/connectivity.dart';
 import '../services/datamap_import.dart';
 import '../services/default_list.dart';
-import '../services/channel_service.dart';
 import '../services/home_sections.dart';
 import '../services/import_review.dart';
 import '../services/library_store.dart';
@@ -25,11 +24,8 @@ import '../services/metadata_service.dart';
 import '../services/organize.dart';
 import '../services/profile_transfer.dart';
 import '../theme/tokens.dart';
-import '../widgets/channel_avatar.dart';
-import '../widgets/channel_badge.dart';
 import 'import_review_screen.dart';
 import 'list_edit_screen.dart';
-import 'list_home_screen.dart';
 import 'needs_sorting_screen.dart';
 import 'settings_screen.dart' show promptForText;
 
@@ -1246,61 +1242,9 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
   }
 
   Future<void> _openList(MediaList list) async {
-    // Channel lists are read-only mirrors of the channel's manifest —
-    // they browse, they don't edit.
     await Navigator.of(context).push(
-      list.isChannel
-          ? MaterialPageRoute(builder: (_) => ListHomeScreen(list: list))
-          : MaterialPageRoute(
-              builder: (_) => ListEditScreen(listId: list.id)),
+      MaterialPageRoute(builder: (_) => ListEditScreen(listId: list.id)),
     );
-    await _reload();
-  }
-
-  Future<void> _unsubscribeChannel(MediaList list) async {
-    final t = WiTokens.of(context);
-    // The user's OWN channel also lives here as an amber list — it has
-    // no subscription to drop, and would only be recreated by the next
-    // channel check. Point at the Channels screen instead.
-    try {
-      final view = await ChannelService.instance.syncView();
-      if (view != null && view.ownPubkey == list.channelPubkey) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('This is your own channel — manage it from '
-                  'the Channels page')));
-        }
-        return;
-      }
-    } on Exception {
-      // Status unavailable — fall through to the normal unsubscribe.
-    }
-    if (!mounted) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: t.ink2,
-        title: Text('Unsubscribe from "${list.title}"?',
-            style: TextStyle(color: t.bone, fontSize: 16)),
-        content: Text(
-          'The channel\'s list disappears from your library and stops '
-          'updating. You can re-add it any time with its code.',
-          style: TextStyle(color: t.boneDim, fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text('Cancel', style: TextStyle(color: t.ash)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Unsubscribe', style: TextStyle(color: t.rust)),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    await ChannelService.instance.unsubscribe(list.channelPubkey!);
     await _reload();
   }
 
@@ -1371,7 +1315,7 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
             padding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
             child: ListTile(
               leading: const Icon(Icons.rule_folder_outlined,
-                  color: WiTokens.channelAmber),
+                  color: WiTokens.warnAmber),
               title: Text('Needs sorting',
                   style: TextStyle(color: t.bone, fontSize: 14)),
               subtitle: Text(
@@ -1457,59 +1401,24 @@ class _MediaListsScreenState extends State<MediaListsScreen> {
         side: BorderSide(color: t.ash),
         onChanged: (v) => _setEnabled(list, v ?? true),
       ),
-      title: Row(
-        children: [
-          if (list.isChannel) ...[
-            ChannelAvatar(memberName: list.channelAvatar, size: 20),
-            const SizedBox(width: 8),
-          ],
-          Flexible(
-            child: Text(
-              list.title,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: list.enabled ? t.bone : t.ash,
-                fontSize: 15,
-              ),
-            ),
-          ),
-          if (list.isChannel) ...[
-            const SizedBox(width: 8),
-            const ChannelBadge(),
-          ],
-        ],
+      title: Text(
+        list.title,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: list.enabled ? t.bone : t.ash,
+          fontSize: 15,
+        ),
       ),
       subtitle: Text(
         '${list.entries.length} '
         '${list.entries.length == 1 ? 'entry' : 'entries'}'
-        '${list.isChannel ? '  ·  read-only, updates automatically' : ''}'
         '${list.enabled ? '' : '  ·  hidden from home'}',
         style: TextStyle(color: t.ash, fontSize: 12),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Channel lists are managed by unsubscribing — never renamed,
-          // exported, or deleted like an owned list.
-          if (list.isChannel)
-            PopupMenuButton<String>(
-              tooltip: 'Channel options',
-              icon: Icon(Icons.more_vert, color: t.ash),
-              color: t.ink2,
-              onSelected: (v) => switch (v) {
-                'unsubscribe' => _unsubscribeChannel(list),
-                _ => null,
-              },
-              itemBuilder: (context) => [
-                PopupMenuItem(
-                  value: 'unsubscribe',
-                  child: Text('Unsubscribe',
-                      style: TextStyle(color: t.rust, fontSize: 14)),
-                ),
-              ],
-            )
-          else
-            PopupMenuButton<String>(
+          PopupMenuButton<String>(
               tooltip: 'List options',
               icon: Icon(Icons.more_vert, color: t.ash),
               color: t.ink2,

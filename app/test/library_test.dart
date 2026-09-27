@@ -358,59 +358,59 @@ void main() {
       expect(row.title, 'Old');
     });
 
-    test('v10 lists gain channelAuthor + channelAvatar on upgrade',
+    test('v16→v17 upgrade deletes channel lists and drops their columns',
         () async {
       final dir = await Directory.systemTemp.createTemp('watchit-migration');
       addTearDown(() => dir.delete(recursive: true));
       final file = File('${dir.path}/watchit.sqlite');
 
-      // Hand-build the alpha.65–69 (schema v10) lists table: channel
-      // pubkey column exists, no profile columns yet.
+      // Hand-build a minimal v16-era lists table: the three channel
+      // columns exist and one subscribed channel sits beside a normal
+      // list (the Channels feature was removed at v17).
       final raw = sqlite3.open(file.path);
       raw.execute('''
         CREATE TABLE media_lists (
           id TEXT NOT NULL, title TEXT NOT NULL, position INTEGER NOT NULL,
           enabled INTEGER NOT NULL DEFAULT 1, channel_pubkey TEXT,
+          channel_author TEXT, channel_avatar TEXT, kind TEXT,
+          ordered_at INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (id));
         CREATE TABLE media_entries (
           entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
           list_id TEXT NOT NULL REFERENCES media_lists (id) ON DELETE CASCADE,
           name TEXT NOT NULL, address TEXT NOT NULL,
           position INTEGER NOT NULL, added_at INTEGER NOT NULL DEFAULT 0,
-          size_bytes INTEGER, video_info TEXT);
-        CREATE TABLE metadata_cache (
-          lookup_key TEXT NOT NULL PRIMARY KEY, found INTEGER NOT NULL,
-          title TEXT, year INTEGER, overview TEXT, category TEXT,
-          episode_label TEXT, poster_file TEXT, media_type TEXT,
-          tmdb_id INTEGER, fetched_at INTEGER NOT NULL, rating REAL,
-          show_overview TEXT, season_overview TEXT, air_date TEXT,
-          still_file TEXT, show_poster_file TEXT,
-          user_edited INTEGER NOT NULL DEFAULT 0);
+          size_bytes INTEGER, video_info TEXT,
+          renamed_at INTEGER NOT NULL DEFAULT 0);
         INSERT INTO media_lists (id, title, position, channel_pubkey)
           VALUES ('channel-x', 'Their channel', 0, '${'ab' * 32}');
-        PRAGMA user_version = 10;
+        INSERT INTO media_lists (id, title, position) VALUES ('m', 'Mine', 1);
+        INSERT INTO media_entries (list_id, name, address, position)
+          VALUES ('channel-x', 'Theirs.mkv', '${'cd' * 32}', 0);
+        INSERT INTO media_entries (list_id, name, address, position)
+          VALUES ('m', 'Mine.mkv', '$_addr', 0);
+        PRAGMA user_version = 16;
       ''');
       raw.close();
 
       await LibraryStore.useForTesting(
           AppDatabase.forTesting(NativeDatabase(file)));
       final lists = await LibraryStore.load();
-      // Pre-upgrade channel lists have no profile yet…
-      expect(lists.single.channelAuthor, isNull);
-      expect(lists.single.channelAvatar, isNull);
-      // …and the new columns round-trip through a save.
-      await LibraryStore.save([
-        MediaList(
-          id: 'channel-x',
-          title: 'Their channel',
-          channelPubkey: 'ab' * 32,
-          channelAuthor: '@neil',
-          channelAvatar: 'channel_avatar_00112233.img',
-        ),
-      ]);
-      final reloaded = (await LibraryStore.load()).single;
-      expect(reloaded.channelAuthor, '@neil');
-      expect(reloaded.channelAvatar, 'channel_avatar_00112233.img');
+      // The channel list is gone outright — entries included — and the
+      // user's own list survives untouched.
+      expect(lists.map((l) => l.id), ['m']);
+      expect(lists.single.entries.single.name, 'Mine.mkv');
+      // The dropped columns really are gone from the table.
+      final check = sqlite3.open(file.path);
+      final cols = [
+        for (final row in check.select("PRAGMA table_info('media_lists')"))
+          row['name'] as String,
+      ];
+      check.close();
+      expect(cols, isNot(contains('channel_pubkey')));
+      expect(cols, isNot(contains('channel_author')));
+      expect(cols, isNot(contains('channel_avatar')));
+      expect(cols, contains('kind'));
     });
   });
 
@@ -821,17 +821,17 @@ void main() {
       await tester.pumpAndSettle();
 
       // Content section (renamed from LIBRARY 2026-08-30), in order:
-      // Channels (public, on top), My W@tch, My Media, Upload
-      // (desktop-only — tests run on the desktop host), Downloads
-      // (moved in from its own section 2026-08-30).
+      // My W@tch, My Media, Upload (desktop-only — tests run on the
+      // desktop host), Downloads (moved in from its own section
+      // 2026-08-30). Channels left with the feature's removal
+      // (2026-09-27).
       expect(find.text('CONTENT'), findsOneWidget);
       expect(find.text('LIBRARY'), findsNothing);
       expect(find.text('My Media'), findsOneWidget);
-      expect(find.text('Channels'), findsOneWidget);
+      expect(find.text('Channels'), findsNothing);
       expect(find.text('My W@tch'), findsOneWidget);
       expect(find.text('Upload'), findsOneWidget);
       expect(find.text('New list'), findsNothing);
-      final channelsY = tester.getTopLeft(find.text('Channels')).dy;
       final myWatchY = tester.getTopLeft(find.text('My W@tch')).dy;
       final myMediaY = tester.getTopLeft(find.text('My Media')).dy;
       final uploadY = tester.getTopLeft(find.text('Upload')).dy;
@@ -840,7 +840,6 @@ void main() {
       final downloadsY = tester
           .getTopLeft(find.text('Queue, storage, and playback behaviour'))
           .dy;
-      expect(channelsY, lessThan(myWatchY));
       expect(myWatchY, lessThan(myMediaY));
       expect(myMediaY, lessThan(uploadY));
       expect(uploadY, lessThan(downloadsY));
@@ -904,7 +903,7 @@ void main() {
       expect(find.text('Auto-pause when idle'), findsOneWidget);
       expect(find.text('BUILT-IN CLIENTS'), findsOneWidget);
       expect(find.text('Connection'), findsOneWidget);
-      expect(find.text('Channels'), findsOneWidget);
+      expect(find.text('Channels'), findsNothing);
       expect(find.text('My W@tch'), findsOneWidget);
       await tester.scrollUntilVisible(find.text('Downloads'), 100);
       expect(find.text('MOBILE DATA'), findsOneWidget);

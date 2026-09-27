@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:watchit/services/app_settings.dart';
-import 'package:watchit/services/channels_api.dart';
 import 'package:watchit/services/my_watch_api.dart';
 import 'package:watchit/services/network_pause.dart';
 import 'package:watchit/services/x0x_cellular.dart' show X0xAgent;
@@ -13,8 +12,8 @@ import 'package:watchit/services/x0x_cellular.dart' show X0xAgent;
 import 'fake_embedded_http.dart';
 
 /// The Settings → Network "Offline mode" switch: pauses
-/// the embedded Autonomi client and switches off both x0x agents,
-/// remembering which so resume re-enables exactly those.
+/// the embedded Autonomi client and switches off the x0x agent,
+/// remembering it so resume re-enables exactly that.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -31,14 +30,6 @@ void main() {
       'state': 'ready',
       'devices': const [],
     };
-    fake.channelsStatus = {
-      'supported': true,
-      'enabled': true,
-      'state': 'ready',
-      'message': null,
-      'own': null,
-      'subs': const [],
-    };
   });
 
   tearDown(() {
@@ -49,7 +40,6 @@ void main() {
         base: FakeEmbeddedHttp.base,
         token: 'test',
         myWatchApi: MyWatchApi(base: FakeEmbeddedHttp.base),
-        channelsApi: ChannelsApi(base: FakeEmbeddedHttp.base),
       );
 
   List<bool> corePosts() => [
@@ -60,12 +50,7 @@ void main() {
         for (final body in fake.myWatchEnabledPosts)
           (jsonDecode(body) as Map<String, dynamic>)['enabled'] as bool,
       ];
-  List<bool> channelsPosts() => [
-        for (final body in fake.channelEnabledPosts)
-          (jsonDecode(body) as Map<String, dynamic>)['enabled'] as bool,
-      ];
-
-  test('pausing silences the core and both running agents', () async {
+  test('pausing silences the core and the running agent', () async {
     final p = pause();
     await p.setPaused(true);
 
@@ -73,9 +58,7 @@ void main() {
     expect(await AppSettings.networkPaused(), isTrue);
     expect(corePosts(), [true]);
     expect(myWatchPosts(), [false]);
-    expect(channelsPosts(), [false]);
     expect(p.isAgentPaused(X0xAgent.myWatch), isTrue);
-    expect(p.isAgentPaused(X0xAgent.channels), isTrue);
   });
 
   test('resume re-enables exactly what the pause switched off — even '
@@ -90,9 +73,7 @@ void main() {
     expect(await AppSettings.networkPaused(), isFalse);
     expect(corePosts(), [true, false]);
     expect(myWatchPosts(), [false, true]);
-    expect(channelsPosts(), [false, true]);
     expect(p.isAgentPaused(X0xAgent.myWatch), isFalse);
-    expect(p.isAgentPaused(X0xAgent.channels), isFalse);
   });
 
   test("a user's own off is never touched: not paused, not resumed",
@@ -101,22 +82,18 @@ void main() {
     final p = pause();
     await p.setPaused(true);
     expect(myWatchPosts(), isEmpty);
-    expect(channelsPosts(), [false]);
     expect(p.isAgentPaused(X0xAgent.myWatch), isFalse);
 
     await p.setPaused(false);
-    // Only channels comes back; My W@tch stays the user's off.
+    // My W@tch stays the user's off.
     expect(myWatchPosts(), isEmpty);
-    expect(channelsPosts(), [false, true]);
   });
 
   test('unsupported agents are never touched', () async {
     fake.myWatchStatus = {'supported': false};
-    fake.channelsStatus = {'supported': false};
     final p = pause();
     await p.setPaused(true);
     expect(myWatchPosts(), isEmpty);
-    expect(channelsPosts(), isEmpty);
     expect(corePosts(), [true]); // the Autonomi client still pauses
   });
 
@@ -130,7 +107,6 @@ void main() {
     // Agents are NOT re-touched at startup — their off state persists
     // in the core's own marker files.
     expect(myWatchPosts(), isEmpty);
-    expect(channelsPosts(), isEmpty);
     p.dispose(); // stops the idle timer start() armed
   });
 
@@ -160,7 +136,6 @@ void main() {
           base: FakeEmbeddedHttp.base,
           token: 'test',
           myWatchApi: MyWatchApi(base: FakeEmbeddedHttp.base),
-          channelsApi: ChannelsApi(base: FakeEmbeddedHttp.base),
           now: () => now,
           downloadsActive: () => downloadsBusy,
           uploadsActive: () => uploadsBusy,
@@ -183,7 +158,6 @@ void main() {
       expect(await AppSettings.networkPaused(), isTrue);
       expect(corePosts(), [true]);
       expect(myWatchPosts(), [false]);
-      expect(channelsPosts(), [false]);
     });
 
     test('playback, downloads and uploads each hold the pause off',
@@ -230,7 +204,6 @@ void main() {
       expect(p.autoPaused, isFalse);
       expect(corePosts(), [true, false]);
       expect(myWatchPosts(), [false, true]);
-      expect(channelsPosts(), [false, true]);
 
       // The clock restarted at the resume.
       now = now.add(const Duration(minutes: 29));

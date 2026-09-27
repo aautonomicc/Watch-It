@@ -33,11 +33,10 @@ class WiTokens extends ThemeExtension<WiTokens> {
   /// Same hue as the dark-theme `accent` — fixed across themes.
   static const bucketBlue = Color(0xFF42A5F5);
 
-  /// Channels accent. Every PUBLIC surface (the Channels screen, channel
-  /// badges, channel rows) is amber; the private space stays blue —
-  /// vocabulary and colour are the first safety wall between the two
-  /// content spaces (docs/PLAN-personal-vs-channels.md Part 3).
-  static const channelAmber = Color(0xFFFFB300);
+  /// Amber attention accent (mobile-data lines, pending-sync warnings,
+  /// needs-sorting tiles). Historically the Channels accent; the feature
+  /// is gone (2026-09-27) but the warning colour stays.
+  static const warnAmber = Color(0xFFFFB300);
 
   static const dark = WiTokens(
     ink: Color(0xFF0A0A0A),
@@ -66,7 +65,6 @@ class WiTokens extends ThemeExtension<WiTokens> {
   );
 
   /// Optional TV palette: quiet woodland surfaces, W@tch's blue retained.
-  /// Channels keep their distinct amber identity in this palette too.
   static const grove = WiTokens(
     ink: Color(0xFF080E0C),
     ink2: Color(0xFF132019),

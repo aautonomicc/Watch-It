@@ -276,9 +276,6 @@ class LibraryStore {
           title: row.title,
           entries: entriesByList[row.id] ?? const [],
           enabled: row.enabled,
-          channelPubkey: row.channelPubkey,
-          channelAuthor: row.channelAuthor,
-          channelAvatar: row.channelAvatar,
           kind: row.kind,
           orderedAt: row.orderedAt == 0 ? null : row.orderedAt,
         ),
@@ -304,9 +301,6 @@ class LibraryStore {
               title: list.title,
               position: listPos,
               enabled: Value(list.enabled),
-              channelPubkey: Value(list.channelPubkey),
-              channelAuthor: Value(list.channelAuthor),
-              channelAvatar: Value(list.channelAvatar),
               kind: Value(list.kind),
               orderedAt: Value(list.orderedAt ?? 0),
             ));
@@ -330,8 +324,7 @@ class LibraryStore {
 /// Merge [entries] into every list named in [chosen] (created when
 /// missing), deduplicating by address — the Upload done pages'
 /// add-to-library semantics, shared by the batch uploader's automatic
-/// add and the channel-publish flow. Channel lists mirror someone's
-/// manifest and are never targets.
+/// add.
 Future<void> addEntriesToLists(
     List<MediaEntry> entries, List<String> chosen) async {
   final lists = await LibraryStore.load();
@@ -342,9 +335,7 @@ Future<void> addEntriesToLists(
     // their own namespace (drawer Playlists section) and gain tracks
     // only through the explicit Add-to-playlist actions.
     final i = updated.indexWhere((l) =>
-        !l.isChannel &&
-        !l.isPlaylist &&
-        l.title.toLowerCase() == title.toLowerCase());
+        !l.isPlaylist && l.title.toLowerCase() == title.toLowerCase());
     if (i < 0) {
       updated
           .add(MediaList(id: '${idBase++}', title: title, entries: entries));

@@ -18,11 +18,6 @@ use ant_core::data::{EvmNetwork, Wallet as EvmWallet};
 const KEYCHAIN_SERVICE: &str = "watchit";
 const KEYCHAIN_USER: &str = "upload-wallet";
 
-/// Keychain entry / fallback file for the channel signing key (channels.rs
-/// reuses this store wholesale — same backends, same threading rules).
-pub const CHANNEL_KEYCHAIN_USER: &str = "channel-key";
-pub const CHANNEL_KEY_FILE: &str = "channel.key";
-
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Storage {
     Keychain,
@@ -42,8 +37,7 @@ pub struct WalletStore {
     /// Fallback key file (`wallet.key` in the data dir); `None` when the
     /// engine runs without a data dir (devserver/tests) — keychain-only.
     file_path: Option<PathBuf>,
-    /// Keychain entry name — the upload wallet and the channel key are
-    /// separate entries in the same keychain service.
+    /// Keychain entry name within the shared keychain service.
     keychain_user: &'static str,
     /// Whether the OS keychain is tried at all. Off in tests so `cargo
     /// test` can never write into a developer's real keychain.
@@ -56,8 +50,7 @@ impl WalletStore {
         Self::named(data_dir, use_keychain, KEYCHAIN_USER, "wallet.key")
     }
 
-    /// A store for a different secret under the same service (the
-    /// channel signing key lives beside the wallet key, never in it).
+    /// A store for a different secret under the same service.
     pub fn named(
         data_dir: Option<&str>,
         use_keychain: bool,

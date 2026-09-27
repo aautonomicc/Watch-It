@@ -44,13 +44,12 @@ Future<AlbumTarget?> pickAlbumTargetFlow(
   List<MediaList>? lists,
 }) async {
   final all = lists ?? await LibraryStore.load();
-  // The album pool: every non-channel, non-playlist entry once
-  // (playlists hold copies of entries that also live in a regular
-  // list; channels mirror someone else's manifest).
+  // The album pool: every non-playlist entry once (playlists hold
+  // copies of entries that also live in a regular list).
   final seen = <(String, String)>{};
   final entries = <MediaEntry>[];
   for (final l in all) {
-    if (l.isChannel || l.isPlaylist) continue;
+    if (l.isPlaylist) continue;
     for (final e in l.entries) {
       if (seen.add((e.address.toLowerCase(), e.name))) entries.add(e);
     }

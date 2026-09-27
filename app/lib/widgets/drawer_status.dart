@@ -2,9 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../screens/channels_screen.dart';
 import '../screens/my_watch_screen.dart';
-import '../services/channels_api.dart';
 import '../services/embedded_client.dart';
 import '../services/my_watch_sync.dart';
 import '../services/network_pause.dart';
@@ -14,16 +12,14 @@ import '../theme/tokens.dart';
 
 /// Connection/status rows at the top of the library drawer, above the
 /// list section — one per network surface, top to bottom: the
-/// Autonomi client (peer count), My W@tch (device sync), and Channels
-/// (public gossip network). Same dot-plus-plain-words style as the
-/// home-screen status bar this replaces; the My W@tch and Channels
-/// rows open their pages on tap.
+/// Autonomi client (peer count) and My W@tch (device sync). Same
+/// dot-plus-plain-words style as the home-screen status bar this
+/// replaces; the My W@tch row opens its page on tap.
 class WiDrawerStatus extends StatefulWidget {
   const WiDrawerStatus({
     super.key,
     this.pinned = false,
     this.healthProvider,
-    this.channelsStatusProvider,
   });
 
   /// True inside the desktop pinned side panel. There is no modal drawer
@@ -35,24 +31,18 @@ class WiDrawerStatus extends StatefulWidget {
   /// Test override for [EmbeddedClient.health].
   final Future<ClientHealth> Function()? healthProvider;
 
-  /// Test override for [ChannelsApi.status].
-  final Future<ChannelsStatus> Function()? channelsStatusProvider;
-
   @override
   State<WiDrawerStatus> createState() => _WiDrawerStatusState();
 }
 
 class _WiDrawerStatusState extends State<WiDrawerStatus> {
   ClientHealth? _health;
-  ChannelsStatus? _channels;
   Timer? _healthTimer;
-  Timer? _channelsTimer;
 
   @override
   void initState() {
     super.initState();
     _pollHealth();
-    _pollChannels();
     // "Paused on mobile data" vs "switched off" wording can flip while
     // the drawer is open (walking out of Wi-Fi range); same for the
     // all-network pause.
@@ -65,7 +55,6 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
     X0xCellularGate.instance.removeListener(_onGateChanged);
     NetworkPause.instance.removeListener(_onGateChanged);
     _healthTimer?.cancel();
-    _channelsTimer?.cancel();
     super.dispose();
   }
 
@@ -81,22 +70,6 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
     _healthTimer = Timer(
       Duration(seconds: health.state == 'ready' ? 15 : 3),
       _pollHealth,
-    );
-  }
-
-  Future<void> _pollChannels() async {
-    final ChannelsStatus status;
-    try {
-      status = await (widget.channelsStatusProvider ?? ChannelsApi().status)();
-    } catch (_) {
-      return; // embedded client unreachable; row stays hidden
-    }
-    if (!mounted) return;
-    setState(() => _channels = status);
-    if (!status.supported) return;
-    _channelsTimer = Timer(
-      Duration(seconds: status.state == 'starting' ? 5 : 30),
-      _pollChannels,
     );
   }
 
@@ -209,39 +182,6 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
     );
   }
 
-  Widget _channelsRow(WiTokens t) {
-    final c = _channels;
-    if (c == null || !c.supported) return const SizedBox.shrink();
-    final (color, text) = switch (c) {
-      ChannelsStatus(enabled: false) => (
-        t.ash,
-        NetworkPause.instance.isAgentPaused(X0xAgent.channels)
-            ? 'Channels: paused with the network'
-            : X0xCellularGate.instance.isPaused(X0xAgent.channels)
-            ? 'Channels: paused on mobile data'
-            : 'Channels: switched off',
-      ),
-      ChannelsStatus(state: 'ready') => (
-        const Color(0xff4caf50),
-        'Channels: connected',
-      ),
-      ChannelsStatus(state: 'starting') => (
-        WiTokens.channelAmber,
-        'Channels: connecting…',
-      ),
-      _ => (t.ash, 'Channels: not connected'),
-    };
-    return _row(
-      t,
-      color: color,
-      text: text,
-      spinner: c.state == 'starting',
-      onTap: ProfileStore.instance.isAdmin
-          ? () => _openPage(const ChannelsScreen())
-          : null,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
@@ -253,7 +193,6 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
           valueListenable: MyWatchSync.status,
           builder: (context, s, _) => _myWatchRow(t, s),
         ),
-        _channelsRow(t),
       ],
     );
   }

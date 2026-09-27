@@ -8,15 +8,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:watchit/services/app_settings.dart';
 import 'package:watchit/services/my_watch_api.dart';
-import 'package:watchit/services/channels_api.dart';
 import 'package:watchit/services/network_events.dart';
 import 'package:watchit/services/x0x_cellular.dart';
 
 import 'fake_embedded_http.dart';
 
-/// The mobile-data gate for the x0x agents: pauses My W@tch / Channels
-/// on cellular when their Settings → Network → Mobile data switch says
-/// Wi-Fi only, resumes on Wi-Fi, and never overrides a user's own off.
+/// The mobile-data gate for the x0x agent: pauses My W@tch on cellular
+/// when its Settings → Network → Mobile data switch says Wi-Fi only,
+/// resumes on Wi-Fi, and never overrides a user's own off.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -33,14 +32,6 @@ void main() {
       'state': 'ready',
       'devices': const [],
     };
-    fake.channelsStatus = {
-      'supported': true,
-      'enabled': true,
-      'state': 'ready',
-      'message': null,
-      'own': null,
-      'subs': const [],
-    };
   });
 
   tearDown(() {
@@ -49,7 +40,6 @@ void main() {
 
   X0xCellularGate gate({NetworkEvents? network}) => X0xCellularGate(
         myWatchApi: MyWatchApi(base: FakeEmbeddedHttp.base),
-        channelsApi: ChannelsApi(base: FakeEmbeddedHttp.base),
         network: network,
       );
 
@@ -65,14 +55,8 @@ void main() {
         for (final body in fake.myWatchEnabledPosts)
           (jsonDecode(body) as Map<String, dynamic>)['enabled'] as bool,
       ];
-  List<bool> channelsPosts() => [
-        for (final body in fake.channelEnabledPosts)
-          (jsonDecode(body) as Map<String, dynamic>)['enabled'] as bool,
-      ];
-
-  test('mobile data defaults to allowed for both agents', () async {
+  test('mobile data defaults to allowed', () async {
     expect(await AppSettings.myWatchOnCellular(), isTrue);
-    expect(await AppSettings.channelsOnCellular(), isTrue);
   });
 
   test('with the default allow settings nothing happens on cellular',
@@ -82,12 +66,10 @@ void main() {
     final g = gate(network: network);
     await g.onPolicyChanged();
     expect(fake.myWatchEnabledPosts, isEmpty);
-    expect(fake.channelEnabledPosts, isEmpty);
     expect(g.isPaused(X0xAgent.myWatch), isFalse);
-    expect(g.isPaused(X0xAgent.channels), isFalse);
   });
 
-  test('pauses only the disallowed agent on cellular and persists the '
+  test('pauses the disallowed agent on cellular and persists the '
       'pause', () async {
     SharedPreferences.setMockInitialValues({'mywatch_cellular_v1': false});
     final network = cellular();
@@ -95,7 +77,6 @@ void main() {
     final g = gate(network: network);
     await g.onPolicyChanged();
     expect(myWatchPosts(), [false]);
-    expect(channelsPosts(), isEmpty); // still allowed
     expect(g.isPaused(X0xAgent.myWatch), isTrue);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getStringList('x0x_cellular_paused_v1'), ['myWatch']);
@@ -103,8 +84,8 @@ void main() {
 
   test('resumes a gate-paused agent when Wi-Fi returns', () async {
     SharedPreferences.setMockInitialValues({
-      'channels_cellular_v1': false,
-      'x0x_cellular_paused_v1': ['channels'],
+      'mywatch_cellular_v1': false,
+      'x0x_cellular_paused_v1': ['myWatch'],
     });
     final transport =
         StreamController<List<ConnectivityResult>>.broadcast();
@@ -117,14 +98,14 @@ void main() {
     g.start(initialDelay: Duration.zero);
     await Future<void>.delayed(Duration.zero);
     await g.onPolicyChanged(); // still on cellular: stays paused
-    expect(channelsPosts(), isEmpty);
-    expect(g.isPaused(X0xAgent.channels), isTrue);
+    expect(myWatchPosts(), isEmpty);
+    expect(g.isPaused(X0xAgent.myWatch), isTrue);
 
     transport.add([ConnectivityResult.wifi]);
     await Future<void>.delayed(Duration.zero);
     await g.onPolicyChanged(); // joins the queued transport apply
-    expect(channelsPosts(), [true]);
-    expect(g.isPaused(X0xAgent.channels), isFalse);
+    expect(myWatchPosts(), [true]);
+    expect(g.isPaused(X0xAgent.myWatch), isFalse);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getStringList('x0x_cellular_paused_v1'), isEmpty);
     await transport.close();
@@ -156,28 +137,21 @@ void main() {
   });
 
   test('unsupported agent is never touched', () async {
-    SharedPreferences.setMockInitialValues({'channels_cellular_v1': false});
-    fake.channelsStatus = {
-      'supported': false,
-      'enabled': true,
-      'state': 'off',
-      'message': null,
-      'own': null,
-      'subs': const [],
-    };
+    SharedPreferences.setMockInitialValues({'mywatch_cellular_v1': false});
+    fake.myWatchStatus = {'supported': false};
     final network = cellular();
     await Future<void>.delayed(Duration.zero);
     final g = gate(network: network);
     await g.onPolicyChanged();
-    expect(fake.channelEnabledPosts, isEmpty);
-    expect(g.isPaused(X0xAgent.channels), isFalse);
+    expect(fake.myWatchEnabledPosts, isEmpty);
+    expect(g.isPaused(X0xAgent.myWatch), isFalse);
   });
 
   test('a manual switch change clears the pause so Wi-Fi cannot '
       'override it', () async {
     SharedPreferences.setMockInitialValues({
-      'channels_cellular_v1': false,
-      'x0x_cellular_paused_v1': ['channels'],
+      'mywatch_cellular_v1': false,
+      'x0x_cellular_paused_v1': ['myWatch'],
     });
     final transport =
         StreamController<List<ConnectivityResult>>.broadcast();
@@ -190,8 +164,8 @@ void main() {
     g.start(initialDelay: Duration.zero);
     await Future<void>.delayed(Duration.zero);
 
-    await g.noteManualChange(X0xAgent.channels);
-    expect(g.isPaused(X0xAgent.channels), isFalse);
+    await g.noteManualChange(X0xAgent.myWatch);
+    expect(g.isPaused(X0xAgent.myWatch), isFalse);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getStringList('x0x_cellular_paused_v1'), isEmpty);
 
@@ -199,7 +173,7 @@ void main() {
     transport.add([ConnectivityResult.wifi]);
     await Future<void>.delayed(Duration.zero);
     await g.onPolicyChanged();
-    expect(fake.channelEnabledPosts, isEmpty);
+    expect(fake.myWatchEnabledPosts, isEmpty);
     await transport.close();
   });
 
@@ -213,7 +187,6 @@ void main() {
     HttpOverrides.global = null;
     final g = X0xCellularGate(
       myWatchApi: MyWatchApi(base: 'http://127.0.0.1:1'),
-      channelsApi: ChannelsApi(base: 'http://127.0.0.1:1'),
       network: NetworkEvents(
           stream: const Stream.empty(),
           check: () async => [ConnectivityResult.wifi]),

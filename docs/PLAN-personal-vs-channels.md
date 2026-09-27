@@ -1,5 +1,9 @@
 # Plan: Personal media (My W@tch) vs public Channels
 
+**STATUS (2026-09-27): the Channels feature described here was REMOVED
+from the app (user decision after a publishing-liability review). This
+document is historical.**
+
 **Status: IMPLEMENTED (2026-08-27).** Part 1 (the Publish→Upload rename)
 shipped as alpha.64. Parts 2–3 (Channels core + safety rails) are
 implemented together on main: Ed25519 channel identity from its own

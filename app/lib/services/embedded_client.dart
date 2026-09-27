@@ -303,7 +303,6 @@ class DayUsage {
     required this.day,
     this.ant = const UsageBytes(),
     this.myWatch = const UsageBytes(),
-    this.channels = const UsageBytes(),
   });
 
   /// The local calendar day (midnight, no timezone math — the native
@@ -311,13 +310,12 @@ class DayUsage {
   final DateTime day;
   final UsageBytes ant;
   final UsageBytes myWatch;
-  final UsageBytes channels;
 
   UsageBytes get total => UsageBytes(
-        rx: ant.rx + myWatch.rx + channels.rx,
-        tx: ant.tx + myWatch.tx + channels.tx,
-        mobRx: ant.mobRx + myWatch.mobRx + channels.mobRx,
-        mobTx: ant.mobTx + myWatch.mobTx + channels.mobTx,
+        rx: ant.rx + myWatch.rx,
+        tx: ant.tx + myWatch.tx,
+        mobRx: ant.mobRx + myWatch.mobRx,
+        mobTx: ant.mobTx + myWatch.mobTx,
       );
 
   static DayUsage? fromJson(dynamic json) {
@@ -328,7 +326,6 @@ class DayUsage {
       day: day,
       ant: UsageBytes.fromJson(json['ant']),
       myWatch: UsageBytes.fromJson(json['mywatch']),
-      channels: UsageBytes.fromJson(json['channels']),
     );
   }
 }
@@ -348,7 +345,6 @@ class DataUsageStats {
     required this.total,
     required this.ant,
     required this.myWatch,
-    required this.channels,
     this.antMediaRx = 0,
     this.antStaleSecs,
     this.days,
@@ -358,7 +354,6 @@ class DataUsageStats {
   final UsageBytes total;
   final UsageBytes ant;
   final UsageBytes myWatch;
-  final UsageBytes channels;
 
   /// Per-local-day history (oldest first), or null on an old core whose
   /// `/stats` predates the daily buckets (UI hides the graph then).
@@ -378,7 +373,6 @@ class DataUsageStats {
         total: UsageBytes.fromJson(json['total']),
         ant: UsageBytes.fromJson(json['ant']),
         myWatch: UsageBytes.fromJson(json['mywatch']),
-        channels: UsageBytes.fromJson(json['channels']),
         antMediaRx: (json['ant'] as Map?)?['media_rx'] as int? ?? 0,
         antStaleSecs: (json['ant'] as Map?)?['stale_secs'] as int?,
         days: json['days'] is List

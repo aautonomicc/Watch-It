@@ -7,7 +7,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:watchit/screens/data_screen.dart';
 import 'package:watchit/services/app_settings.dart';
-import 'package:watchit/services/channels_api.dart';
 import 'package:watchit/services/embedded_client.dart';
 import 'package:watchit/services/my_watch_api.dart';
 import 'package:watchit/services/network_pause.dart';
@@ -59,7 +58,6 @@ void main() {
         baseOverride: FakeEmbeddedHttp.base,
         tokenOverride: 'sekrit',
         myWatchApi: MyWatchApi(base: FakeEmbeddedHttp.base),
-        channelsApi: ChannelsApi(base: FakeEmbeddedHttp.base),
         gate: gate,
         healthProvider: health,
         clock: clock,
@@ -84,8 +82,7 @@ void main() {
           'media_rx': 200 * 1024 * 1024,
           'stale_secs': 120,
         },
-        'mywatch': {'rx': 40 * 1024 * 1024, 'tx': 6 * 1024 * 1024},
-        'channels': {'rx': 10 * 1024 * 1024, 'tx': 4 * 1024 * 1024},
+        'mywatch': {'rx': 50 * 1024 * 1024, 'tx': 10 * 1024 * 1024},
       };
       await open(tester);
 
@@ -93,13 +90,11 @@ void main() {
       expect(find.text('330 MB'), findsOneWidget); // big total
       expect(find.text('↑ 30.0 MB'), findsOneWidget);
       expect(find.text('↓ 300 MB'), findsOneWidget);
-      // Component rows, top to bottom: Autonomi, My W@tch, Channels.
+      // Component rows, top to bottom: Autonomi, My W@tch.
       expect(find.text('Autonomi client'), findsOneWidget);
       final antY = tester.getTopLeft(find.text('Autonomi client')).dy;
       final mwY = tester.getTopLeft(find.text('My W@tch').first).dy;
-      final chY = tester.getTopLeft(find.text('Channels').first).dy;
       expect(antY, lessThan(mwY));
-      expect(mwY, lessThan(chY));
       // Autonomi extras: the media split and the summary freshness.
       expect(find.text('of which media: 200 MB'), findsOneWidget);
       expect(find.text('updated 2 min ago'), findsOneWidget);
@@ -115,7 +110,6 @@ void main() {
         'total': {'rx': 1000, 'tx': 100},
         'ant': {'rx': 1000, 'tx': 100, 'media_rx': 0, 'stale_secs': null},
         'mywatch': {'rx': 0, 'tx': 0},
-        'channels': {'rx': 0, 'tx': 0},
       };
       // Injected clock: fake-async pumps don't advance DateTime.now().
       var now = DateTime(2026, 9, 4, 12, 0, 0);
@@ -148,7 +142,6 @@ void main() {
           'stale_secs': 10,
         },
         'mywatch': {'rx': 0, 'tx': 0},
-        'channels': {'rx': 0, 'tx': 0},
       };
       await open(tester);
       // 6 MB period total on the card and as the ant row's own total;
@@ -186,10 +179,9 @@ void main() {
         'enabled': false,
         'devices': const [],
       };
-      fake.channelsStatus['enabled'] = false;
       await open(tester);
-      // Two usage-row tags plus the two pills' own Off segments.
-      expect(find.text('Off'), findsNWidgets(4));
+      // The usage-row tag plus the pill's own Off segment.
+      expect(find.text('Off'), findsNWidgets(2));
       await close(tester);
     });
 
@@ -199,7 +191,6 @@ void main() {
         'total': {'rx': 10, 'tx': 2},
         'ant': {'rx': 7, 'tx': 1, 'media_rx': 5, 'stale_secs': 60},
         'mywatch': {'rx': 2, 'tx': 1},
-        'channels': {'rx': 1, 'tx': 0},
       });
       expect(stats.periodStart.millisecondsSinceEpoch, 1234);
       expect(stats.total.total, 12);
@@ -207,14 +198,12 @@ void main() {
       expect(stats.antMediaRx, 5);
       expect(stats.antStaleSecs, 60);
       expect(stats.myWatch.tx, 1);
-      expect(stats.channels.rx, 1);
       // Absent stale_secs (pre-first-summary) parses as null.
       final fresh = DataUsageStats.fromJson({
         'period_start_ms': 1,
         'total': {'rx': 0, 'tx': 0},
         'ant': {'rx': 0, 'tx': 0, 'media_rx': 0, 'stale_secs': null},
         'mywatch': {'rx': 0, 'tx': 0},
-        'channels': {'rx': 0, 'tx': 0},
       });
       expect(fresh.antStaleSecs, isNull);
     });
@@ -233,13 +222,11 @@ void main() {
         'total': {'rx': 10, 'tx': 2, 'mob_rx': 4, 'mob_tx': 1},
         'ant': {'rx': 10, 'tx': 2, 'media_rx': 0, 'stale_secs': null},
         'mywatch': {'rx': 0, 'tx': 0},
-        'channels': {'rx': 0, 'tx': 0},
         'days': [
           {
             'day': '2026-09-23',
             'ant': {'rx': 7, 'tx': 1, 'mob_rx': 3, 'mob_tx': 1},
-            'mywatch': {'rx': 2, 'tx': 0},
-            'channels': {'rx': 1, 'tx': 1},
+            'mywatch': {'rx': 3, 'tx': 1},
           },
           {'day': 'garbage'}, // malformed entries are dropped, not fatal
         ],
@@ -259,7 +246,6 @@ void main() {
         'total': {'rx': 0, 'tx': 0},
         'ant': {'rx': 0, 'tx': 0},
         'mywatch': {'rx': 0, 'tx': 0},
-        'channels': {'rx': 0, 'tx': 0},
       });
       expect(old.days, isNull);
     });
@@ -292,20 +278,17 @@ void main() {
           'media_rx': 0,
           'stale_secs': 120,
         },
-        'mywatch': split(40 * mb, 6 * mb),
-        'channels': split(10 * mb, 4 * mb),
+        'mywatch': split(50 * mb, 10 * mb),
         'days': [
           {
             'day': '2026-09-19',
             'ant': split(0, 0),
             'mywatch': split(10 * mb, 2 * mb),
-            'channels': split(0, 0),
           },
           {
             'day': '2026-09-23',
             'ant': split(100 * mb, 10 * mb, mobRx: 40 * mb, mobTx: 5 * mb),
             'mywatch': split(0, 0),
-            'channels': split(0, 0),
           },
         ],
       };
@@ -370,13 +353,11 @@ void main() {
         'total': split(6 * gb, 0),
         'ant': {...split(6 * gb, 0), 'media_rx': 0, 'stale_secs': null},
         'mywatch': split(0, 0),
-        'channels': split(0, 0),
         'days': [
           {
             'day': '2026-09-23',
             'ant': split(6 * gb, 0),
             'mywatch': split(0, 0),
-            'channels': split(0, 0),
           },
         ],
       };
@@ -414,16 +395,6 @@ void main() {
         'state': 'ready',
         'devices': const [],
       };
-      fake.channelsStatus = {
-        'supported': true,
-        'enabled': true,
-        'state': 'ready',
-        'message': null,
-        'own': null,
-        'subs': [
-          {'pubkey': 'ab' * 32, 'code': 'wchn1-x', 'head': null},
-        ],
-      };
       await open(tester);
 
       final usageY = tester.getTopLeft(find.text('Total data usage')).dy;
@@ -436,14 +407,11 @@ void main() {
       expect(pauseY, lessThan(clientsY));
       expect(clientsY, lessThan(mobileY));
 
-      // State lines, and Channels' pill above My W@tch's (the CONTENT
-      // section's order).
+      // State line and the pill's default.
       expect(find.text('On — connected to your devices'), findsOneWidget);
-      expect(find.text('On — connected to the channel network'),
-          findsOneWidget);
       final pills = find.byType(SegmentedButton<ClientNetMode>);
-      expect(pills, findsNWidgets(2));
-      // Both agents on with the cellular default: Wi-Fi + mobile.
+      expect(pills, findsOneWidget);
+      // The agent on with the cellular default: Wi-Fi + mobile.
       for (final pill in
           tester.widgetList<SegmentedButton<ClientNetMode>>(pills)) {
         expect(pill.selected, {ClientNetMode.wifiAndMobile});
@@ -458,27 +426,25 @@ void main() {
 
     testWidgets('Off pill switches the agent off and reads back off',
         (tester) async {
-      fake.channelsStatus = {
+      fake.myWatchStatus = {
         'supported': true,
         'enabled': true,
+        'linked': true,
         'state': 'ready',
-        'message': null,
-        'own': null,
-        'subs': [
-          {'pubkey': 'ab' * 32, 'code': 'wchn1-x', 'head': null},
-        ],
+        'devices': const [],
       };
       await open(tester);
 
-      // The Channels pill sits above My W@tch's — its Off is first.
-      await tester.tap(find.text('Off').first);
+      await tester.tap(find.descendant(
+          of: find.byType(SegmentedButton<ClientNetMode>),
+          matching: find.text('Off')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 
-      expect(fake.channelEnabledPosts, hasLength(1));
-      expect(jsonDecode(fake.channelEnabledPosts.single),
+      expect(fake.myWatchEnabledPosts, hasLength(1));
+      expect(jsonDecode(fake.myWatchEnabledPosts.single),
           {'enabled': false});
-      expect(find.textContaining('Off — channels get no updates'),
+      expect(find.text('Off — nothing syncs between devices'),
           findsOneWidget);
       await close(tester);
     });
@@ -487,28 +453,26 @@ void main() {
         'Wi-Fi and Wi-Fi + mobile pills persist the cellular pref and '
         'poke the gate — no agent flip while it is on', (tester) async {
       final gate = _RecordingGate();
-      fake.channelsStatus = {
+      fake.myWatchStatus = {
         'supported': true,
         'enabled': true,
+        'linked': true,
         'state': 'ready',
-        'message': null,
-        'own': null,
-        'subs': const [],
+        'devices': const [],
       };
       await open(tester, gate: gate);
 
       await tester.tap(find.text('Wi-Fi').first);
       await tester.pumpAndSettle();
-      expect(await AppSettings.channelsOnCellular(), isFalse);
-      expect(await AppSettings.myWatchOnCellular(), isTrue);
+      expect(await AppSettings.myWatchOnCellular(), isFalse);
       expect(gate.policyChanges, 1);
-      expect(fake.channelEnabledPosts, isEmpty);
+      expect(fake.myWatchEnabledPosts, isEmpty);
 
       await tester.tap(find.text('Wi-Fi + mobile').first);
       await tester.pumpAndSettle();
-      expect(await AppSettings.channelsOnCellular(), isTrue);
+      expect(await AppSettings.myWatchOnCellular(), isTrue);
       expect(gate.policyChanges, 2);
-      expect(fake.channelEnabledPosts, isEmpty);
+      expect(fake.myWatchEnabledPosts, isEmpty);
       await close(tester);
     });
 
@@ -526,7 +490,6 @@ void main() {
       expect(find.text('Off — nothing syncs between devices'),
           findsOneWidget);
 
-      // My W@tch's pill is the lower one.
       await tester.tap(find.text('Wi-Fi').last);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
@@ -543,18 +506,17 @@ void main() {
         'pause', (tester) async {
       // A gate pause only ever exists alongside the Wi-Fi-only pref.
       SharedPreferences.setMockInitialValues({
-        'x0x_cellular_paused_v1': ['channels'],
-        'channels_cellular_v1': false,
+        'x0x_cellular_paused_v1': ['myWatch'],
+        'mywatch_cellular_v1': false,
       });
       final gate = X0xCellularGate();
       await gate.ensureLoaded();
-      fake.channelsStatus = {
+      fake.myWatchStatus = {
         'supported': true,
         'enabled': false,
+        'linked': true,
         'state': 'off',
-        'message': null,
-        'own': null,
-        'subs': const [],
+        'devices': const [],
       };
       await open(tester, gate: gate);
 
@@ -562,9 +524,9 @@ void main() {
           findsOneWidget);
       // The pause is the Wi-Fi rule at work — the pill must NOT read
       // Off (Wi-Fi's return resumes the agent by itself).
-      final channelsPill = tester.widget<SegmentedButton<ClientNetMode>>(
+      final myWatchPill = tester.widget<SegmentedButton<ClientNetMode>>(
           find.byType(SegmentedButton<ClientNetMode>).first);
-      expect(channelsPill.selected, {ClientNetMode.wifi});
+      expect(myWatchPill.selected, {ClientNetMode.wifi});
 
       // An explicit Off wins over the gate: pause forgotten, agent off.
       // (Scoped to the pill — the usage block shows an 'Off' tag too.)
@@ -573,8 +535,8 @@ void main() {
           matching: find.text('Off')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
-      expect(gate.isPaused(X0xAgent.channels), isFalse);
-      expect(jsonDecode(fake.channelEnabledPosts.single),
+      expect(gate.isPaused(X0xAgent.myWatch), isFalse);
+      expect(jsonDecode(fake.myWatchEnabledPosts.single),
           {'enabled': false});
       await close(tester);
     });
@@ -591,7 +553,6 @@ void main() {
       await open(tester);
 
       expect(find.text('Not available on this platform'), findsOneWidget);
-      // My W@tch is the second pill (Channels sits on top).
       final myWatchPill = tester.widget<SegmentedButton<ClientNetMode>>(
           find.byType(SegmentedButton<ClientNetMode>).last);
       expect(myWatchPill.onSelectionChanged, isNull);

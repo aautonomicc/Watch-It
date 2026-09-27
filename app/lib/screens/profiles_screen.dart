@@ -6,9 +6,11 @@ import '../models/media_list.dart';
 import '../services/library_store.dart';
 import '../services/profiles.dart';
 import '../theme/tokens.dart';
+import 'package:file_selector/file_selector.dart';
+
 import '../widgets/pin_dialog.dart';
+import '../widgets/poster_crop_dialog.dart';
 import '../widgets/profile_avatar.dart';
-import 'channels_screen.dart' show pickChannelAvatar;
 
 /// Settings → Profiles (admin only): the family's profiles, the door to
 /// creating/editing them, and the admin PIN with its one-time recovery
@@ -214,7 +216,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   }
 
   Future<void> _pickImageAvatar() async {
-    final bytes = await pickChannelAvatar(context);
+    final bytes = await pickAvatarImage(context);
     if (bytes == null) return;
     setState(() {
       _stagedAvatarBytes = bytes;
@@ -587,12 +589,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                   list.title,
                   style: TextStyle(color: t.bone, fontSize: 14),
                 ),
-                subtitle: list.isChannel
-                    ? Text(
-                        'Channel — updates by itself',
-                        style: TextStyle(color: t.ash, fontSize: 11),
-                      )
-                    : null,
                 onChanged: (v) => setState(() {
                   if (v ?? false) {
                     _allowed.add(list.id);
@@ -650,4 +646,47 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       ),
     );
   }
+}
+
+/// Pick an image file and crop it square for a profile avatar.
+/// Returns the crop bytes (≤512px) or null on cancel/refusal. The crop
+/// is forced 1:1 — the stored bytes are always square, so the circular
+/// render never surprises. (Moved here from the removed Channels
+/// feature, whose avatar picker this was.)
+Future<Uint8List?> pickAvatarImage(BuildContext context) async {
+  final file = await openFile(acceptedTypeGroups: const [
+    XTypeGroup(
+        label: 'Images',
+        extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp']),
+    XTypeGroup(label: 'All files'),
+  ]);
+  if (file == null) return null;
+  final bytes = await file.readAsBytes();
+  if (!context.mounted) return null;
+  if (bytes.length > 10 * 1024 * 1024) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content:
+            Text('That image is larger than 10 MB — pick a smaller one.')));
+    return null;
+  }
+  final cropped = await showDialog<Uint8List>(
+    context: context,
+    builder: (_) => PosterCropDialog(
+      bytes: bytes,
+      aspect: 1,
+      title: 'Crop your avatar',
+      hint: 'The square becomes the circular avatar: drag to position, '
+          'zoom to fill it. Square images of at least 256px work best.',
+      allowWholeFrame: false,
+      maxOutputDimension: 512,
+    ),
+  );
+  if (cropped == null || !context.mounted) return null;
+  if (cropped.length > 2 * 1024 * 1024) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('The cropped avatar is larger than the 2 MB limit — '
+            'try a smaller image.')));
+    return null;
+  }
+  return cropped;
 }

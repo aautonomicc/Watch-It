@@ -28,7 +28,6 @@ import '../widgets/brand_mark.dart';
 import '../widgets/messenger.dart';
 import '../widgets/tv_dpad_focus.dart';
 import '../widgets/update_tile.dart';
-import 'channels_screen.dart';
 import 'data_screen.dart';
 import 'downloads_screen.dart';
 import 'exit_info_screen.dart';
@@ -504,8 +503,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 if (_isAdmin) ...[
                   // Renamed from LIBRARY (2026-08-30): the section covers
-                  // everything your content does — channels, device sync,
-                  // your media, uploads, and downloads.
+                  // everything your content does — device sync, your
+                  // media, uploads, and downloads.
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
                     child: Text(
@@ -518,29 +517,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                   ),
-                  // Channels — the PUBLIC space, amber; leads the section
-                  // (2026-08-29), above the private tiles.
-                  ListTile(
-                    leading: const Icon(
-                      Icons.podcasts,
-                      color: WiTokens.channelAmber,
-                    ),
-                    title: Text(
-                      'Channels',
-                      style: TextStyle(color: t.bone, fontSize: 15),
-                    ),
-                    subtitle: Text(
-                      'Public · anyone with the code',
-                      style: TextStyle(color: t.ash, fontSize: 12),
-                    ),
-                    trailing: Icon(Icons.chevron_right, color: t.ash),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const ChannelsScreen()),
-                    ),
-                  ),
-                  // My W@tch directly under Channels (2026-08-29): the two
-                  // sharing surfaces sit together — public above, private
-                  // below.
                   ListTile(
                     leading: Icon(Icons.devices_outlined, color: t.accent),
                     title: Text(
@@ -672,8 +648,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                         'playing something resumes it'
                                   : 'Paused — nothing is streamed or synced '
                                         'until you switch this off')
-                            : 'Disconnects from Autonomi and pauses Channels '
-                                  'and My W@tch until switched back on',
+                            : 'Disconnects from Autonomi and pauses '
+                                  'My W@tch until switched back on',
                         style: TextStyle(color: t.ash, fontSize: 12),
                       ),
                       value: NetworkPause.instance.paused,
@@ -863,8 +839,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 // Android the key lives in the 0600 file fallback —
                 // the wallet screen surfaces that). Section named
                 // WALLET (not PUBLISHING) since the Publish→Upload
-                // rename — one wallet funds both spaces
-                // (docs/PLAN-personal-vs-channels.md).
+                // rename.
                 if (_isAdmin && isUploadPlatform) ...[
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),

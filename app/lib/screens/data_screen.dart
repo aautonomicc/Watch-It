@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
-import '../services/channels_api.dart';
 import '../services/download_manager.dart';
 import '../services/embedded_client.dart';
 import '../services/my_watch_api.dart';
@@ -38,8 +37,8 @@ enum ClientNetMode { off, wifi, wifiAndMobile }
 /// Settings → Network → Data: everything data on one page (2026-09-06
 /// reorg, replacing the Data usage / Data saving / Mobile data /
 /// Built-in clients sub-pages). Top to bottom: the running usage
-/// counters, Auto-pause when idle, the two built-in clients with a
-/// compact Off / Wi-Fi / Wi-Fi + mobile pill each, and the streaming +
+/// counters, Auto-pause when idle, the built-in clients (My W@tch with
+/// a compact Off / Wi-Fi / Wi-Fi + mobile pill), and the streaming +
 /// download mobile-data policies. The always-manual Offline mode
 /// switch stays on the Network section above this page's tile.
 class DataScreen extends StatefulWidget {
@@ -49,7 +48,6 @@ class DataScreen extends StatefulWidget {
     this.tokenOverride,
     this.clock,
     this.myWatchApi,
-    this.channelsApi,
     this.gate,
     this.healthProvider,
   });
@@ -64,7 +62,6 @@ class DataScreen extends StatefulWidget {
 
   /// More test overrides.
   final MyWatchApi? myWatchApi;
-  final ChannelsApi? channelsApi;
   final X0xCellularGate? gate;
   final Future<ClientHealth> Function()? healthProvider;
 
@@ -91,22 +88,16 @@ class _DataScreenState extends State<DataScreen> {
   // -- Built-in clients. --
   ClientHealth? _health;
   MyWatchStatus? _myWatch;
-  ChannelsStatus? _channels;
   bool _busyMyWatch = false;
-  bool _busyChannels = false;
 
   // -- Mobile-data policies. --
   StreamingNetworkPolicy _streaming = StreamingNetworkPolicy.ask;
   DownloadNetworkPolicy _downloads = DownloadNetworkPolicy.wifiOnly;
-  bool _channelsOnCellular = true;
   bool _myWatchOnCellular = true;
 
   MyWatchApi get _myWatchApi =>
       widget.myWatchApi ??
       MyWatchApi(base: widget.baseOverride, token: widget.tokenOverride);
-  ChannelsApi get _channelsApi =>
-      widget.channelsApi ??
-      ChannelsApi(base: widget.baseOverride, token: widget.tokenOverride);
   X0xCellularGate get _gate => widget.gate ?? X0xCellularGate.instance;
 
   @override
@@ -136,8 +127,8 @@ class _DataScreenState extends State<DataScreen> {
   DateTime _now() => widget.clock?.call() ?? DateTime.now();
 
   /// One poll fetches everything the page shows live: counters, the
-  /// Autonomi connection, and the two agent states (all localhost
-  /// calls, so a shared 5 s cadence is cheap).
+  /// Autonomi connection, and the agent state (all localhost calls,
+  /// so a shared 5 s cadence is cheap).
   Future<void> _tick() async {
     await Future.wait([_loadStats(), _reloadClients()]);
   }
@@ -161,7 +152,6 @@ class _DataScreenState extends State<DataScreen> {
   Future<void> _reloadClients() async {
     ClientHealth? health;
     MyWatchStatus? myWatch;
-    ChannelsStatus? channels;
     try {
       health = await (widget.healthProvider ?? EmbeddedClient.health)();
     } catch (_) {
@@ -170,28 +160,22 @@ class _DataScreenState extends State<DataScreen> {
     try {
       myWatch = await _myWatchApi.status();
     } catch (_) {}
-    try {
-      channels = await _channelsApi.status();
-    } catch (_) {}
     if (!mounted) return;
     setState(() {
       _health = health ?? _health;
       _myWatch = myWatch ?? _myWatch;
-      _channels = channels ?? _channels;
     });
   }
 
   Future<void> _loadPolicies() async {
     final streaming = await AppSettings.streamingNetworkPolicy();
     final downloads = await AppSettings.downloadNetworkPolicy();
-    final channels = await AppSettings.channelsOnCellular();
     final myWatch = await AppSettings.myWatchOnCellular();
     final alertGb = await AppSettings.dataAlertGb();
     if (!mounted) return;
     setState(() {
       _streaming = streaming;
       _downloads = downloads;
-      _channelsOnCellular = channels;
       _myWatchOnCellular = myWatch;
       _alertGb = alertGb;
     });
@@ -362,38 +346,6 @@ class _DataScreenState extends State<DataScreen> {
     return cellularAllowed ? ClientNetMode.wifiAndMobile : ClientNetMode.wifi;
   }
 
-  Future<void> _setChannelsMode(ClientNetMode mode) async {
-    setState(() => _busyChannels = true);
-    try {
-      switch (mode) {
-        case ClientNetMode.off:
-          // An explicit Off wins over the mobile-data gate: forget any
-          // pause it holds so Wi-Fi's return won't flip this back on.
-          await _gate.noteManualChange(X0xAgent.channels);
-          await _channelsApi.setEnabled(false);
-        case ClientNetMode.wifi:
-        case ClientNetMode.wifiAndMobile:
-          final cellular = mode == ClientNetMode.wifiAndMobile;
-          await AppSettings.setChannelsOnCellular(cellular);
-          if (mounted) setState(() => _channelsOnCellular = cellular);
-          if (!(_channels?.enabled ?? true) &&
-              !_gate.isPaused(X0xAgent.channels)) {
-            await _gate.noteManualChange(X0xAgent.channels);
-            await _channelsApi.setEnabled(true);
-          }
-          // On cellular right now, the agent pauses or resumes without
-          // waiting for a transport change.
-          await _gate.onPolicyChanged();
-      }
-    } catch (e) {
-      wiMessengerKey.currentState?.showSnackBar(
-        SnackBar(content: Text('Could not change the setting: $e')),
-      );
-    }
-    if (mounted) setState(() => _busyChannels = false);
-    await _reloadClients();
-  }
-
   Future<void> _setMyWatchMode(ClientNetMode mode) async {
     setState(() => _busyMyWatch = true);
     try {
@@ -437,24 +389,6 @@ class _DataScreenState extends State<DataScreen> {
     if (!s.linked) return 'On — no devices linked yet';
     return switch (s.state) {
       'ready' => 'On — connected to your devices',
-      'starting' => 'On — connecting…',
-      _ => 'On',
-    };
-  }
-
-  String _channelsStateLine(ChannelsStatus? s) {
-    if (s == null) return 'Checking…';
-    if (!s.supported) return 'Not available on this platform';
-    if (!s.enabled) {
-      return _gate.isPaused(X0xAgent.channels)
-          ? 'Paused on mobile data — resumes on Wi-Fi'
-          : 'Off — channels get no updates; your own publishes '
-              'wait here until it is back on';
-    }
-    final count = s.subs.length + (s.own != null ? 1 : 0);
-    if (count == 0) return 'On — no channels yet';
-    return switch (s.state) {
-      'ready' => 'On — connected to the channel network',
       'starting' => 'On — connecting…',
       _ => 'On',
     };
@@ -599,7 +533,7 @@ class _DataScreenState extends State<DataScreen> {
                   'Mobile data: ↑ ${formatBytes(usage.mobTx)} · '
                   '↓ ${formatBytes(usage.mobRx)}',
                   style: TextStyle(
-                      color: WiTokens.channelAmber, fontSize: 12.5),
+                      color: WiTokens.warnAmber, fontSize: 12.5),
                 ),
               ),
           ],
@@ -680,7 +614,7 @@ class _DataScreenState extends State<DataScreen> {
                                     t.accent.withValues(alpha: alpha)),
                             Container(
                                 height: mobH,
-                                color: WiTokens.channelAmber
+                                color: WiTokens.warnAmber
                                     .withValues(alpha: alpha)),
                           ],
                         ),
@@ -737,7 +671,7 @@ class _DataScreenState extends State<DataScreen> {
               legendDot(t.accent, 'Wi-Fi / other'),
               if (anyMobile) ...[
                 const SizedBox(width: 14),
-                legendDot(WiTokens.channelAmber, 'Mobile data'),
+                legendDot(WiTokens.warnAmber, 'Mobile data'),
               ],
             ],
           ),
@@ -920,14 +854,14 @@ class _DataScreenState extends State<DataScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(Icons.warning_amber_outlined,
-                  color: WiTokens.channelAmber, size: 16),
+                  color: WiTokens.warnAmber, size: 16),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   "Today's usage is ${formatBytes(todayUsage.total)} — "
                   'over your $_alertGb GB daily alert.',
                   style: TextStyle(
-                      color: WiTokens.channelAmber, fontSize: 12),
+                      color: WiTokens.warnAmber, fontSize: 12),
                 ),
               ),
             ],
@@ -960,16 +894,6 @@ class _DataScreenState extends State<DataScreen> {
                   ? (dayStats?.myWatch ?? const UsageBytes())
                   : stats.myWatch,
               off: selectedDay == null && _myWatch?.enabled == false,
-            ),
-            _componentTile(
-              t,
-              icon: Icons.podcasts,
-              iconColor: WiTokens.channelAmber,
-              name: 'Channels',
-              usage: selectedDay != null
-                  ? (dayStats?.channels ?? const UsageBytes())
-                  : stats.channels,
-              off: selectedDay == null && _channels?.enabled == false,
             ),
           ],
         ),
@@ -1024,10 +948,9 @@ class _DataScreenState extends State<DataScreen> {
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 0, 16, 8),
           child: Text(
-            'Measured inside the app: the My W@tch and Channels rows '
-            'count raw connection bytes, the Autonomi row counts '
-            'protocol data. System-level meters read a few percent '
-            'higher.',
+            'Measured inside the app: the My W@tch row counts raw '
+            'connection bytes, the Autonomi row counts protocol data. '
+            'System-level meters read a few percent higher.',
             style: TextStyle(color: t.ash, fontSize: 11.5),
           ),
         ),
@@ -1038,7 +961,6 @@ class _DataScreenState extends State<DataScreen> {
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
     final myWatch = _myWatch;
-    final channels = _channels;
     return Scaffold(
       appBar: AppBar(
         backgroundColor: t.ink,
@@ -1096,9 +1018,8 @@ class _DataScreenState extends State<DataScreen> {
                     'Two networks are built into the app. The Autonomi '
                     'client streams and downloads your media. The x0x '
                     'client is a separate peer-to-peer gossip network '
-                    'that Channels and My W@tch talk over; each has its '
-                    'own pill — Off stops the feature entirely, Wi-Fi '
-                    'keeps it off mobile data.',
+                    'that My W@tch talks over; its pill — Off stops the '
+                    'feature entirely, Wi-Fi keeps it off mobile data.',
                     style: TextStyle(fontSize: 12.5, color: t.boneDim),
                   ),
                 ),
@@ -1112,23 +1033,6 @@ class _DataScreenState extends State<DataScreen> {
                   ),
                   trailing: Icon(Icons.refresh, color: t.ash, size: 18),
                   onTap: _reloadClients,
-                ),
-                // Channels above My W@tch — the CONTENT section's order.
-                _clientBlock(
-                  t,
-                  icon: Icons.podcasts,
-                  iconColor: WiTokens.channelAmber,
-                  name: 'Channels',
-                  stateLine: _channelsStateLine(channels),
-                  mode: _modeFor(
-                    enabled: channels?.enabled ?? true,
-                    cellularAllowed: _channelsOnCellular,
-                    gatePaused: _gate.isPaused(X0xAgent.channels),
-                  ),
-                  pillEnabled: !_busyChannels &&
-                      channels != null &&
-                      channels.supported,
-                  onChanged: _setChannelsMode,
                 ),
                 _clientBlock(
                   t,
@@ -1147,14 +1051,12 @@ class _DataScreenState extends State<DataScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                   child: Text(
-                    'While a client is Off the feature simply pauses: '
-                    'linked devices stop hearing from this one, '
-                    'subscribed channels stop updating, and nothing you '
-                    'do here is lost. On Wi-Fi it pauses only while the '
-                    'device is on mobile data and picks up where it '
-                    'left off. Joining a link, creating a channel or '
-                    'subscribing turns the feature back on '
-                    'automatically.',
+                    'While the client is Off the feature simply pauses: '
+                    'linked devices stop hearing from this one, and '
+                    'nothing you do here is lost. On Wi-Fi it pauses '
+                    'only while the device is on mobile data and picks '
+                    'up where it left off. Joining a link turns the '
+                    'feature back on automatically.',
                     style: TextStyle(fontSize: 11.5, color: t.ash),
                   ),
                 ),

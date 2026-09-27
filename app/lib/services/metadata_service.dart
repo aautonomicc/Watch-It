@@ -367,54 +367,6 @@ class MetadataService extends ChangeNotifier {
   /// Whether TMDB lookups can run at all (a key is configured).
   Future<bool> get hasTmdbKey async => (await _apiKeyProvider()).isNotEmpty;
 
-  /// Explicit TMDB lookup for [parsed] — the Describe-this-item "Check
-  /// TMDB" button, searching with whatever title/year the publisher
-  /// typed. Nothing is cached or written; the caller previews the match
-  /// and commits it via [adoptTmdbMatch]. Returns `null` on a genuine
-  /// miss; throws [TmdbException] on transport/API errors.
-  Future<TmdbMatch?> lookupTmdb(ParsedName parsed) async {
-    final client =
-        TmdbClient(apiKey: await _apiKeyProvider(), client: _httpClient);
-    try {
-      return await client.lookup(parsed);
-    } finally {
-      if (_httpClient == null) client.close();
-    }
-  }
-
-  /// Poster bytes for a [lookupTmdb] preview; `null` when the match has
-  /// no poster or the CDN fetch fails (artwork is decoration).
-  Future<Uint8List?> tmdbPosterBytes(TmdbMatch match) async {
-    if (match.posterPath == null) return null;
-    final client =
-        TmdbClient(apiKey: await _apiKeyProvider(), client: _httpClient);
-    try {
-      return Uint8List.fromList(await client.fetchPoster(match.posterPath!));
-    } on TmdbException {
-      return null;
-    } finally {
-      if (_httpClient == null) client.close();
-    }
-  }
-
-  /// Commit a previewed [match] for [key] through the normal fetch
-  /// pipeline: full cache row (rating/genres/TMDB id included — they
-  /// travel in channel manifests and bundle exports) plus artwork files
-  /// under the shared TMDB naming. Replaces whatever row the key held —
-  /// the user explicitly chose this match.
-  Future<MediaMetadata> adoptTmdbMatch(String key, TmdbMatch match) async {
-    final client =
-        TmdbClient(apiKey: await _apiKeyProvider(), client: _httpClient);
-    try {
-      final resolved = await _persistMatch(key, match, client);
-      _memory[key] = resolved;
-      notifyListeners();
-      return resolved;
-    } finally {
-      if (_httpClient == null) client.close();
-    }
-  }
-
   /// Write [match] into the cache row for [key] and its images into the
   /// posters dir. File IO is synchronous on purpose — this runs from
   /// widget flows exercised under fake-async tests, where pending real

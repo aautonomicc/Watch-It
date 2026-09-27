@@ -26,7 +26,6 @@ import 'services/media_session.dart';
 import 'services/now_playing.dart';
 import 'services/download_manager.dart';
 import 'services/embedded_client.dart';
-import 'services/channel_service.dart';
 import 'services/favourites.dart';
 import 'services/home_rows.dart';
 import 'services/home_sections.dart';
@@ -51,8 +50,6 @@ import 'theme/tokens.dart';
 import 'widgets/brand_mark.dart';
 import 'widgets/tv_app_frame.dart';
 import 'widgets/download_badge.dart';
-import 'widgets/channel_avatar.dart';
-import 'widgets/channel_badge.dart';
 import 'widgets/downloads_indicator.dart';
 import 'widgets/library_drawer.dart';
 import 'widgets/messenger.dart';
@@ -164,13 +161,10 @@ Future<void> main() async {
   // failed offline retry at once instead of after the period.
   MyWatchSync.instance.start();
   MyWatchSync.instance.bindConnectivity(ConnectivityMonitor.instance);
-  // Channels auto-update: follows subscribed channels' signed heads and
-  // imports newer manifests (a silent no-op with no subscriptions).
-  ChannelService.instance.start();
-  // Mobile-data gates for the x0x agents (Settings → Network → Mobile
-  // data): pause My W@tch / Channels on cellular when set to Wi-Fi
-  // only, resume when Wi-Fi returns. A no-op with the default
-  // everything-allowed settings.
+  // Mobile-data gate for the x0x agent (Settings → Network → Mobile
+  // data): pause My W@tch on cellular when set to Wi-Fi only, resume
+  // when Wi-Fi returns. A no-op with the default everything-allowed
+  // settings.
   X0xCellularGate.instance.start();
   // Daily data alert (Settings → Network → Data): a quiet once-per-day
   // snackbar when the day's usage passes the chosen level. Alert-only —
@@ -415,8 +409,6 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     WatchStateStore.instance.addListener(_reloadRows);
     // A background My W@tch sync can add/remove list entries under us.
     MyWatchSync.revision.addListener(_reload);
-    // A channel auto-update can replace a channel list under us.
-    ChannelService.revision.addListener(_reload);
     // Wall cards badge their download state — have the queue loaded.
     unawaited(DownloadManager.instance.ensureLoaded());
     // A crash or shutdown can leave a batch upload cut short — once per
@@ -441,7 +433,6 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     wiRouteObserver.unsubscribe(this);
     WatchStateStore.instance.removeListener(_reloadRows);
     MyWatchSync.revision.removeListener(_reload);
-    ChannelService.revision.removeListener(_reload);
     super.dispose();
   }
 
@@ -840,35 +831,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   List<Widget> _listSection(WiTokens t, MediaList? list) {
     if (list == null) return const [];
     return [
-      // Channel rows are badged amber — public content is visibly not
-      // "your" list even where it renders like one.
-      if (list.isChannel)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Row(
-            children: [
-              // The channel's mini avatar — identity beside the badge
-              // (podcasts-icon fallback when the channel has none).
-              ChannelAvatar(memberName: list.channelAvatar, size: 18),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  list.title,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: t.bone,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              const ChannelBadge(),
-            ],
-          ),
-        )
-      else
-        _sectionTitle(t, list.title),
+      _sectionTitle(t, list.title),
       if (list.entries.isEmpty)
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),

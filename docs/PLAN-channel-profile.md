@@ -1,5 +1,9 @@
 # Plan — Channel profile: avatar, name, author
 
+**STATUS (2026-09-27): the Channels feature described here was REMOVED
+from the app (user decision after a publishing-liability review). This
+document is historical.**
+
 Status: **IMPLEMENTED 2026-08-29.** Follows the "Later: channel avatars"
 item in PLAN-personal-vs-channels.md. Read that plan first; nothing here weakens its
 safety rails — it extends them to two new public facts (avatar, author).

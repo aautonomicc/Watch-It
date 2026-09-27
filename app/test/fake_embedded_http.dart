@@ -66,9 +66,6 @@ class FakeEmbeddedHttp extends HttpOverrides {
   /// Raw bodies of every `POST /network/pause` (the pause toggle).
   final List<String> networkPausePosts = [];
 
-  /// Raw bodies of every `POST /channel/enabled` (the Settings switch).
-  final List<String> channelEnabledPosts = [];
-
   /// Raw bodies of every `POST /mywatch/sync` (published sync docs).
   final List<String> myWatchSyncPublishes = [];
 
@@ -86,35 +83,6 @@ class FakeEmbeddedHttp extends HttpOverrides {
   /// Mnemonic that `POST /wallet/generate` hands out.
   String generatedMnemonic =
       'test test test test test test test test test test test junk';
-
-  /// Channels state `GET /channels` plays back; create/restore/subscribe
-  /// mutate it the way the Rust core would. Tests override for richer
-  /// scenarios.
-  Map<String, dynamic> channelsStatus = {
-    'supported': true,
-    'state': 'off',
-    'message': null,
-    'own': null,
-    'subs': const [],
-  };
-
-  /// Mnemonic + code `POST /channel/generate` hands out.
-  String channelMnemonic =
-      'legal winner thank year wave sausage worth useful legal winner '
-      'thank yellow';
-  String channelCode = 'wchn1-${'a' * 52}';
-  String channelPubkey = 'aa' * 32;
-
-  /// Raw bodies of every `POST /channel/create|restore|meta|publish`.
-  final List<String> channelCreates = [];
-  final List<String> channelRestores = [];
-  final List<String> channelMetaPosts = [];
-  final List<String> channelPublishes = [];
-  final List<String> channelSubscribes = [];
-  final List<String> channelUnsubscribes = [];
-
-  /// Manifest zips `GET /channel/manifest/<addr>` serves, by address.
-  final Map<String, List<int>> channelManifests = {};
 
   /// Balances `GET /wallet/balances` reports (raw 18-decimal strings).
   String antAtto = '1500000000000000000';
@@ -161,7 +129,6 @@ class FakeEmbeddedHttp extends HttpOverrides {
     'total': {'rx': 0, 'tx': 0},
     'ant': {'rx': 0, 'tx': 0, 'media_rx': 0, 'stale_secs': null},
     'mywatch': {'rx': 0, 'tx': 0},
-    'channels': {'rx': 0, 'tx': 0},
   };
   int statsResets = 0;
 
@@ -245,7 +212,6 @@ class FakeEmbeddedHttp extends HttpOverrides {
               : null,
         },
         'mywatch': {'rx': 0, 'tx': 0},
-        'channels': {'rx': 0, 'tx': 0},
       };
       return (200, utf8.encode(jsonEncode(stats)));
     }
@@ -264,10 +230,6 @@ class FakeEmbeddedHttp extends HttpOverrides {
     }
     if (path == '/mywatch' || path.startsWith('/mywatch/')) {
       return _handleMyWatch(method, path, body);
-    }
-    if (path == '/channels' || path == '/channel' ||
-        path.startsWith('/channel/')) {
-      return _handleChannels(method, path, body);
     }
     if (method == 'POST' && path == '/upload/estimate') {
       final fail = estimateFailure;
@@ -344,160 +306,6 @@ class FakeEmbeddedHttp extends HttpOverrides {
     }
     return (404, const <int>[]);
   }
-
-  (int, List<int>) _handleChannels(
-      String method, String path, List<int> body) {
-    if (method == 'GET' && path == '/channels') {
-      return (200, utf8.encode(jsonEncode(channelsStatus)));
-    }
-    if (method == 'POST' && path == '/channel/enabled') {
-      channelEnabledPosts.add(utf8.decode(body));
-      final on = (jsonDecode(utf8.decode(body))
-          as Map<String, dynamic>)['enabled'] == true;
-      final hasChannels = channelsStatus['own'] != null ||
-          (channelsStatus['subs'] as List? ?? const []).isNotEmpty;
-      channelsStatus = {
-        ...channelsStatus,
-        'enabled': on,
-        'state': on && hasChannels ? 'ready' : 'off',
-      };
-      return (200, utf8.encode(jsonEncode({'enabled': on})));
-    }
-    if (method == 'POST' && path == '/channel/generate') {
-      return (
-        200,
-        utf8.encode(jsonEncode({
-          'mnemonic': channelMnemonic,
-          'code': channelCode,
-        }))
-      );
-    }
-    if (method == 'POST' && path == '/channel/create') {
-      final v = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
-      if ((v['name'] as String? ?? '').trim().isEmpty) {
-        return (400, utf8.encode('channel name is required'));
-      }
-      channelCreates.add(utf8.decode(body));
-      channelsStatus = {
-        ...channelsStatus,
-        'state': 'ready',
-        'own': {
-          'name': v['name'],
-          'description': v['description'] ?? '',
-          'pubkey': channelPubkey,
-          'code': channelCode,
-          'seq': 0,
-          'manifest': '',
-          'created_at_ms': 1,
-          'key_storage': 'file',
-          'key_missing': false,
-          'head': null,
-        },
-      };
-      return (
-        200,
-        utf8.encode(jsonEncode({
-          'code': channelCode,
-          'pubkey': channelPubkey,
-          'key_storage': 'file',
-        }))
-      );
-    }
-    if (method == 'POST' && path == '/channel/restore') {
-      channelRestores.add(utf8.decode(body));
-      channelsStatus = {
-        ...channelsStatus,
-        'state': 'ready',
-        'own': {
-          'name': '',
-          'description': '',
-          'pubkey': channelPubkey,
-          'code': channelCode,
-          'seq': 0,
-          'manifest': '',
-          'created_at_ms': 1,
-          'key_storage': 'file',
-          'key_missing': false,
-          'head': null,
-        },
-      };
-      return (
-        200,
-        utf8.encode(jsonEncode({
-          'code': channelCode,
-          'pubkey': channelPubkey,
-          'key_storage': 'file',
-        }))
-      );
-    }
-    if (method == 'POST' && path == '/channel/meta') {
-      channelMetaPosts.add(utf8.decode(body));
-      return (200, utf8.encode(jsonEncode({'updated': true})));
-    }
-    if (method == 'DELETE' && path == '/channel') {
-      channelsStatus = {...channelsStatus, 'own': null};
-      return (200, utf8.encode(jsonEncode({'removed': true})));
-    }
-    if (method == 'POST' && path == '/channel/publish') {
-      if (wallet == null) {
-        return (
-          400,
-          utf8.encode('no upload wallet configured — set one up in '
-              'Settings → Wallet')
-        );
-      }
-      channelPublishes.add(utf8.decode(body));
-      _uploadPolls = 0;
-      _uploadsStarted++;
-      return (200, utf8.encode(jsonEncode({'id': _uploadsStarted})));
-    }
-    if (method == 'POST' && path == '/channel/subscribe') {
-      final v = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
-      final code = (v['code'] as String? ?? '').trim();
-      if (!code.toLowerCase().startsWith('wchn1-')) {
-        return (
-          400,
-          utf8.encode('not a channel code (it should start with wchn1-)')
-        );
-      }
-      channelSubscribes.add(code);
-      // A predictable fake pubkey per code: hash-ish from the length.
-      final pubkey = subscribePubkeyFor(code);
-      final subs = [
-        ...(channelsStatus['subs'] as List<dynamic>? ?? const []),
-        {'pubkey': pubkey, 'code': code, 'head': null},
-      ];
-      channelsStatus = {
-        ...channelsStatus,
-        'state': 'ready',
-        'subs': subs,
-      };
-      return (200, utf8.encode(jsonEncode({'pubkey': pubkey})));
-    }
-    if (method == 'DELETE' && path.startsWith('/channel/subscribe/')) {
-      final pubkey = path.substring('/channel/subscribe/'.length);
-      channelUnsubscribes.add(pubkey);
-      final subs = [
-        for (final sub in channelsStatus['subs'] as List<dynamic>? ?? const [])
-          if ((sub as Map<String, dynamic>)['pubkey'] != pubkey) sub,
-      ];
-      channelsStatus = {...channelsStatus, 'subs': subs};
-      return (200, utf8.encode(jsonEncode({'unsubscribed': true})));
-    }
-    if (method == 'GET' && path.startsWith('/channel/manifest/')) {
-      final manifest =
-          channelManifests[path.substring('/channel/manifest/'.length)];
-      return manifest == null
-          ? (502, utf8.encode('manifest lookup failed: not found'))
-          : (200, manifest);
-    }
-    return (404, const <int>[]);
-  }
-
-  /// The pubkey `POST /channel/subscribe` fakes for [code] — stable so
-  /// tests can pre-seed status/manifests for it.
-  static String subscribePubkeyFor(String code) =>
-      (code.length % 256).toRadixString(16).padLeft(2, '0') * 32;
 
   (int, List<int>) _handleMyWatch(String method, String path, List<int> body) {
     if (method == 'GET' && path == '/mywatch') {

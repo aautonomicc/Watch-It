@@ -1,4 +1,4 @@
-//! Post-join tuning shared by the My W@tch and Channels x0x agents.
+//! Post-join tuning for the My W@tch x0x agent.
 //!
 //! x0x 0.40.4's presence beacons fan a ~5.5KB ML-DSA-signed record to
 //! every open QUIC connection per joined group every 30s — the one
