@@ -443,6 +443,11 @@ inside the app: **Settings → About → Open-source licenses**.
 In short: take the *source* under MIT; redistribute the *binaries* under
 GPLv3.
 
+One request if you fork: **please rebrand**. The **W@tch** name, wordmark
+and bucket logo identify this project's own builds — a fork distributed
+under the same name would be mistaken for ours, and we don't answer for
+what forks ship.
+
 ### Bundled catalog
 
 A fresh install seeds *Big Buck Bunny* (2008) — the Blender
