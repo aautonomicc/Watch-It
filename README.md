@@ -15,7 +15,7 @@ anything — tracks, movies, whole seasons of episodes — into an ordered
 play-through of your own, and an any-video playlist plays end to end as
 a marathon.
 
-Think the Plex / Emby / [Silo](https://github.com/Silo-Server/) experience —
+Think the Plex / Emby experience —
 poster-wall library, rich metadata, resume-watching — but **with no server to install**.
 W@tch is client-only: your media library is one or more lists of files stored
 privately on the decentralized [Autonomi](https://github.com/WithAutonomi/ant-client)
