@@ -458,8 +458,8 @@ picker (see [docs/SEED-CATALOG.md](docs/SEED-CATALOG.md)).
 Alpha.48–.50 bundled a 48-title public-domain catalog; alpha.51
 trimmed the bundle to *Night of the Living Dead* (1968), and
 alpha.93 replaced NOTLD with Big Buck Bunny — installs that
-already seeded earlier catalogs keep them, and the old uploads remain
-playable on the network. A downloadable `Public Domain.watch-list`
+already seeded earlier catalogs keep them. A downloadable
+`Public Domain.watch-list`
 bundle of that catalog was hosted in this repository until 2026-09-27,
 when it was withdrawn as a precaution: the titles were verified public
 domain **in the United States**, but copyright terms differ elsewhere —
