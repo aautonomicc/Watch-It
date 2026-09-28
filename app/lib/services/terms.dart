@@ -6,8 +6,12 @@ library;
 /// accept on their next launch (their stored accepted version is lower).
 /// v2 (2026-08-27): Channels — public channel publishing got its own
 /// section. v3 (2026-09-27): the Channels feature was removed, and its
-/// section with it (later sections renumbered).
-const kTermsVersion = 3;
+/// section with it (later sections renumbered). v4 (2026-09-28):
+/// "publish" wording replaced with upload/share (publishing left the app
+/// with Channels), and sharing a library outside the app — bundle files
+/// posted online, passed on a USB drive, My W@tch invites — is covered
+/// explicitly.
+const kTermsVersion = 4;
 
 /// One-line lead-in above the sections.
 const kTermsIntro =
@@ -28,7 +32,7 @@ const kTermsSections = [
     'W@tch is an independent, open-source media player — a client for '
         'the decentralized Autonomi network. The developers do not host, '
         'store, index, curate, moderate, or control any content. All '
-        'media is published to and fetched from a public peer-to-peer '
+        'media is uploaded to and fetched from a public peer-to-peer '
         'network by its users. The developers have no ability to remove, '
         'alter, or block content on that network, and no knowledge of '
         'what you access with the app.',
@@ -36,7 +40,11 @@ const kTermsSections = [
   TermsSection(
     '2. Your content is your responsibility',
     'You are solely responsible for everything you import, stream, '
-        'download, share, or publish with W@tch. Only use content you '
+        'download, upload, or share with W@tch. That includes passing '
+        'your library or any part of it to other people by any means — '
+        'for example posting a .watch-list bundle or datamap file on '
+        'the internet, handing it over on a USB drive, or inviting '
+        'someone into your My W@tch. Only use and share content you '
         'own, that is in the public domain, or that you are licensed or '
         'otherwise authorized to use. Copyright and media laws differ '
         'between countries — it is your responsibility to comply with '
@@ -44,7 +52,7 @@ const kTermsSections = [
   ),
   TermsSection(
     '3. Prohibited use',
-    'You must not use W@tch to access, share, or publish content that '
+    'You must not use W@tch to access, upload, or share content that '
         'infringes copyright or other rights, or that is unlawful where '
         'you live or where it is made available — including but not '
         'limited to pirated media and any illegal material of any kind. '
@@ -52,20 +60,23 @@ const kTermsSections = [
         'responsibility for such use.',
   ),
   TermsSection(
-    '4. Publishing is permanent',
-    'Data published to the Autonomi network is permanent. It cannot be '
+    '4. Uploads and shares are permanent',
+    'Data uploaded to the Autonomi network is permanent. It cannot be '
         'edited, taken down, or deleted by anyone — including you and '
-        'the developers. Never publish anything you do not have the '
-        'right to make permanently and publicly available.',
+        'the developers. Sharing cannot be undone either: anyone you '
+        'give a bundle, datamap, or invite to can keep fetching that '
+        'content forever, however it reached them. Never upload or '
+        'share anything you do not have the right to make permanently '
+        'available to others.',
   ),
   TermsSection(
     '5. Wallet and payments',
-    'The built-in publishing wallet is a "hot" wallet stored on your '
+    'The built-in upload wallet is a "hot" wallet stored on your '
         'device and controlled only by you. The developers never see, '
         'hold, or have access to your keys or funds, and cannot recover '
         'a lost key or reverse a transaction. Cryptocurrency carries '
         'risk; keep only small amounts in the wallet. Network fees paid '
-        'for publishing are non-refundable.',
+        'for uploads are non-refundable.',
   ),
   TermsSection(
     '6. Third-party services',
@@ -87,8 +98,8 @@ const kTermsSections = [
     'To the maximum extent permitted by law, the developers and '
         'contributors are not liable for any damages or losses arising '
         'from your use of (or inability to use) the app — including '
-        'content you or others access or publish, lost funds, lost '
-        'data, or legal claims made against you.',
+        'content you or others access, upload, or share, lost funds, '
+        'lost data, or legal claims made against you.',
   ),
   TermsSection(
     '9. Indemnity',
