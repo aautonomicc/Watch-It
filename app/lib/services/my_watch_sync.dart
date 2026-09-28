@@ -629,7 +629,7 @@ class MyWatchSync {
         maxWatchStatesPerProfile: maxDocWatchStates,
       );
     } catch (e) {
-      _problems.add('Publishing profiles failed: $e');
+      _problems.add('Sending profiles to your devices failed: $e');
     }
     final built = buildDocParts(
       lists: lists,

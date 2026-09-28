@@ -114,7 +114,7 @@ void main() {
 
     test('audio', () {
       const probe = MediaProbe(hasAudio: true, audioCodec: 'mp3');
-      expect(probeVerdict(probe), 'Audio · MP3 — published as-is.');
+      expect(probeVerdict(probe), 'Audio · MP3 — uploaded as-is.');
     });
   });
 

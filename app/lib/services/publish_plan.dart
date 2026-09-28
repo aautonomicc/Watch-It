@@ -10,7 +10,7 @@ import 'dart:math' as math;
 
 /// What ffprobe learned about a picked file. Null probe = the file could
 /// not be probed (no ffprobe on the box, or not a media file) — it can
-/// still be published as-is.
+/// still be uploaded as-is.
 class MediaProbe {
   const MediaProbe({
     this.hasVideo = false,
@@ -96,7 +96,7 @@ List<PublishTier> offeredTiers(MediaProbe? probe) {
 }
 
 /// Default selection: every offered tier, except that "Original" starts
-/// unticked for sources that don't play everywhere (publishing them as-is
+/// unticked for sources that don't play everywhere (uploading them as-is
 /// is possible but rarely what a series uploader wants).
 List<PublishTier> defaultTiers(MediaProbe? probe) {
   final offered = offeredTiers(probe);
@@ -112,14 +112,14 @@ List<PublishTier> defaultTiers(MediaProbe? probe) {
 String probeVerdict(MediaProbe? probe, {bool ffmpegAvailable = true}) {
   if (probe == null) {
     return ffmpegAvailable
-        ? 'Could not read this file — it can only be published as-is.'
-        : 'Published as-is — this device has no encoding tools.';
+        ? 'Could not read this file — it can only be uploaded as-is.'
+        : 'Uploaded as-is — this device has no encoding tools.';
   }
   if (!probe.hasVideo) {
     final codec = probe.audioCodec?.toUpperCase();
     return probe.hasAudio
-        ? 'Audio${codec == null ? '' : ' · $codec'} — published as-is.'
-        : 'Not a media file — published as-is.';
+        ? 'Audio${codec == null ? '' : ' · $codec'} — uploaded as-is.'
+        : 'Not a media file — uploaded as-is.';
   }
   final bits = probe.pixelFormat?.contains('10') ?? false ? ' 10-bit' : '';
   final codecName = videoCodecName(probe.videoCodec) ?? 'unknown codec';
@@ -142,7 +142,7 @@ String? videoCodecName(String? codec) => switch (codec) {
       final c => c.toUpperCase(),
     };
 
-/// `480p H.264` — the format label a published output should carry as its
+/// `480p H.264` — the format label an uploaded output should carry as its
 /// library entry's videoInfo (the version picker and cards show it next
 /// to the size, same style as the seed catalog's). Encode tiers are
 /// always H.264 at their real output height; Original keeps the source's
