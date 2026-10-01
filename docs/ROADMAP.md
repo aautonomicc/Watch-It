@@ -734,6 +734,26 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       the 30 s period. Still open: publishing each device's own
       pending counts into the doc so every device can also show the
       OTHER side's remaining work
+- [ ] Sync while apart (back from the parking lot 2026-10-01 — its
+      revisit trigger fired): devices currently must be online
+      together to sync; there is no relay/mailbox in the middle, so an
+      always-on linked device is the only bridge today. **Unblocked:**
+      ant-core 0.11.0 (tagged 2026-10-01, the rc-2026.9.4 promotion)
+      reintroduces **Pointers** — mutable, owner-signed,
+      group-quorum-stored records (ADR 0016: quorum from the close
+      group, every answer verified, fork healing + catch-up proven
+      e2e, PUT paid) — exactly the dead-drop-to-poll primitive the
+      parked note was waiting for. Design direction: a My W@tch
+      mailbox/dead-drop — each device publishes its sync doc (and
+      shrunk maps / art manifests) to a link-secret-derived location
+      an offline-together peer can later fetch and fold through the
+      existing merge, with Pointers as the mutable head over immutable
+      chunk payloads. Needs: the ant-core 0.11.0 bump first (ride the
+      parked combined dep pass — x0x 0.46.0 when it tags + ant-core
+      0.11.0 + lockfile wave), then a design discussion (PUT cost per
+      update, polling cadence vs idle-data budget, what subset of the
+      sync doc is worth paying to relay, encryption at rest under the
+      link secret, tombstone/LWW semantics unchanged)
 
 ## Channels (alpha.65–.107): REMOVED 2026-09-27
 
@@ -1140,12 +1160,10 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
   went with it (moot)
 - ~~Watch-state + list sync between devices~~ — **shipped** as My W@tch
   (alpha.61/.62, via x0x rather than Autonomi — see the section above)
-- Sync while apart (moved here 2026-09-22; devices must currently be
-  online together — no relay/mailbox in the middle, and an always-on
-  linked device already bridges the gap today. Bring back when future
-  options become available: Pointer/Scratchpad-style mutable
-  primitives returning to Autonomi ant-core (a dead-drop to poll), or
-  an upstream x0x mailbox/store-and-forward layer)
+- ~~Sync while apart~~ — **moved back to the active My W@tch section
+  2026-10-01**: the revisit trigger fired — ant-core 0.11.0
+  (2026-10-01) reintroduces Pointer-style mutable primitives, making
+  a dead-drop/mailbox buildable (parked here 2026-09-22)
 - Idle x0x gossip baseline (moved here 2026-09-22; idle traffic is
   still high while an agent is active — an upstream x0x issue, and no
   further in-app lever is planned. Deal with it when x0x releases fix
