@@ -57,6 +57,50 @@ pub(crate) fn gossip_mode(agent: &x0x::Agent) -> Option<String> {
         .map(|p| p.mode.to_string())
 }
 
+/// Gossip config for the My W@tch agent, with x0x 0.46.0's opt-in Leaf
+/// egress controls (upstream tracker #504) behind environment variables.
+///
+/// Default (no env set) is the stock config: the egress byte budget
+/// runs as an observe-only METER, so shipped behavior is unchanged.
+/// `WATCHIT_X0X_BYTE_POLICY=shed_normal` opts the agent into refusing
+/// normal-class RELAY sends above the hard budget — upstream guarantees
+/// own publishes, targeted sends and Critical topics are never shed, so
+/// My W@tch sync docs and the chunked art-transfer DMs are untouched by
+/// construction. `WATCHIT_X0X_EGRESS_HARD_BPS` / `_SOFT_BPS` override
+/// the thresholds (bytes/sec; x0x defaults 131072 / 65536).
+/// Harness/devserver experiment only for now — deliberately NOT a
+/// Settings surface while upstream labels the policy experimental.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
+pub(crate) fn gossip_config(label: &str) -> x0x::gossip::GossipConfig {
+    let mut cfg = x0x::gossip::GossipConfig::default();
+    if let Some(n) = std::env::var("WATCHIT_X0X_EGRESS_SOFT_BPS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        cfg.leaf_egress_soft_bytes_per_sec = n;
+    }
+    if let Some(n) = std::env::var("WATCHIT_X0X_EGRESS_HARD_BPS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        cfg.leaf_egress_hard_bytes_per_sec = n;
+    }
+    if std::env::var("WATCHIT_X0X_BYTE_POLICY").as_deref() == Ok("shed_normal") {
+        cfg.byte_policy = x0x::gossip::LeafBytePolicy::ShedNormal;
+        tracing::info!(
+            "{label}: EXPERIMENTAL shed_normal byte policy ON (soft {} / hard {} B/s)",
+            cfg.leaf_egress_soft_bytes_per_sec,
+            cfg.leaf_egress_hard_bytes_per_sec,
+        );
+    }
+    cfg
+}
+
 /// Bounded agent shutdown for the pause/switch-off/unlink paths.
 /// x0x's `Agent::shutdown` can hang indefinitely once an agent gets
 /// stuck "disconnecting" (seen live in the 2026-09-05 idle test) —

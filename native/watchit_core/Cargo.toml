@@ -17,11 +17,13 @@ path = "src/bin/devserver.rs"
 cc = "1"
 
 [dependencies]
-# Pinned to ant-core 0.9.0 (tag ant-core-v0.9.0). Still exposes
-# Client::file_download_to_sender + self_encryption 0.36 get_range seek;
-# brings the V2-903 download-diagnostics stack (node-GET correlation,
-# flush-after-failed-download) + settlement-version quote gate.
-ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "785a155ce044fc5fb3f9a7106e990eee264b2be2" }
+# Pinned to ant-core 0.11.0 (tag ant-core-v0.11.0, rc-2026.9.4). Still
+# exposes Client::file_download_to_sender + self_encryption 0.36
+# get_range seek; 0.10 brought the cold-download startup-stall reduction
+# + closed-session-spin fix, 0.11 reintroduces Pointers (mutable
+# owner-signed group-quorum records, ADR 0016 — the My W@tch mailbox
+# candidate primitive).
+ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "fd7e7d04252f311f745c4ec978122515ce7e86b6" }
 self_encryption = "0.36"
 # Upload-wallet key derivation; the mnemonic feature adds the
 # BIP-39/BIP-32 path (m/44'/60'/0'/0/0, MetaMask-compatible). 2.x may
@@ -89,18 +91,19 @@ tracing-android = "0.2"
 # ant-quic, post-quantum, mDNS LAN discovery) syncs lists/viewpoints
 # through a self-keyed CRDT KV store on a secret invite topic. Android
 # included since the NDK cross-build of the x0x tree was proven.
-# 0.43–0.45 (the 2026-09-13/14 release burst): 0.43.0's BREAKING
-# change is the upgrade-path library API only (AutoApplyUpgrader —
-# unused here; the Agent API is unchanged) + ant-quic 0.27.51 transport
-# fixes (#278 stale conn after disconnect, #280 single accept_bi
-# consumer, #283 shutdown drain); 0.44.0 makes relay fan-out lazy for
-# non-consumed topics (#674) + ant-quic 0.27.52 joins accept workers on
-# shutdown; 0.45.0 pins saorsa-gossip 0.5.81 (#58 dedupe read-lock —
-# the measured #656 CPU fix — + #41 bounded per-topic peer state + #42
-# IHAVE-flusher shutdown livelock fix). Idle-bandwidth note: #622 (leaf
-# egress budget) still open, so no leaf idle-traffic change expected.
+# 0.46.0 (2026-10-03, built from cea64f20): the measure-and-experiment
+# idle-bandwidth release under tracker #504 — ships the egress byte
+# budget as an observe_only METER by default, the opt-in experimental
+# `byte_policy = shed_normal` (Leaf-only: refuses normal-class RELAY
+# sends above a non-zero leaf_egress_hard_bytes_per_sec; never sheds
+# own publishes/targeted sends/Critical topics, so My W@tch sync docs
+# and the chunked art-transfer DMs are untouched by construction),
+# per-topic egress diagnostics (#1006), the #807 leaf eager-set
+# truncation fix, and the #1148 D39(A) not-member-rejoin fix. Deeper
+# ENFORCED shedding (S1 unicast caps → S3 consume-only Leaves → S4
+# enforced shed_normal) is explicitly post-0.46 upstream.
 # Pin a release, never git main.
-x0x = "0.45.0"
+x0x = "0.46.0"
 # CancellationToken for the mywatch heartbeat/watch task (already in the
 # x0x tree, so free on desktop).
 tokio-util = "0.7"

@@ -1170,6 +1170,7 @@ mod imp {
                 .with_identity_dir(&dir)
                 .with_peer_cache_dir(dir.join("peers"))
                 .with_network_config(x0x::network::NetworkConfig::default())
+                .with_gossip_config(crate::x0x_tune::gossip_config("mywatch"))
                 .build()
                 .await
                 .map_err(|e| format!("agent build failed: {e}"))?;
@@ -1386,6 +1387,11 @@ mod imp {
                 // "leaf" on every healthy client (x0x 0.40.4 default);
                 // "full" would mean this agent relays overlay traffic.
                 "gossip_mode": running.and_then(|r| crate::x0x_tune::gossip_mode(&r.agent)),
+                // x0x 0.46.0 per-topic egress meters + Leaf byte-budget
+                // diagnostics (the embedded equivalent of x0xd's
+                // GET /diagnostics/gossip) — attribution for the idle
+                // bandwidth work; null on a non-ready agent.
+                "gossip_egress": running.and_then(|r| r.agent.gossip_egress_diagnostics()),
             })
         }
     }
