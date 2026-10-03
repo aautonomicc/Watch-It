@@ -92,7 +92,8 @@ for you. (As above, the titles shown are invented for the screenshots.)*
    content-hash ledger remembers every
    finished upload, so re-running a folder never pays for the same file
    twice. Finished uploads land in the library list of your choice ready
-   to play, and their `.datamap` files can be saved to share. The same
+   to play, and their `.datamap` files can be saved for safe keeping —
+   each one is the key that imports the same title anywhere you run W@tch. The same
    pipeline exists as a standalone command-line tool
    ([docs/UPLOAD-CLI.md](docs/UPLOAD-CLI.md)) sharing the same ledger. Prefer the
    command line? `ant file upload <file>` does the same job (private is the
@@ -103,9 +104,10 @@ for you. (As above, the titles shown are invented for the screenshots.)*
    is itself stored on the network where any node operator can find it and
    watch the file. That's why W@tch takes datamaps only, and has no
    public-address entry type.
-2. **Lists of media.** Import `.datamap` files into one or more lists; share
-   a library as a `.watch-list` bundle (datamaps + artwork). A datamap grants
-   full access, so share bundles as privately as the content deserves.
+2. **Lists of media.** Import `.datamap` files into one or more lists; export
+   a library as a `.watch-list` bundle (datamaps + artwork) that imports
+   anywhere W@tch runs. A datamap grants full access, so treat bundles as
+   privately as the content deserves.
 3. **Metadata from the name.** From the file name W@tch looks up the same public
    databases the media servers use (TMDB) and fetches artwork, description, and
    category to organize and display the collection as a poster-wall library. Name
@@ -119,7 +121,7 @@ for you. (As above, the titles shown are invented for the screenshots.)*
    both free and keyless, so music metadata needs no setup at all. For home movies and anything TMDB doesn't know, the detail
    page's **Edit details** editor takes your own title, year, description,
    and artwork — from an image file, a picked video frame, or the player's
-   "use this frame" button — and those edits travel inside shared bundles.
+   "use this frame" button — and those edits travel inside exported bundles.
 4. **Stream or download.** Hit play to stream straight from the network, or download
    an item to the device for offline watching. Downloaded items play with the full
    library experience, no connectivity needed.
@@ -241,7 +243,7 @@ day, toggle in Settings → About — the app's only phone-home).
 Alpha.57 adds **Edit details**: your own title, year, description, and
 artwork — from an image file, a picked video frame, or the player's
 camera button — for anything TMDB doesn't know, never overwritten by
-TMDB and carried along in shared bundles. Alpha.58 extends Edit details
+TMDB and carried along in exported bundles. Alpha.58 extends Edit details
 to TV: shows and seasons get their own edit pencil, and editing an
 episode edits *that episode* (name, synopsis, artwork) instead of the
 series. Alpha.59 fixes Publish for files over ~12 MiB (every

@@ -351,7 +351,7 @@ client when peers stay at 0 and re-dials automatically.
 
 ## `.watch-list` bundles (spec locked 2026-07-25, released in v0.1.0-alpha.33)
 
-Share-ready list bundles: a zip carrying the plain-text list plus TMDB
+Portable list bundles: a zip carrying the plain-text list plus TMDB
 metadata, posters, optional root data maps (instant play on import, verified
 offline), and optional watch history (device migration). Full spec in
 [BUNDLE-FORMAT.md](BUNDLE-FORMAT.md):

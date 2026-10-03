@@ -30,13 +30,13 @@ library private by construction.
    to host.
 3. **Lists as libraries.** A library is a list of entries, each backed by a
    `.datamap` file — the key a private upload produces (W@tch's own Publish
-   flow, or `ant file upload`). Users can keep several lists and share them
-   as `.watch-list` bundles.
+   flow, or `ant file upload`). Users can keep several lists and export them
+   as `.watch-list` bundles that import anywhere W@tch runs.
 4. **Private by construction.** Public Autonomi uploads are discoverable —
    their data map sits on the network in plaintext, readable by any node
    operator. W@tch therefore takes datamaps only: content stays invisible on
    the network, and access travels exactly as far as the datamap does.
-   (Corollary: a datamap grants full access, so bundles should be shared as
+   (Corollary: a datamap grants full access, so bundles should be treated as
    privately as their content deserves — publishing one at a public address
    re-leaks every title in it.)
 5. **Metadata like the big apps.** From the file name alone, fetch artwork,
@@ -80,9 +80,9 @@ library private by construction.
    nothing nice to play it with.
 2. **The streaming-fatigued viewer** — wants a Plex-quality library experience
    without running or paying for anything.
-3. **The curator** — maintains and shares `.watch-list` bundles of media
+3. **The curator** — maintains `.watch-list` bundles of media
    (their own uploads, or the fetched datamaps of legitimately public
-   material) for others to import.
+   material) that import anywhere W@tch runs.
 
 ## Product principles
 

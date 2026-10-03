@@ -15,7 +15,7 @@ in `server.rs`.
 A `.watch-list` file is a **zip archive** that carries the `.datamap` files
 of a media library *plus* everything needed to enjoy it instantly on another
 device: TMDB metadata, poster images, optionally watch history (device
-migration). A datamap grants full access to its content, so **share a bundle
+migration). A datamap grants full access to its content, so **treat a bundle
 as privately as the content deserves** — and note that publishing a bundle
 at a public Autonomi address makes every title in it discoverable
 (privacy is transitive).
@@ -68,7 +68,7 @@ a *public* upload of the same file would have had, which is why:
 - importing the same content twice (any route) dedupes naturally.
 
 Nothing exists *on the network* at a private upload's derived address —
-that is the point: the map never leaves the devices you share it with.
+that is the point: the map never leaves the devices that hold it.
 
 ## Import
 
@@ -82,15 +82,15 @@ that is the point: the map never leaves the devices you share it with.
   skipped with a note (or refused with a pointer at bundles when it was
   the only pick). Mixed picks work; loose datamaps import as one batch.
 - **Network-stored bundles travel as their datamap.** Upload a bundle
-  privately (`ant file upload "My Library.watch-list"`) and share the
-  resulting `My Library.watch-list.datamap` file — ant-cli names the map
+  privately (`ant file upload "My Library.watch-list"`) and move the
+  resulting `My Library.watch-list.datamap` file to your other devices — ant-cli names the map
   after the uploaded file, so the double suffix survives on its own and
   is the routing signal (a renamed map falls through to the loose-entry
   route). Import stores the bundle's map, refuses anything whose declared
   size exceeds the 200 MB bundle cap *before* downloading, streams the
   bundle through the embedded client behind a progress dialog with
   Cancel, and then runs the normal bundle import under the bundle's file
-  name. This shares only a ~KB map file instead of the whole bundle — and
+  name. This moves only a ~KB map file instead of the whole bundle — and
   unlike the deleted bundle-download-by-public-address (alpha.41), no
   public address is ever typed or published; privacy stays transitive
   (whoever holds the bundle's map can fetch every map inside it).
@@ -138,7 +138,7 @@ library came from that v1 bundle exports a fully self-contained v2 bundle.
 - **One format: the bundle.** The plain `.txt` export is gone — a filename
   list without its maps is unplayable, and a hex list would recreate the
   public-address format this app no longer supports. The export dialog has
-  one checkbox: **Include watch history** (default **OFF** — shared lists
+  one checkbox: **Include watch history** (default **OFF** — exported lists
   shouldn't leak viewing habits; a migration backup opts in explicitly),
   plus `library.json` for the whole-library export.
 - **Members come straight from the local store** (`GET /datamap/{addr}`,
