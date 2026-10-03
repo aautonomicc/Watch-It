@@ -413,6 +413,26 @@ review — W@tch no longer has any public publishing surface. Private
 Upload, My W@tch device sync, the wallet, playlists and profiles are
 all unaffected; the Terms of Use were updated (v3) to match.
 
+Alpha.109 **cuts idle background data on My W@tch-linked devices by
+roughly 6×**. The release bumps the network stack to x0x 0.46.0 (plus
+Autonomi ant-core 0.11.0) and turns on its Leaf egress budget in
+`shed_normal` mode by default: once a device's outbound budget is
+spent, it stops *relaying* other peers' gossip — while its own sync
+documents, artwork transfers and direct messages are never shed by
+construction, so My W@tch sync is unaffected. Measured on the same
+idle, linked setup (30 × 60 s samples per leg): about **322 MB/min**
+combined up+down on alpha.108's x0x 0.45.0, **142 MB/min** on x0x
+0.46.0 out of the box, and **52 MB/min** with `shed_normal` — the
+mode this release ships. Idle background traffic only exists while My
+W@tch is linked and switched on; devices without a link (or with My
+W@tch set to Off / paused) were and remain near-silent. It's still
+more background data than we want long-term — the deeper enforced fix
+is being built upstream (saorsa-labs x0x tracker #504) — but it's a
+~6× cut against the previous release and ~11–15× against the x0x
+0.41-era builds of mid-September (561–778 MB/min). Field escape
+hatch: set `WATCHIT_X0X_BYTE_POLICY=observe` in the app's environment
+to revert to the stock observe-only meter.
+
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users

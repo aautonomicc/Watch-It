@@ -1164,13 +1164,15 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
   2026-10-01**: the revisit trigger fired — ant-core 0.11.0
   (2026-10-01) reintroduces Pointer-style mutable primitives, making
   a dead-drop/mailbox buildable (parked here 2026-09-22)
-- Idle x0x gossip baseline (moved here 2026-09-22; idle traffic is
-  still high while an agent is active — an upstream x0x issue, and no
-  further in-app lever is planned. Deal with it when x0x releases fix
-  it: the opt-in Leaf egress byte-shed policy (x0x #736, merged
-  2026-09-21 on saorsa-gossip 0.5.84) ships enforcement in the next
-  x0x tag after 0.45.0 — bump then and re-run the idle window with
-  shed_normal)
+- Idle x0x gossip baseline (moved here 2026-09-22; the revisit
+  trigger fired 2026-10-03: x0x 0.46.0 shipped the Leaf egress
+  byte-shed policy, the idle A/B measured 52 MB/min with shed_normal
+  vs 142 stock / 322 on 0.45.0, and **alpha.109 ships shed_normal ON
+  by default** (`WATCHIT_X0X_BYTE_POLICY=observe` reverts). Still
+  parked: idle traffic remains higher than home-friendly — the deeper
+  enforced fix (S1 unicast caps → S3 consume-only Leaves → S4
+  enforced shed) is upstream work under x0x tracker #504; re-measure
+  at each x0x bump)
 - tvOS (Apple TV) layout — Android TV is now in Phase 4
 - Trakt scrobbling
 - ~~Music lists~~ — **shipped** (alpha.76–.79, see the Music section

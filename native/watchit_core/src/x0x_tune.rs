@@ -57,19 +57,21 @@ pub(crate) fn gossip_mode(agent: &x0x::Agent) -> Option<String> {
         .map(|p| p.mode.to_string())
 }
 
-/// Gossip config for the My W@tch agent, with x0x 0.46.0's opt-in Leaf
-/// egress controls (upstream tracker #504) behind environment variables.
+/// Gossip config for the My W@tch agent, with x0x 0.46.0's Leaf egress
+/// controls (upstream tracker #504).
 ///
-/// Default (no env set) is the stock config: the egress byte budget
-/// runs as an observe-only METER, so shipped behavior is unchanged.
-/// `WATCHIT_X0X_BYTE_POLICY=shed_normal` opts the agent into refusing
-/// normal-class RELAY sends above the hard budget — upstream guarantees
-/// own publishes, targeted sends and Critical topics are never shed, so
-/// My W@tch sync docs and the chunked art-transfer DMs are untouched by
-/// construction. `WATCHIT_X0X_EGRESS_HARD_BPS` / `_SOFT_BPS` override
-/// the thresholds (bytes/sec; x0x defaults 131072 / 65536).
-/// Harness/devserver experiment only for now — deliberately NOT a
-/// Settings surface while upstream labels the policy experimental.
+/// Default is `shed_normal`: the agent refuses normal-class RELAY
+/// sends above the hard egress budget. Upstream guarantees own
+/// publishes, targeted sends and Critical topics are never shed, so My
+/// W@tch sync docs and the chunked art-transfer DMs are untouched by
+/// construction — only pass-through relay traffic for other peers is
+/// capped. The 2026-10-03 idle A/B measured 52 MB/min combined vs 142
+/// on the stock observe-only meter (and 322 on x0x 0.45.0) with no
+/// sync downside, so Watch-It ships it ON despite upstream's
+/// experimental label (field escape hatch below).
+/// `WATCHIT_X0X_BYTE_POLICY=observe` reverts to the stock observe-only
+/// METER; `WATCHIT_X0X_EGRESS_HARD_BPS` / `_SOFT_BPS` override the
+/// thresholds (bytes/sec; x0x defaults 131072 / 65536).
 #[cfg(any(
     target_os = "linux",
     target_os = "windows",
@@ -90,15 +92,61 @@ pub(crate) fn gossip_config(label: &str) -> x0x::gossip::GossipConfig {
     {
         cfg.leaf_egress_hard_bytes_per_sec = n;
     }
-    if std::env::var("WATCHIT_X0X_BYTE_POLICY").as_deref() == Ok("shed_normal") {
-        cfg.byte_policy = x0x::gossip::LeafBytePolicy::ShedNormal;
-        tracing::info!(
-            "{label}: EXPERIMENTAL shed_normal byte policy ON (soft {} / hard {} B/s)",
-            cfg.leaf_egress_soft_bytes_per_sec,
-            cfg.leaf_egress_hard_bytes_per_sec,
-        );
+    match std::env::var("WATCHIT_X0X_BYTE_POLICY").as_deref() {
+        Ok("observe") | Ok("observe_only") | Ok("off") => {
+            cfg.byte_policy = x0x::gossip::LeafBytePolicy::ObserveOnly;
+            tracing::info!(
+                "{label}: shed_normal byte policy OFF by env — observe-only meter"
+            );
+        }
+        _ => {
+            cfg.byte_policy = x0x::gossip::LeafBytePolicy::ShedNormal;
+            tracing::info!(
+                "{label}: shed_normal byte policy ON (soft {} / hard {} B/s)",
+                cfg.leaf_egress_soft_bytes_per_sec,
+                cfg.leaf_egress_hard_bytes_per_sec,
+            );
+        }
     }
     cfg
+}
+
+#[cfg(all(
+    test,
+    any(
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "android"
+    )
+))]
+mod tests {
+    use super::*;
+
+    /// shed_normal is the shipped DEFAULT (the 2026-10-03 idle A/B win);
+    /// `WATCHIT_X0X_BYTE_POLICY=observe` is the field escape hatch back
+    /// to the stock observe-only meter. One test so the env mutations
+    /// can't race a parallel sibling.
+    #[test]
+    fn byte_policy_defaults_shed_normal_with_observe_escape_hatch() {
+        std::env::remove_var("WATCHIT_X0X_BYTE_POLICY");
+        assert_eq!(
+            gossip_config("test").byte_policy,
+            x0x::gossip::LeafBytePolicy::ShedNormal
+        );
+        std::env::set_var("WATCHIT_X0X_BYTE_POLICY", "observe");
+        assert_eq!(
+            gossip_config("test").byte_policy,
+            x0x::gossip::LeafBytePolicy::ObserveOnly
+        );
+        // Unknown values keep the shipped default.
+        std::env::set_var("WATCHIT_X0X_BYTE_POLICY", "shed_normal");
+        assert_eq!(
+            gossip_config("test").byte_policy,
+            x0x::gossip::LeafBytePolicy::ShedNormal
+        );
+        std::env::remove_var("WATCHIT_X0X_BYTE_POLICY");
+    }
 }
 
 /// Bounded agent shutdown for the pause/switch-off/unlink paths.
