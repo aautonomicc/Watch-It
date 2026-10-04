@@ -2,6 +2,8 @@
 
 # W@tch
 
+**[Visit the W@tch site →](https://aautonomicc.github.io/watch-site/)**
+
 *Formerly **watch-it** — rebranded 2026-07-31. The repository keeps the name
 `Watch-It` (GitHub disallows `@`), as do all technical identifiers.*
 
