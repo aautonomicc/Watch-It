@@ -19,6 +19,8 @@ import 'screens/terms_screen.dart';
 import 'services/app_settings.dart';
 import 'services/impeller.dart';
 import 'services/tv_settings.dart';
+import 'services/backup.dart';
+import 'services/backup_follow.dart';
 import 'services/connectivity.dart';
 import 'services/data_alert.dart';
 import 'services/download_foreground.dart';
@@ -161,6 +163,20 @@ Future<void> main() async {
   // failed offline retry at once instead of after the period.
   MyWatchSync.instance.start();
   MyWatchSync.instance.bindConnectivity(ConnectivityMonitor.instance);
+  // Seed-phrase backup, phase 2: a wallet-holding device shares its
+  // backup READ keys (pointer + content key — never the wallet key)
+  // inside its sync doc; linked devices adopt them and poll the backup
+  // from the network on a slow cadence, so a device that was offline
+  // while the others synced catches up from the backup for free. The
+  // same service runs the opt-in daily automatic backup on the master.
+  await BackupFollowService.instance.initialize();
+  MyWatchSync.instance.backupSectionProvider =
+      BackupFollowService.instance.sectionForPublish;
+  MyWatchSync.instance.onRemoteDocs =
+      BackupFollowService.instance.noteRemoteDocs;
+  BackupService.onBackupPublished =
+      BackupFollowService.instance.noteBackupPublished;
+  BackupFollowService.instance.start();
   // Mobile-data gate for the x0x agent (Settings → Network → Mobile
   // data): pause My W@tch on cellular when set to Wi-Fi only, resume
   // when Wi-Fi returns. A no-op with the default everything-allowed

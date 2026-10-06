@@ -59,6 +59,40 @@ pub struct BackupKeys {
     pub pointer: [u8; 32],
 }
 
+/// The free-read half of a backup identity: the pointer address to poll
+/// and the content key that opens everything under it. This — never the
+/// wallet key — is what a wallet-holding device shares with its linked
+/// devices over the My W@tch store (phase 2), so they can fold its
+/// backups in: reading is free, spending stays with the wallet holder.
+#[derive(Clone, Copy, Debug)]
+pub struct ReadKeys {
+    pub enc: [u8; 32],
+    pub pointer: [u8; 32],
+}
+
+impl BackupKeys {
+    pub fn read(&self) -> ReadKeys {
+        ReadKeys { enc: self.enc, pointer: self.pointer }
+    }
+}
+
+/// Parse shared read keys (pointer address + content key, 64 hex each).
+pub fn read_keys_from_hex(ptr_hex: &str, key_hex: &str) -> Result<ReadKeys, String> {
+    Ok(ReadKeys {
+        pointer: addr_from_hex(ptr_hex)
+            .ok_or("the backup pointer must be 64 hex characters")?,
+        enc: addr_from_hex(key_hex)
+            .ok_or("the backup read key must be 64 hex characters")?,
+    })
+}
+
+/// 64-hex → 32 bytes, or None.
+pub fn addr_from_hex(hex_str: &str) -> Option<[u8; 32]> {
+    hex::decode(hex_str.trim())
+        .ok()
+        .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok())
+}
+
 /// Derive the backup identity from the wallet's private key (the exact
 /// bytes the 12 words produce at m/44'/60'/0'/0/0 — both wallet import
 /// paths land here, so both restore the same backup).
@@ -379,15 +413,33 @@ impl Engine {
         tokio::spawn(run_restore(self, job, key, art_dir));
         Ok(())
     }
+
+    /// Kick off a follow fetch (phase 2): read another device's backup
+    /// with its SHARED read keys — pointer address + content key, never
+    /// a wallet key — and stage it exactly like a restore. Free: reads
+    /// only, no wallet needed on this device.
+    pub fn start_follow(
+        &'static self,
+        ptr_hex: &str,
+        key_hex: &str,
+        art_dir: String,
+    ) -> Result<(), String> {
+        let keys = read_keys_from_hex(ptr_hex, key_hex)?;
+        if art_dir.trim().is_empty() {
+            return Err("follow needs an art_dir".into());
+        }
+        let job = self.backups.begin("follow", "locating")?;
+        tokio::spawn(run_follow(self, job, keys, art_dir));
+        Ok(())
+    }
 }
 
-async fn run_backup(
+/// Record a finished job's outcome and free the single job slot.
+fn finish_job(
     engine: &'static Engine,
-    job: Arc<Mutex<JobState>>,
-    key_hex: String,
-    input: serde_json::Value,
+    job: &Arc<Mutex<JobState>>,
+    outcome: Result<serde_json::Value, String>,
 ) {
-    let outcome = drive_backup(engine, &job, &key_hex, &input).await;
     {
         let mut s = job.lock().unwrap();
         match outcome {
@@ -402,6 +454,16 @@ async fn run_backup(
         }
     }
     engine.backups.active.store(false, Ordering::SeqCst);
+}
+
+async fn run_backup(
+    engine: &'static Engine,
+    job: Arc<Mutex<JobState>>,
+    key_hex: String,
+    input: serde_json::Value,
+) {
+    let outcome = drive_backup(engine, &job, &key_hex, &input).await;
+    finish_job(engine, &job, outcome);
 }
 
 async fn drive_backup(
@@ -630,21 +692,39 @@ async fn run_restore(
     key_hex: String,
     art_dir: String,
 ) {
-    let outcome = drive_restore(engine, &job, &key_hex, &art_dir).await;
-    {
-        let mut s = job.lock().unwrap();
-        match outcome {
-            Ok(result) => {
-                s.phase = "done".into();
-                s.result = Some(result);
-            }
-            Err(e) => {
-                s.phase = "error".into();
-                s.error = Some(e);
-            }
+    let outcome = match derive_keys(&key_hex) {
+        Ok(keys) => {
+            drive_restore(
+                engine,
+                &job,
+                keys.read(),
+                &art_dir,
+                "no backup found for this wallet — nothing has been backed \
+                 up under these 12 words yet",
+            )
+            .await
         }
-    }
-    engine.backups.active.store(false, Ordering::SeqCst);
+        Err(e) => Err(e),
+    };
+    finish_job(engine, &job, outcome);
+}
+
+async fn run_follow(
+    engine: &'static Engine,
+    job: Arc<Mutex<JobState>>,
+    keys: ReadKeys,
+    art_dir: String,
+) {
+    let outcome = drive_restore(
+        engine,
+        &job,
+        keys,
+        &art_dir,
+        "no backup found under the shared keys — the other device has not \
+         backed up yet",
+    )
+    .await;
+    finish_job(engine, &job, outcome);
 }
 
 /// Fetch and decrypt one object blob by its manifest entry.
@@ -670,13 +750,17 @@ async fn fetch_blob(
         .map_err(|e| format!("fetch failed: {e}"))
 }
 
+/// The shared read path: a restore (keys derived from a wallet key) and
+/// a phase-2 follow fetch (keys shared over My W@tch) are the same walk
+/// — pointer → head → manifest → objects — differing only in where the
+/// [ReadKeys] came from.
 async fn drive_restore(
     engine: &'static Engine,
     job: &Arc<Mutex<JobState>>,
-    key_hex: &str,
+    keys: ReadKeys,
     art_dir: &str,
+    missing: &'static str,
 ) -> Result<serde_json::Value, String> {
-    let keys = derive_keys(key_hex)?;
     set_phase(job, "locating");
     let client = engine.client().await?;
 
@@ -684,10 +768,7 @@ async fn drive_restore(
         .pointer_get(&keys.pointer)
         .await
         .map_err(|e| format!("backup lookup failed: {e}"))?
-        .ok_or(
-            "no backup found for this wallet — nothing has been backed up under \
-             these 12 words yet",
-        )?;
+        .ok_or(missing)?;
     let head_addr = pointer.target().address;
     let head_chunk = client
         .chunk_get(&head_addr)
@@ -858,6 +939,9 @@ async fn drive_restore(
     Ok(serde_json::json!({
         "created_ms": head.get("created_ms"),
         "backups": head.get("backups"),
+        // The head chunk this fetch walked — the follower records it so
+        // its next peek can tell "unchanged" without fetching anything.
+        "head": hex::encode(head_addr),
         "doc": doc,
         "maps_imported": maps_imported,
         "maps_failed": maps_failed,
@@ -906,6 +990,58 @@ mod tests {
         assert!(derive_keys("zz").is_err());
         assert!(derive_keys("0x1234").is_err());
         assert!(derive_keys("").is_err());
+    }
+
+    #[test]
+    fn read_keys_round_trip_the_derived_identity() {
+        // The hex a master publishes over My W@tch parses back to the
+        // exact identity its wallet derives — the whole phase-2 handoff.
+        let keys = derive_keys(KEY).unwrap();
+        let parsed = read_keys_from_hex(
+            &hex::encode(keys.pointer),
+            &hex::encode(keys.enc),
+        )
+        .unwrap();
+        assert_eq!(parsed.pointer, keys.pointer);
+        assert_eq!(parsed.enc, keys.enc);
+        assert_eq!(keys.read().pointer, keys.pointer);
+        assert_eq!(keys.read().enc, keys.enc);
+        // A follower can open what the master sealed, and nothing else.
+        let (hash, ct) = seal_object(&keys.enc, b"shared state");
+        assert_eq!(
+            open_object(&parsed.enc, &hash, &ct).unwrap(),
+            b"shared state"
+        );
+        // Malformed halves are refused with a pointer at which half.
+        let ok = &hex::encode(keys.pointer);
+        assert!(read_keys_from_hex("zz", ok).unwrap_err().contains("pointer"));
+        assert!(read_keys_from_hex(ok, "1234").unwrap_err().contains("read key"));
+        assert!(read_keys_from_hex("", "").is_err());
+    }
+
+    #[test]
+    fn follow_arg_validation_needs_no_wallet() {
+        let dir = std::env::temp_dir()
+            .join(format!("wi-backup-followargs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let engine: &'static Engine =
+            Box::leak(Box::new(Engine::new(None, dir.to_str())));
+        engine.wallet.disable_keychain();
+        let ptr = "ab".repeat(32);
+        let key = "cd".repeat(32);
+        // Reading is free: a wallet-less device may follow, so only the
+        // arguments themselves are vetted here.
+        let err = engine
+            .start_follow("nothex", &key, "/tmp/x".into())
+            .unwrap_err();
+        assert!(err.contains("pointer"), "{err}");
+        let err = engine
+            .start_follow(&ptr, "short", "/tmp/x".into())
+            .unwrap_err();
+        assert!(err.contains("read key"), "{err}");
+        let err = engine.start_follow(&ptr, &key, "  ".into()).unwrap_err();
+        assert!(err.contains("art_dir"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

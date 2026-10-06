@@ -26,6 +26,21 @@ class AppSettings {
     await prefs.setInt(_bufferSizeKey, mb);
   }
 
+  static const _backupAutoKey = 'backup_auto_v1';
+
+  /// Automatic seed-phrase backups (Settings → Backup): once a day,
+  /// only when something changed, paid from the upload wallet. Off by
+  /// default — every backup costs a little ANT, so spending is opt-in.
+  static Future<bool> backupAuto() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_backupAutoKey) ?? false;
+  }
+
+  static Future<void> setBackupAuto(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_backupAutoKey, value);
+  }
+
   static const _softwareVideoDecodeKey = 'software_video_decode_v1';
 
   /// Decode video on the CPU instead of the device's hardware decoder

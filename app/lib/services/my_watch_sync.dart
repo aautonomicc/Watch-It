@@ -86,6 +86,15 @@ class MyWatchSync {
 
   Timer? _timer;
 
+  /// Phase-2 backup hooks, wired in main() (null — the default, and in
+  /// most tests — is a no-op): [backupSectionProvider] supplies the
+  /// `backup` read-keys section this device publishes in its sync doc
+  /// when it is a backing-up wallet holder, and [onRemoteDocs] hands
+  /// every cycle's remote docs to the backup follower so it can adopt
+  /// keys another device shared (see backup_follow.dart).
+  Future<Map<String, dynamic>?> Function()? backupSectionProvider;
+  void Function(List<RemoteSyncDoc> remote)? onRemoteDocs;
+
   /// The in-flight cycle, when one is running. Background ticks join
   /// it; [syncNow] waits it out and runs a fresh pass instead — joining
   /// would report on work that started before the press.
@@ -446,6 +455,13 @@ class MyWatchSync {
       for (final d in remote)
         if (d.doc['updated_ms'] case final int ms when ms > 0) d.agentId: ms,
     };
+    try {
+      // The backup follower reads any shared read-keys sections out of
+      // the same docs this cycle merges — no extra store round.
+      onRemoteDocs?.call(remote);
+    } catch (e) {
+      debugPrint('mywatch sync: backup-follow hook failed: $e');
+    }
     _setActivity('Merging changes from your devices…');
     final merge = mergeRemoteDocs(
       lists: lists,
@@ -631,6 +647,12 @@ class MyWatchSync {
     } catch (e) {
       _problems.add('Sending profiles to your devices failed: $e');
     }
+    Map<String, dynamic>? backupSection;
+    try {
+      backupSection = await backupSectionProvider?.call();
+    } catch (e) {
+      debugPrint('mywatch sync: backup section failed: $e');
+    }
     final built = buildDocParts(
       lists: lists,
       tombstones: state.tombstones,
@@ -640,6 +662,7 @@ class MyWatchSync {
       haveHashes: haveHashes,
       tmdbSection: tmdbSection,
       profilesSection: profilesSection,
+      backupSection: backupSection,
       entryRotation: state.entryRot,
       metaRotation: state.metaRot,
     );
@@ -1537,6 +1560,7 @@ class MyWatchSync {
     List<String> haveHashes = const [],
     Map<String, dynamic>? tmdbSection,
     Map<String, dynamic>? profilesSection,
+    Map<String, dynamic>? backupSection,
     int entryCap = maxDocEntries,
     int entryOffset = 0,
   }) {
@@ -1621,6 +1645,10 @@ class MyWatchSync {
       // Old builds ignore the key; its presence marks a profile-sync
       // capable build (see profile_sync.dart).
       'profiles': ?profilesSection,
+      // Phase 2: the shared backup read keys (pointer + content key) a
+      // wallet-holding device publishes so linked devices can follow
+      // its backups. Tiny, never trimmed; old builds ignore the key.
+      'backup': ?backupSection,
     };
   }
 
@@ -1656,6 +1684,7 @@ class MyWatchSync {
     List<String> haveHashes = const [],
     Map<String, dynamic>? tmdbSection,
     Map<String, dynamic>? profilesSection,
+    Map<String, dynamic>? backupSection,
     int entryOffset = 0,
     int? entryLimit,
   }) {
@@ -1681,6 +1710,7 @@ class MyWatchSync {
           haveHashes: have,
           tmdbSection: tmdb,
           profilesSection: profiles,
+          backupSection: backupSection,
           entryCap: entryCap,
           entryOffset: entryOffset,
         );
@@ -1802,6 +1832,7 @@ class MyWatchSync {
     List<String> haveHashes = const [],
     Map<String, dynamic>? tmdbSection,
     Map<String, dynamic>? profilesSection,
+    Map<String, dynamic>? backupSection,
     int entryRotation = 0,
     int metaRotation = 0,
     int maxParts = maxSyncParts,
@@ -1838,6 +1869,7 @@ class MyWatchSync {
         haveHashes: have,
         tmdbSection: tmdb,
         profilesSection: first ? profilesSection : null,
+        backupSection: first ? backupSection : null,
         entryOffset: offset,
         entryLimit: entriesLeft,
       );

@@ -132,7 +132,12 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   to Autonomi encrypted under keys derived from the wallet (its 12
   words restore it anywhere), "Restore from backup" merges it back
   through the My W@tch sync rules; both confirm first, progress
-  inline, costs called out (backup paid, restore free)
+  inline, costs called out (backup paid, restore free). Phase 2
+  additions: a "Back up automatically" switch (default OFF — once a
+  day, only when something changed), and on a wallet-less device a
+  "Following a shared backup" card (shown once a linked device has
+  shared its backup read keys over My W@tch) with last-caught-up
+  info and a "Check the backup now" button
 - Playback (hardware decode, default subtitle language, skip amounts)
 - Appearance (Colour scheme; sits below Metadata since 2026-08-30)
 - About / licenses (incl. TMDB attribution notice + logo; the Terms of

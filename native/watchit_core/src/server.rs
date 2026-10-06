@@ -155,6 +155,14 @@ fn protected_router(engine: &'static Engine) -> Router {
             "/backup/restore",
             post(move |body: Bytes| backup_restore(engine, body)),
         )
+        .route(
+            "/backup/peek",
+            post(move |body: Bytes| backup_peek(engine, body)),
+        )
+        .route(
+            "/backup/follow",
+            post(move |body: Bytes| backup_follow(engine, body)),
+        )
 }
 
 fn open_router(engine: &'static Engine) -> Router {
@@ -661,15 +669,18 @@ async fn upload_status(engine: &'static Engine, Path(id): Path<u64>) -> Response
 
 /// `GET /backup` — the backup identity (derived from the stored wallet),
 /// the last backup's summary, and the running (or last finished) job.
+/// `key` is the content READ key: with `pointer` it is what a wallet
+/// holder shares with its linked devices (phase 2) — it can open the
+/// backup but never spend from the wallet.
 async fn backup_status(engine: &'static Engine) -> Response {
-    let pointer = engine
+    let keys = engine
         .wallet
         .load()
-        .and_then(|(key, _)| crate::backup::derive_keys(&key).ok())
-        .map(|k| hex::encode(k.pointer));
+        .and_then(|(key, _)| crate::backup::derive_keys(&key).ok());
     json_ok(serde_json::json!({
-        "configured": pointer.is_some(),
-        "pointer": pointer,
+        "configured": keys.is_some(),
+        "pointer": keys.as_ref().map(|k| hex::encode(k.pointer)),
+        "key": keys.as_ref().map(|k| hex::encode(k.enc)),
         "last": engine.backups.last_json(),
         "job": engine.backups.job_json(),
     }))
@@ -712,6 +723,68 @@ async fn backup_restore(engine: &'static Engine, body: Bytes) -> Response {
         .unwrap_or_default()
         .to_string();
     match engine.start_restore(key, art_dir) {
+        Ok(()) => json_ok(serde_json::json!({ "ok": true })),
+        Err(e) if e.contains("already running") => {
+            (StatusCode::CONFLICT, e).into_response()
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+/// `POST /backup/peek` `{"ptr": 64-hex}` — one free pointer read: does a
+/// backup exist under this pointer, and which head chunk does it target?
+/// The follower's cheap no-change check (phase 2): a quiet backup line
+/// costs one pointer lookup per poll, nothing else.
+async fn backup_peek(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    let Some(ptr) = v
+        .get("ptr")
+        .and_then(|p| p.as_str())
+        .and_then(crate::backup::addr_from_hex)
+    else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "the backup pointer must be 64 hex characters",
+        )
+            .into_response();
+    };
+    let client = match engine.client().await {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, e).into_response(),
+    };
+    match client.pointer_get(&ptr).await {
+        Ok(Some(p)) => json_ok(serde_json::json!({
+            "found": true,
+            "head": hex::encode(p.target().address),
+            "counter": p.counter(),
+        })),
+        Ok(None) => json_ok(serde_json::json!({ "found": false })),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            format!("backup lookup failed: {e}"),
+        )
+            .into_response(),
+    }
+}
+
+/// `POST /backup/follow` `{"ptr","key","art_dir"}` — fetch another
+/// device's backup with its shared read keys and stage it exactly like
+/// a restore (job kind `follow`, polled on `GET /backup`). Free: reads
+/// only, no wallet needed on this device.
+async fn backup_follow(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    let ptr = v.get("ptr").and_then(|p| p.as_str()).unwrap_or_default();
+    let key = v.get("key").and_then(|k| k.as_str()).unwrap_or_default();
+    let art_dir = v
+        .get("art_dir")
+        .and_then(|d| d.as_str())
+        .unwrap_or_default()
+        .to_string();
+    match engine.start_follow(ptr, key, art_dir) {
         Ok(()) => json_ok(serde_json::json!({ "ok": true })),
         Err(e) if e.contains("already running") => {
             (StatusCode::CONFLICT, e).into_response()
@@ -1516,11 +1589,13 @@ mod wallet_api_tests {
     async fn backup_routes_guarded_and_validated() {
         let engine = test_engine("backup");
         let app = router_with_auth(engine, "sekrit");
-        // All three routes sit behind the token.
+        // Every backup route sits behind the token.
         for (method, path) in [
             ("GET", "/backup"),
             ("POST", "/backup/run"),
             ("POST", "/backup/restore"),
+            ("POST", "/backup/peek"),
+            ("POST", "/backup/follow"),
         ] {
             let (status, _) = send_auth(&app, method, path, vec![], None).await;
             assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {path}");
@@ -1533,6 +1608,7 @@ mod wallet_api_tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["configured"], serde_json::json!(false));
         assert!(json["pointer"].is_null());
+        assert!(json["key"].is_null());
         let (status, body) = send_auth(
             &app,
             "POST",
@@ -1575,6 +1651,19 @@ mod wallet_api_tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["configured"], serde_json::json!(true));
         assert_eq!(json["pointer"].as_str().unwrap().len(), 64);
+        // The shareable read key appears beside the pointer — and it is
+        // the derived enc key, never the wallet key itself.
+        let shared = json["key"].as_str().unwrap();
+        assert_eq!(shared.len(), 64);
+        let derived = crate::backup::derive_keys(
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        )
+        .unwrap();
+        assert_eq!(shared, hex::encode(derived.enc));
+        assert_ne!(
+            shared,
+            "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+        );
         assert!(json["last"].is_null());
         assert!(json["job"].is_null());
         let (status, body) = send_auth(
@@ -1587,6 +1676,41 @@ mod wallet_api_tests {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(String::from_utf8_lossy(&body).contains("doc"));
+        // Peek and follow vet their arguments before touching anything
+        // (a bad pointer must never reach the network path).
+        let (status, body) = send_auth(
+            &app,
+            "POST",
+            "/backup/peek",
+            br#"{"ptr":"nothex"}"#.to_vec(),
+            Some("sekrit"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(String::from_utf8_lossy(&body).contains("pointer"));
+        let ptr = "ab".repeat(32);
+        let (status, body) = send_auth(
+            &app,
+            "POST",
+            "/backup/follow",
+            format!(r#"{{"ptr":"{ptr}","key":"zz","art_dir":"/tmp/x"}}"#)
+                .into_bytes(),
+            Some("sekrit"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(String::from_utf8_lossy(&body).contains("read key"));
+        let key = "cd".repeat(32);
+        let (status, body) = send_auth(
+            &app,
+            "POST",
+            "/backup/follow",
+            format!(r#"{{"ptr":"{ptr}","key":"{key}"}}"#).into_bytes(),
+            Some("sekrit"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(String::from_utf8_lossy(&body).contains("art_dir"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

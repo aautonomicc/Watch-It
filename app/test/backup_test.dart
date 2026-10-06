@@ -15,6 +15,7 @@ import 'package:watchit/db/app_database.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/screens/backup_screen.dart';
 import 'package:watchit/services/backup.dart';
+import 'package:watchit/services/backup_follow.dart';
 import 'package:watchit/services/library_store.dart';
 import 'package:watchit/services/metadata_service.dart';
 import 'package:watchit/services/profiles.dart';
@@ -526,6 +527,66 @@ void main() {
       ));
       await tester.pumpAndSettle();
       expect(find.text('Never backed up from this device'), findsOneWidget);
+    });
+
+    testWidgets('the automatic-backup switch persists the opt-in',
+        (tester) async {
+      fake.backupStatus = {
+        'configured': true,
+        'pointer': 'aa' * 32,
+        'last': null,
+        'job': null,
+      };
+      final screenService = BackupService(
+        api: BackupApi(base: FakeEmbeddedHttp.base, token: 't'),
+      );
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: BackupScreen(service: screenService),
+      ));
+      await tester.pumpAndSettle();
+      final toggle = find.text('Back up automatically');
+      expect(toggle, findsOneWidget);
+      expect(
+          tester
+              .widget<SwitchListTile>(find.byType(SwitchListTile))
+              .value,
+          isFalse);
+      await tester.ensureVisible(toggle);
+      await tester.pump();
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(
+          tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+          isTrue);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('backup_auto_v1'), isTrue);
+    });
+
+    testWidgets('a wallet-less follower shows the shared-backup card',
+        (tester) async {
+      BackupFollowService.status.value = BackupFollowStatus(
+        following: true,
+        pointer: 'ab' * 32,
+        lastAppliedMs:
+            DateTime.now().millisecondsSinceEpoch - 5 * 60 * 1000,
+        lastSummary: 'Caught up from the backup: 2 added.',
+      );
+      addTearDown(() =>
+          BackupFollowService.status.value = const BackupFollowStatus());
+      final screenService = BackupService(
+        api: BackupApi(base: FakeEmbeddedHttp.base, token: 't'),
+      );
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: BackupScreen(service: screenService),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('Following a shared backup'), findsOneWidget);
+      expect(find.textContaining('Last caught up 5 min ago'), findsOneWidget);
+      expect(find.text('Check the backup now'), findsOneWidget);
+      // The wallet CTA stays available below the card.
+      expect(find.text('Set up the wallet'), findsOneWidget);
     });
   });
 }

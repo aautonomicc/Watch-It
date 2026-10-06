@@ -151,13 +151,20 @@ class FakeEmbeddedHttp extends HttpOverrides {
   Map<String, dynamic> backupStatus = {
     'configured': false,
     'pointer': null,
+    'key': null,
     'last': null,
     'job': null,
   };
 
-  /// Raw bodies of every `POST /backup/run` / `POST /backup/restore`.
+  /// Raw bodies of every `POST /backup/run` / `POST /backup/restore` /
+  /// `POST /backup/peek` / `POST /backup/follow`.
   final List<String> backupRunPosts = [];
   final List<String> backupRestorePosts = [];
+  final List<String> backupPeekPosts = [];
+  final List<String> backupFollowPosts = [];
+
+  /// What `POST /backup/peek` answers.
+  Map<String, dynamic> backupPeek = {'found': false};
 
   /// Job states `GET /backup` plays back in order once a run/restore
   /// started (the last one repeats) — the poll-loop lifecycle.
@@ -256,6 +263,18 @@ class FakeEmbeddedHttp extends HttpOverrides {
       _backupPolls = 0;
       // Tests stage "restored" artwork into the posted art_dir here,
       // exactly where the native side would write it during the job.
+      final artDir = (jsonDecode(text) as Map)['art_dir'];
+      if (artDir is String) onBackupRestore?.call(artDir);
+      return (200, utf8.encode(jsonEncode({'ok': true})));
+    }
+    if (method == 'POST' && path == '/backup/peek') {
+      backupPeekPosts.add(utf8.decode(body));
+      return (200, utf8.encode(jsonEncode(backupPeek)));
+    }
+    if (method == 'POST' && path == '/backup/follow') {
+      final text = utf8.decode(body);
+      backupFollowPosts.add(text);
+      _backupPolls = 0;
       final artDir = (jsonDecode(text) as Map)['art_dir'];
       if (artDir is String) onBackupRestore?.call(artDir);
       return (200, utf8.encode(jsonEncode({'ok': true})));

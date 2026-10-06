@@ -351,9 +351,29 @@ regresses newer local state). The backup complements the x0x link, it
 never replaces it (decided 2026-10-06): gossip stays the free live
 two-way channel; the backup is the paid, slow-cadence, one-writer
 recovery layer on the wallet-holding device. Routes (token-guarded):
-`GET /backup`, `POST /backup/run`, `POST /backup/restore`. Phase 2
-(planned): sharing the derived READ keys over the My W@tch link so
-linked devices catch up from the backup directly.
+`GET /backup`, `POST /backup/run`, `POST /backup/restore`,
+`POST /backup/peek`, `POST /backup/follow`.
+
+Phase 2 — shared read keys (implemented 2026-10-06, unreleased): the
+wallet holder publishes its derived READ keys (pointer address +
+content key — never the wallet key, so spend stays put) as a tiny
+`backup` section in its My W@tch sync doc, which already travels
+encrypted in the link store. Linked devices adopt the newest shared
+keys (`app/lib/services/backup_follow.dart`; a device never follows
+its own line) and poll the backup on a slow cadence — launch + every
+6 h + immediately when a linked doc advertises a newer backup —
+peek-first: `POST /backup/peek` is one free `pointer_get`, and the
+full `POST /backup/follow` fetch (job kind `follow`, the same walk as
+a restore with explicit keys) runs only when the head moved. The fold
+reuses the restore merge wholesale, so an offline-while-the-others-
+synced device catches up from the backup instead of needing to be
+online together. The same service runs the opt-in daily automatic
+backup on the master (Settings → Backup switch, default OFF; a
+payload fingerprint skips unchanged state so no-change days spend
+nothing). Keys deliberately do not rotate on unlink: rotation would
+re-encrypt every object (full re-upload) while the removed device
+keeps the old keys anyway — replacing the wallet starts a new backup
+line.
 
 ### Channels — public signed media lists (REMOVED 2026-09-27)
 

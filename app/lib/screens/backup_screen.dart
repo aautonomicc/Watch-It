@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../services/app_settings.dart';
 import '../services/backup.dart';
+import '../services/backup_follow.dart';
 import '../theme/tokens.dart';
 import 'wallet_screen.dart';
 
@@ -27,11 +29,15 @@ class _BackupScreenState extends State<BackupScreen> {
   /// The running job's latest polled state, while one runs from here.
   BackupJob? _progress;
   bool _busy = false;
+  bool _auto = false;
 
   @override
   void initState() {
     super.initState();
     _reload();
+    AppSettings.backupAuto().then((v) {
+      if (mounted) setState(() => _auto = v);
+    });
   }
 
   Future<void> _reload() async {
@@ -191,6 +197,83 @@ class _BackupScreenState extends State<BackupScreen> {
     }
   }
 
+  /// The phase-2 follower card (wallet-less devices): whether a linked
+  /// device has shared its backup read keys, when this device last
+  /// caught up from the backup, and a manual check button.
+  Widget _followerCard(WiTokens t) {
+    String ago(int ms) {
+      final mins =
+          (DateTime.now().millisecondsSinceEpoch - ms) ~/ 60000;
+      if (mins < 1) return 'just now';
+      if (mins < 60) return '$mins min ago';
+      final hours = mins ~/ 60;
+      return hours < 48 ? '$hours h ago' : '${hours ~/ 24} days ago';
+    }
+
+    return ValueListenableBuilder<BackupFollowStatus>(
+      valueListenable: BackupFollowService.status,
+      builder: (context, follow, _) {
+        if (!follow.following) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Text(
+              'When a device linked over My W@tch backs up with its '
+              'wallet, this device receives the backup\'s read keys '
+              'automatically and catches up from it — nothing to set '
+              'up here.',
+              style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+            ),
+          );
+        }
+        final applied = follow.lastAppliedMs;
+        final checked = follow.lastCheckMs;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.cloud_sync_outlined, color: t.accent),
+                title: Text('Following a shared backup',
+                    style: TextStyle(color: t.bone, fontSize: 15)),
+                subtitle: Text(
+                  [
+                    'A linked device shared its backup keys over '
+                        'My W@tch.',
+                    if (applied != null)
+                      'Last caught up ${ago(applied)}.'
+                    else if (checked != null)
+                      'Checked ${ago(checked)} — nothing fetched yet.',
+                    ?follow.lastSummary,
+                  ].join(' '),
+                  style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+                ),
+              ),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('Check the backup now'),
+                onPressed: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  try {
+                    final outcome =
+                        await BackupFollowService.instance.checkNow();
+                    messenger
+                        .showSnackBar(SnackBar(content: Text(outcome)));
+                  } catch (e) {
+                    messenger.showSnackBar(
+                        SnackBar(content: Text('Check failed: $e')));
+                  }
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   String _lastLine(BackupLast last) {
     final when = DateTime.fromMillisecondsSinceEpoch(last.ms);
     final date = '${when.year}-${when.month.toString().padLeft(2, '0')}-'
@@ -226,6 +309,7 @@ class _BackupScreenState extends State<BackupScreen> {
           ] else if (status == null) ...[
             const Center(child: CircularProgressIndicator()),
           ] else if (!status.configured) ...[
+            _followerCard(t),
             Text(
               'No upload wallet is set up on this device yet. The '
               'backup lives under keys derived from the wallet, so set '
@@ -282,12 +366,30 @@ class _BackupScreenState extends State<BackupScreen> {
                 label: const Text('Restore from backup'),
                 onPressed: _restore,
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text('Back up automatically',
+                    style: TextStyle(color: t.bone, fontSize: 15)),
+                subtitle: Text(
+                  'Once a day, and only when something changed. Each '
+                  'backup costs a little ANT from the upload wallet.',
+                  style: TextStyle(color: t.ash, fontSize: 12),
+                ),
+                value: _auto,
+                onChanged: (v) async {
+                  await AppSettings.setBackupAuto(v);
+                  if (mounted) setState(() => _auto = v);
+                },
+              ),
+              const SizedBox(height: 8),
               Text(
                 'Backing up costs a little ANT from the upload wallet '
                 '(only what changed since last time). Restoring is '
-                'free. Replacing the wallet starts a new backup line — '
-                'the old one stays readable with the old words.',
+                'free. Linked devices receive the backup\'s read keys '
+                'over My W@tch and catch up from it automatically. '
+                'Replacing the wallet starts a new backup line — the '
+                'old one stays readable with the old words.',
                 style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
               ),
             ],

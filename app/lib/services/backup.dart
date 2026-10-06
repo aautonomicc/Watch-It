@@ -94,7 +94,32 @@ class BackupApi {
         'key': ?key,
         'art_dir': artDir,
       });
+
+  /// One free pointer read: does a backup exist under [ptr], and which
+  /// head chunk does it target? The follower's cheap no-change check.
+  Future<BackupPeek> peek(String ptr) async {
+    final json = await _request('POST', '/backup/peek', body: {'ptr': ptr});
+    return (
+      found: json['found'] as bool? ?? false,
+      head: json['head'] as String?,
+    );
+  }
+
+  /// Start a follow fetch of another device's backup with its shared
+  /// read keys (job kind `follow`; free — reads only, no wallet here).
+  Future<void> followStart({
+    required String ptr,
+    required String key,
+    required String artDir,
+  }) =>
+      _request('POST', '/backup/follow', body: {
+        'ptr': ptr,
+        'key': key,
+        'art_dir': artDir,
+      });
 }
+
+typedef BackupPeek = ({bool found, String? head});
 
 class BackupException implements Exception {
   BackupException(this.message);
@@ -108,6 +133,7 @@ class BackupStatus {
   const BackupStatus({
     required this.configured,
     this.pointer,
+    this.key,
     this.last,
     this.job,
   });
@@ -115,6 +141,7 @@ class BackupStatus {
   factory BackupStatus.fromJson(Map<String, dynamic> json) => BackupStatus(
         configured: json['configured'] as bool? ?? false,
         pointer: json['pointer'] as String?,
+        key: json['key'] as String?,
         last: json['last'] is Map<String, dynamic>
             ? BackupLast.fromJson(json['last'] as Map<String, dynamic>)
             : null,
@@ -126,6 +153,11 @@ class BackupStatus {
   /// Whether a wallet (and so a backup identity) exists on this device.
   final bool configured;
   final String? pointer;
+
+  /// The derived content READ key (hex) — with [pointer] it is what a
+  /// master shares over My W@tch so linked devices can follow its
+  /// backups. Never the wallet key; it cannot spend anything.
+  final String? key;
   final BackupLast? last;
   final BackupJob? job;
 }
@@ -215,6 +247,7 @@ class BackupRunSummary {
 /// What a restore merged into this device.
 class RestoreSummary {
   const RestoreSummary({
+    this.head,
     required this.createdMs,
     required this.entriesAdded,
     required this.watchApplied,
@@ -225,6 +258,10 @@ class RestoreSummary {
     required this.artInstalled,
     required this.problems,
   });
+
+  /// The backup head chunk this fetch walked (hex) — the follower
+  /// records it so its next peek can skip an unchanged backup.
+  final String? head;
   final int createdMs;
   final int entriesAdded;
   final int watchApplied;
@@ -462,14 +499,42 @@ class BackupService {
 
   // ---- backup -------------------------------------------------------------
 
-  /// Build the payload, start the backup, and wait it out. [onProgress]
-  /// gets every polled job state for the screen.
+  /// Called after every successful backup with the published payload's
+  /// [payloadFingerprint] — the auto-backup scheduler stores it so an
+  /// unchanged state never pays for a redundant backup.
+  static void Function(String fingerprint)? onBackupPublished;
+
+  /// A stable digest of a backup payload's content: the state document
+  /// (minus its build stamp — two payloads of identical state must
+  /// fingerprint identically), the art manifest and the map addresses.
+  static String payloadFingerprint(Map<String, dynamic> payload) {
+    final doc = {
+      for (final e
+          in (payload['doc'] as Map<String, dynamic>? ?? const {}).entries)
+        if (e.key != 'updated_ms') e.key: e.value,
+    };
+    final body = jsonEncode({
+      'doc': doc,
+      'art': payload['art'],
+      'map_addrs': payload['map_addrs'],
+    });
+    return crypto.sha256.convert(utf8.encode(body)).toString();
+  }
+
+  /// Build the payload (unless one is handed in), start the backup, and
+  /// wait it out. [onProgress] gets every polled job state.
   Future<BackupRunSummary> runBackup(
-      {void Function(BackupJob job)? onProgress}) async {
-    final payload = await buildPayload();
+      {Map<String, dynamic>? payload,
+      void Function(BackupJob job)? onProgress}) async {
+    payload ??= await buildPayload();
     await _api.run(payload);
     final job = await _awaitJob('backup', onProgress);
     final result = job.result ?? const {};
+    try {
+      onBackupPublished?.call(payloadFingerprint(payload));
+    } catch (e) {
+      debugPrint('backup: fingerprint hook failed: $e');
+    }
     return BackupRunSummary(
       objects: result['objects'] as int? ?? 0,
       uploaded: result['uploaded'] as int? ?? 0,
@@ -502,13 +567,42 @@ class BackupService {
   /// sync merge rules, so a restore never regresses newer local state.
   /// Root maps were already imported natively, so entries play.
   Future<RestoreSummary> restore(
-      {String? walletKey, void Function(BackupJob job)? onProgress}) async {
+      {String? walletKey, void Function(BackupJob job)? onProgress}) =>
+      _fetchAndApply(
+        'restore',
+        (artDir) => _api.restoreStart(key: walletKey, artDir: artDir),
+        onProgress,
+      );
+
+  /// Phase 2: fetch another device's backup with the read keys it shared
+  /// over My W@tch and merge it in — the same walk and the same
+  /// never-regress merge as [restore], differing only in where the keys
+  /// came from. Free: no wallet on this device is needed.
+  Future<RestoreSummary> followFetch({
+    required String ptr,
+    required String key,
+    void Function(BackupJob job)? onProgress,
+  }) =>
+      _fetchAndApply(
+        'follow',
+        (artDir) => _api.followStart(ptr: ptr, key: key, artDir: artDir),
+        onProgress,
+      );
+
+  /// One free pointer read against [ptr] (see [BackupApi.peek]).
+  Future<BackupPeek> peek(String ptr) => _api.peek(ptr);
+
+  Future<RestoreSummary> _fetchAndApply(
+    String kind,
+    Future<void> Function(String artDir) start,
+    void Function(BackupJob job)? onProgress,
+  ) async {
     final staging = await _stagingDir();
     if (staging.existsSync()) staging.deleteSync(recursive: true);
     staging.createSync(recursive: true);
     try {
-      await _api.restoreStart(key: walletKey, artDir: staging.path);
-      final job = await _awaitJob('restore', onProgress);
+      await start(staging.path);
+      final job = await _awaitJob(kind, onProgress);
       return await _applyRestore(job.result ?? const {}, staging);
     } finally {
       // Covers the failed-job path too — a "no backup found" must not
@@ -702,6 +796,7 @@ class BackupService {
       problems.add('$artFailed artwork file(s) could not be fetched');
     }
     return RestoreSummary(
+      head: result['head'] as String?,
       createdMs: result['created_ms'] as int? ?? 0,
       entriesAdded: merge.entriesAdded,
       watchApplied: watchApplied,

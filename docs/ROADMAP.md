@@ -777,27 +777,37 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       layer on the wallet-holding device. Needs: pointer routes
       surfaced in watchit_core + a live mainnet pointer smoke
       (fleet-rollout probe) before relying on it.
-      PHASE 2 — SHARED READ KEYS (pulled into the plan 2026-10-06,
-      user decision; was the parked mailbox's "consolidation path"):
-      the master shares the DERIVED backup read keys (pointer address
-      + content enc key — never the 12 words or the wallet key, so
-      spend stays with the master) over the already-encrypted My
-      W@tch link store; linked devices then poll the backup head
-      directly from the network (pointer reads are free, no wallet
-      needed) and fold it through the existing LWW/tombstone merge.
-      Motivation: real-world sync pain — devices must be online
-      together and a moderate library syncs slowly (sync-doc byte
-      budget rotates entries over many 30s cycles, and the x0x
-      chunked-art DM transfer is the flakiest leg); backup reads pull
-      art/datamaps/metadata as plain network chunk fetches instead,
-      robust and whole-manifest-at-once. Gossip stays for the reverse
-      direction (secondary devices' watch states/profile edits still
-      travel to the master over the link) and for low-latency live
-      sync. Design items to settle at build time: poll cadence vs
-      idle-data budget, backup freshness (secondaries see the
-      master's last backup — needs a debounced auto-backup), and key
-      rotation on unlink (an unlinked device keeps the enc key; a new
-      derivation epoch re-keys future backups)
+      PHASE 2 — SHARED READ KEYS: IMPLEMENTED 2026-10-06 (unreleased —
+      ships next release; pulled into the plan the same day, user
+      decision; was the parked mailbox's "consolidation path"): the
+      wallet-holding device publishes its DERIVED backup read keys
+      (pointer address + content enc key — never the 12 words or the
+      wallet key, so spend stays with the master) as a tiny `backup`
+      section in its My W@tch sync doc, which already travels
+      encrypted inside the link store; linked devices adopt the
+      newest shared keys (`backup_follow.dart`, own backup line never
+      followed) and poll the pointer directly from the network —
+      pointer reads are free, no wallet needed — folding a fetched
+      backup through the exact restore merge (LWW/tombstones, never
+      regressing newer local state; root maps import offline so
+      entries play). Peek-first: a quiet backup line costs one free
+      pointer read per poll (`POST /backup/peek`), a full fetch
+      (`POST /backup/follow`, job kind `follow`) only when the head
+      moved. Settled design items: poll cadence = launch + every 6 h
+      + immediately when a linked device advertises a newer backup;
+      freshness = opt-in **Back up automatically** switch on
+      Settings → Backup (default OFF — backups spend ANT; once a
+      day, skipped when a payload fingerprint shows nothing
+      changed); key rotation on unlink = deliberately NOT in v1
+      (rotation would re-encrypt every object — a full re-upload —
+      while the removed device keeps the old keys anyway; replacing
+      the wallet starts a new backup line and is the honest lever).
+      Gossip stays for the reverse direction (follower watch states/
+      profile edits still travel to the master over the link) and
+      for low-latency live sync. STILL OPEN: the live
+      master-backs-up → follower-catches-up round trip needs the
+      funded wallet (user test at release, same gap as phase 1's
+      paid pointer write)
 
 ## Channels (alpha.65–.107): REMOVED 2026-09-27
 
