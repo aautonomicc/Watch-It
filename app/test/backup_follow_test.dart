@@ -94,7 +94,7 @@ void main() {
       RemoteSyncDoc(agentId: agent * 32, doc: {
         'v': 1,
         'lists': const [],
-        if (backup != null) 'backup': backup,
+        'backup': ?backup,
       }, maps: const {});
 
   group('sectionForPublish', () {
