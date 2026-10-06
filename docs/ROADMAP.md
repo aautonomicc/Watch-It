@@ -759,7 +759,28 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       key); the backup is the paid, slow-cadence, one-writer recovery
       layer on the wallet-holding device. Needs: pointer routes
       surfaced in watchit_core + a live mainnet pointer smoke
-      (fleet-rollout probe) before relying on it
+      (fleet-rollout probe) before relying on it.
+      PHASE 2 — SHARED READ KEYS (pulled into the plan 2026-10-06,
+      user decision; was the parked mailbox's "consolidation path"):
+      the master shares the DERIVED backup read keys (pointer address
+      + content enc key — never the 12 words or the wallet key, so
+      spend stays with the master) over the already-encrypted My
+      W@tch link store; linked devices then poll the backup head
+      directly from the network (pointer reads are free, no wallet
+      needed) and fold it through the existing LWW/tombstone merge.
+      Motivation: real-world sync pain — devices must be online
+      together and a moderate library syncs slowly (sync-doc byte
+      budget rotates entries over many 30s cycles, and the x0x
+      chunked-art DM transfer is the flakiest leg); backup reads pull
+      art/datamaps/metadata as plain network chunk fetches instead,
+      robust and whole-manifest-at-once. Gossip stays for the reverse
+      direction (secondary devices' watch states/profile edits still
+      travel to the master over the link) and for low-latency live
+      sync. Design items to settle at build time: poll cadence vs
+      idle-data budget, backup freshness (secondaries see the
+      master's last backup — needs a debounced auto-backup), and key
+      rotation on unlink (an unlinked device keeps the enc key; a new
+      derivation epoch re-keys future backups)
 
 ## Channels (alpha.65–.107): REMOVED 2026-09-27
 
@@ -1174,13 +1195,16 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
   with the devices), devices that are ever online together already
   sync free over gossip, and per-device mailbox pointers need a
   funded wallet PER DEVICE — which TVs/phones won't have.
-  Consolidation path if offline catch-up ever bites testers: share
-  the DERIVED backup read keys (pointer address + enc key, never the
-  wallet key) over the already-encrypted My W@tch link so linked
-  devices poll the backup head and fold it through the existing
-  LWW/tombstone merge — the backup then doubles as a one-writer
-  mailbox with zero new primitives. Revisit trigger: a real
-  never-online-together catch-up need across multiple funded wallets
+  Consolidation path — share the DERIVED backup read keys (pointer
+  address + enc key, never the wallet key) over the already-encrypted
+  My W@tch link so linked devices poll the backup head and fold it
+  through the existing LWW/tombstone merge — **pulled into the active
+  seed-phrase backup plan as phase 2 on 2026-10-06** (user decision,
+  motivated by slow moderate-library sync + the online-together
+  requirement; see the backup item above). What stays parked here is
+  only true per-device mailboxes (every device a writer with its own
+  funded wallet). Revisit trigger: a real never-online-together
+  catch-up need across multiple funded wallets
 - Idle x0x gossip baseline (moved here 2026-09-22; the revisit
   trigger fired 2026-10-03: x0x 0.46.0 shipped the Leaf egress
   byte-shed policy, the idle A/B measured 52 MB/min with shed_normal
