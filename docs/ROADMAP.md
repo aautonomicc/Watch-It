@@ -734,26 +734,32 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       the 30 s period. Still open: publishing each device's own
       pending counts into the doc so every device can also show the
       OTHER side's remaining work
-- [ ] Sync while apart (back from the parking lot 2026-10-01 — its
-      revisit trigger fired): devices currently must be online
-      together to sync; there is no relay/mailbox in the middle, so an
-      always-on linked device is the only bridge today. **Unblocked:**
-      ant-core 0.11.0 (tagged 2026-10-01, the rc-2026.9.4 promotion)
-      reintroduces **Pointers** — mutable, owner-signed,
-      group-quorum-stored records (ADR 0016: quorum from the close
-      group, every answer verified, fork healing + catch-up proven
-      e2e, PUT paid) — exactly the dead-drop-to-poll primitive the
-      parked note was waiting for. Design direction: a My W@tch
-      mailbox/dead-drop — each device publishes its sync doc (and
-      shrunk maps / art manifests) to a link-secret-derived location
-      an offline-together peer can later fetch and fold through the
-      existing merge, with Pointers as the mutable head over immutable
-      chunk payloads. Needs: the ant-core 0.11.0 bump first (ride the
-      parked combined dep pass — x0x 0.46.0 when it tags + ant-core
-      0.11.0 + lockfile wave), then a design discussion (PUT cost per
-      update, polling cadence vs idle-data budget, what subset of the
-      sync doc is worth paying to relay, encryption at rest under the
-      link secret, tombstone/LWW semantics unchanged)
+- [ ] Seed-phrase backup (planned 2026-10-05/06, plan ADOPTED
+      2026-10-06 — awaiting the implementation go-ahead): back up the
+      FULL W@tch state — lists + entries, shrunk datamaps, user-edited
+      metadata, posters/art, watch states, profiles (PIN + recovery
+      travel as a pair) — to Autonomi under keys derived OFFLINE from
+      the wallet's 12 words (blake3-derived ML-DSA pointer owner key +
+      ChaCha20-Poly1305 content key); restore on a fresh install from
+      the words alone — reading is free, needs no funded wallet and no
+      linked device, so it covers the all-devices-lost case. Storage
+      shape: content-addressed encrypted object store with per-object
+      DETERMINISTIC encryption (key/nonce = blake3(backup key ‖ object
+      content hash)) so unchanged objects are byte-identical
+      ciphertext → network chunk dedup makes re-backups nearly free
+      (art uploads once ever; small records batch into section blobs;
+      manifest → encrypted head chunk with a predecessor link = free
+      walkable history → pointer update; a steady-state backup after a
+      viewing session ≈ a few chunks). No plaintext datamap ever
+      touches the network — scrape-proof to anyone without the seed.
+      DECIDED 2026-10-06: the backup COMPLEMENTS, never replaces, the
+      x0x My W@tch link — gossip sync stays the free, live, two-way
+      channel (wallet-less TVs/phones can't pay for pointer writes,
+      and putting the 12 words on every device would spread the money
+      key); the backup is the paid, slow-cadence, one-writer recovery
+      layer on the wallet-holding device. Needs: pointer routes
+      surfaced in watchit_core + a live mainnet pointer smoke
+      (fleet-rollout probe) before relying on it
 
 ## Channels (alpha.65–.107): REMOVED 2026-09-27
 
@@ -1160,10 +1166,21 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
   went with it (moot)
 - ~~Watch-state + list sync between devices~~ — **shipped** as My W@tch
   (alpha.61/.62, via x0x rather than Autonomi — see the section above)
-- ~~Sync while apart~~ — **moved back to the active My W@tch section
-  2026-10-01**: the revisit trigger fired — ant-core 0.11.0
-  (2026-10-01) reintroduces Pointer-style mutable primitives, making
-  a dead-drop/mailbox buildable (parked here 2026-09-22)
+- Sync while apart / My W@tch mailbox — parked 2026-09-22, un-parked
+  2026-10-01 when ant-core 0.11.0 reintroduced Pointers, **re-parked
+  2026-10-06** (user decision, with the seed-phrase backup adopted
+  instead): the backup covers the all-devices-lost case the mailbox
+  never could (mailbox keys derive from the LINK secret, which dies
+  with the devices), devices that are ever online together already
+  sync free over gossip, and per-device mailbox pointers need a
+  funded wallet PER DEVICE — which TVs/phones won't have.
+  Consolidation path if offline catch-up ever bites testers: share
+  the DERIVED backup read keys (pointer address + enc key, never the
+  wallet key) over the already-encrypted My W@tch link so linked
+  devices poll the backup head and fold it through the existing
+  LWW/tombstone merge — the backup then doubles as a one-writer
+  mailbox with zero new primitives. Revisit trigger: a real
+  never-online-together catch-up need across multiple funded wallets
 - Idle x0x gossip baseline (moved here 2026-09-22; the revisit
   trigger fired 2026-10-03: x0x 0.46.0 shipped the Leaf egress
   byte-shed policy, the idle A/B measured 52 MB/min with shed_normal
