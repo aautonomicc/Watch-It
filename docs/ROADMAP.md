@@ -6,14 +6,34 @@ private Upload and My W@tch stay. Channel mentions in the release
 history below are historical; the Channels section itself is collapsed
 to a dated note.
 
-**Status (2026-09-20):** latest release is **v0.1.0-alpha.103**
+**Status (2026-10-06):** latest release is **v0.1.0-alpha.110**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
 a release ships **four artifacts**: a signed APK (dual-ABI
 armeabi-v7a + arm64-v8a since alpha.98, so Fire TV Sticks and other
 32-bit-app devices install the normal APK), a Linux AppImage, a
 Windows portable zip (since alpha.55), and a macOS universal dmg
 (since alpha.92 — unsigned, right-click → Open). The newest wave is
-**pairing, mobile channels & TV fixes**: alpha.102 ships
+the **seed-phrase backup** (alpha.110): the full W@tch state — lists
+and playable entries, watch positions, profiles with PINs, custom
+details and artwork — backs up to the Autonomi network encrypted
+under keys derived offline from the upload wallet's 12 words, and
+restores on a fresh install from the words alone (reads are free —
+no funded wallet, no linked device needed); linked devices receive
+derived read-only keys over My W@tch, so a device that was offline
+while the others synced catches up straight from the backup, with an
+opt-in daily auto-backup (a no-change day uploads nothing); x0x
+0.46.3 and Terms v5 (backup coverage) ride along. Before it,
+alpha.109 cut idle background data on My W@tch-linked devices ~6×
+(x0x 0.46.0 + ant-core 0.11.0, Leaf `shed_normal` egress policy on
+by default — 322 → 52 MB/min measured) with Terms v4's upload/share
+rewording, and alpha.104–.108 were the TV-fix and profiles wave:
+Impeller off by default on Tegra plus a Graphics compatibility
+toggle (.104), the tester-driven TV/update polish round (.105), the
+desktop polish trio, Data-page daily graph with Wi-Fi/mobile split
+and honest My W@tch sync reporting (.106), the Android updater
+free-storage pre-check (.107), and **profiles sync over My W@tch**
+plus the Channels removal (.108). Before that, **pairing & TV
+fixes**: alpha.102 ships
 **reverse-QR pairing** — a TV or desktop joins My W@tch by *showing*
 a pairing code a linked phone scans, so nothing is typed on a
 remote — with the unlinked screen regrouped by intent (first device
@@ -556,7 +576,7 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       since the self-updaters shipped, the snackbar's action starts
       the in-app update where the app can apply it itself (alpha.103;
       it used to open the release page even on Android, the tester
-      report that prompted the fix). Unreleased — ships next release:
+      report that prompted the fix). Since alpha.105:
       the check also runs on app resume (phones can go weeks without
       a cold start, so a startup-only check never ran there) and a
       found update persists, so the About row and snackbar survive
@@ -713,8 +733,7 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       on-screen keyboard, monospace field, Enter submits) and invite
       codes are case-insensitive end-to-end; the QR-scan button is
       hidden on cameraless TVs
-- [x] Honest sync reporting + faster convergence (unreleased — ships
-      next release; from the Google TV Streamer hotspot report
+- [x] Honest sync reporting + faster convergence (alpha.106; from the Google TV Streamer hotspot report
       "phone says in sync while the TV says fetching data maps"):
       **Sync now** waits out an in-flight cycle and runs a fresh full
       pass instead of answering "Nothing to sync." mid-cycle, and it
@@ -734,8 +753,7 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       the 30 s period. Still open: publishing each device's own
       pending counts into the doc so every device can also show the
       OTHER side's remaining work
-- [x] Seed-phrase backup — PHASE 1 IMPLEMENTED 2026-10-06 (unreleased —
-      ships next release; planned 2026-10-05/06, plan ADOPTED
+- [x] Seed-phrase backup — PHASE 1 IMPLEMENTED 2026-10-06 (shipped in alpha.110; planned 2026-10-05/06, plan ADOPTED
       2026-10-06). Shipped shape: Settings → Backup (admin, beside
       Wallet) with **Back up now** and **Restore from backup**; the
       native side (`backup.rs`) derives the identity from the wallet
@@ -777,8 +795,7 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       layer on the wallet-holding device. Needs: pointer routes
       surfaced in watchit_core + a live mainnet pointer smoke
       (fleet-rollout probe) before relying on it.
-      PHASE 2 — SHARED READ KEYS: IMPLEMENTED 2026-10-06 (unreleased —
-      ships next release; pulled into the plan the same day, user
+      PHASE 2 — SHARED READ KEYS: IMPLEMENTED 2026-10-06 (shipped in alpha.110; pulled into the plan the same day, user
       decision; was the parked mailbox's "consolidation path"): the
       wallet-holding device publishes its DERIVED backup read keys
       (pointer address + content enc key — never the 12 words or the
@@ -1004,7 +1021,7 @@ against the x0x project.
       3-way **Off | Wi-Fi | Wi-Fi + mobile** pill — and the mobile
       data policies (Streaming / Downloads pickers)
 - [x] Daily buckets/graph, Wi-Fi vs cellular tagging, daily alert
-      (2026-09-23, unreleased — ships next release; the trio deferred
+      (2026-09-23, alpha.106; the trio deferred
       from the data-usage plan, all on the existing Data page): the
       native counters also bucket every add into per-local-day history
       (~35 days, survives period Reset) split Wi-Fi vs mobile — the
@@ -1056,8 +1073,7 @@ files stay install-global — a profile scopes only viewing state.
       app versions simply ignore the extra bundle members
 - [x] Android TV first cut for the family-TV case (alpha.95) — see
       Phase 4
-- [x] Profiles sync over My W@tch (2026-09-27, unreleased — ships next
-      release; closes the TV import gap: a TV can't file-import, now
+- [x] Profiles sync over My W@tch (2026-09-27, alpha.108; closes the TV import gap: a TV can't file-import, now
       it never needs to for profiles): every profile rides the sync
       doc's `profiles` section automatically — name/kind, avatar
       (manifest + the existing x0x art transfer, full quality), PIN
@@ -1095,7 +1111,7 @@ files stay install-global — a profile scopes only viewing state.
       remembered across launches; narrow windows and mobile keep the
       modal drawer
 - [x] Keyboard map, window polish, hover thumbnails on seek bar
-      (2026-09-23, unreleased — ships next release): app-owned mpv-style
+      (2026-09-23, alpha.106): app-owned mpv-style
       desktop keyboard map (space/K, ←→ & J/L ±10s, 0–9 percent-seek,
       ↑↓ volume, M mute, F/Esc fullscreen, S frame-as-artwork, `?` help
       sheet); desktop windows enforce an 800×600 minimum and remember
@@ -1152,7 +1168,7 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
       including the track list on album and playlist pages — and the
       full-screen audio player opens with the seek bar focused so
       D-pad left/right seek immediately. From the Streamer first-run
-      report (unreleased — ships next release): the focus outline
+      report (alpha.105): the focus outline
       draws outside the focused control and card labels clear the
       cards' own focus ring (highlight no longer clips title text),
       the Continue shelf and browse grid get the TV cell-height bump
@@ -1160,8 +1176,7 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
       pairing/invite QR dialogs fit small TV viewports whole
       (wider dialog + the QR shrinks to the height it really has,
       floor ~120px — the bottom third of the QR used to crop away).
-      From the alpha.104 interface report (unreleased — ships next
-      release): Settings, My W@tch, detail pages and the
+      From the alpha.104 interface report (alpha.105): Settings, My W@tch, detail pages and the
       pairing dialog open with a VISIBLE starting focus (nothing was
       focused on entry, so screens opened "dark" and the first D-pad
       press hunted in from a screen edge), and dialog text fields no
@@ -1169,7 +1184,7 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
       arrows as caret movement — once focus dropped below the invite
       dialog's Join button it could never get back; vertical arrows
       now leave a field as focus traversal, TV only). From the
-      Streamer follow-up (unreleased — ships next release): the
+      Streamer follow-up (alpha.106): the
       Settings list is fully laid out on TV so the D-pad scrolls past
       WALLET into ABOUT (the run of non-focusable attribution content
       was taller than the lazy list's cache, so the next focusable
@@ -1177,8 +1192,7 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
       About section"), and Settings → About gains a **Check for
       updates now** row that bypasses the daily throttle and answers
       out loud: up to date / update found / GitHub unreachable. From
-      the Google TV Streamer My W@tch report (unreleased — ships next
-      release): the My W@tch page scrolls back up on a D-pad — the
+      the Google TV Streamer My W@tch report (alpha.106): the My W@tch page scrolls back up on a D-pad — the
       status/activity/device rows above the bottom buttons were not
       focusable, so Up from "Sync now" jumped straight to the app
       bar and the page stuck at the bottom; they are now tappable
@@ -1191,8 +1205,7 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
       Shield (Tegra X1) report; default off. A/B test builds on the
       alpha.101 release page isolate hardware decode vs the Impeller
       renderer while the tester narrows it down
-- [x] Impeller opt-out for Tegra devices (unreleased — ships next
-      release): the Shield A/B confirmed Impeller as the black-video
+- [x] Impeller opt-out for Tegra devices (alpha.104): the Shield A/B confirmed Impeller as the black-video
       culprit, so MainActivity passes `--enable-impeller=false` to the
       engine at launch — on by default on known Tegra devices (Nvidia
       Shield family), overridable via the new Android-only **Graphics

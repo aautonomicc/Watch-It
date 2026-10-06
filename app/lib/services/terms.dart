@@ -10,8 +10,11 @@ library;
 /// "publish" wording replaced with upload/share (publishing left the app
 /// with Channels), and sharing a library outside the app — bundle files
 /// posted online, passed on a USB drive, My W@tch invites — is covered
-/// explicitly.
-const kTermsVersion = 4;
+/// explicitly. v5 (2026-10-06): seed-phrase backup — the wallet section
+/// covers backups: encrypted under keys derived from the wallet's
+/// 12 words, which decrypt every backup ever made with that wallet,
+/// forever; linked devices can hold read-only backup keys.
+const kTermsVersion = 5;
 
 /// One-line lead-in above the sections.
 const kTermsIntro =
@@ -70,13 +73,20 @@ const kTermsSections = [
         'available to others.',
   ),
   TermsSection(
-    '5. Wallet and payments',
+    '5. Wallet, payments, and backups',
     'The built-in upload wallet is a "hot" wallet stored on your '
         'device and controlled only by you. The developers never see, '
         'hold, or have access to your keys or funds, and cannot recover '
         'a lost key or reverse a transaction. Cryptocurrency carries '
         'risk; keep only small amounts in the wallet. Network fees paid '
-        'for uploads are non-refundable.',
+        'for uploads are non-refundable. The optional backup feature '
+        'uploads your library and settings to the network as paid, '
+        'permanent data encrypted with keys derived from the wallet\'s '
+        '12-word recovery phrase: anyone who ever learns those 12 words '
+        'can read every backup made with that wallet, forever — old '
+        'backups cannot be deleted or re-encrypted. Devices linked '
+        'through My W@tch can receive read-only backup keys; a device '
+        'removed from the link keeps any keys it already received.',
   ),
   TermsSection(
     '6. Third-party services',

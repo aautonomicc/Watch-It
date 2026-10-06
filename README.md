@@ -437,6 +437,26 @@ is being built upstream (saorsa-labs x0x tracker #504) — but it's a
 hatch: set `WATCHIT_X0X_BYTE_POLICY=observe` in the app's environment
 to revert to the stock observe-only meter.
 
+Alpha.110 ships the **seed-phrase backup**: back up your whole W@tch —
+lists and playable entries, watch positions, profiles with their PINs,
+custom details and artwork — to the Autonomi network, and restore it
+on a fresh install from nothing but the upload wallet's 12-word
+recovery phrase. Backups are encrypted end to end under keys derived
+offline from the wallet key (nodes see only random bytes at an address
+nobody else can derive), stored as a content-addressed object store so
+an unchanged library re-backs-up nearly free, and chained so older
+backups stay walkable. Restoring is free — no funded wallet, no linked
+device — so it covers the all-devices-lost case My W@tch sync can't.
+Linked devices get the second half: the backing-up device shares
+derived *read-only* keys over My W@tch (never the 12 words or the
+wallet key), so a device that was offline while the others synced
+catches up straight from the backup, and an optional daily auto-backup
+keeps the backup fresh (off by default; a no-change day uploads
+nothing). Find it under Settings → WALLET → Backup. The release also
+bumps x0x to 0.46.3 (whole-network-restart pub/sub stall fix on the My
+W@tch sync path) and updates the Terms of Use to v5 to cover backups —
+every user re-accepts on next launch.
+
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users

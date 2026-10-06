@@ -20,20 +20,18 @@ channel falls back to the ordinary interface.
 - The device-name dialog initially focuses Continue on TV. Up moves toward
   the name field; Left reaches Cancel. Phone keyboard Done also submits a
   nonempty name. The dialog owns and disposes its text controller.
-- Screens open with a visible starting focus (unreleased — ships next
-  release): the Settings, My W@tch and detail pages give the
+- Screens open with a visible starting focus (alpha.105): the Settings, My W@tch and detail pages give the
   scope's first control the focus once the first frame is up (an explicit
   autofocus wins), and the pairing-code dialog focuses its Cancel button —
   previously these surfaces opened with nothing focused, so the outline was
   invisible until a first blind D-pad press hunted in from a screen edge.
-- Text fields never trap the D-pad (unreleased — ships next release): on TV
+- Text fields never trap the D-pad (alpha.105): on TV
   a vertical arrow inside a dialog text field (invite code, device name,
   paste-captions) moves focus out of the field instead of being consumed as
   caret movement. Before, a focused field swallowed all four arrows forever
   — going Down past the invite field left Join unreachable until the app
   was killed.
-- The Settings list is fully laid out on TV (unreleased — ships next
-  release): D-pad scrolling only advances by moving focus, and the ABOUT
+- The Settings list is fully laid out on TV (alpha.106): D-pad scrolling only advances by moving focus, and the ABOUT
   section opens with a run of non-focusable content (brand tile +
   attribution paragraphs) taller than a lazy list's default cache — the
   next focusable row was never built, so on a Streamer scrolling stopped
@@ -42,8 +40,7 @@ channel falls back to the ordinary interface.
   throttle and reports its result in a snackbar (up to date / update
   found / could not reach GitHub) — the background check is deliberately
   silent, which on a TV read as "updates aren't working".
-- The My W@tch page scrolls back up on a D-pad (unreleased — ships next
-  release): everything above the bottom buttons (Last sync, the sync
+- The My W@tch page scrolls back up on a D-pad (alpha.106): everything above the bottom buttons (Last sync, the sync
   activity card, Linked since, the device rows) was not focusable, so Up
   from "Sync now" jumped straight to the app-bar back button and the page
   stuck at the bottom — with the sync problem lines the tester needed to
@@ -156,7 +153,7 @@ Nvidia Shield (Tegra X1). Default off; the subtitle points at the
 symptom. A/B test builds attached to the alpha.101 release page
 isolate hardware decode vs the Impeller renderer.
 
-## Graphics compatibility mode (unreleased — ships next release)
+## Graphics compatibility mode (alpha.104)
 
 The Shield A/B came back: the Impeller renderer itself is the
 black-video culprit on the Shield (the no-Impeller test build showed a

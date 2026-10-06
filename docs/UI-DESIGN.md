@@ -98,7 +98,7 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   **Buffer size**. The Data sub-page is the one place for everything
   data, top to bottom: the live usage counters (total card with an
   amber "Mobile data: ↑ · ↓" line when any mobile bytes exist,
-  followed since 2026-09-23 — unreleased — by a compact 7-day
+  followed since 2026-09-23 — alpha.106 — by a compact 7-day
   two-tone stacked bar graph: accent Wi-Fi/other over amber mobile,
   today bright, tap a bar to re-scope the card + component rows to
   that day with a "Show whole period" way back; per-component rows
@@ -127,7 +127,7 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - Wallet (renamed from Publishing 2026-08-27: create with 12-word
   ceremony + retype confirm, import key/phrase, live ANT/ETH balances,
   remove; funds the private uploads)
-- Backup (2026-10-06, unreleased — beside Wallet, admin-only): the
+- Backup (2026-10-06, alpha.110 — beside Wallet, admin-only): the
   seed-phrase backup — "Back up now" publishes the full W@tch state
   to Autonomi encrypted under keys derived from the wallet (its 12
   words restore it anywhere), "Restore from backup" merges it back
@@ -260,7 +260,7 @@ second profile exists (a pre-profile install is silently the lone
 - Watch positions, favourites and colour scheme are per profile;
   library, downloads, wallet and the network identity are
   shared (profiles, not accounts)
-- **Profiles sync over My W@tch** (2026-09-27, unreleased): profiles
+- **Profiles sync over My W@tch** (2026-09-27, alpha.108): profiles
   and their own watch points reach every linked device automatically —
   no export needed (a kid set up on the phone appears on the TV, with
   her Continue Watching). Deleting a profile deletes it everywhere

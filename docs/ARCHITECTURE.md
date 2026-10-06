@@ -264,7 +264,7 @@ LAN plus public bootstrap for remote devices), implemented in
   File renames travel too (alpha.97, newest-stamp-wins by rename time),
   playlists arrive as playlists, and a playlist's drag-reordered play
   order follows (alpha.98, newest-reorder-wins with a deterministic
-  tie-break so devices converge). Since 2026-09-27 (unreleased) the
+  tie-break so devices converge). Since 2026-09-27 (alpha.108) the
   whole family of viewing profiles syncs too — every profile, its
   avatar (via the artwork transfer), PIN pair, kid allow-list and its
   OWN watch points, with delete-everywhere tombstones — see the
@@ -319,7 +319,7 @@ LAN plus public bootstrap for remote devices), implemented in
   now. Devices must be online *together* for changes to travel — there is
   no relay in the middle, by design.
 
-### Seed-phrase backup (implemented 2026-10-06, unreleased)
+### Seed-phrase backup (implemented 2026-10-06, shipped in alpha.110)
 
 The all-devices-lost recovery layer (`native/watchit_core/src/backup.rs`
 + `app/lib/services/backup.dart`, Settings → Backup): the FULL state —
@@ -354,7 +354,7 @@ recovery layer on the wallet-holding device. Routes (token-guarded):
 `GET /backup`, `POST /backup/run`, `POST /backup/restore`,
 `POST /backup/peek`, `POST /backup/follow`.
 
-Phase 2 — shared read keys (implemented 2026-10-06, unreleased): the
+Phase 2 — shared read keys (implemented 2026-10-06, shipped in alpha.110): the
 wallet holder publishes its derived READ keys (pointer address +
 content key — never the wallet key, so spend stays put) as a tiny
 `backup` section in its My W@tch sync doc, which already travels
@@ -419,7 +419,7 @@ v17 dropped the channel columns and lists. History in
   alpha.95 profiles can optionally ride a library bundle (export
   checkbox → `profiles.json` + avatar members; import merges by name,
   device wins — old importers ignore the members). Since 2026-09-27
-  (unreleased) profiles also sync automatically over My W@tch: the
+  (alpha.108) profiles also sync automatically over My W@tch: the
   sync doc's `profiles` section carries every profile (name/kind,
   avatar manifest, PIN pair, kid allow-list titles) plus EACH
   profile's own watch points, merged last-writer-wins on a per-profile
