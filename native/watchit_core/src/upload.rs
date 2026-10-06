@@ -109,8 +109,9 @@ impl Engine {
 }
 
 /// A connected client with the upload wallet attached (forcing one
-/// reconnect when the client pre-dates the wallet import).
-async fn wallet_client(
+/// reconnect when the client pre-dates the wallet import). Shared with
+/// the backup module — backups pay from the same wallet.
+pub(crate) async fn wallet_client(
     engine: &'static Engine,
 ) -> Result<std::sync::Arc<ant_core::data::Client>, String> {
     let mut client = engine.client().await?;

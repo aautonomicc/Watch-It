@@ -155,6 +155,9 @@ pub struct Engine {
     pub wallet: crate::wallet::WalletStore,
     /// Publish upload jobs (`POST /upload` → poll `GET /upload/{id}`).
     pub uploads: crate::upload::UploadManager,
+    /// Seed-phrase backup / restore jobs (`POST /backup/run`,
+    /// `POST /backup/restore` → poll `GET /backup`).
+    pub backups: crate::backup::BackupManager,
     /// My W@tch device linking (x0x agent; test implementation).
     pub mywatch: crate::mywatch::MyWatchStore,
 }
@@ -201,6 +204,7 @@ impl Engine {
             attempts: AtomicU32::new(0),
             wallet: crate::wallet::WalletStore::new(data_dir, true),
             uploads: crate::upload::UploadManager::default(),
+            backups: crate::backup::BackupManager::new(data_dir),
             mywatch: crate::mywatch::MyWatchStore::new(data_dir),
         }
     }

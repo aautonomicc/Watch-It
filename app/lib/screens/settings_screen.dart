@@ -37,6 +37,7 @@ import 'profile_picker_screen.dart' show switchProfileFlow;
 import 'profiles_screen.dart';
 import 'publish_screen.dart' show PublishScreen, isUploadPlatform;
 import 'terms_screen.dart';
+import 'backup_screen.dart';
 import 'wallet_screen.dart';
 
 /// Settings: content, network, metadata, appearance, and about sections.
@@ -870,6 +871,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     trailing: Icon(Icons.chevron_right, color: t.ash),
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const WalletScreen()),
+                    ),
+                  ),
+                  ListTile(
+                    leading: Icon(Icons.cloud_upload_outlined, color: t.accent),
+                    title: Text(
+                      'Backup',
+                      style: TextStyle(color: t.bone, fontSize: 15),
+                    ),
+                    subtitle: Text(
+                      'Back up your library to Autonomi — restore it '
+                      'anywhere with the wallet\'s 12 words',
+                      style: TextStyle(color: t.ash, fontSize: 12),
+                    ),
+                    trailing: Icon(Icons.chevron_right, color: t.ash),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const BackupScreen()),
                     ),
                   ),
                 ],

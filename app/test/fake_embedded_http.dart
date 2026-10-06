@@ -147,6 +147,26 @@ class FakeEmbeddedHttp extends HttpOverrides {
     'ant_quic': '5.5.5',
   };
 
+  /// `GET /backup` body minus the job (identity + last-backup summary).
+  Map<String, dynamic> backupStatus = {
+    'configured': false,
+    'pointer': null,
+    'last': null,
+    'job': null,
+  };
+
+  /// Raw bodies of every `POST /backup/run` / `POST /backup/restore`.
+  final List<String> backupRunPosts = [];
+  final List<String> backupRestorePosts = [];
+
+  /// Job states `GET /backup` plays back in order once a run/restore
+  /// started (the last one repeats) — the poll-loop lifecycle.
+  final List<Map<String, dynamic>> backupJobStates = [];
+  int _backupPolls = 0;
+
+  /// Called with the posted `art_dir` when `POST /backup/restore` lands.
+  void Function(String artDir)? onBackupRestore;
+
   /// Any base URL works — routing only looks at the path.
   static const String base = 'http://127.0.0.1:9';
 
@@ -224,6 +244,30 @@ class FakeEmbeddedHttp extends HttpOverrides {
         utf8.encode(jsonEncode(
             paused ? {'state': 'paused'} : {'state': 'connecting'}))
       );
+    }
+    if (method == 'POST' && path == '/backup/run') {
+      backupRunPosts.add(utf8.decode(body));
+      _backupPolls = 0;
+      return (200, utf8.encode(jsonEncode({'ok': true})));
+    }
+    if (method == 'POST' && path == '/backup/restore') {
+      final text = utf8.decode(body);
+      backupRestorePosts.add(text);
+      _backupPolls = 0;
+      // Tests stage "restored" artwork into the posted art_dir here,
+      // exactly where the native side would write it during the job.
+      final artDir = (jsonDecode(text) as Map)['art_dir'];
+      if (artDir is String) onBackupRestore?.call(artDir);
+      return (200, utf8.encode(jsonEncode({'ok': true})));
+    }
+    if (method == 'GET' && path == '/backup') {
+      var job = backupStatus['job'];
+      if (backupJobStates.isNotEmpty) {
+        final i = _backupPolls.clamp(0, backupJobStates.length - 1);
+        _backupPolls++;
+        job = backupJobStates[i];
+      }
+      return (200, utf8.encode(jsonEncode({...backupStatus, 'job': job})));
     }
     if (path == '/wallet' || path.startsWith('/wallet/')) {
       return _handleWallet(method, path, body);

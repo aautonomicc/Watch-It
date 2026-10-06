@@ -143,6 +143,18 @@ fn protected_router(engine: &'static Engine) -> Router {
             "/mywatch/art/fetch",
             post(move |body: Bytes| mywatch_art_fetch(engine, body)),
         )
+        // Seed-phrase backup. Protected: backups spend money and the
+        // pointer address alone identifies the user's backup line.
+        .route("/backup", get(move || backup_status(engine)))
+        .route(
+            "/backup/run",
+            post(move |body: Bytes| backup_run(engine, body))
+                .layer(DefaultBodyLimit::max(MAX_ROOTMAP_BYTES)),
+        )
+        .route(
+            "/backup/restore",
+            post(move |body: Bytes| backup_restore(engine, body)),
+        )
 }
 
 fn open_router(engine: &'static Engine) -> Router {
@@ -642,6 +654,69 @@ async fn upload_status(engine: &'static Engine, Path(id): Path<u64>) -> Response
     match engine.uploads.state(id) {
         Some(state) => json_ok(state.to_json(id)),
         None => (StatusCode::NOT_FOUND, "no such upload job").into_response(),
+    }
+}
+
+// ---- seed-phrase backup --------------------------------------------------
+
+/// `GET /backup` — the backup identity (derived from the stored wallet),
+/// the last backup's summary, and the running (or last finished) job.
+async fn backup_status(engine: &'static Engine) -> Response {
+    let pointer = engine
+        .wallet
+        .load()
+        .and_then(|(key, _)| crate::backup::derive_keys(&key).ok())
+        .map(|k| hex::encode(k.pointer));
+    json_ok(serde_json::json!({
+        "configured": pointer.is_some(),
+        "pointer": pointer,
+        "last": engine.backups.last_json(),
+        "job": engine.backups.job_json(),
+    }))
+}
+
+/// `POST /backup/run` — start a backup of the app-assembled payload
+/// (`{"doc": {...}, "art": [{"file","path"}…], "map_addrs": […]}`);
+/// progress and the outcome are polled on `GET /backup`.
+async fn backup_run(engine: &'static Engine, body: Bytes) -> Response {
+    let json: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("bad JSON: {e}")).into_response()
+        }
+    };
+    match engine.start_backup(json) {
+        Ok(()) => json_ok(serde_json::json!({ "ok": true })),
+        Err(e) if e.contains("already running") => {
+            (StatusCode::CONFLICT, e).into_response()
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+/// `POST /backup/restore` `{"key"?: wallet-key-hex, "art_dir": path}` —
+/// start a restore (free: reads only). The finished job's result on
+/// `GET /backup` carries the decrypted state document, the root-map
+/// import counts, and the artwork files written into `art_dir`.
+async fn backup_restore(engine: &'static Engine, body: Bytes) -> Response {
+    let json: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("bad JSON: {e}")).into_response()
+        }
+    };
+    let key = json.get("key").and_then(|k| k.as_str()).map(str::to_string);
+    let art_dir = json
+        .get("art_dir")
+        .and_then(|d| d.as_str())
+        .unwrap_or_default()
+        .to_string();
+    match engine.start_restore(key, art_dir) {
+        Ok(()) => json_ok(serde_json::json!({ "ok": true })),
+        Err(e) if e.contains("already running") => {
+            (StatusCode::CONFLICT, e).into_response()
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
     }
 }
 
@@ -1435,6 +1510,83 @@ mod wallet_api_tests {
         // Open routes stay tokenless.
         let (status, _) = send_auth(&app, "GET", "/health", vec![], None).await;
         assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn backup_routes_guarded_and_validated() {
+        let engine = test_engine("backup");
+        let app = router_with_auth(engine, "sekrit");
+        // All three routes sit behind the token.
+        for (method, path) in [
+            ("GET", "/backup"),
+            ("POST", "/backup/run"),
+            ("POST", "/backup/restore"),
+        ] {
+            let (status, _) = send_auth(&app, method, path, vec![], None).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {path}");
+        }
+        // No wallet: status reports unconfigured, a run is refused with a
+        // pointer at the fix, a restore without a pasted key likewise.
+        let (status, body) =
+            send_auth(&app, "GET", "/backup", vec![], Some("sekrit")).await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["configured"], serde_json::json!(false));
+        assert!(json["pointer"].is_null());
+        let (status, body) = send_auth(
+            &app,
+            "POST",
+            "/backup/run",
+            br#"{"doc":{}}"#.to_vec(),
+            Some("sekrit"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(String::from_utf8_lossy(&body).contains("wallet"));
+        let (status, body) = send_auth(
+            &app,
+            "POST",
+            "/backup/restore",
+            br#"{"art_dir":"/tmp/x"}"#.to_vec(),
+            Some("sekrit"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(String::from_utf8_lossy(&body).contains("wallet"));
+        // A pasted key that is not a key is refused clearly.
+        let (status, body) = send_auth(
+            &app,
+            "POST",
+            "/backup/restore",
+            br#"{"key":"zz","art_dir":"/tmp/x"}"#.to_vec(),
+            Some("sekrit"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(String::from_utf8_lossy(&body).contains("private key"));
+        // With a wallet, the identity appears and a doc-less run is 400.
+        engine
+            .wallet
+            .store("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+            .unwrap();
+        let (status, body) =
+            send_auth(&app, "GET", "/backup", vec![], Some("sekrit")).await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["configured"], serde_json::json!(true));
+        assert_eq!(json["pointer"].as_str().unwrap().len(), 64);
+        assert!(json["last"].is_null());
+        assert!(json["job"].is_null());
+        let (status, body) = send_auth(
+            &app,
+            "POST",
+            "/backup/run",
+            br#"{"art":[]}"#.to_vec(),
+            Some("sekrit"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(String::from_utf8_lossy(&body).contains("doc"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

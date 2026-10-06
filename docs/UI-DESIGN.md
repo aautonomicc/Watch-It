@@ -127,6 +127,12 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - Wallet (renamed from Publishing 2026-08-27: create with 12-word
   ceremony + retype confirm, import key/phrase, live ANT/ETH balances,
   remove; funds the private uploads)
+- Backup (2026-10-06, unreleased — beside Wallet, admin-only): the
+  seed-phrase backup — "Back up now" publishes the full W@tch state
+  to Autonomi encrypted under keys derived from the wallet (its 12
+  words restore it anywhere), "Restore from backup" merges it back
+  through the My W@tch sync rules; both confirm first, progress
+  inline, costs called out (backup paid, restore free)
 - Playback (hardware decode, default subtitle language, skip amounts)
 - Appearance (Colour scheme; sits below Metadata since 2026-08-30)
 - About / licenses (incl. TMDB attribution notice + logo; the Terms of

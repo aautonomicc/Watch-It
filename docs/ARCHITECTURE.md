@@ -319,6 +319,42 @@ LAN plus public bootstrap for remote devices), implemented in
   now. Devices must be online *together* for changes to travel — there is
   no relay in the middle, by design.
 
+### Seed-phrase backup (implemented 2026-10-06, unreleased)
+
+The all-devices-lost recovery layer (`native/watchit_core/src/backup.rs`
++ `app/lib/services/backup.dart`, Settings → Backup): the FULL state —
+lists + entries, ROOT data maps, user edits, TMDB rows, posters/art,
+watch states, profiles — published to Autonomi under keys derived
+OFFLINE from the upload wallet's private key, so the 12 words restore
+it anywhere. Derivation: `blake3::derive_key("watchit.backup.pointer.v1",
+wallet_key)` seeds an ML-DSA-65 owner pair whose
+`autonomi.pointer.address.v1` pointer address is the backup's location;
+a second domain (`watchit.backup.enc.v1`) yields the ChaCha20-Poly1305
+content key. Storage is a content-addressed encrypted object store:
+each object (the sync-doc-shaped state document, the root-map bundle,
+each artwork file) is encrypted DETERMINISTICALLY (key/nonce from the
+backup key ‖ the object's blake3 content hash), so unchanged objects
+are byte-identical ciphertext → identical chunks → re-backups are
+nearly free via network dedup (a local `backup_state.json` skips the
+upload rounds entirely for known hashes). An encrypted manifest lists
+the objects with their private shrunk data maps; its map rides in an
+encrypted HEAD chunk that also links the previous head (free walkable
+history); the pointer targets the head. Nothing is plaintext on the
+network except the pointer record itself. Writes are paid (the wallet
+client: per-object `data_upload`, `chunk_put` for the head,
+`pointer_update`); READS ARE FREE — restore needs no wallet funds and
+no linked device: `pointer_get` → head → manifest → objects, root maps
+imported straight into the local map store (so restored entries play),
+artwork staged for the app, and the state document applied through the
+EXACT My W@tch sync merge rules (LWW everywhere — a restore never
+regresses newer local state). The backup complements the x0x link, it
+never replaces it (decided 2026-10-06): gossip stays the free live
+two-way channel; the backup is the paid, slow-cadence, one-writer
+recovery layer on the wallet-holding device. Routes (token-guarded):
+`GET /backup`, `POST /backup/run`, `POST /backup/restore`. Phase 2
+(planned): sharing the derived READ keys over the My W@tch link so
+linked devices catch up from the backup directly.
+
 ### Channels — public signed media lists (REMOVED 2026-09-27)
 
 The public content space (Ed25519 channel identities with `wchn1-…`

@@ -734,8 +734,25 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       the 30 s period. Still open: publishing each device's own
       pending counts into the doc so every device can also show the
       OTHER side's remaining work
-- [ ] Seed-phrase backup (planned 2026-10-05/06, plan ADOPTED
-      2026-10-06 — awaiting the implementation go-ahead): back up the
+- [x] Seed-phrase backup — PHASE 1 IMPLEMENTED 2026-10-06 (unreleased —
+      ships next release; planned 2026-10-05/06, plan ADOPTED
+      2026-10-06). Shipped shape: Settings → Backup (admin, beside
+      Wallet) with **Back up now** and **Restore from backup**; the
+      native side (`backup.rs`) derives the identity from the wallet
+      key (`watchit.backup.pointer.v1` → ML-DSA owner seed,
+      `watchit.backup.enc.v1` → ChaCha20-Poly1305 content key), runs
+      the content-addressed object store with deterministic per-object
+      encryption, the encrypted manifest + head chunk (predecessor
+      link) and the pointer update; the app side assembles the
+      unbudgeted sync-doc-shaped state document and applies a restore
+      through the exact My W@tch merge rules (LWW everywhere — a
+      restore never regresses newer local state). Root maps ride as
+      FULL root maps, so a restore imports them offline and every
+      entry plays. STILL OPEN before relying on it: a real PAID backup
+      on mainnet (needs a funded wallet — the pointer write path's
+      first live exercise, incl. the fleet-rollout gate on ant-node
+      0.21.0+ close groups) and an optional debounced auto-backup.
+      Plan background: back up the
       FULL W@tch state — lists + entries, shrunk datamaps, user-edited
       metadata, posters/art, watch states, profiles (PIN + recovery
       travel as a pair) — to Autonomi under keys derived OFFLINE from
