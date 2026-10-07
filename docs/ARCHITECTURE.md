@@ -234,15 +234,32 @@ LAN plus public bootstrap for remote devices), implemented in
 `services/my_watch_sync.dart` and `screens/my_watch_screen.dart`.
 
 - **Linking**: one device creates a link — a 32-byte secret shared as an
-  invite code `wtch1-<hex64>`, shown as a QR code (scannable in-app on
+  invite code `wtch2-<hex64>` (the `wtch1-` form is the pre-encryption
+  format; a v2 build rejects it with a specific "update that device
+  first" message), shown as a QR code (scannable in-app on
   Android/iOS) or pasted as text. Devices holding the secret meet in a
   self-keyed **CRDT key-value store** on a gossip topic *derived* (blake3)
   from the secret — the secret itself never goes on the wire, and nothing
   about the group is discoverable without it. The invite is the key:
   share it only with your own devices. Unlink wipes the local agent state.
+- **Store encryption (2026-10-07)**: the store's own layer is signed but
+  NOT encrypted, so every value W@tch publishes (sync doc parts, entry
+  maps, device records) is sealed app-side with ChaCha20-Poly1305 under
+  `blake3::derive_key("watchit.mywatch.store.v1", link secret)`, format
+  `wenc1 ‖ 12-byte random nonce ‖ AEAD` with **AAD = the store key
+  string** (a sealed value is bound to its slot — no cross-slot
+  replay). Values that do not open — plaintext from an injector,
+  garbage, wrong key, tampered — are skipped, which also keeps
+  anything a topic-holder without the secret writes out of the merge,
+  and the on-disk store snapshots now hold sealed bytes by
+  construction. The topic domain bumped to v2 with the same change, so
+  sealed and plaintext eras never mix in one store and harvested v1
+  topic strings lead nowhere.
 - **Reverse-QR pairing (alpha.102)**: a device
   with a screen but no camera (TV, desktop) joins by *showing* a
-  `wtchp1-` pairing code — an ephemeral x25519 public key + 16-byte
+  `wtchp2-` pairing code (`wtchp1-` was the pre-encryption label,
+  rejected with the same update-first message) — an ephemeral x25519
+  public key + 16-byte
   nonce rendered as a branded QR. A linked phone scans it and
   publishes the group's existing 32-byte link secret on a short-lived
   rendezvous gossip topic (blake3 of the nonce), sealed to the code's

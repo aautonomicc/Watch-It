@@ -7,7 +7,7 @@ void main() {
   testWidgets('WiQr renders a brand-styled QR with the embedded logo',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(
-      home: Scaffold(body: WiQr(data: 'wtch1-abc123', size: 200)),
+      home: Scaffold(body: WiQr(data: 'wtch2-abc123', size: 200)),
     ));
 
     final qr = tester.widget<QrImageView>(find.byType(QrImageView));

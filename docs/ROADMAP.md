@@ -804,8 +804,9 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       (pointer address + content enc key — never the 12 words or the
       wallet key, so spend stays with the master) as a tiny `backup`
       section in its My W@tch sync doc, inside the link store
-      (plaintext on the gossip layer today — sealing it is the planned
-      link-store encryption item below); linked devices adopt the
+      (sealed since the 2026-10-07 link-store encryption below — every
+      store value travels ChaCha20-Poly1305-encrypted under the link
+      secret); linked devices adopt the
       newest shared keys (`backup_follow.dart`, own backup line never
       followed) and poll the pointer directly from the network —
       pointer reads are free, no wallet needed — folding a fetched
@@ -830,22 +831,29 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       funded wallet (user test at release; phase 1's paid pointer
       write was live-proven 2026-10-07, this leg still needs a second
       linked device)
-- [ ] **Link-store encryption** (planned 2026-10-07 —
+- [x] **Link-store encryption** (IMPLEMENTED 2026-10-07, unreleased —
+      ships next release;
       [PLAN-mywatch-store-encryption.md](PLAN-mywatch-store-encryption.md)):
-      seal every My W@tch store value (sync doc parts, entry maps,
-      device records) with ChaCha20-Poly1305 under a blake3 key
-      derived from the link secret — the 2026-10-07 leak-vector
-      review found the store is plaintext on the gossip layer (whole
-      library, playable shrunk maps, watch positions, profiles incl.
-      PIN hashes, and since phase 2 the backup read keys, exposed to
+      every My W@tch store value (sync doc parts, entry maps, device
+      records) is sealed with ChaCha20-Poly1305 under a blake3 key
+      derived from the link secret, AAD = the store key string (slot
+      binding) — the 2026-10-07 leak-vector review found the store
+      was plaintext on the gossip layer (whole library, playable
+      shrunk maps, watch positions, profiles incl. PIN hashes, and
+      since phase 2 the backup read keys, exposed to
       payload-capturing relays or anyone holding the topic string).
-      Breaking link-format change: topic domain bumps to v2 (clean
+      Breaking link-format change: topic domain bumped to v2 (clean
       split from old builds, harvested v1 topics go dark), invite/
-      pairing prefixes bump to `wtch2-`/`wtchp2-` so cross-version
-      joins fail loudly; existing links migrate automatically once
-      every device updates (same secret, no re-pairing). Also closes
-      the write-injection vector (unsealable values are skipped) and
-      the plaintext on-disk store snapshots
+      pairing prefixes bumped to `wtch2-`/`wtchp2-` so cross-version
+      joins fail loudly with a specific "update that device first"
+      message; existing links migrate automatically once every device
+      updates (same secret, no re-pairing — release notes must say
+      UPDATE EVERY LINKED DEVICE TOGETHER). Also closes the
+      write-injection vector (unsealable values are skipped, so
+      nothing a topic-holder plants reaches the merge) and the
+      plaintext on-disk store snapshots. Forward-only: anything
+      captured from the v1 plaintext era stays captured (new wallet =
+      new backup line remains the lever)
 
 ## Channels (alpha.65–.107): REMOVED 2026-09-27
 

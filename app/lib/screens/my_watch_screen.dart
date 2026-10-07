@@ -193,7 +193,13 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
           title: 'Scan pairing code',
           hint: 'Point the camera at the pairing code shown on the '
               'new device (My W@tch → "Show a pairing code")',
-          accept: (v) => v.trim().toLowerCase().startsWith('wtchp1-'),
+          // Old wtchp1- codes are deliberately scannable too: the core
+          // rejects them with the specific "update that device first"
+          // message, which beats the scanner silently ignoring them.
+          accept: (v) {
+            final c = v.trim().toLowerCase();
+            return c.startsWith('wtchp2-') || c.startsWith('wtchp1-');
+          },
         ),
       ),
     );
@@ -281,8 +287,13 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                       title: 'Scan invite',
                       hint: 'Point the camera at the QR code shown on '
                           'your linked device',
-                      accept: (v) =>
-                          v.trim().toLowerCase().startsWith('wtch1-'),
+                      // Old wtch1- invites scan too — the core answers
+                      // with the "update that device first" message.
+                      accept: (v) {
+                        final c = v.trim().toLowerCase();
+                        return c.startsWith('wtch2-') ||
+                            c.startsWith('wtch1-');
+                      },
                     ),
                   ),
                 ),

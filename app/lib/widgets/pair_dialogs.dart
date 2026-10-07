@@ -7,7 +7,7 @@ import '../services/tv_settings.dart';
 import '../theme/tokens.dart';
 import 'wi_qr.dart';
 
-/// Reverse-QR pairing, unlinked side: shows the `wtchp1-` pairing code
+/// Reverse-QR pairing, unlinked side: shows the `wtchp2-` pairing code
 /// as a QR for a linked device (with a camera) to scan, and polls until
 /// this device has joined the link. Pops `true` once linked, `false`
 /// when cancelled or dismissed after a failure.
@@ -24,7 +24,7 @@ class PairCodeDialog extends StatefulWidget {
 
   final MyWatchApi api;
 
-  /// The `wtchp1-…` code from `pairStart`.
+  /// The `wtchp2-…` code from `pairStart`.
   final String code;
 
   final Duration pollInterval;

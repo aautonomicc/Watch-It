@@ -56,10 +56,10 @@ void main() {
     // pops trimmed and lowercased, and Enter submits without hunting
     // for the Join button.
     await tester.enterText(
-        find.widgetWithText(TextField, 'Invite code'), ' WTCH1-ABCDEF ');
+        find.widgetWithText(TextField, 'Invite code'), ' WTCH2-ABCDEF ');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
-    expect(popped, [('Living room', 'wtch1-abcdef')]);
+    expect(popped, [('Living room', 'wtch2-abcdef')]);
   });
 
   testWidgets('Join without a code keeps the dialog open and moves focus '
@@ -90,11 +90,11 @@ void main() {
 
   testWidgets('off TV: invite field autofocuses and a provided scanner '
       'shows and fills the field', (tester) async {
-    await show(tester, onScanQr: () async => 'wtch1-feedbeef');
+    await show(tester, onScanQr: () async => 'wtch2-feedbeef');
     expect(inviteField(tester).autofocus, isTrue);
     await tester.tap(find.text('Scan QR code'));
     await tester.pumpAndSettle();
-    expect(find.text('wtch1-feedbeef'), findsOneWidget);
+    expect(find.text('wtch2-feedbeef'), findsOneWidget);
   });
 
   testWidgets('on TV: a vertical arrow LEAVES a field — the D-pad is '
@@ -133,7 +133,7 @@ void main() {
       (tester) async {
     await show(tester);
     await tester.enterText(
-        find.widgetWithText(TextField, 'Invite code'), 'wtch1-abc');
+        find.widgetWithText(TextField, 'Invite code'), 'wtch2-abc');
     final invite = inviteField(tester);
     expect(invite.focusNode!.hasFocus, isTrue);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);

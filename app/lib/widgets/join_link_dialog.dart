@@ -88,7 +88,7 @@ class _JoinLinkDialogState extends State<JoinLinkDialog> {
               decoration: const InputDecoration(
                 labelText: 'Invite code',
                 helperText: 'Shown under the QR code on the linked device '
-                    '(starts with wtch1-)',
+                    '(starts with wtch2-)',
                 helperMaxLines: 3,
               ),
             ),

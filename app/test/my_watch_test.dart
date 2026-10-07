@@ -96,7 +96,7 @@ void main() {
       expect(fake.requests, contains('POST /mywatch/link'));
       expect(find.byType(WiQr), findsOneWidget);
       expect(find.byType(QrImageView), findsOneWidget);
-      expect(find.textContaining('wtch1-'), findsWidgets);
+      expect(find.textContaining('wtch2-'), findsWidgets);
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
       // The fake flipped to linked; the screen reloaded into linked view.
@@ -126,6 +126,22 @@ void main() {
       await tester.tap(find.text('Join'));
       await tester.pumpAndSettle();
       expect(find.textContaining('not a My W@tch invite code'), findsOneWidget);
+      await close(tester);
+    });
+
+    testWidgets('an old-version wtch1- invite gets the update-first message',
+        (tester) async {
+      await open(tester);
+      await tester.tap(find.text('Enter an invite code (from a linked device)'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Invite code'), 'wtch1-${'cd' * 32}');
+      await tester.tap(find.text('Join'));
+      await tester.pumpAndSettle();
+      // The store-encryption break: the specific actionable message,
+      // not the generic invalid-code error.
+      expect(find.textContaining('older W@tch'), findsOneWidget);
+      expect(find.textContaining('not a My W@tch invite code'), findsNothing);
       await close(tester);
     });
   });

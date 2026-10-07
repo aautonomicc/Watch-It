@@ -43,13 +43,13 @@ class FakeEmbeddedHttp extends HttpOverrides {
   };
 
   /// Invite `POST /mywatch/link` and `GET /mywatch/invite` hand out.
-  String myWatchInvite = 'wtch1-${'cd' * 32}';
+  String myWatchInvite = 'wtch2-${'cd' * 32}';
 
   /// Raw bodies of every `POST /mywatch/announce`.
   final List<String> myWatchAnnounces = [];
 
   /// Code `POST /mywatch/pair/start` hands out (reverse-QR pairing).
-  String myWatchPairCode = 'wtchp1-${'ef' * 48}';
+  String myWatchPairCode = 'wtchp2-${'ef' * 48}';
 
   /// State `GET /mywatch/pair` plays back; pair/start, pair/send and
   /// pair/cancel mutate it the way the Rust core would. Tests override
@@ -412,7 +412,15 @@ class FakeEmbeddedHttp extends HttpOverrides {
       final name = (json['device_name'] as String? ?? '').trim();
       final invite = (json['invite'] as String? ?? '').trim();
       if (name.isEmpty) return (400, utf8.encode('device name is required'));
-      if (!invite.startsWith('wtch1-')) {
+      if (invite.toLowerCase().startsWith('wtch1-')) {
+        // Mirrors the core's specific pre-store-encryption rejection.
+        return (
+          400,
+          utf8.encode('this code is from an older W@tch — update that '
+              'device first, then show a fresh code')
+        );
+      }
+      if (!invite.toLowerCase().startsWith('wtch2-')) {
         return (400, utf8.encode('not a My W@tch invite code'));
       }
       myWatchStatus = {
@@ -458,7 +466,14 @@ class FakeEmbeddedHttp extends HttpOverrides {
       myWatchPairPosts.add(utf8.decode(body));
       final json = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
       final code = (json['code'] as String? ?? '').trim().toLowerCase();
-      if (!code.startsWith('wtchp1-')) {
+      if (code.startsWith('wtchp1-')) {
+        return (
+          400,
+          utf8.encode('this code is from an older W@tch — update that '
+              'device first, then show a fresh code')
+        );
+      }
+      if (!code.startsWith('wtchp2-')) {
         return (400, utf8.encode('not a My W@tch pairing code'));
       }
       if (myWatchStatus['linked'] != true) {

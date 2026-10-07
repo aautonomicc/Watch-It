@@ -8,6 +8,11 @@
 //! wire), where each device owns exactly one record — its agent-id key —
 //! holding name/platform/library counts/heartbeat time. Merging is the
 //! CRDT's, so it is bidirectional and order-free by construction.
+//! Every store value is SEALED (ChaCha20-Poly1305 under a key derived
+//! from the link secret, slot-bound via AAD — see the store-sealing
+//! section) because the store's own layer is signed but not encrypted;
+//! values that do not open are skipped, which also keeps injected
+//! records out of the merge.
 //!
 //! Besides the presence records, each device publishes a library sync
 //! document and its entries' shrunk data maps under its bound
@@ -25,13 +30,31 @@
 //! reports `supported: false`.
 
 /// Invite string prefix; version-bumped if the format ever changes.
-pub const INVITE_PREFIX: &str = "wtch1-";
+/// v2 marks the store-encryption era: the payload is unchanged (same
+/// 32-byte secret), but v2 builds seal every store value and meet on a
+/// different topic, so a cross-version join must fail loudly instead
+/// of linking into a store that silently never syncs.
+pub const INVITE_PREFIX: &str = "wtch2-";
+
+/// The pre-store-encryption invite prefix, recognised only so an old
+/// code can be rejected with a specific "update that device first"
+/// message instead of the generic invalid-code error.
+pub const OLD_INVITE_PREFIX: &str = "wtch1-";
 
 /// Pairing-code prefix (reverse-QR pairing: the UNLINKED device shows
 /// this code — an ephemeral x25519 public key + rendezvous nonce — and
 /// a linked device with a camera scans it and sends the link secret
-/// over, sealed to that key). Version-bumped if the format changes.
-pub const PAIR_PREFIX: &str = "wtchp1-";
+/// over, sealed to that key). Version-bumped alongside the invite
+/// prefix for the same loud cross-version failure.
+pub const PAIR_PREFIX: &str = "wtchp2-";
+
+/// The pre-store-encryption pairing prefix — recognised only to reject.
+pub const OLD_PAIR_PREFIX: &str = "wtchp1-";
+
+/// What a cross-version invite or pairing code gets instead of the
+/// generic damage error (the one actionable thing the user can do).
+const OLD_CODE_ERROR: &str =
+    "this code is from an older W@tch — update that device first, then show a fresh code";
 
 /// Everything the routes call, real on desktop, stub elsewhere.
 pub use imp::MyWatchStore;
@@ -51,7 +74,9 @@ mod imp {
     use serde_json::{json, Value};
     use tokio::sync::Mutex;
 
-    use super::{INVITE_PREFIX, PAIR_PREFIX};
+    use super::{
+        INVITE_PREFIX, OLD_CODE_ERROR, OLD_INVITE_PREFIX, OLD_PAIR_PREFIX, PAIR_PREFIX,
+    };
 
     /// Seconds between own-record heartbeats while linked (also bounds
     /// how stale another device's "last heard" can look while online).
@@ -61,6 +86,8 @@ mod imp {
     const WATCH_SECS: u64 = 5;
     /// Ceiling for one published KV value; the store's hard cap is
     /// 64 KiB (`MAX_INLINE_SIZE`), this leaves protocol headroom.
+    /// Measured on the PLAINTEXT — [`seal_value`]'s fixed 33-byte
+    /// overhead rides comfortably inside the same headroom.
     const MAX_VALUE_BYTES: usize = 60_000;
     /// How many `<agent>/sync` document parts a device may publish
     /// (the main `<agent>/sync` doc plus `<agent>/sync/N` overflow
@@ -757,15 +784,17 @@ mod imp {
                 });
             };
             let own = hex::encode(running.agent.agent_id().as_bytes());
+            let secret = &running.config.secret_hex;
             for (i, bytes) in doc_parts.iter().enumerate() {
                 let key = if i == 0 {
                     format!("{own}/sync")
                 } else {
                     format!("{own}/sync/{i}")
                 };
+                let sealed = seal_value(secret, &key, bytes.as_bytes())?;
                 running
                     .store
-                    .put(key, bytes.clone().into_bytes(), "application/json".into())
+                    .put(key, sealed, "application/octet-stream".into())
                     .await
                     .map_err(|e| format!("sync publish failed: {e}"))?;
             }
@@ -819,13 +848,12 @@ mod imp {
                 );
             }
             for (i, part) in parts.iter().enumerate() {
+                let key = format!("{own}/maps/{i}");
+                let sealed =
+                    seal_value(secret, &key, Value::Object(part.clone()).to_string().as_bytes())?;
                 running
                     .store
-                    .put(
-                        format!("{own}/maps/{i}"),
-                        Value::Object(part.clone()).to_string().into_bytes(),
-                        "application/json".into(),
-                    )
+                    .put(key, sealed, "application/octet-stream".into())
                     .await
                     .map_err(|e| format!("map publish failed: {e}"))?;
             }
@@ -854,54 +882,11 @@ mod imp {
                 .keys()
                 .await
                 .map_err(|e| format!("store read failed: {e}"))?;
-            let mut docs: std::collections::HashMap<String, Value> = Default::default();
-            let mut parts: std::collections::HashMap<String, Vec<(usize, Value)>> =
-                Default::default();
-            let mut maps: std::collections::HashMap<String, serde_json::Map<String, Value>> =
-                Default::default();
-            for entry in entries {
-                let Some((agent, suffix)) = entry.key.split_once('/') else {
-                    continue;
-                };
-                if agent == own {
-                    continue;
-                }
-                if suffix == "sync" {
-                    if let Ok(doc) = serde_json::from_slice::<Value>(&entry.value) {
-                        docs.insert(agent.to_string(), doc);
-                    }
-                } else if let Some(idx) = suffix
-                    .strip_prefix("sync/")
-                    .and_then(|s| s.parse::<usize>().ok())
-                {
-                    // Overflow parts of a sharded sync doc (large
-                    // libraries) — the app merges them with the main doc.
-                    if let Ok(doc) = serde_json::from_slice::<Value>(&entry.value) {
-                        parts.entry(agent.to_string()).or_default().push((idx, doc));
-                    }
-                } else if suffix.starts_with("maps/") {
-                    if let Ok(Value::Object(part)) =
-                        serde_json::from_slice::<Value>(&entry.value)
-                    {
-                        maps.entry(agent.to_string()).or_default().extend(part);
-                    }
-                }
-            }
-            let devices: Vec<Value> = docs
-                .into_iter()
-                .map(|(agent, doc)| {
-                    let m = maps.remove(&agent).unwrap_or_default();
-                    let mut extra = parts.remove(&agent).unwrap_or_default();
-                    extra.sort_by_key(|(idx, _)| *idx);
-                    let extra: Vec<Value> = extra.into_iter().map(|(_, d)| d).collect();
-                    json!({
-                        "agent_id": agent,
-                        "doc": doc,
-                        "doc_parts": extra,
-                        "maps": m,
-                    })
-                })
-                .collect();
+            let devices = collect_sync_devices(
+                &running.config.secret_hex,
+                &own,
+                entries.into_iter().map(|e| (e.key, e.value)),
+            );
             Ok(json!({
                 "agent_id": own,
                 "last_sync_ms": self.shared.last_sync_ms.load(Ordering::SeqCst),
@@ -1215,6 +1200,7 @@ mod imp {
             let shared = Arc::clone(&self.shared);
             let own_key = hex::encode(running.agent.agent_id().as_bytes());
             let device_name = running.config.device_name.clone();
+            let secret_hex = running.config.secret_hex.clone();
             let restored = running.restored_from_snapshot;
             tokio::spawn(async move {
                 let mut seen: std::collections::HashMap<String, String> =
@@ -1236,11 +1222,20 @@ mod imp {
                             shared.lists.load(Ordering::SeqCst),
                             shared.entries.load(Ordering::SeqCst),
                         );
-                        if let Err(e) = store
-                            .put(own_key.clone(), record.into_bytes(), "application/json".into())
-                            .await
-                        {
-                            tracing::debug!("mywatch heartbeat put failed: {e}");
+                        match seal_value(&secret_hex, &own_key, record.as_bytes()) {
+                            Ok(sealed) => {
+                                if let Err(e) = store
+                                    .put(
+                                        own_key.clone(),
+                                        sealed,
+                                        "application/octet-stream".into(),
+                                    )
+                                    .await
+                                {
+                                    tracing::debug!("mywatch heartbeat put failed: {e}");
+                                }
+                            }
+                            Err(e) => tracing::debug!("mywatch heartbeat seal failed: {e}"),
                         }
                     }
                     // Watch: any remote record new/changed => we synced.
@@ -1344,8 +1339,22 @@ mod imp {
                         if entry.key.contains('/') {
                             continue;
                         }
+                        // A record that does not open under the link
+                        // key is not a device — an injector without
+                        // the secret never gets a tile.
+                        let Some(plain) = open_value(
+                            &running.config.secret_hex,
+                            &entry.key,
+                            &entry.value,
+                        ) else {
+                            tracing::debug!(
+                                "mywatch: unreadable device record {} skipped",
+                                entry.key
+                            );
+                            continue;
+                        };
                         let v: Value =
-                            serde_json::from_slice(&entry.value).unwrap_or(Value::Null);
+                            serde_json::from_slice(&plain).unwrap_or(Value::Null);
                         let is_self = entry.key == own_id;
                         let updated_at_ms = v["updated_at_ms"].as_u64().unwrap_or(0);
                         // A fresh store heartbeat (60s cadence) marks a
@@ -1408,6 +1417,9 @@ mod imp {
         // Case never carries meaning in an invite (prefix + hex), and TV
         // remote keyboards capitalize freely — accept any casing.
         let lower = invite.trim().to_lowercase();
+        if lower.starts_with(OLD_INVITE_PREFIX) {
+            return Err(OLD_CODE_ERROR.into());
+        }
         let hex_part = lower
             .strip_prefix(INVITE_PREFIX)
             .ok_or("not a My W@tch invite code")?;
@@ -1505,6 +1517,9 @@ mod imp {
     /// Parse a scanned/typed pairing code (case never carries meaning).
     fn parse_pair_code(code: &str) -> Result<([u8; 32], [u8; 16]), String> {
         let lower = code.trim().to_lowercase();
+        if lower.starts_with(OLD_PAIR_PREFIX) {
+            return Err(OLD_CODE_ERROR.into());
+        }
         let hex_part = lower
             .strip_prefix(PAIR_PREFIX)
             .ok_or("not a My W@tch pairing code")?;
@@ -1690,13 +1705,164 @@ mod imp {
     }
 
     /// Gossip topic for a link. Derived, so the raw invite secret never
-    /// appears in topic-shaped places on the wire, and a future encrypted
-    /// payload could key itself from the same secret independently.
+    /// appears in topic-shaped places on the wire; the sealed store
+    /// values key themselves from the same secret independently
+    /// ([`store_seal_key`] — different blake3 domain).
+    ///
+    /// The v2 domain is the store-encryption break: the same secret
+    /// lands v2 builds on a DIFFERENT topic from v1 builds, so sealed
+    /// and plaintext eras never mix in one store (no plaintext
+    /// fallback, no downgrade) — and anyone who harvested a link's v1
+    /// topic string from relayed envelopes loses the trail, because
+    /// the v2 topic is underivable without the secret itself.
     fn topic_for(secret_hex: &str) -> String {
         let mut hasher = blake3::Hasher::new();
-        hasher.update(b"watchit mywatch v1 topic");
+        hasher.update(b"watchit mywatch v2 topic");
         hasher.update(secret_hex.as_bytes());
         format!("wtch-mywatch-{}", hasher.finalize().to_hex())
+    }
+
+    // ---- store sealing --------------------------------------------------
+    //
+    // Everything the link publishes goes into an x0x SelfKeyed store,
+    // whose own layer is signed but NOT encrypted: deltas are plain
+    // bincode, relays forward envelopes for topics they are not
+    // subscribed to, and any topic-holder can pull full state. So every
+    // value is sealed here, app-side, under a key only link members can
+    // derive — a payload-capturing relay (or a topic harvester) sees
+    // random bytes, and anything a topic-holder WRITES without the
+    // secret never decrypts, so it never reaches the merge.
+
+    /// Magic + version prefix on every sealed store value.
+    const STORE_SEAL_MAGIC: &[u8; 5] = b"wenc1";
+
+    /// The link's store-sealing key: one symmetric ChaCha20-Poly1305
+    /// key per link, derived from the 32-byte link secret — the same
+    /// secret the invite/pairing already treats as the crown jewels,
+    /// so there is no new secret to distribute. Domain-separated from
+    /// [`topic_for`], [`art_auth`] and the pairing seal.
+    fn store_seal_key(secret_hex: &str) -> Result<[u8; 32], String> {
+        let secret =
+            hex::decode(secret_hex).map_err(|_| "link secret is damaged".to_string())?;
+        Ok(blake3::derive_key("watchit.mywatch.store.v1", &secret))
+    }
+
+    /// Seal one store value: `wenc1 ‖ nonce(12 random) ‖ AEAD(json)`.
+    /// The AAD is the store KEY string, binding the ciphertext to its
+    /// slot — even a link member (or a replayer) cannot copy device
+    /// A's sealed record under device B's key. Random nonce per seal:
+    /// values are whole-replace, and the app already skips
+    /// republishing unchanged docs, so random nonces add no churn.
+    /// Overhead is 33 bytes (5 magic + 12 nonce + 16 tag) — inside the
+    /// headroom [`MAX_VALUE_BYTES`] leaves under the store's 64 KiB cap.
+    fn seal_value(
+        secret_hex: &str,
+        store_key: &str,
+        plain: &[u8],
+    ) -> Result<Vec<u8>, String> {
+        use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+        let key = store_seal_key(secret_hex)?;
+        let cipher = chacha20poly1305::ChaCha20Poly1305::new((&key).into());
+        let mut nonce = [0u8; 12];
+        use rand::RngCore;
+        rand::thread_rng().fill_bytes(&mut nonce);
+        let ct = cipher
+            .encrypt(
+                (&nonce).into(),
+                Payload { msg: plain, aad: store_key.as_bytes() },
+            )
+            .map_err(|_| "sealing a store value failed".to_string())?;
+        let mut out = Vec::with_capacity(STORE_SEAL_MAGIC.len() + nonce.len() + ct.len());
+        out.extend_from_slice(STORE_SEAL_MAGIC);
+        out.extend_from_slice(&nonce);
+        out.extend_from_slice(&ct);
+        Ok(out)
+    }
+
+    /// Open one store value sealed by [`seal_value`] under the same
+    /// link secret and slot. `None` for everything else — plaintext
+    /// from an injector without the secret, garbage, a wrong-key or
+    /// tampered box, or a sealed value replayed into another slot —
+    /// and the caller skips the value, which IS the injection defense.
+    fn open_value(secret_hex: &str, store_key: &str, value: &[u8]) -> Option<Vec<u8>> {
+        use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+        let rest = value.strip_prefix(STORE_SEAL_MAGIC.as_slice())?;
+        // 12-byte nonce + at least the 16-byte Poly1305 tag.
+        if rest.len() < 12 + 16 {
+            return None;
+        }
+        let (nonce, ct) = rest.split_at(12);
+        let nonce: [u8; 12] = nonce.try_into().ok()?;
+        let key = store_seal_key(secret_hex).ok()?;
+        let cipher = chacha20poly1305::ChaCha20Poly1305::new((&key).into());
+        cipher
+            .decrypt(
+                (&nonce).into(),
+                Payload { msg: ct, aad: store_key.as_bytes() },
+            )
+            .ok()
+    }
+
+    /// Open + bucket every remote store entry into the `devices` array
+    /// [`MyWatchStore::sync_docs`] returns. Pure (no store, no agent)
+    /// so the seal/skip behaviour is unit-testable: a value that does
+    /// not open under the link key and its own slot — plaintext from
+    /// an injector, garbage, or a sealed value replayed under another
+    /// key — is skipped and never reaches the app's merge.
+    fn collect_sync_devices(
+        secret_hex: &str,
+        own: &str,
+        entries: impl IntoIterator<Item = (String, Vec<u8>)>,
+    ) -> Vec<Value> {
+        let mut docs: std::collections::HashMap<String, Value> = Default::default();
+        let mut parts: std::collections::HashMap<String, Vec<(usize, Value)>> =
+            Default::default();
+        let mut maps: std::collections::HashMap<String, serde_json::Map<String, Value>> =
+            Default::default();
+        for (key, value) in entries {
+            let Some((agent, suffix)) = key.split_once('/') else {
+                continue;
+            };
+            if agent == own {
+                continue;
+            }
+            let Some(plain) = open_value(secret_hex, &key, &value) else {
+                tracing::debug!("mywatch sync: unreadable store value at {key} skipped");
+                continue;
+            };
+            if suffix == "sync" {
+                if let Ok(doc) = serde_json::from_slice::<Value>(&plain) {
+                    docs.insert(agent.to_string(), doc);
+                }
+            } else if let Some(idx) = suffix
+                .strip_prefix("sync/")
+                .and_then(|s| s.parse::<usize>().ok())
+            {
+                // Overflow parts of a sharded sync doc (large
+                // libraries) — the app merges them with the main doc.
+                if let Ok(doc) = serde_json::from_slice::<Value>(&plain) {
+                    parts.entry(agent.to_string()).or_default().push((idx, doc));
+                }
+            } else if suffix.starts_with("maps/") {
+                if let Ok(Value::Object(part)) = serde_json::from_slice::<Value>(&plain) {
+                    maps.entry(agent.to_string()).or_default().extend(part);
+                }
+            }
+        }
+        docs.into_iter()
+            .map(|(agent, doc)| {
+                let m = maps.remove(&agent).unwrap_or_default();
+                let mut extra = parts.remove(&agent).unwrap_or_default();
+                extra.sort_by_key(|(idx, _)| *idx);
+                let extra: Vec<Value> = extra.into_iter().map(|(_, d)| d).collect();
+                json!({
+                    "agent_id": agent,
+                    "doc": doc,
+                    "doc_parts": extra,
+                    "maps": m,
+                })
+            })
+            .collect()
     }
 
     #[cfg(test)]
@@ -1721,11 +1887,32 @@ mod imp {
             // TV remote keyboards capitalize freely: prefix and hex in
             // any case (plus stray whitespace) normalize to the same
             // lowercase secret.
-            let shouty = format!(" WTCH1-{} ", secret.to_uppercase());
+            let shouty = format!(" WTCH2-{} ", secret.to_uppercase());
             assert_eq!(parse_invite(&shouty).unwrap(), secret);
             // Damage still refused.
-            assert!(parse_invite("wtch1-abcd").is_err());
+            assert!(parse_invite("wtch2-abcd").is_err());
             assert!(parse_invite(&format!("wchn1-{secret}")).is_err());
+        }
+
+        #[test]
+        fn old_codes_get_the_update_first_message() {
+            let secret = "ab".repeat(32);
+            // A pre-store-encryption invite is rejected with the one
+            // actionable message, any casing — not the generic error.
+            for code in [
+                format!("{OLD_INVITE_PREFIX}{secret}"),
+                format!(" WTCH1-{} ", secret.to_uppercase()),
+            ] {
+                let err = parse_invite(&code).unwrap_err();
+                assert!(err.contains("older W@tch"), "got: {err}");
+            }
+            // Same for an old pairing code.
+            let old_pair = format!("{OLD_PAIR_PREFIX}{}", "ab".repeat(48));
+            let err = parse_pair_code(&old_pair).unwrap_err();
+            assert!(err.contains("older W@tch"), "got: {err}");
+            // Genuinely foreign strings keep the generic errors.
+            assert!(!parse_invite("wchn1-abcd").unwrap_err().contains("older"));
+            assert!(!parse_pair_code("junk").unwrap_err().contains("older"));
         }
 
         #[test]
@@ -1739,9 +1926,9 @@ mod imp {
             let shouty = format!(" {} ", code.to_uppercase());
             assert_eq!(parse_pair_code(&shouty).unwrap(), (pk, nonce));
             // Damage and foreign prefixes refused.
-            assert!(parse_pair_code("wtchp1-abcd").is_err());
+            assert!(parse_pair_code("wtchp2-abcd").is_err());
             assert!(parse_pair_code(&code[..code.len() - 2]).is_err());
-            assert!(parse_pair_code(&code.replace(PAIR_PREFIX, "wtch1-")).is_err());
+            assert!(parse_pair_code(&code.replace(PAIR_PREFIX, "wtch2-")).is_err());
         }
 
         #[test]
@@ -1813,6 +2000,108 @@ mod imp {
         }
 
         #[test]
+        fn store_seal_round_trip_and_refusals() {
+            let secret = "ab".repeat(32);
+            let key = format!("{}/sync", "aa".repeat(32));
+            let plain = br#"{"lists":[],"watch":{}}"#;
+            let sealed = seal_value(&secret, &key, plain).unwrap();
+            // Versioned magic leads; nothing of the plaintext shows.
+            assert!(sealed.starts_with(STORE_SEAL_MAGIC));
+            assert_eq!(sealed.len(), plain.len() + 5 + 12 + 16);
+            assert_eq!(open_value(&secret, &key, &sealed).unwrap(), plain);
+            // Fresh random nonce per seal: two seals differ, both open.
+            let sealed2 = seal_value(&secret, &key, plain).unwrap();
+            assert_ne!(sealed, sealed2);
+            assert_eq!(open_value(&secret, &key, &sealed2).unwrap(), plain);
+            // Wrong secret refuses.
+            assert!(open_value(&"cd".repeat(32), &key, &sealed).is_none());
+            // Slot binding: a value sealed under one store key never
+            // opens under another (cross-slot replay by a member).
+            let other_key = format!("{}/sync", "bb".repeat(32));
+            assert!(open_value(&secret, &other_key, &sealed).is_none());
+            // Tampered ciphertext refused.
+            let mut bad = sealed.clone();
+            let last = bad.len() - 1;
+            bad[last] ^= 1;
+            assert!(open_value(&secret, &key, &bad).is_none());
+            // Plaintext (an injector without the secret), garbage and
+            // truncation all open as None.
+            assert!(open_value(&secret, &key, br#"{"name":"evil"}"#).is_none());
+            assert!(open_value(&secret, &key, b"").is_none());
+            assert!(open_value(&secret, &key, b"wenc1short").is_none());
+            // The sealing key is domain-separated from the topic hash.
+            let derived = store_seal_key(&secret).unwrap();
+            assert!(!topic_for(&secret).contains(&hex::encode(derived)));
+        }
+
+        #[test]
+        fn topic_v2_is_a_deliberate_break_from_v1() {
+            let secret = "ab".repeat(32);
+            let topic = topic_for(&secret);
+            assert!(topic.starts_with("wtch-mywatch-"));
+            assert_eq!(topic, topic_for(&secret));
+            // Pin the OLD v1 domain string: the same secret must land
+            // on a DIFFERENT topic, so sealed (v2) and plaintext (v1)
+            // builds never meet in one store — and a harvested v1
+            // topic string reveals nothing about the v2 topic.
+            let mut hasher = blake3::Hasher::new();
+            hasher.update(b"watchit mywatch v1 topic");
+            hasher.update(secret.as_bytes());
+            let v1 = format!("wtch-mywatch-{}", hasher.finalize().to_hex());
+            assert_ne!(topic, v1);
+        }
+
+        #[test]
+        fn sync_collection_reads_sealed_values_and_skips_the_rest() {
+            let secret = "ab".repeat(32);
+            let own = "00".repeat(32);
+            let peer = "11".repeat(32);
+            let stranger = "22".repeat(32);
+            let sealed = |key: &str, v: &Value| {
+                (
+                    key.to_string(),
+                    seal_value(&secret, key, v.to_string().as_bytes()).unwrap(),
+                )
+            };
+            let doc = serde_json::json!({ "lists": [], "v": 1 });
+            let part1 = serde_json::json!({ "lists": [], "part": 1 });
+            let maps = serde_json::json!({ "aa11": "bWFw" });
+            let entries = vec![
+                sealed(&format!("{peer}/sync"), &doc),
+                sealed(&format!("{peer}/sync/1"), &part1),
+                sealed(&format!("{peer}/maps/0"), &maps),
+                // Our own publishes never count as a remote device.
+                sealed(&format!("{own}/sync"), &serde_json::json!({ "own": true })),
+                // An injector without the secret writes plaintext —
+                // skipped, never reaches the merge.
+                (
+                    format!("{stranger}/sync"),
+                    serde_json::json!({ "lists": ["planted"] })
+                        .to_string()
+                        .into_bytes(),
+                ),
+                // A member's sealed value replayed under another slot —
+                // the AAD binding refuses it.
+                (
+                    format!("{stranger}/maps/0"),
+                    seal_value(
+                        &secret,
+                        &format!("{peer}/maps/0"),
+                        maps.to_string().as_bytes(),
+                    )
+                    .unwrap(),
+                ),
+            ];
+            let devices = collect_sync_devices(&secret, &own, entries);
+            assert_eq!(devices.len(), 1, "only the honest peer survives");
+            let d = &devices[0];
+            assert_eq!(d["agent_id"], serde_json::json!(peer));
+            assert_eq!(d["doc"], doc);
+            assert_eq!(d["doc_parts"], serde_json::json!([part1]));
+            assert_eq!(d["maps"]["aa11"], serde_json::json!("bWFw"));
+        }
+
+        #[test]
         fn sha256_hex_matches_known_vector() {
             assert_eq!(
                 sha256_hex(b"abc"),
@@ -1875,13 +2164,11 @@ mod imp {
 
     async fn put_own_record(running: &Running, lists: u64, entries: u64) -> Result<(), String> {
         let key = hex::encode(running.agent.agent_id().as_bytes());
+        let record = record_json(&running.config.device_name, lists, entries);
+        let sealed = seal_value(&running.config.secret_hex, &key, record.as_bytes())?;
         running
             .store
-            .put(
-                key,
-                record_json(&running.config.device_name, lists, entries).into_bytes(),
-                "application/json".into(),
-            )
+            .put(key, sealed, "application/octet-stream".into())
             .await
             .map_err(|e| format!("record publish failed: {e}"))
     }

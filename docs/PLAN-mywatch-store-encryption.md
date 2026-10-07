@@ -1,6 +1,13 @@
 # Plan: encrypt the My W@tch link store (seal every value under a link-secret-derived key)
 
-**Status: PLAN — agreed direction 2026-10-07, not yet implemented.**
+**Status: IMPLEMENTED 2026-10-07 (unreleased — ships next release),
+as planned, with both open-question recommendations adopted (invite
+prefix bumped to `wtch2-`, PIN stretching deferred). One deliberate
+addition beyond the plan text: the Dart QR scanner still *accepts* old
+`wtch1-`/`wtchp1-` codes so the core's specific "update that device
+first" rejection reaches the user instead of the scanner silently
+ignoring the code. Release notes must say: update every linked device
+together.**
 Fixes the one real finding of the 2026-10-07 leak-vector review: the
 My W@tch sync store is **plaintext on the gossip layer**, and since the
 phase-2 backup feature it also carries the backup read keys (pointer

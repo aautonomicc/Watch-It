@@ -207,9 +207,9 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   shows a "switched off" card instead of the connecting spinner.
 - Unlinked (regrouped by intent, alpha.102):
   "Setting up your first device?" → **Start a new My W@tch** (names
-  the device, shows the invite as a branded QR + copyable `wtch1-…`
+  the device, shows the invite as a branded QR + copyable `wtch2-…`
   code), and "Already have a My W@tch?" over both join paths —
-  **Show a pairing code** (the device displays a `wtchp1-` QR that a
+  **Show a pairing code** (the device displays a `wtchp2-` QR that a
   linked phone scans; listed first and primary on TV/desktop, where
   there's no camera) and **Enter an invite code** (paste the code, or
   scan the QR with the camera on Android/iOS; TV-friendly dialog,

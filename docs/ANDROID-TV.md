@@ -125,7 +125,7 @@ while up/down still traverse away.
 The My W@tch unlinked screen groups its choices by situation, and on a
 TV (or any cameraless device with a screen) the **Show a pairing code**
 path comes first as the filled-primary button: the TV displays a
-`wtchp1-` pairing code as a branded QR, an already linked phone picks
+`wtchp2-` pairing code as a branded QR, an already linked phone picks
 "Add a device — scan its pairing code" and scans the TV's screen, and
 the TV joins the existing My W@tch — nothing is typed on a remote.
 Codes expire after ten minutes and each attempt is an independent

@@ -17,7 +17,7 @@ import 'package:watchit/widgets/wi_qr.dart';
 import 'fake_embedded_http.dart';
 
 /// Reverse-QR pairing: the unlinked device (TV/desktop — screen, no
-/// camera) shows a `wtchp1-` code; a linked phone scans it and sends
+/// camera) shows a `wtchp2-` code; a linked phone scans it and sends
 /// the link secret over a rendezvous gossip topic.
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;

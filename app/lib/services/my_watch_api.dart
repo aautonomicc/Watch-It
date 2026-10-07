@@ -90,7 +90,7 @@ class MyWatchApi {
     return json['invite'] as String? ?? '';
   }
 
-  /// Reverse-QR pairing, unlinked side: mint the `wtchp1-` pairing code
+  /// Reverse-QR pairing, unlinked side: mint the `wtchp2-` pairing code
   /// this device shows as a QR (a linked device scans it and sends the
   /// link secret over). Idempotent while an attempt is waiting.
   Future<String> pairStart(String deviceName) async {
