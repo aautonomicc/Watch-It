@@ -766,10 +766,13 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       through the exact My W@tch merge rules (LWW everywhere — a
       restore never regresses newer local state). Root maps ride as
       FULL root maps, so a restore imports them offline and every
-      entry plays. STILL OPEN before relying on it: a real PAID backup
-      on mainnet (needs a funded wallet — the pointer write path's
-      first live exercise, incl. the fleet-rollout gate on ant-node
-      0.21.0+ close groups) and an optional debounced auto-backup.
+      entry plays. LIVE-TESTED 2026-10-07 on alpha.110 with a funded
+      wallet: real paid backup (pointer create), state changes + a
+      second backup (pointer flip), factory reset + wallet removal,
+      wallet re-imported from the 12 words, restore recovered the
+      library and watch point exactly — the paid pointer-write leg and
+      the fleet's pointer support are proven on mainnet. Still open:
+      an optional debounced auto-backup beyond the daily opt-in.
       Plan background: back up the
       FULL W@tch state — lists + entries, shrunk datamaps, user-edited
       metadata, posters/art, watch states, profiles (PIN + recovery
@@ -800,8 +803,9 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       wallet-holding device publishes its DERIVED backup read keys
       (pointer address + content enc key — never the 12 words or the
       wallet key, so spend stays with the master) as a tiny `backup`
-      section in its My W@tch sync doc, which already travels
-      encrypted inside the link store; linked devices adopt the
+      section in its My W@tch sync doc, inside the link store
+      (plaintext on the gossip layer today — sealing it is the planned
+      link-store encryption item below); linked devices adopt the
       newest shared keys (`backup_follow.dart`, own backup line never
       followed) and poll the pointer directly from the network —
       pointer reads are free, no wallet needed — folding a fetched
@@ -823,8 +827,25 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       profile edits still travel to the master over the link) and
       for low-latency live sync. STILL OPEN: the live
       master-backs-up → follower-catches-up round trip needs the
-      funded wallet (user test at release, same gap as phase 1's
-      paid pointer write)
+      funded wallet (user test at release; phase 1's paid pointer
+      write was live-proven 2026-10-07, this leg still needs a second
+      linked device)
+- [ ] **Link-store encryption** (planned 2026-10-07 —
+      [PLAN-mywatch-store-encryption.md](PLAN-mywatch-store-encryption.md)):
+      seal every My W@tch store value (sync doc parts, entry maps,
+      device records) with ChaCha20-Poly1305 under a blake3 key
+      derived from the link secret — the 2026-10-07 leak-vector
+      review found the store is plaintext on the gossip layer (whole
+      library, playable shrunk maps, watch positions, profiles incl.
+      PIN hashes, and since phase 2 the backup read keys, exposed to
+      payload-capturing relays or anyone holding the topic string).
+      Breaking link-format change: topic domain bumps to v2 (clean
+      split from old builds, harvested v1 topics go dark), invite/
+      pairing prefixes bump to `wtch2-`/`wtchp2-` so cross-version
+      joins fail loudly; existing links migrate automatically once
+      every device updates (same secret, no re-pairing). Also closes
+      the write-injection vector (unsealable values are skipped) and
+      the plaintext on-disk store snapshots
 
 ## Channels (alpha.65–.107): REMOVED 2026-09-27
 

@@ -15,8 +15,12 @@ import 'my_watch_api.dart';
 /// The wallet-holding device (the "master") publishes its DERIVED backup
 /// read keys — the pointer address to poll plus the content key, never
 /// the wallet key or the 12 words — as a tiny `backup` section in its
-/// My W@tch sync document, which already travels encrypted inside the
-/// link store. Every linked device adopts the newest shared keys and
+/// My W@tch sync document inside the link store. NOTE: the store is
+/// plaintext on the gossip layer today — sealing every store value
+/// under a link-secret-derived key is planned
+/// (docs/PLAN-mywatch-store-encryption.md); until that ships, these
+/// read keys share the store's exposure to payload-capturing relays.
+/// Every linked device adopts the newest shared keys and
 /// polls the pointer directly from the network: reading is free (no
 /// wallet needed), so a device that was offline while the others synced
 /// catches up from the backup instead of waiting to be online together.
