@@ -41,6 +41,21 @@ class AppSettings {
     await prefs.setBool(_backupAutoKey, value);
   }
 
+  static const _backupAutoNudgeKey = 'backup_auto_nudge_dismissed_v1';
+
+  /// The Backup screen's one-time nudge to turn on automatic backups
+  /// once linked devices follow this device's backups — "Not now"
+  /// retires it for good.
+  static Future<bool> backupAutoNudgeDismissed() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_backupAutoNudgeKey) ?? false;
+  }
+
+  static Future<void> setBackupAutoNudgeDismissed() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_backupAutoNudgeKey, true);
+  }
+
   static const _softwareVideoDecodeKey = 'software_video_decode_v1';
 
   /// Decode video on the CPU instead of the device's hardware decoder

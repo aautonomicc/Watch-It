@@ -6,6 +6,7 @@ import '../models/media_list.dart';
 import '../services/app_settings.dart';
 import '../services/download_manager.dart';
 import '../services/embedded_client.dart';
+import '../services/low_data_mode.dart';
 import '../services/my_watch_api.dart';
 import '../services/my_watch_sync.dart';
 import '../services/network_pause.dart';
@@ -349,6 +350,10 @@ class _DataScreenState extends State<DataScreen> {
   Future<void> _setMyWatchMode(ClientNetMode mode) async {
     setState(() => _busyMyWatch = true);
     try {
+      // Touching the pill is direct manual control: low-data mode (My
+      // W@tch screen) steps aside instead of silently re-disabling the
+      // agent later.
+      await LowDataMode.instance.clear();
       switch (mode) {
         case ClientNetMode.off:
           await _gate.noteManualChange(X0xAgent.myWatch);
@@ -382,6 +387,10 @@ class _DataScreenState extends State<DataScreen> {
     if (s == null) return 'Checking…';
     if (!s.supported) return 'Not available on this platform';
     if (!s.enabled) {
+      if (LowDataMode.instance.enabled) {
+        return 'Low-data mode — syncing from the shared backup '
+            '(see My W@tch)';
+      }
       return _gate.isPaused(X0xAgent.myWatch)
           ? 'Paused on mobile data — resumes on Wi-Fi'
           : 'Off — nothing syncs between devices';

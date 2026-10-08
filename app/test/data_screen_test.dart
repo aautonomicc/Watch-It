@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watchit/screens/data_screen.dart';
 import 'package:watchit/services/app_settings.dart';
 import 'package:watchit/services/embedded_client.dart';
+import 'package:watchit/services/low_data_mode.dart';
 import 'package:watchit/services/my_watch_api.dart';
 import 'package:watchit/services/network_pause.dart';
 import 'package:watchit/services/x0x_cellular.dart';
@@ -538,6 +539,40 @@ void main() {
       expect(gate.isPaused(X0xAgent.myWatch), isFalse);
       expect(jsonDecode(fake.myWatchEnabledPosts.single),
           {'enabled': false});
+      await close(tester);
+    });
+
+    testWidgets('low-data mode reads so on the state line, and touching '
+        'the pill clears the mode', (tester) async {
+      final mode = LowDataMode(
+          api: MyWatchApi(base: FakeEmbeddedHttp.base, token: 't'));
+      final previous = LowDataMode.instance;
+      LowDataMode.instance = mode;
+      addTearDown(() => LowDataMode.instance = previous);
+      fake.myWatchStatus = {
+        'supported': true,
+        'enabled': true,
+        'linked': true,
+        'state': 'ready',
+        'devices': const [],
+      };
+      await mode.setEnabled(true); // agent off, mode on
+      fake.myWatchEnabledPosts.clear();
+      await open(tester);
+
+      expect(
+          find.textContaining('Low-data mode — syncing from the shared '
+              'backup'),
+          findsOneWidget);
+      // Picking Wi-Fi + mobile is direct manual control: the agent
+      // comes back on and the mode steps aside.
+      await tester.tap(find.descendant(
+          of: find.byType(SegmentedButton<ClientNetMode>).first,
+          matching: find.text('Wi-Fi + mobile')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(mode.enabled, isFalse);
+      expect(jsonDecode(fake.myWatchEnabledPosts.last), {'enabled': true});
       await close(tester);
     });
 

@@ -85,6 +85,18 @@ class BackupFollowService {
   Timer? _timer;
   bool _checking = false;
 
+  /// Backup-first bootstrap (the phase-2 ride-along): once resolved —
+  /// the first follow attempt completed or failed, or the deadline
+  /// passed — the gossip merge is never deferred again this session.
+  bool _bootstrapResolved = false;
+  int? _bootstrapDeadlineMs;
+
+  /// Hard bound on how long [deferGossipMergeFor] can hold the gossip
+  /// merge off: if the first follow has not finished by then (slow
+  /// network, big backup), live sync proceeds regardless — the merge
+  /// is a union, so nothing is lost by having deferred.
+  static const bootstrapGateMs = 5 * 60 * 1000;
+
   /// Start the slow background cadence (called once from main).
   void start() {
     _timer ??= Timer.periodic(pollInterval, (_) => _tick());
@@ -171,6 +183,53 @@ class BackupFollowService {
 
   // ---- follower role -----------------------------------------------------
 
+  /// Backup-first bootstrap, wired as `MyWatchSync.bootstrapGate`: a
+  /// device that holds (or is right now receiving) shared backup read
+  /// keys and has never folded that backup in populates from the
+  /// backup FIRST — one bulk fetch over free network reads — instead
+  /// of trickling a large library through the sync-doc byte budget
+  /// over many cycles. Returns true while the sync cycle should skip
+  /// merging remote content (its own publish still runs, so the
+  /// reverse direction is unaffected).
+  ///
+  /// Deliberately conditional (the recorded design): without keys in
+  /// sight the gate never activates — wallet-less fleets have no
+  /// backup line, gossip is their only path — and it resolves forever
+  /// the moment the first follow completes or fails ([checkNow]), or
+  /// at [bootstrapGateMs] regardless.
+  bool deferGossipMergeFor(List<RemoteSyncDoc> remote, {int? nowMs}) {
+    if (_bootstrapResolved) return false;
+    final state = _loadState();
+    if (state.appliedHead != null) {
+      // This device has folded a backup in before — it is populated,
+      // live sync leads as usual.
+      _bootstrapResolved = true;
+      return false;
+    }
+    final hasKeys = state.ptr != null && state.key != null;
+    final hasSection = remote.any((d) {
+      final b = d.doc['backup'];
+      return b is Map<String, dynamic> &&
+          _isHex64((b['ptr'] as String? ?? '').toLowerCase()) &&
+          _isHex64((b['key'] as String? ?? '').toLowerCase()) &&
+          (b['ms'] as int? ?? 0) > 0;
+    });
+    if (!hasKeys && !hasSection) return false;
+    final now = nowMs ?? DateTime.now().millisecondsSinceEpoch;
+    _bootstrapDeadlineMs ??= now + bootstrapGateMs;
+    if (now >= _bootstrapDeadlineMs!) {
+      _bootstrapResolved = true;
+      return false;
+    }
+    // Keys already adopted but no check in flight (adoption in a past
+    // session, nothing newly advertised): kick one now instead of
+    // waiting out the launch delay.
+    if (hasKeys && !_checking) {
+      unawaited(checkNow().then((_) {}, onError: (_) {}));
+    }
+    return true;
+  }
+
   /// Adopt shared read keys out of a sync cycle's remote docs (wired as
   /// `MyWatchSync.onRemoteDocs`): the newest valid section wins; our own
   /// backup line is never followed. A record that advertises a backup
@@ -233,25 +292,32 @@ class BackupFollowService {
     try {
       final own = await _ownPointer();
       if (own != null && own == ptr) {
+        _bootstrapResolved = true;
         return 'This device makes that backup itself.';
       }
       if (!await _networkOk()) {
+        // Not a terminal outcome: the bootstrap gate stays armed (its
+        // deadline bounds the wait) so connectivity returning still
+        // gets the backup-first population.
         return 'Waiting for the network connection.';
       }
       final nowMs = DateTime.now().millisecondsSinceEpoch;
       final peek = await _api.peek(ptr);
       state.lastCheckMs = nowMs;
       if (!peek.found) {
+        _bootstrapResolved = true;
         _saveState(state);
         _publishStatus(state);
         return 'No backup published under the shared keys yet.';
       }
       if (peek.head != null && peek.head == state.appliedHead) {
+        _bootstrapResolved = true;
         _saveState(state);
         _publishStatus(state);
         return 'Already caught up with the latest backup.';
       }
       final summary = await _backupService.followFetch(ptr: ptr, key: key);
+      _bootstrapResolved = true;
       state
         ..appliedHead = summary.head ?? peek.head
         ..lastAppliedMs = DateTime.now().millisecondsSinceEpoch;
@@ -259,6 +325,10 @@ class BackupFollowService {
       _publishStatus(state, lastSummary: _summarize(summary));
       return _summarize(summary);
     } catch (e) {
+      // A failed first follow resolves the bootstrap gate too —
+      // "until the first follow completes or FAILS" — so live sync
+      // takes over instead of waiting out the gate's deadline.
+      _bootstrapResolved = true;
       _publishStatus(_loadState(), error: '$e');
       rethrow;
     } finally {

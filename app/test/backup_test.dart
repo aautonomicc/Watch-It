@@ -14,9 +14,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/models/media_list.dart';
 import 'package:watchit/screens/backup_screen.dart';
+import 'package:watchit/services/app_settings.dart';
 import 'package:watchit/services/backup.dart';
 import 'package:watchit/services/backup_follow.dart';
 import 'package:watchit/services/library_store.dart';
+import 'package:watchit/services/my_watch_api.dart';
 import 'package:watchit/services/metadata_service.dart';
 import 'package:watchit/services/profiles.dart';
 import 'package:watchit/services/user_metadata.dart';
@@ -561,6 +563,98 @@ void main() {
           isTrue);
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getBool('backup_auto_v1'), isTrue);
+    });
+
+    testWidgets('nudges toward automatic backups once a linked device '
+        'follows this one', (tester) async {
+      fake.backupStatus = {
+        'configured': true,
+        'pointer': 'aa' * 32,
+        'last': {'ms': 1700000000000, 'backups': 2, 'objects': 7, 'uploaded': 1},
+        'job': null,
+      };
+      fake.myWatchStatus = {
+        'supported': true,
+        'linked': true,
+        'state': 'ready',
+        'devices': [
+          {'agent_id': 'aa' * 32, 'self': true, 'name': 'Here'},
+          {'agent_id': 'bb' * 32, 'self': false, 'name': 'Phone'},
+        ],
+      };
+      final screenService = BackupService(
+        api: BackupApi(base: FakeEmbeddedHttp.base, token: 't'),
+      );
+      Future<void> open() async {
+        await tester.pumpWidget(MaterialApp(
+          theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+          home: BackupScreen(
+            service: screenService,
+            myWatchApi: MyWatchApi(base: FakeEmbeddedHttp.base, token: 't'),
+          ),
+        ));
+        await tester.pumpAndSettle();
+      }
+
+      await open();
+      expect(find.textContaining('follow this device\'s backups'),
+          findsOneWidget);
+      // Turn on flips the opt-in and retires the nudge.
+      await tester.tap(find.text('Turn on'));
+      await tester.pumpAndSettle();
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('backup_auto_v1'), isTrue);
+      expect(find.textContaining('follow this device\'s backups'),
+          findsNothing);
+
+      // Fresh screen with auto off again: "Not now" dismisses for good.
+      // (Dispose first — pumping the same widget would reuse the State.)
+      await AppSettings.setBackupAuto(false);
+      await tester.pumpWidget(const SizedBox());
+      await open();
+      expect(find.textContaining('follow this device\'s backups'),
+          findsOneWidget);
+      await tester.tap(find.text('Not now'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('follow this device\'s backups'),
+          findsNothing);
+      expect(prefs.getBool('backup_auto_nudge_dismissed_v1'), isTrue);
+      await tester.pumpWidget(const SizedBox());
+      await open();
+      expect(find.textContaining('follow this device\'s backups'),
+          findsNothing);
+    });
+
+    testWidgets('no nudge without followers or before the first backup',
+        (tester) async {
+      // Followers but never backed up: keys are not even published yet.
+      fake.backupStatus = {
+        'configured': true,
+        'pointer': 'aa' * 32,
+        'last': null,
+        'job': null,
+      };
+      fake.myWatchStatus = {
+        'supported': true,
+        'linked': true,
+        'state': 'ready',
+        'devices': [
+          {'agent_id': 'bb' * 32, 'self': false, 'name': 'Phone'},
+        ],
+      };
+      final screenService = BackupService(
+        api: BackupApi(base: FakeEmbeddedHttp.base, token: 't'),
+      );
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: BackupScreen(
+          service: screenService,
+          myWatchApi: MyWatchApi(base: FakeEmbeddedHttp.base, token: 't'),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('follow this device\'s backups'),
+          findsNothing);
     });
 
     testWidgets('a wallet-less follower shows the shared-backup card',

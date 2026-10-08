@@ -95,6 +95,15 @@ class MyWatchSync {
   Future<Map<String, dynamic>?> Function()? backupSectionProvider;
   void Function(List<RemoteSyncDoc> remote)? onRemoteDocs;
 
+  /// Backup-first bootstrap gate, wired in main() to
+  /// `BackupFollowService.deferGossipMergeFor` (null — the default,
+  /// and in most tests — never defers): when it returns true the cycle
+  /// skips merging the remote docs' content and lets the backup
+  /// follower populate this device in one bulk fetch first; the own
+  /// publish still runs. Bounded on the follower's side — the first
+  /// follow completing or failing (or its deadline) ends the deferral.
+  bool Function(List<RemoteSyncDoc> remote)? bootstrapGate;
+
   /// The in-flight cycle, when one is running. Background ticks join
   /// it; [syncNow] waits it out and runs a fresh pass instead — joining
   /// would report on work that started before the press.
@@ -287,6 +296,10 @@ class MyWatchSync {
   /// headline is "up to date, except…".
   static String summarize(SyncCycleResult result,
       {int pendingMaps = 0, int pendingArt = 0}) {
+    if (result.bootstrapDeferred) {
+      return 'Catching up from the shared backup first — live sync '
+          'merges resume right after.';
+    }
     final parts = <String>[
       if (result.entriesAdded > 0) '${result.entriesAdded} added',
       if (result.entriesRemoved > 0) '${result.entriesRemoved} removed',
@@ -462,6 +475,23 @@ class MyWatchSync {
     } catch (e) {
       debugPrint('mywatch sync: backup-follow hook failed: $e');
     }
+    // Backup-first bootstrap: a fresh device with shared backup read
+    // keys in sight populates from the backup (one bulk fetch over
+    // free network reads) before the gossip merge gets to trickle the
+    // library through the doc budget. Publishing our own state still
+    // runs below — the reverse direction never waits on the backup.
+    var deferMerge = false;
+    try {
+      deferMerge = bootstrapGate?.call(remote) ?? false;
+    } catch (e) {
+      debugPrint('mywatch sync: bootstrap gate failed: $e');
+    }
+    if (deferMerge) {
+      _setActivity('Catching up from the shared backup first…');
+      await _publishOwn(state: state, lists: lists, remote: remote, now: now);
+      await _saveState(state);
+      return const SyncCycleResult(bootstrapDeferred: true);
+    }
     _setActivity('Merging changes from your devices…');
     final merge = mergeRemoteDocs(
       lists: lists,
@@ -626,6 +656,20 @@ class MyWatchSync {
     result = result.copyWith(artFetched: artFetched);
 
     // 7. Publish our (possibly just-merged) state.
+    await _publishOwn(state: state, lists: lists, remote: remote, now: now);
+    await _saveState(state);
+    return result;
+  }
+
+  /// Stage 7 of a cycle: build and publish this device's own sync doc
+  /// (also run by the bootstrap-deferred path, which publishes without
+  /// merging first).
+  Future<void> _publishOwn({
+    required _SyncState state,
+    required List<MediaList> lists,
+    required List<RemoteSyncDoc> remote,
+    required int now,
+  }) async {
     _setActivity("Sending this device's library to your devices…");
     state.snapshot = membershipOf(lists);
     final metaRows = await _localMetaRows();
@@ -727,8 +771,6 @@ class MyWatchSync {
         _problems.add('Sending your library to your devices failed: $e');
       }
     }
-    await _saveState(state);
-    return result;
   }
 
   /// Import every remote shrunk map for an address our library holds but
@@ -2467,6 +2509,7 @@ class SyncCycleResult {
     this.tmdbApplied = 0,
     this.profilesChanged = 0,
     this.artFetched = 0,
+    this.bootstrapDeferred = false,
   });
 
   final int entriesAdded;
@@ -2481,6 +2524,10 @@ class SyncCycleResult {
   /// Profiles created, updated or deleted from remote docs.
   final int profilesChanged;
   final int artFetched;
+
+  /// This cycle skipped the gossip merge so the backup follower could
+  /// populate the device first (the backup-first bootstrap gate).
+  final bool bootstrapDeferred;
 
   SyncCycleResult copyWith({
     int? watchStatesApplied,
@@ -2501,6 +2548,7 @@ class SyncCycleResult {
         tmdbApplied: tmdbApplied ?? this.tmdbApplied,
         profilesChanged: profilesChanged ?? this.profilesChanged,
         artFetched: artFetched ?? this.artFetched,
+        bootstrapDeferred: bootstrapDeferred,
       );
 }
 

@@ -33,6 +33,7 @@ import 'services/home_rows.dart';
 import 'services/home_sections.dart';
 import 'services/library_store.dart';
 import 'services/licenses.dart';
+import 'services/low_data_mode.dart';
 import 'services/metadata.dart';
 import 'services/metadata_service.dart';
 import 'services/network_events.dart';
@@ -174,9 +175,19 @@ Future<void> main() async {
       BackupFollowService.instance.sectionForPublish;
   MyWatchSync.instance.onRemoteDocs =
       BackupFollowService.instance.noteRemoteDocs;
+  // Backup-first bootstrap: a fresh joiner with shared backup read
+  // keys in sight populates from the backup in one bulk fetch before
+  // the gossip merge trickles the library through the doc budget.
+  MyWatchSync.instance.bootstrapGate =
+      BackupFollowService.instance.deferGossipMergeFor;
   BackupService.onBackupPublished =
       BackupFollowService.instance.noteBackupPublished;
   BackupFollowService.instance.start();
+  // Low-data mode (per device): the x0x agent stays off and the
+  // backup follower carries the sync; "Sync now" runs a bounded live
+  // session. initialize() also re-asserts the agent-off state after a
+  // failed burst teardown.
+  unawaited(LowDataMode.instance.initialize());
   // Mobile-data gate for the x0x agent (Settings → Network → Mobile
   // data): pause My W@tch on cellular when set to Wi-Fi only, resume
   // when Wi-Fi returns. A no-op with the default everything-allowed

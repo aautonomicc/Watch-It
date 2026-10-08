@@ -485,4 +485,155 @@ void main() {
       expect(seen.single.single.doc['backup'], isNotNull);
     });
   });
+
+  group('backup-first bootstrap gate', () {
+    String statePath() => '${tempDir.path}/backup_follow.json';
+
+    void seedKeys({String? appliedHead}) =>
+        File(statePath()).writeAsStringSync(jsonEncode({
+          'ptr': ptrA,
+          'key': keyA,
+          'shared_ms': 900,
+          'applied_head': appliedHead,
+        }));
+
+    test('never activates without keys or a shared section in sight',
+        () async {
+      expect(follow.deferGossipMergeFor(const []), isFalse);
+      expect(follow.deferGossipMergeFor([docWith(null)]), isFalse);
+    });
+
+    test('activates on a shared section and resolves for good once the '
+        'first check answers', () async {
+      final docs = [
+        docWith({'v': 1, 'ptr': ptrA, 'key': keyA, 'ms': 900}),
+      ];
+      expect(follow.deferGossipMergeFor(docs), isTrue);
+      // The adoption the sync cycle runs in parallel: the peek answers
+      // found:false — a terminal outcome, live sync takes over.
+      await follow.noteRemoteDocs(docs);
+      expect(follow.deferGossipMergeFor(docs), isFalse);
+      expect(follow.deferGossipMergeFor(const []), isFalse);
+    });
+
+    test('a junk-only section never activates the gate', () async {
+      expect(
+        follow.deferGossipMergeFor([
+          docWith({'v': 1, 'ptr': 'nothex', 'key': keyA, 'ms': 900}),
+          docWith({'v': 1, 'ptr': ptrA, 'key': keyA, 'ms': 0}),
+        ]),
+        isFalse,
+      );
+    });
+
+    test('a device that already folded this backup in never defers',
+        () async {
+      seedKeys(appliedHead: 'ee' * 32);
+      expect(follow.deferGossipMergeFor(const []), isFalse);
+    });
+
+    test('the deadline ends the deferral even when the check cannot '
+        'finish', () async {
+      health = const ClientHealth(state: 'connecting', peers: 0);
+      seedKeys();
+      expect(follow.deferGossipMergeFor(const [], nowMs: 1000), isTrue);
+      expect(
+        follow.deferGossipMergeFor(const [],
+            nowMs: 1000 + BackupFollowService.bootstrapGateMs),
+        isFalse,
+      );
+      // Resolved is forever — an earlier clock never re-arms it.
+      expect(follow.deferGossipMergeFor(const [], nowMs: 1000), isFalse);
+      // Let the kicked background check (which only waited for the
+      // network) finish before teardown.
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    });
+
+    test('a failed first follow resolves the gate', () async {
+      seedKeys();
+      fake.backupPeek = {'found': true, 'head': 'ee' * 32, 'counter': 2};
+      fake.backupJobStates.add({
+        'kind': 'follow',
+        'phase': 'error',
+        'error': 'chunk fetch failed',
+      });
+      await expectLater(follow.checkNow(), throwsA(anything));
+      expect(follow.deferGossipMergeFor(const [], nowMs: 1), isFalse);
+    });
+
+    test('a gated sync cycle publishes without merging, then merges once '
+        'the follower resolved', () async {
+      fake.myWatchStatus = {
+        'supported': true,
+        'linked': true,
+        'state': 'ready',
+        'enabled': true,
+        'devices': const [],
+      };
+      // The remote device shares both a library entry AND its backup
+      // read keys: the first cycle must hold the entry back.
+      fake.myWatchSyncDevices = [
+        {
+          'agent_id': 'bb' * 32,
+          'doc': {
+            'v': 1,
+            'lists': [
+              {
+                'title': 'Movies',
+                'entries': [
+                  {
+                    'name': 'Remote.mp4',
+                    'address': _addr(2),
+                    'added_ms': 2000,
+                  },
+                ],
+              },
+            ],
+            'backup': {'v': 1, 'ptr': ptrA, 'key': keyA, 'ms': 900},
+          },
+          'maps': const {},
+        },
+      ];
+      MyWatchSync.statePathOverride = '${tempDir.path}/mywatch_sync.json';
+      MyWatchSync.postersDirOverride =
+          () async => Directory('${tempDir.path}/posters');
+      addTearDown(() {
+        MyWatchSync.statePathOverride = null;
+        MyWatchSync.postersDirOverride = null;
+      });
+      final sync = MyWatchSync(
+        api: MyWatchApi(base: FakeEmbeddedHttp.base, token: 't'),
+        health: () async => health,
+        clientBase: FakeEmbeddedHttp.base,
+      );
+      sync.onRemoteDocs = follow.noteRemoteDocs;
+      sync.bootstrapGate = follow.deferGossipMergeFor;
+      await ProfileStore.instance.ensureLoaded();
+
+      final first = await sync.cycleForTesting();
+      expect(first?.bootstrapDeferred, isTrue);
+      expect(first?.entriesAdded, 0);
+      // Nothing merged — but our own state still went out.
+      var lists = await LibraryStore.load();
+      expect(lists.where((l) => l.title == 'Movies'), isEmpty);
+      expect(fake.myWatchSyncPublishes, isNotEmpty);
+      expect(
+        MyWatchSync.summarize(first!),
+        contains('shared backup first'),
+      );
+
+      // The parallel adoption's check answered (no backup published) —
+      // make the resolution deterministic, then the next cycle merges.
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await follow.checkNow();
+      final second = await sync.cycleForTesting();
+      expect(second?.bootstrapDeferred, isFalse);
+      expect(second?.entriesAdded, 1);
+      lists = await LibraryStore.load();
+      expect(
+        lists.firstWhere((l) => l.title == 'Movies').entries.single.address,
+        _addr(2),
+      );
+    });
+  });
 }

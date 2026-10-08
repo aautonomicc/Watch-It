@@ -487,6 +487,14 @@ void main() {
           'Everything is in sync.');
     });
 
+    test('a bootstrap-deferred cycle says the backup leads', () {
+      expect(
+        MyWatchSync.summarize(
+            const SyncCycleResult(bootstrapDeferred: true)),
+        contains('shared backup first'),
+      );
+    });
+
     test('quiet cycle with pending maps/artwork is honest about it', () {
       expect(
         MyWatchSync.summarize(const SyncCycleResult(),

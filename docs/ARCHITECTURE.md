@@ -392,6 +392,25 @@ re-encrypt every object (full re-upload) while the removed device
 keeps the old keys anyway — replacing the wallet starts a new backup
 line.
 
+Low-data mode (2026-10-08, unreleased): a per-device switch on the
+linked My W@tch screen (`app/lib/services/low_data_mode.dart`, pref
+`low_data_mode_v1`) that keeps the x0x agent off — the idle mesh
+costs ~tens of MB per minute just by being connected — and lets the
+backup follower above carry the sync (free pointer reads). "Sync
+now" then runs a bounded live burst: agent on → join → one full sync
+cycle both ways → a short linger so the published store deltas
+gossip out → agent off regardless of outcome, behind a dialog that
+names the real cost (~100–150 MB per session). Enabling clears any
+mobile-data-gate pause; a manual Data-page pill change or an unlink
+clears the mode. Ride-along: a backup-first bootstrap gate
+(`MyWatchSync.bootstrapGate` →
+`BackupFollowService.deferGossipMergeFor`) defers the gossip merge
+on a device that holds (or is just receiving) shared read keys and
+has never folded that backup in, so one bulk backup fetch populates
+it instead of many doc-budget cycles — the own publish still runs,
+the gate needs keys in sight to activate, and it resolves when the
+first follow completes/fails or at a 5-minute deadline.
+
 ### Channels — public signed media lists (REMOVED 2026-09-27)
 
 The public content space (Ed25519 channel identities with `wchn1-…`

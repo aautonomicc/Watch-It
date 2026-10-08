@@ -137,7 +137,13 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   day, only when something changed), and on a wallet-less device a
   "Following a shared backup" card (shown once a linked device has
   shared its backup read keys over My W@tch) with last-caught-up
-  info and a "Check the backup now" button
+  info and a "Check the backup now" button; a one-time nudge card
+  ("your linked devices follow this device's backups — turn on
+  automatic backups") appears once another linked device exists,
+  with Turn on / Not now (2026-10-08, unreleased). The linked My
+  W@tch screen gains a **Low-data mode** switch the same day: x0x
+  stays off, the shared backup carries the sync, and Sync now runs
+  one bounded live session behind an honest ~100–150 MB cost dialog
 - Playback (hardware decode, default subtitle language, skip amounts)
 - Appearance (Colour scheme; sits below Metadata since 2026-08-30)
 - About / licenses (incl. TMDB attribution notice + logo; the Terms of

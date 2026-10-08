@@ -11,7 +11,9 @@ import '../widgets/pair_dialogs.dart';
 import '../widgets/tv_dpad_focus.dart';
 import '../services/tv_settings.dart';
 
+import '../services/backup_follow.dart';
 import '../services/library_store.dart';
+import '../services/low_data_mode.dart';
 import '../services/my_watch_api.dart';
 import '../services/my_watch_sync.dart';
 import '../services/x0x_cellular.dart';
@@ -220,6 +222,42 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
   }
 
   Future<void> _syncNow() async {
+    // In low-data mode the agent is off: Sync now means one bounded
+    // live session instead — honest about its cost before it starts.
+    if (LowDataMode.instance.enabled) {
+      final t = WiTokens.of(context);
+      final sure = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Run a live sync session?'),
+          content: Text(
+            'This device connects to your other devices for one full '
+            'sync both ways, then disconnects again. Joining takes a '
+            'minute or two, and the live connection itself uses a lot '
+            'of data — expect the session to cost roughly 100–150 MB.',
+            style: TextStyle(color: t.bone, fontSize: 14),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Sync'),
+            ),
+          ],
+        ),
+      );
+      if (sure != true) return;
+      await _runBusy(() async {
+        final summary = await LowDataMode.instance.runBurst();
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(summary)));
+        }
+      });
+      return;
+    }
     await _runBusy(() async {
       final summary = await MyWatchSync.instance.syncNow();
       if (mounted) {
@@ -227,6 +265,38 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
             .showSnackBar(SnackBar(content: Text(summary)));
       }
     });
+  }
+
+  Future<void> _toggleLowData(bool on) async {
+    // Going quiet with nothing to follow deserves a clear warning: a
+    // shared backup is the mode's whole sync path.
+    if (on && !BackupFollowService.status.value.following) {
+      final t = WiTokens.of(context);
+      final sure = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Turn on low-data mode?'),
+          content: Text(
+            'No linked device has shared a backup with this one yet, '
+            'so nothing will sync while the live connection is off. '
+            'Once a linked device with the upload wallet backs up, '
+            'this device follows that backup automatically.',
+            style: TextStyle(color: t.bone, fontSize: 14),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Turn on'),
+            ),
+          ],
+        ),
+      );
+      if (sure != true) return;
+    }
+    await _runBusy(() => LowDataMode.instance.setEnabled(on));
   }
 
   Future<void> _showExistingInvite() async {
@@ -259,7 +329,12 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
       ),
     );
     if (sure != true) return;
-    await _runBusy(() => _api.unlink());
+    await _runBusy(() async {
+      await _api.unlink();
+      // The mode is a property of being linked — a later re-join
+      // starts with the live sync on, like any fresh link.
+      await LowDataMode.instance.clear();
+    });
   }
 
   Future<String?> _askDeviceName(String title) async {
@@ -522,13 +597,18 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    X0xCellularGate.instance.isPaused(X0xAgent.myWatch)
-                        ? 'My W@tch is paused while on mobile data — '
-                            'sync resumes on Wi-Fi (change this under '
-                            'Settings → Network → Data).'
-                        : 'My W@tch is switched off — nothing syncs '
-                            'until you turn it back on in Settings → '
-                            'Network → Data.',
+                    LowDataMode.instance.enabled
+                        ? 'Low-data mode — this device syncs from the '
+                            'shared backup instead of staying connected '
+                            'to your devices. Changes made here reach '
+                            'the others when you run "Sync now".'
+                        : X0xCellularGate.instance.isPaused(X0xAgent.myWatch)
+                            ? 'My W@tch is paused while on mobile data — '
+                                'sync resumes on Wi-Fi (change this under '
+                                'Settings → Network → Data).'
+                            : 'My W@tch is switched off — nothing syncs '
+                                'until you turn it back on in Settings → '
+                                'Network → Data.',
                     style: TextStyle(fontSize: 13, color: t.boneDim),
                   ),
                 ),
@@ -582,6 +662,31 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
       ValueListenableBuilder<MyWatchSyncStatus>(
         valueListenable: MyWatchSync.status,
         builder: (context, s, _) => _syncActivityCard(t, s),
+      ),
+      // Low-data mode: backup-follow becomes the sync, the live x0x
+      // connection stays off (it costs tens of MB per minute just by
+      // being connected), and "Sync now" runs one bounded live session.
+      ListenableBuilder(
+        listenable: LowDataMode.instance,
+        builder: (context, _) {
+          final mode = LowDataMode.instance;
+          return SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            secondary: Icon(Icons.data_saver_on, color: t.accent),
+            title: const Text('Low-data mode'),
+            subtitle: Text(
+              mode.bursting
+                  ? (mode.burstStage ?? 'Running a live sync session…')
+                  : 'Sync from the shared backup instead of the live '
+                      'device connection, which uses a lot of data '
+                      'while on. "Sync now" runs one brief live '
+                      'session.',
+              style: TextStyle(color: t.boneDim, fontSize: 12),
+            ),
+            value: mode.enabled,
+            onChanged: _busy || mode.bursting ? null : _toggleLowData,
+          );
+        },
       ),
       if (status.linkedSinceMs != null && status.linkedSinceMs != 0)
         ListTile(
@@ -643,7 +748,11 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
       OutlinedButton.icon(
         icon: const Icon(Icons.sync),
         label: const Text('Sync now'),
-        onPressed: _busy || starting ? null : _syncNow,
+        // In low-data mode the agent is deliberately off ("starting"
+        // never ends) — the button stays live and runs a burst.
+        onPressed: _busy || (starting && !LowDataMode.instance.enabled)
+            ? null
+            : _syncNow,
       ),
       const SizedBox(height: 12),
       OutlinedButton.icon(

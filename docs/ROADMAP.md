@@ -840,6 +840,43 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       funded wallet (user test at release; phase 1's paid pointer
       write was live-proven 2026-10-07, this leg still needs a second
       linked device)
+- [x] **Low-data mode, backup-first bootstrap, auto-backup nudge**
+      (implemented 2026-10-08, UNRELEASED — ships next release; the
+      2026-10-08 backup-first design discussion's recommendations,
+      built because x0x's idle mesh cost — ~52 MB/min with shedding,
+      an unsheddable Critical-class floor upstream (#504, P2, months
+      out) — makes live sync impractical for always-on devices):
+      **(1) Low-data mode** — a per-device switch on the linked My
+      W@tch screen (`low_data_mode_v1`, `low_data_mode.dart`): the
+      x0x agent stays off and the phase-2 backup follower IS the
+      sync (free pointer reads on its slow cadence); "Sync now"
+      instead runs a bounded live BURST (agent on → join → one full
+      sync cycle both ways → short linger so the published deltas
+      gossip out → agent off, whatever happened) behind an honest
+      cost dialog (~100–150 MB per session). Enabling clears any
+      mobile-data-gate pause (so Wi-Fi's return can't re-enable the
+      agent behind the mode's back); touching the Data page pill or
+      unlinking clears the mode; enabling with no shared backup in
+      sight warns first (nothing would sync). Surfaces say so: the
+      My W@tch card, the Data page state line and the drawer row all
+      read "low-data mode" instead of "switched off".
+      **(2) Backup-first bootstrap** (ride-along): a device that
+      holds — or is right now receiving — shared backup read keys
+      and has never folded that backup in defers the gossip merge
+      (`MyWatchSync.bootstrapGate` →
+      `BackupFollowService.deferGossipMergeFor`) so the backup
+      populates it in one bulk fetch instead of trickling a large
+      library through the sync-doc byte budget; the own publish
+      still runs (reverse direction unaffected), the gate never
+      activates without keys (wallet-less fleets keep gossip), and
+      it resolves forever when the first follow completes or fails,
+      or at a 5-minute deadline.
+      **(3) Auto-backup nudge** — once another linked device exists
+      and this device has backed up at least once with auto-backups
+      off, the Backup screen shows a one-time card ("followers only
+      see what you back up") with Turn on / Not now
+      (`backup_auto_nudge_dismissed_v1`); the default stays OFF
+      (backups spend ANT).
 - [x] **Link-store encryption** (implemented 2026-10-07, shipped in
       alpha.111;
       [PLAN-mywatch-store-encryption.md](PLAN-mywatch-store-encryption.md)):

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/app_settings.dart';
 import '../services/backup.dart';
 import '../services/backup_follow.dart';
+import '../services/my_watch_api.dart';
 import '../theme/tokens.dart';
 import 'wallet_screen.dart';
 
@@ -11,10 +12,11 @@ import 'wallet_screen.dart';
 /// make entries playable — backed up to Autonomi under keys derived
 /// from the upload wallet, restorable anywhere from its 12 words.
 class BackupScreen extends StatefulWidget {
-  const BackupScreen({super.key, this.service});
+  const BackupScreen({super.key, this.service, this.myWatchApi});
 
-  /// Test override.
+  /// Test overrides.
   final BackupService? service;
+  final MyWatchApi? myWatchApi;
 
   @override
   State<BackupScreen> createState() => _BackupScreenState();
@@ -31,6 +33,12 @@ class _BackupScreenState extends State<BackupScreen> {
   bool _busy = false;
   bool _auto = false;
 
+  /// Linked devices exist that follow this device's backups — drives
+  /// the turn-on-auto-backup nudge (pointer followers go stale between
+  /// manual backups).
+  bool _hasFollowers = false;
+  bool _nudgeDismissed = true;
+
   @override
   void initState() {
     super.initState();
@@ -38,6 +46,22 @@ class _BackupScreenState extends State<BackupScreen> {
     AppSettings.backupAuto().then((v) {
       if (mounted) setState(() => _auto = v);
     });
+    AppSettings.backupAutoNudgeDismissed().then((v) {
+      if (mounted) setState(() => _nudgeDismissed = v);
+    });
+    _loadFollowers();
+  }
+
+  Future<void> _loadFollowers() async {
+    try {
+      final s = await (widget.myWatchApi ?? MyWatchApi()).status();
+      if (mounted) {
+        setState(() => _hasFollowers =
+            s.linked && s.devices.any((d) => !d.isSelf));
+      }
+    } catch (_) {
+      // No link state — the nudge just stays hidden.
+    }
   }
 
   Future<void> _reload() async {
@@ -274,6 +298,63 @@ class _BackupScreenState extends State<BackupScreen> {
     );
   }
 
+  /// One-time nudge once another linked device exists: followers only
+  /// ever see this device's LAST backup, so without automatic backups
+  /// they go stale between manual ones.
+  Widget _autoNudgeCard(WiTokens t) {
+    return Card(
+      color: t.ink2,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.notifications_active_outlined,
+                    size: 18, color: WiTokens.warnAmber),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Your linked devices follow this device\'s backups '
+                    '— but they only see what you back up. Turn on '
+                    'automatic backups so they stay current while '
+                    'apart.',
+                    style: TextStyle(
+                        fontSize: 13, color: t.bone, height: 1.4),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () async {
+                    await AppSettings.setBackupAutoNudgeDismissed();
+                    if (mounted) setState(() => _nudgeDismissed = true);
+                  },
+                  child: const Text('Not now'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: () async {
+                    await AppSettings.setBackupAuto(true);
+                    if (mounted) setState(() => _auto = true);
+                  },
+                  child: const Text('Turn on'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   String _lastLine(BackupLast last) {
     final when = DateTime.fromMillisecondsSinceEpoch(last.ms);
     final date = '${when.year}-${when.month.toString().padLeft(2, '0')}-'
@@ -341,6 +422,11 @@ class _BackupScreenState extends State<BackupScreen> {
                 style: TextStyle(color: t.ash, fontSize: 12),
               ),
             ),
+            if (!_auto &&
+                !_nudgeDismissed &&
+                _hasFollowers &&
+                status.last != null)
+              _autoNudgeCard(t),
             const SizedBox(height: 8),
             if (_busy) ...[
               LinearProgressIndicator(

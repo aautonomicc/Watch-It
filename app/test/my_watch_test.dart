@@ -192,7 +192,14 @@ void main() {
       expect(find.textContaining('· this device ·'), findsOneWidget);
       expect(find.textContaining('last heard 2 min ago'), findsOneWidget);
       expect(find.textContaining('2 lists · 17 items'), findsOneWidget);
+      // The buttons live below the lazy list's initial build range now
+      // that the low-data tile sits above them — scroll them in.
+      await tester.scrollUntilVisible(
+          find.text('Add a device — show invite code'), 200,
+          scrollable: find.byType(Scrollable).first);
       expect(find.text('Add a device — show invite code'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('Unlink this device'), 200,
+          scrollable: find.byType(Scrollable).first);
       expect(find.text('Unlink this device'), findsOneWidget);
       await close(tester);
     });
@@ -262,8 +269,10 @@ void main() {
     testWidgets('unlink confirms, deletes, and returns to unlinked view',
         (tester) async {
       await open(tester);
-      // The sync activity card above can push the button off-screen.
-      await tester.ensureVisible(find.text('Unlink this device'));
+      // The rows above can push the button past the lazy list's build
+      // range — scroll it in.
+      await tester.scrollUntilVisible(find.text('Unlink this device'), 200,
+          scrollable: find.byType(Scrollable).first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Unlink this device'));
       await tester.pumpAndSettle();

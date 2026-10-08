@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../screens/my_watch_screen.dart';
 import '../services/embedded_client.dart';
+import '../services/low_data_mode.dart';
 import '../services/my_watch_sync.dart';
 import '../services/network_pause.dart';
 import '../services/profiles.dart';
@@ -151,6 +152,8 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
         t.ash,
         NetworkPause.instance.isAgentPaused(X0xAgent.myWatch)
             ? 'My W@tch: paused with the network'
+            : LowDataMode.instance.enabled
+            ? 'My W@tch: low-data mode'
             : X0xCellularGate.instance.isPaused(X0xAgent.myWatch)
             ? 'My W@tch: paused on mobile data'
             : 'My W@tch: switched off',
