@@ -4190,7 +4190,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.57.0",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -8992,9 +8992,9 @@ dependencies = [
 
 [[package]]
 name = "x0x"
-version = "0.46.3"
+version = "0.46.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f50ca1d44d80dc0c78d15360f36ba13c6367988b4b44a0f83274b25360b0362e"
+checksum = "193bd36c8f39931defc58bca1611f6e379c998e5c6537883c044848286dc1916"
 dependencies = [
  "ant-quic",
  "anyhow",
