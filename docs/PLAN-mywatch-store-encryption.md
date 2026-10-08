@@ -1,6 +1,6 @@
 # Plan: encrypt the My W@tch link store (seal every value under a link-secret-derived key)
 
-**Status: IMPLEMENTED 2026-10-07 (unreleased — ships next release),
+**Status: IMPLEMENTED 2026-10-07 (released in v0.1.0-alpha.111),
 as planned, with both open-question recommendations adopted (invite
 prefix bumped to `wtch2-`, PIN stretching deferred). One deliberate
 addition beyond the plan text: the Dart QR scanner still *accepts* old

@@ -457,6 +457,24 @@ bumps x0x to 0.46.3 (whole-network-restart pub/sub stall fix on the My
 W@tch sync path) and updates the Terms of Use to v5 to cover backups —
 every user re-accepts on next launch.
 
+Alpha.111 seals the My W@tch link store — **W@tch your wallet**:
+everything linked devices share over sync (library and playable
+entries, watch positions, profiles with their PIN hashes, custom
+details, and since alpha.110 the shared backup read keys) used to
+travel signed but readable at the gossip layer; now every store value
+is encrypted with ChaCha20-Poly1305 under a key derived from the link
+secret before it leaves the device, values that don't open under the
+link secret are skipped (so nothing an outsider plants can reach the
+merge), and the on-disk sync snapshots are encrypted too. It is a
+breaking sync-format change: **update every linked device together** —
+a mixed fleet silently stops syncing until all devices are on
+alpha.111 (the link itself survives; no re-pairing), and invite/
+pairing codes move to `wtch2-`/`wtchp2-` with a clear "update that
+device first" message for old codes. The release also bumps x0x to
+0.46.5, an upstream security release (authenticated identity-discovery
+authority, plus dropping unsigned pub/sub payloads before they reach
+the app).
+
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users

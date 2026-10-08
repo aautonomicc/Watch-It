@@ -6,13 +6,22 @@ private Upload and My W@tch stay. Channel mentions in the release
 history below are historical; the Channels section itself is collapsed
 to a dated note.
 
-**Status (2026-10-06):** latest release is **v0.1.0-alpha.110**
+**Status (2026-10-08):** latest release is **v0.1.0-alpha.111**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
 a release ships **four artifacts**: a signed APK (dual-ABI
 armeabi-v7a + arm64-v8a since alpha.98, so Fire TV Sticks and other
 32-bit-app devices install the normal APK), a Linux AppImage, a
 Windows portable zip (since alpha.55), and a macOS universal dmg
-(since alpha.92 — unsigned, right-click → Open). The newest wave is
+(since alpha.92 — unsigned, right-click → Open). The newest release is
+**link-store encryption** (alpha.111 — "W@tch your wallet"): every
+My W@tch store value (sync doc parts, entry maps, device records)
+travels sealed with ChaCha20-Poly1305 under a key derived from the
+link secret, closing the 2026-10-07 leak-vector finding that the sync
+store was plaintext on the gossip layer; a breaking sync-format
+change, so **every linked device must update together** (the link
+survives, no re-pairing; invite/pairing codes move to
+`wtch2-`/`wtchp2-`), with x0x bumped to 0.46.5 (upstream security
+release) riding along. Before it came
 the **seed-phrase backup** (alpha.110): the full W@tch state — lists
 and playable entries, watch positions, profiles with PINs, custom
 details and artwork — backs up to the Autonomi network encrypted
@@ -831,8 +840,8 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       funded wallet (user test at release; phase 1's paid pointer
       write was live-proven 2026-10-07, this leg still needs a second
       linked device)
-- [x] **Link-store encryption** (IMPLEMENTED 2026-10-07, unreleased —
-      ships next release;
+- [x] **Link-store encryption** (implemented 2026-10-07, shipped in
+      alpha.111;
       [PLAN-mywatch-store-encryption.md](PLAN-mywatch-store-encryption.md)):
       every My W@tch store value (sync doc parts, entry maps, device
       records) is sealed with ChaCha20-Poly1305 under a blake3 key
