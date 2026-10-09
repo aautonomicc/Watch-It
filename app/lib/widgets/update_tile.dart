@@ -14,7 +14,13 @@ import '../theme/tokens.dart';
 /// downloads and applies the update (user-triggered only, never
 /// automatic); anywhere else it opens the release page like before.
 class UpdateAvailableTile extends StatelessWidget {
-  const UpdateAvailableTile({super.key});
+  const UpdateAvailableTile({super.key, this.focusNode});
+
+  /// Lets the Settings screen point the TV focus ring at this row after
+  /// a manual check finds an update — the result snackbar lives at the
+  /// bottom of the screen where a D-pad can never reach it, so the row
+  /// itself must take the focus.
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -108,6 +114,7 @@ class UpdateAvailableTile extends StatelessWidget {
     bool error = false,
   }) =>
       ListTile(
+        focusNode: focusNode,
         leading: Icon(Icons.system_update_alt, color: t.accent),
         title: Text(
           'Update available',

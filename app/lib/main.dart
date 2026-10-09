@@ -221,6 +221,17 @@ Future<void> main() async {
 /// that prompted this); elsewhere **View** still opens the release page.
 @visibleForTesting
 SnackBar updateAvailableSnackBar(String tag, String? url) {
+  // TV: a snackbar action can never take D-pad focus, so an Update/View
+  // button there is a dead end (the Android TV report — "the bar at the
+  // bottom shows update available but the D-pad can't get to it").
+  // Point the remote at the reachable path instead.
+  if (TvSettings.instance.enabled) {
+    return SnackBar(
+      content: Text(
+          'Update available: $tag — install it from Settings → About'),
+      duration: const Duration(seconds: 8),
+    );
+  }
   final kind = UpdateInstaller.availableSelfUpdate;
   return SnackBar(
     content: Text('Update available: $tag'),

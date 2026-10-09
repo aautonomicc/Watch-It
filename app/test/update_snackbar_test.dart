@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:watchit/main.dart';
+import 'package:watchit/services/tv_settings.dart';
 import 'package:watchit/services/update_check.dart';
 import 'package:watchit/services/update_install.dart';
 import 'package:watchit/theme/tokens.dart';
@@ -79,6 +80,23 @@ void main() {
     expect(bar.action?.label, 'View');
     expect(updateAvailableSnackBar('v0.1.0-alpha.103', null).action, isNull);
   }, skip: Platform.environment['APPIMAGE'] != null);
+
+  test('TV → no action (a snackbar button is D-pad-unreachable), the '
+      'text points at Settings → About', () {
+    UpdateInstaller.androidPlatformOverride = true;
+    TvSettings.instance = TvSettings(enabled: true);
+    addTearDown(() => TvSettings.instance = TvSettings());
+    UpdateCheck.instance
+      ..availableTag = 'v0.1.0-alpha.103'
+      ..assets = [apkAsset(const [1, 2, 3])];
+    final bar = updateAvailableSnackBar(
+        'v0.1.0-alpha.103', 'https://example.com/release');
+    expect(bar.action, isNull);
+    expect(
+      (bar.content as Text).data,
+      contains('install it from Settings → About'),
+    );
+  });
 
   testWidgets(
       'Android: tapping Update downloads the APK and opens the installer',

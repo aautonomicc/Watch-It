@@ -40,6 +40,17 @@ channel falls back to the ordinary interface.
   throttle and reports its result in a snackbar (up to date / update
   found / could not reach GitHub) — the background check is deliberately
   silent, which on a TV read as "updates aren't working".
+- A found update is reachable by D-pad (unreleased — ships next release):
+  when the manual check finds a release on TV, the focus ring moves straight
+  onto the **Update available** row (which appears ABOVE the Check-now tile,
+  the one direction "down" never goes) so one OK press starts the install,
+  and the snackbar says "press OK to download and install" instead of
+  pointing at itself — a snackbar sits at the bottom of the screen where a
+  D-pad can never reach, which is exactly where the tester hunted. The
+  Check-now tile also stays focusable while checking (onTap null would have
+  dropped the TV focus the instant the check started), and the startup
+  "Update available" snackbar drops its unreachable Update/View action on
+  TV in favour of text pointing at Settings → About.
 - The My W@tch page scrolls back up on a D-pad (alpha.106): everything above the bottom buttons (Last sync, the sync
   activity card, Linked since, the device rows) was not focusable, so Up
   from "Sync now" jumped straight to the app-bar back button and the page

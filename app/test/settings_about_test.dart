@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -409,6 +410,118 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Update available'), findsOneWidget);
     expect(find.textContaining('v0.1.0-alpha.106'), findsWidgets);
+    // Off TV the snackbar points at the row; the focus is not moved.
+    expect(
+      find.textContaining('see the Update available row above'),
+      findsOneWidget,
+    );
+    expect(
+      tester.binding.focusManager.primaryFocus?.debugLabel,
+      isNot('update-available-row'),
+    );
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('TV: a manual check that finds an update moves the D-pad '
+      'focus onto the Update available row', (tester) async {
+    // The Android TV report: the found-update snackbar sits at the
+    // bottom where a D-pad can never reach, and the actionable row
+    // appears ABOVE the Check-now tile — pressing down went nowhere.
+    UpdateCheck.resetForTesting();
+    addTearDown(UpdateCheck.resetForTesting);
+    TvSettings.instance = TvSettings(enabled: true);
+    addTearDown(() => TvSettings.instance = TvSettings());
+    PackageInfo.setMockInitialValues(
+      appName: 'watchit',
+      packageName: 'watchit',
+      version: '0.1.0',
+      buildNumber: '105',
+      buildSignature: '',
+    );
+    UpdateCheck.instance.client = MockClient(
+      (_) async => http.Response(
+        jsonEncode({
+          'tag_name': 'v0.1.0-alpha.106',
+          'html_url': 'https://example.com/v0.1.0-alpha.106',
+        }),
+        200,
+      ),
+    );
+    await pumpSettings(tester);
+    final row = find.text('Check for updates now');
+    await tester.ensureVisible(row);
+    await tester.pump();
+    await tester.tap(row);
+    await tester.pumpAndSettle();
+    expect(find.text('Update available'), findsOneWidget);
+    // The focus ring landed on the row — one OK press starts the
+    // update, no traversal hunting.
+    expect(
+      tester.binding.focusManager.primaryFocus?.debugLabel,
+      'update-available-row',
+    );
+    // And the snackbar says what to press instead of pointing at a
+    // bar the remote can't reach.
+    expect(
+      find.textContaining('press OK to download and install'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('row above'), findsNothing);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('Check for updates now stays focusable while checking and '
+      'ignores re-presses', (tester) async {
+    // onTap: null mid-check made the tile unfocusable, which DROPPED
+    // the TV focus the instant the check started (the alpha.105
+    // disabled-button class) — the tile must keep its tap handler and
+    // simply ignore presses while busy.
+    UpdateCheck.resetForTesting();
+    addTearDown(UpdateCheck.resetForTesting);
+    PackageInfo.setMockInitialValues(
+      appName: 'watchit',
+      packageName: 'watchit',
+      version: '0.1.0',
+      buildNumber: '105',
+      buildSignature: '',
+    );
+    var requests = 0;
+    final gate = Completer<http.Response>();
+    UpdateCheck.instance.client = MockClient((_) {
+      requests++;
+      return gate.future;
+    });
+    await pumpSettings(tester);
+    final row = find.text('Check for updates now');
+    await tester.ensureVisible(row);
+    await tester.pump();
+    await tester.tap(row);
+    await tester.pump();
+    expect(find.text('Checking…'), findsOneWidget);
+    final tile = tester.widget<ListTile>(
+      find.widgetWithText(ListTile, 'Check for updates now'),
+    );
+    expect(tile.onTap, isNotNull);
+    // A re-press while checking starts nothing.
+    await tester.tap(row);
+    await tester.pump();
+    expect(requests, 1);
+    gate.complete(
+      http.Response(
+        jsonEncode({
+          'tag_name': 'v0.1.0-alpha.1',
+          'html_url': 'https://example.com/v0.1.0-alpha.1',
+        }),
+        200,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('You are on the latest release'),
+      findsOneWidget,
+    );
     await tester.pump(const Duration(seconds: 5));
     await tester.pumpAndSettle();
   });

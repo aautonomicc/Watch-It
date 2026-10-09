@@ -1272,7 +1272,17 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
       focusable, so Up from "Sync now" jumped straight to the app
       bar and the page stuck at the bottom; they are now tappable
       stepping stones (tap = copy for a bug report / refresh) and the
-      list is fully laid out on TV like Settings
+      list is fully laid out on TV like Settings. From the Android TV
+      update-check report (unreleased — ships next release): when the
+      manual check finds a release, the focus ring moves straight onto
+      the Update available row (one OK press installs — the row
+      appears above the Check-now tile while the result snackbar sits
+      at the unreachable bottom of the screen, exactly where "down"
+      was hunted), the Check-now tile stays focusable while checking
+      (a tap-less tile dropped the TV focus the instant the check
+      started), and the startup update snackbar drops its
+      D-pad-unreachable Update/View action on TV for text pointing at
+      Settings → About
 - [x] Software video decoding toggle (alpha.102): a Settings switch
       directly below Buffer size forces
       CPU decoding (mpv `hwdec=no`) for devices where hardware decode

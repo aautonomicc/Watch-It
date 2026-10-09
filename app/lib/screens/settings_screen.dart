@@ -70,6 +70,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _updateCheckEnabled = true;
   bool _checkingUpdates = false;
 
+  /// Focus target for the Update available row: after a manual check
+  /// finds a release on TV, the ring moves onto the row so one OK press
+  /// starts the update — the result snackbar sits at the bottom of the
+  /// screen where a D-pad can never reach, and the row appears ABOVE
+  /// the Check-now tile, exactly where "down" doesn't go.
+  final _updateRowFocus = FocusNode(debugLabel: 'update-available-row');
+
   /// Formatted period total for the Data tile's subtitle (null while
   /// unknown / client unavailable).
   String? _dataUsageTotal;
@@ -93,6 +100,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
     _loadDataSize();
     DownloadManager.instance.ensureLoaded();
+  }
+
+  @override
+  void dispose() {
+    _updateRowFocus.dispose();
+    super.dispose();
   }
 
   Future<void> _reload() async {
@@ -360,15 +373,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// the row. The found-update row itself appears via UpdateCheck's
   /// notifyListeners (UpdateAvailableTile listens).
   Future<void> _checkForUpdatesNow() async {
+    // The tile keeps its onTap while checking so the D-pad focus stays
+    // on it (a tap-less ListTile is unfocusable and DROPS focus the
+    // moment the check starts — the alpha.105 disabled-button class);
+    // re-presses during the check are simply ignored here.
+    if (_checkingUpdates) return;
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _checkingUpdates = true);
     final outcome = await UpdateCheck.instance.checkNow();
     if (!mounted) return;
     setState(() => _checkingUpdates = false);
+    final onTv = TvSettings.instance.enabled;
+    if (outcome == UpdateCheckOutcome.updateFound && onTv) {
+      // Put the focus ring straight on the Update available row: the
+      // snackbar at the bottom is unreachable by D-pad, and the row
+      // appears above this tile — the one direction "down" never goes.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _updateRowFocus.requestFocus();
+        final ctx = _updateRowFocus.context;
+        if (ctx != null) {
+          Scrollable.ensureVisible(
+            ctx,
+            alignment: 0.5,
+            duration: const Duration(milliseconds: 150),
+          );
+        }
+      });
+    }
     final message = switch (outcome) {
       UpdateCheckOutcome.updateFound =>
         'Update available: ${UpdateCheck.instance.availableTag} — '
-            'see the Update available row above',
+            '${onTv ? 'press OK to download and install' : 'see the Update available row above'}',
       UpdateCheckOutcome.upToDate =>
         'You are on the latest release (${_version ?? 'this version'})',
       UpdateCheckOutcome.failed =>
@@ -1040,7 +1076,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 if (UpdateCheck.supportedPlatform) ...[
-                  const UpdateAvailableTile(),
+                  UpdateAvailableTile(focusNode: _updateRowFocus),
                   // Manual check: the background check is silent and
                   // at most daily, so a tester wondering "is updating
                   // even working?" gets an immediate, spoken answer.
@@ -1056,7 +1092,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           : 'Ask GitHub for the latest release right away',
                       style: TextStyle(color: t.ash, fontSize: 12),
                     ),
-                    onTap: _checkingUpdates ? null : _checkForUpdatesNow,
+                    // Always tappable: onTap null would make the tile
+                    // unfocusable mid-check and strand the TV D-pad.
+                    onTap: _checkForUpdatesNow,
                   ),
                   SwitchListTile(
                     secondary: Icon(Icons.update, color: t.accent),
