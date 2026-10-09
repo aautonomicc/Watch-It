@@ -17,13 +17,15 @@ path = "src/bin/devserver.rs"
 cc = "1"
 
 [dependencies]
-# Pinned to ant-core 0.11.0 (tag ant-core-v0.11.0, rc-2026.9.4). Still
+# Pinned to ant-core 0.12.0 (tag ant-core-v0.12.0, rc-2026.10.1). Still
 # exposes Client::file_download_to_sender + self_encryption 0.36
-# get_range seek; 0.10 brought the cold-download startup-stall reduction
-# + closed-session-spin fix, 0.11 reintroduces Pointers (mutable
-# owner-signed group-quorum records, ADR 0016 — the My W@tch mailbox
-# candidate primitive).
-ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "fd7e7d04252f311f745c4ec978122515ce7e86b6" }
+# get_range seek; 0.11 reintroduced Pointers (ADR 0016 — the seed-phrase
+# backup's primitive), 0.12 adds PR #208's pointer read-freshness
+# (2-peer corroboration before a read is trusted) + pay-only-for-
+# landable-writes — both directly on the backup's pointer path.
+# NOTE: file manifests (ADR-0006, PR #219) are NOT in this tag — they
+# ride the next ant-core tag.
+ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "50d9c865d8b15ea482e32b5a239d09976c5d4a0d" }
 self_encryption = "0.36"
 # Upload-wallet key derivation; the mnemonic feature adds the
 # BIP-39/BIP-32 path (m/44'/60'/0'/0/0, MetaMask-compatible). 2.x may
