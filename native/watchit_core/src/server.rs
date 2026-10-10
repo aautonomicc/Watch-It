@@ -88,6 +88,14 @@ fn protected_router(engine: &'static Engine) -> Router {
         )
         .route("/upload", post(move |body: Bytes| upload_start(engine, body)))
         .route(
+            "/upload/batch",
+            post(move |body: Bytes| upload_batch_start(engine, body)),
+        )
+        .route(
+            "/upload/batch/{id}",
+            get(move |path: Path<u64>| upload_batch_status(engine, path)),
+        )
+        .route(
             "/upload/{id}",
             get(move |path: Path<u64>| upload_status(engine, path)),
         )
@@ -162,6 +170,12 @@ fn protected_router(engine: &'static Engine) -> Router {
         .route(
             "/backup/follow",
             post(move |body: Bytes| backup_follow(engine, body)),
+        )
+        .route(
+            "/backup/followkeys",
+            get(move || followkeys_get(engine))
+                .post(move |body: Bytes| followkeys_set(engine, body))
+                .delete(move || followkeys_delete(engine)),
         )
 }
 
@@ -665,6 +679,52 @@ async fn upload_status(engine: &'static Engine, Path(id): Path<u64>) -> Response
     }
 }
 
+/// `POST /upload/batch` `{"files": [{"path", "name"?}, …]}` — one paid
+/// batch for the whole file set: every chunk pooled, one merkle payment
+/// per ≤256-chunk sub-batch (the upload-all flow — hardware-wallet plan
+/// phase 0). Returns `{"id": N}` to poll on `GET /upload/batch/{id}`.
+async fn upload_batch_start(engine: &'static Engine, body: Bytes) -> Response {
+    let json: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("bad JSON: {e}")).into_response(),
+    };
+    let Some(entries) = json.get("files").and_then(|v| v.as_array()) else {
+        return (StatusCode::BAD_REQUEST, "body must have a \"files\" array")
+            .into_response();
+    };
+    let mut files = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let Some(path) = entry.get("path").and_then(|v| v.as_str()) else {
+            return (StatusCode::BAD_REQUEST, "every file needs a \"path\"")
+                .into_response();
+        };
+        let path = std::path::PathBuf::from(path);
+        let name = entry
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or_default();
+        files.push((path, name));
+    }
+    match engine.start_batch_upload(files) {
+        Ok(id) => json_ok(serde_json::json!({ "id": id })),
+        Err(e) if e.contains("already running") => {
+            (StatusCode::CONFLICT, e).into_response()
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+/// `GET /upload/batch/{id}` — batch job state (phase, chunk progress,
+/// payment count, per-file outcomes).
+async fn upload_batch_status(engine: &'static Engine, Path(id): Path<u64>) -> Response {
+    match engine.uploads.batch_state(id) {
+        Some(state) => json_ok(state.to_json(id)),
+        None => (StatusCode::NOT_FOUND, "no such batch upload job").into_response(),
+    }
+}
+
 // ---- seed-phrase backup --------------------------------------------------
 
 /// `GET /backup` — the backup identity (derived from the stored wallet),
@@ -791,6 +851,58 @@ async fn backup_follow(engine: &'static Engine, body: Bytes) -> Response {
         }
         Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
     }
+}
+
+/// `GET /backup/followkeys` — the shared read keys this device follows,
+/// held in the OS keychain (0600-file fallback) via [`Engine::follow_keys`]
+/// so the content key never sits in a plaintext state file (the derived-key
+/// at-rest hardening from the hardware-wallet plan, phase 4).
+async fn followkeys_get(engine: &'static Engine) -> Response {
+    let Some((blob, storage)) = engine.follow_keys.load() else {
+        return json_ok(serde_json::json!({ "configured": false }));
+    };
+    let v: serde_json::Value = serde_json::from_str(&blob).unwrap_or_default();
+    let ptr = v.get("ptr").and_then(|p| p.as_str());
+    let key = v.get("key").and_then(|k| k.as_str());
+    json_ok(serde_json::json!({
+        "configured": ptr.is_some() && key.is_some(),
+        "ptr": ptr,
+        "key": key,
+        "storage": storage.as_str(),
+    }))
+}
+
+/// `POST /backup/followkeys` `{"ptr": 64-hex, "key": 64-hex}` — adopt a
+/// followed backup line's read keys into the keychain store.
+async fn followkeys_set(engine: &'static Engine, body: Bytes) -> Response {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) else {
+        return (StatusCode::BAD_REQUEST, "body must be JSON").into_response();
+    };
+    let hex64 = |field: &str| {
+        v.get(field)
+            .and_then(|s| s.as_str())
+            .map(str::to_lowercase)
+            .filter(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+    };
+    let (Some(ptr), Some(key)) = (hex64("ptr"), hex64("key")) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "ptr and key must both be 64 hex characters",
+        )
+            .into_response();
+    };
+    let blob = serde_json::json!({ "ptr": ptr, "key": key }).to_string();
+    match engine.follow_keys.store(&blob) {
+        Ok(storage) => json_ok(serde_json::json!({ "storage": storage.as_str() })),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
+/// `DELETE /backup/followkeys` — forget the followed line's keys (every
+/// backend they could live in).
+async fn followkeys_delete(engine: &'static Engine) -> Response {
+    engine.follow_keys.remove();
+    json_ok(serde_json::json!({ "ok": true }))
 }
 
 // ---- My W@tch device linking -------------------------------------------
@@ -1447,6 +1559,7 @@ mod wallet_api_tests {
         let engine: &'static Engine =
             Box::leak(Box::new(Engine::new(None, dir.to_str())));
         engine.wallet.disable_keychain();
+        engine.follow_keys.disable_keychain();
         engine
     }
 
@@ -1596,6 +1709,9 @@ mod wallet_api_tests {
             ("POST", "/backup/restore"),
             ("POST", "/backup/peek"),
             ("POST", "/backup/follow"),
+            ("GET", "/backup/followkeys"),
+            ("POST", "/backup/followkeys"),
+            ("DELETE", "/backup/followkeys"),
         ] {
             let (status, _) = send_auth(&app, method, path, vec![], None).await;
             assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {path}");
@@ -1711,6 +1827,72 @@ mod wallet_api_tests {
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(String::from_utf8_lossy(&body).contains("art_dir"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn followkeys_round_trip_validated_and_persisted() {
+        let engine = test_engine("followkeys");
+        let app = router_with_auth(engine, "sekrit");
+        // Unconfigured reads clean.
+        let (status, body) =
+            send_auth(&app, "GET", "/backup/followkeys", vec![], Some("sekrit")).await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["configured"], serde_json::json!(false));
+        // Junk keys are refused before anything persists.
+        for bad in [
+            br#"{"ptr":"nothex","key":"nothex"}"#.to_vec(),
+            format!(r#"{{"ptr":"{}"}}"#, "ab".repeat(32)).into_bytes(),
+            b"not json".to_vec(),
+        ] {
+            let (status, _) =
+                send_auth(&app, "POST", "/backup/followkeys", bad, Some("sekrit"))
+                    .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+        }
+        // Store (uppercase input normalizes), read back, survives a cold
+        // store (fresh engine over the same data dir = the file fallback
+        // actually persisted), delete clears every backend.
+        let ptr = "AB".repeat(32);
+        let key = "cd".repeat(32);
+        let (status, body) = send_auth(
+            &app,
+            "POST",
+            "/backup/followkeys",
+            format!(r#"{{"ptr":"{ptr}","key":"{key}"}}"#).into_bytes(),
+            Some("sekrit"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["storage"], serde_json::json!("file"));
+        let (_, body) =
+            send_auth(&app, "GET", "/backup/followkeys", vec![], Some("sekrit")).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["configured"], serde_json::json!(true));
+        assert_eq!(json["ptr"], serde_json::json!("ab".repeat(32)));
+        assert_eq!(json["key"], serde_json::json!("cd".repeat(32)));
+        assert_eq!(json["storage"], serde_json::json!("file"));
+        // The blob never contains the words ptr/key unprotected elsewhere:
+        // it lives in follow.keys under the data dir, mode 0600.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = std::env::temp_dir()
+                .join(format!("wi-wallet-api-followkeys-{}", std::process::id()))
+                .join("follow.keys");
+            let mode =
+                std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let (status, _) =
+            send_auth(&app, "DELETE", "/backup/followkeys", vec![], Some("sekrit"))
+                .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, body) =
+            send_auth(&app, "GET", "/backup/followkeys", vec![], Some("sekrit")).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["configured"], serde_json::json!(false));
     }
 
     #[tokio::test(flavor = "multi_thread")]

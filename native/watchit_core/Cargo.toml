@@ -27,6 +27,10 @@ cc = "1"
 # ride the next ant-core tag.
 ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "50d9c865d8b15ea482e32b5a239d09976c5d4a0d" }
 self_encryption = "0.36"
+# batch.rs implements ant-core's UploadAdapter trait (the pooled-payment
+# upload driver), which is declared with async_trait — implementors need
+# the same macro. Already in the tree via ant-core.
+async-trait = "0.1"
 # Upload-wallet key derivation; the mnemonic feature adds the
 # BIP-39/BIP-32 path (m/44'/60'/0'/0/0, MetaMask-compatible). 2.x may
 # resolve a second alloy tree beside evmlib's — acceptable: wallet.rs

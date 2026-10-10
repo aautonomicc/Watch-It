@@ -68,13 +68,23 @@ impl JobState {
 #[derive(Default)]
 pub struct UploadManager {
     jobs: Mutex<HashMap<u64, Arc<Mutex<JobState>>>>,
-    next_id: AtomicU64,
-    active: AtomicBool,
+    /// Batch jobs (`batch.rs`) share the id space and the active slot —
+    /// paid work never runs concurrently, whatever shape it takes.
+    pub(crate) batch_jobs:
+        Mutex<HashMap<u64, Arc<Mutex<crate::batch::BatchJobState>>>>,
+    pub(crate) next_id: AtomicU64,
+    pub(crate) active: AtomicBool,
 }
 
 impl UploadManager {
     pub fn state(&self, id: u64) -> Option<JobState> {
         let job = self.jobs.lock().unwrap().get(&id).cloned()?;
+        let state = job.lock().unwrap().clone();
+        Some(state)
+    }
+
+    pub fn batch_state(&self, id: u64) -> Option<crate::batch::BatchJobState> {
+        let job = self.batch_jobs.lock().unwrap().get(&id).cloned()?;
         let state = job.lock().unwrap().clone();
         Some(state)
     }

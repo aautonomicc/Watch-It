@@ -153,6 +153,12 @@ pub struct Engine {
     /// Upload-wallet key storage; the key is attached to every client the
     /// connect path builds (ant-core wallets are set at construct time).
     pub wallet: crate::wallet::WalletStore,
+    /// Shared backup read keys this device follows (phase 2), kept in the
+    /// OS keychain (0600-file fallback) instead of a plaintext state file
+    /// — the content key decrypts the followed backup line forever, so it
+    /// gets the wallet key's at-rest treatment. Stored value: one JSON
+    /// blob `{"ptr": 64-hex, "key": 64-hex}`.
+    pub follow_keys: crate::wallet::WalletStore,
     /// Publish upload jobs (`POST /upload` → poll `GET /upload/{id}`).
     pub uploads: crate::upload::UploadManager,
     /// Seed-phrase backup / restore jobs (`POST /backup/run`,
@@ -160,6 +166,9 @@ pub struct Engine {
     pub backups: crate::backup::BackupManager,
     /// My W@tch device linking (x0x agent; test implementation).
     pub mywatch: crate::mywatch::MyWatchStore,
+    /// The app data dir, for modules that stage working files beside the
+    /// other state (batch-upload spills + payment checkpoints).
+    data_dir: Option<std::path::PathBuf>,
 }
 
 impl Engine {
@@ -203,10 +212,23 @@ impl Engine {
             last_error: Mutex::new(None),
             attempts: AtomicU32::new(0),
             wallet: crate::wallet::WalletStore::new(data_dir, true),
+            follow_keys: crate::wallet::WalletStore::named(
+                data_dir,
+                true,
+                "backup-follow-keys",
+                "follow.keys",
+            ),
             uploads: crate::upload::UploadManager::default(),
             backups: crate::backup::BackupManager::new(data_dir),
             mywatch: crate::mywatch::MyWatchStore::new(data_dir),
+            data_dir: data_dir
+                .filter(|d| !d.trim().is_empty())
+                .map(std::path::PathBuf::from),
         }
+    }
+
+    pub fn data_dir(&self) -> Option<&std::path::Path> {
+        self.data_dir.as_deref()
     }
 
     /// Root maps persisted on disk (for `/health`).

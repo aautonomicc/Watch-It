@@ -6,6 +6,7 @@
 //! streams `http://127.0.0.1:{port}/xor/{address}` like any HTTP source.
 
 pub mod backup;
+pub mod batch;
 pub mod cache;
 pub mod datausage;
 pub mod engine;
