@@ -1086,10 +1086,24 @@ decision (2026-10-10).
       the keychain took the keys). The rest of phase 4 (optional
       never-persist paranoid mode, zeroize-on-drop) rides the HW
       phases.
-- [ ] Phase 1 — sign-to-derive backup identity: backup keys from a
-      deterministic (RFC-6979) signature of a fixed, VERSIONED domain
-      message (`watchit.backup.hw.v1` + epoch), signed twice at setup
-      and compared (determinism guard); BREAKING = new backup line
+- [x] Phase 1 — sign-to-derive backup identity (implemented
+      2026-10-10, unreleased): backup keys now derive from the
+      wallet's deterministic (RFC-6979) EIP-191 signature of the
+      frozen, versioned `IDENTITY_MESSAGE_V1` (version + epoch lines
+      baked into the message), signed twice and compared on every
+      derivation (determinism guard — load-bearing once hardware
+      signers arrive); `derive_keys_from_signature` is the seam a
+      Trezor plugs into (same personal-sign message → same identity,
+      whether the 12 words live in the app or in the device).
+      BREAKING by design = new backup line: the local
+      `backup_state.json` is identity-stamped (a changed identity
+      starts a clean line — the first post-upgrade backup re-uploads
+      everything once, since the enc key changed), `GET /backup`
+      hides a pre-upgrade `last` so followers are never advertised
+      keys to an empty line, and restore falls back to the legacy
+      raw-key derivation when the new pointer is empty (old backups
+      stay restorable from the same 12 words; the restore dialog
+      says so). Legacy + v2 derivations pinned by test vectors.
 - [ ] Phase 2 — external-signer payments: a Signer-trait seam behind
       the phase-0 adapter (software key / Trezor / Ledger
       interchangeable), ant-core external-signer machinery

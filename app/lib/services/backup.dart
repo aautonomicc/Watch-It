@@ -277,6 +277,7 @@ class RestoreSummary {
     required this.mapsImported,
     required this.artInstalled,
     required this.problems,
+    this.legacy = false,
   });
 
   /// The backup head chunk this fetch walked (hex) — the follower
@@ -291,6 +292,12 @@ class RestoreSummary {
   final int mapsImported;
   final int artInstalled;
   final List<String> problems;
+
+  /// True when the restore fell back to the pre-sign-to-derive backup
+  /// line (a backup made before the identity upgrade): the data is fine,
+  /// but the next backup starts a fresh line under the upgraded keys and
+  /// re-uploads everything once.
+  final bool legacy;
 }
 
 class BackupService {
@@ -826,6 +833,7 @@ class BackupService {
       mapsImported: result['maps_imported'] as int? ?? 0,
       artInstalled: artInstalled,
       problems: problems,
+      legacy: result['legacy'] == true,
     );
   }
 }

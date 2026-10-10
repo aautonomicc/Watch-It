@@ -193,6 +193,10 @@ class _BackupScreenState extends State<BackupScreen> {
               parts.isEmpty
                   ? 'Everything in the backup was already on this device.'
                   : 'Restored ${parts.join(', ')}.',
+              if (summary.legacy)
+                'This backup was made by an older W@tch. Everything restored '
+                    'fine — your next backup starts a fresh line under the '
+                    'upgraded backup keys, so it uploads everything once.',
               for (final p in summary.problems) p,
             ].join('\n\n'),
             style: TextStyle(color: t.bone, fontSize: 14),

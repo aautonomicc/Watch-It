@@ -1,7 +1,17 @@
 //! Seed-phrase backup: the full W@tch state published to Autonomi under
-//! keys derived OFFLINE from the upload wallet's private key, so a fresh
-//! install restores from the 12 words alone (docs/ROADMAP.md, plan
-//! adopted 2026-10-06).
+//! keys derived OFFLINE from the upload wallet, so a fresh install
+//! restores from the 12 words alone (docs/ROADMAP.md, plan adopted
+//! 2026-10-06).
+//!
+//! SIGN-TO-DERIVE (hw-wallet plan phase 1, 2026-10-10): the identity no
+//! longer derives from the raw private key — it derives from the
+//! wallet's deterministic (RFC-6979) EIP-191 signature of the frozen
+//! [IDENTITY_MESSAGE_V1]. A hardware wallet signs exactly that message
+//! once at setup and lands on the SAME identity as the software wallet
+//! holding the same 12 words, without the key ever leaving the device.
+//! Breaking by design: pre-phase-1 backups live under the old raw-key
+//! derivation, kept as [derive_keys_legacy] so a restore falls back to
+//! the old line when the new one is empty.
 //!
 //! Shape: a content-addressed encrypted object store. Every object
 //! (the sync-doc-shaped state document, the root-map bundle, each
@@ -40,11 +50,28 @@ use crate::engine::Engine;
 
 // Key-derivation domains. NEVER change released domain strings: they are
 // the backup identity — a change orphans every existing backup.
-const DOMAIN_POINTER: &str = "watchit.backup.pointer.v1";
-const DOMAIN_ENC: &str = "watchit.backup.enc.v1";
+// v1 pointer/enc = the pre-phase-1 raw-key derivation, kept only for the
+// legacy restore fallback; v2 hangs off the identity signature.
+const DOMAIN_POINTER_LEGACY: &str = "watchit.backup.pointer.v1";
+const DOMAIN_ENC_LEGACY: &str = "watchit.backup.enc.v1";
+const DOMAIN_IDENTITY: &str = "watchit.backup.identity.v1";
+const DOMAIN_POINTER: &str = "watchit.backup.pointer.v2";
+const DOMAIN_ENC: &str = "watchit.backup.enc.v2";
 const DOMAIN_OBJECT_KEY: &str = "watchit.backup.object-key.v1";
 const DOMAIN_OBJECT_NONCE: &str = "watchit.backup.object-nonce.v1";
 const DOMAIN_ENVELOPE: &str = "watchit.backup.envelope.v1";
+const DOMAIN_STATE_ID: &str = "watchit.backup.state-id.v1";
+
+/// The message whose EIP-191 signature IS the backup identity. FROZEN
+/// FOREVER: changing one byte orphans every v2 backup. Future rotation
+/// bumps the epoch line into a new frozen message (a new backup line) —
+/// never edits this one. A hardware wallet shows this text at setup; the
+/// wording must stay true: signing it spends nothing.
+pub const IDENTITY_MESSAGE_V1: &str = "W@tch backup identity\n\
+version: 1\n\
+epoch: 0\n\n\
+Signing this message derives the keys that encrypt this wallet's W@tch \
+backups. It costs nothing and authorizes no transaction.";
 
 /// Artwork files above this are skipped (mirrors the Dart-side
 /// `MyWatchSync.maxArtBytes` and the x0x art-transfer cap).
@@ -93,21 +120,89 @@ pub fn addr_from_hex(hex_str: &str) -> Option<[u8; 32]> {
         .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok())
 }
 
+/// The wallet's deterministic identity signature: EIP-191 personal-sign
+/// of [IDENTITY_MESSAGE_V1], returned as r‖s (64 bytes — the recovery
+/// byte is dropped because its encoding varies across signers while r‖s
+/// is identical for the same key, RFC-6979). This is the exact signature
+/// a Trezor/Ledger produces for the same message, so the hardware path
+/// (phase 3) plugs in by swapping the signer, nothing else.
+pub fn identity_signature(wallet_key_hex: &str) -> Result<[u8; 64], String> {
+    use alloy_signer::SignerSync;
+    use alloy_signer_local::PrivateKeySigner;
+    let cleaned = wallet_key_hex.trim().trim_start_matches("0x");
+    let signer: PrivateKeySigner = cleaned
+        .parse()
+        .map_err(|_| "wallet key is not a valid private key".to_string())?;
+    let sign_once = || -> Result<[u8; 64], String> {
+        let sig = signer
+            .sign_message_sync(IDENTITY_MESSAGE_V1.as_bytes())
+            .map_err(|e| format!("identity signing failed: {e}"))?;
+        let mut rs = [0u8; 64];
+        rs[..32].copy_from_slice(&sig.r().to_be_bytes::<32>());
+        rs[32..].copy_from_slice(&sig.s().to_be_bytes::<32>());
+        Ok(rs)
+    };
+    // Determinism guard: a signer that does not repeat the signature
+    // would mint a backup identity nothing can ever re-derive — refuse
+    // before deriving anything. Trivially true for RFC-6979 software
+    // signing; load-bearing once hardware signers arrive.
+    let first = sign_once()?;
+    if first != sign_once()? {
+        return Err(
+            "the signer did not repeat the identity signature — refusing to \
+             derive backup keys a fresh install could never re-derive"
+                .into(),
+        );
+    }
+    Ok(first)
+}
+
 /// Derive the backup identity from the wallet's private key (the exact
 /// bytes the 12 words produce at m/44'/60'/0'/0/0 — both wallet import
-/// paths land here, so both restore the same backup).
+/// paths land here, so both restore the same backup). Since phase 1 the
+/// key only SIGNS; the keys hang off the signature.
 pub fn derive_keys(wallet_key_hex: &str) -> Result<BackupKeys, String> {
+    Ok(derive_keys_from_signature(&identity_signature(
+        wallet_key_hex,
+    )?))
+}
+
+/// The signature → keys half of [derive_keys]: the seam an external
+/// signer (phase 3) feeds — hand it the 64-byte r‖s of the device's
+/// [IDENTITY_MESSAGE_V1] signature and it lands on the same identity.
+pub fn derive_keys_from_signature(sig_rs: &[u8; 64]) -> BackupKeys {
+    let root = blake3::derive_key(DOMAIN_IDENTITY, sig_rs);
+    let seed = blake3::derive_key(DOMAIN_POINTER, &root);
+    let (pk, sk) = ml_dsa_65().generate_keypair_from_seed(&seed);
+    let enc = blake3::derive_key(DOMAIN_ENC, &root);
+    let pointer = pointer_address(&pk);
+    BackupKeys { sk, pk, enc, pointer }
+}
+
+/// The pre-phase-1 derivation (blake3 straight over the raw key bytes).
+/// Kept ONLY so restores reach backups made before the sign-to-derive
+/// flip; nothing ever writes under this identity again.
+pub fn derive_keys_legacy(wallet_key_hex: &str) -> Result<BackupKeys, String> {
     let cleaned = wallet_key_hex.trim().trim_start_matches("0x");
     let bytes = hex::decode(cleaned)
         .map_err(|_| "wallet key is not valid hex".to_string())?;
     if bytes.len() != 32 {
         return Err("wallet key must be 32 bytes".into());
     }
-    let seed = blake3::derive_key(DOMAIN_POINTER, &bytes);
+    let seed = blake3::derive_key(DOMAIN_POINTER_LEGACY, &bytes);
     let (pk, sk) = ml_dsa_65().generate_keypair_from_seed(&seed);
-    let enc = blake3::derive_key(DOMAIN_ENC, &bytes);
+    let enc = blake3::derive_key(DOMAIN_ENC_LEGACY, &bytes);
     let pointer = pointer_address(&pk);
     Ok(BackupKeys { sk, pk, enc, pointer })
+}
+
+/// A short public-safe fingerprint of a backup identity (derived from
+/// the enc key through its own one-way domain), stamped into the local
+/// state file so a changed identity — the phase-1 flip, or a swapped
+/// wallet — starts a CLEAN line instead of reusing the old line's object
+/// cache and head chain.
+pub fn identity_fingerprint(enc: &[u8; 32]) -> String {
+    hex::encode(&blake3::derive_key(DOMAIN_STATE_ID, enc)[..8])
 }
 
 /// blake3 content hash of an object's plaintext — the object's identity
@@ -204,9 +299,13 @@ pub fn safe_art_file_name(name: &str) -> bool {
 
 /// `backup_state.json` beside the other app state: which object hashes
 /// already uploaded (hash → shrunk map + size, so unchanged objects skip
-/// the network entirely) plus the last backup's summary for the UI.
+/// the network entirely) plus the last backup's summary for the UI —
+/// all stamped with the identity fingerprint they belong to, because a
+/// different identity means different ciphertexts and a different
+/// pointer: its cache and head chain are poison for the new line.
 #[derive(Default)]
 struct BackupState {
+    identity: Option<String>,
     objects: BTreeMap<String, (String, u64)>,
     last: Option<serde_json::Value>,
 }
@@ -231,7 +330,14 @@ impl BackupState {
                 objects.insert(hash.clone(), (map_b64.to_string(), size));
             }
         }
-        Self { objects, last: v.get("last").cloned().filter(|l| !l.is_null()) }
+        Self {
+            identity: v
+                .get("identity")
+                .and_then(|i| i.as_str())
+                .map(str::to_string),
+            objects,
+            last: v.get("last").cloned().filter(|l| !l.is_null()),
+        }
     }
 
     fn save(&self, path: &PathBuf) {
@@ -243,6 +349,7 @@ impl BackupState {
             );
         }
         let out = serde_json::json!({
+            "identity": self.identity,
             "objects": objects,
             "last": self.last,
         });
@@ -317,14 +424,40 @@ impl BackupManager {
             .unwrap_or_default()
     }
 
+    /// The persisted state AS SEEN BY one identity: a stored state from a
+    /// different identity (or from before states were stamped — every
+    /// pre-phase-1 file) is discarded and the line starts clean, so the
+    /// old line's object cache can never feed the new line's manifest.
+    fn state_for(&self, identity_fp: &str) -> BackupState {
+        let mut state = self.state();
+        if state.identity.as_deref() != Some(identity_fp) {
+            if !state.objects.is_empty() || state.last.is_some() {
+                tracing::info!(
+                    "backup identity changed — starting a new backup line"
+                );
+            }
+            state = BackupState::default();
+        }
+        state.identity = Some(identity_fp.to_string());
+        state
+    }
+
     fn save_state(&self, state: &BackupState) {
         if let Some(p) = &self.state_path {
             state.save(p);
         }
     }
 
-    pub fn last_json(&self) -> Option<serde_json::Value> {
-        self.state().last
+    /// The last backup recorded for THIS identity — a summary left behind
+    /// by a different (pre-flip) identity reads as "never backed up", so
+    /// the UI and the phase-2 key-share section never present the new
+    /// line as populated (followers would adopt keys to an empty line).
+    pub fn last_json(&self, identity_fp: Option<&str>) -> Option<serde_json::Value> {
+        let state = self.state();
+        match (identity_fp, state.identity.as_deref()) {
+            (Some(fp), Some(id)) if fp == id => state.last,
+            _ => None,
+        }
     }
 
     fn begin(
@@ -557,7 +690,9 @@ async fn drive_backup(
 
     // -- upload what the store does not already hold ----------------------
     let client = crate::upload::wallet_client(engine).await?;
-    let mut state = engine.backups.state();
+    let mut state = engine
+        .backups
+        .state_for(&identity_fingerprint(&keys.enc));
     let total = objects.len();
     set_phase(job, "uploading");
     set_progress(job, 0, total);
@@ -692,17 +827,37 @@ async fn run_restore(
     key_hex: String,
     art_dir: String,
 ) {
+    const MISSING: &str = "no backup found for this wallet — nothing has been \
+                           backed up under these 12 words yet";
     let outcome = match derive_keys(&key_hex) {
         Ok(keys) => {
-            drive_restore(
-                engine,
-                &job,
-                keys.read(),
-                &art_dir,
-                "no backup found for this wallet — nothing has been backed \
-                 up under these 12 words yet",
-            )
-            .await
+            match drive_restore(engine, &job, keys.read(), &art_dir, MISSING)
+                .await
+            {
+                // Nothing under the signature-derived (v2) pointer: fall
+                // back to the pre-phase-1 raw-key derivation so backups
+                // made before the flip stay restorable from the same 12
+                // words. Only the clean not-found falls through — a
+                // transport error surfaces as itself (retrying the walk
+                // under different keys would not help it).
+                Err(e) if e == MISSING => match derive_keys_legacy(&key_hex) {
+                    Ok(old) => {
+                        tracing::info!(
+                            "no backup under the current identity — trying \
+                             the pre-upgrade backup line"
+                        );
+                        set_phase(&job, "locating");
+                        drive_restore(engine, &job, old.read(), &art_dir, MISSING)
+                            .await
+                            .map(|mut v| {
+                                v["legacy"] = serde_json::Value::Bool(true);
+                                v
+                            })
+                    }
+                    Err(e) => Err(e),
+                },
+                other => other,
+            }
         }
         Err(e) => Err(e),
     };
@@ -918,7 +1073,9 @@ async fn drive_restore(
     if let Some((stored_key, _)) = engine.wallet.load() {
         if let Ok(stored) = derive_keys(&stored_key) {
             if stored.pointer == keys.pointer {
-                let mut state = engine.backups.state();
+                let mut state = engine
+                    .backups
+                    .state_for(&identity_fingerprint(&keys.enc));
                 for (hash, entry) in objects {
                     let (Some(map_b64), Some(size)) = (
                         entry.get("map").and_then(|m| m.as_str()),
@@ -968,12 +1125,11 @@ mod tests {
         // paths land on the same identity).
         let c = derive_keys(&format!("  {} ", &KEY[2..])).unwrap();
         assert_eq!(a.pointer, c.pointer);
-        // The enc key and the ML-DSA seed live in separate domains.
-        let seed = blake3::derive_key(
-            DOMAIN_POINTER,
-            &hex::decode(&KEY[2..]).unwrap(),
-        );
-        assert_ne!(a.enc, seed);
+        // The enc key and the ML-DSA seed live in separate domains of the
+        // signature root.
+        let root = blake3::derive_key(DOMAIN_IDENTITY, &identity_signature(KEY).unwrap());
+        assert_ne!(a.enc, root);
+        assert_ne!(a.enc, blake3::derive_key(DOMAIN_POINTER, &root));
         // The pointer address is the canonical upstream derivation.
         assert_eq!(a.pointer, pointer_address(&a.pk));
         // A different wallet is a different identity.
@@ -983,6 +1139,101 @@ mod tests {
         .unwrap();
         assert_ne!(a.pointer, other.pointer);
         assert_ne!(a.enc, other.enc);
+        // The sign-to-derive flip is real: the same key's v2 identity is
+        // NOT the legacy raw-key identity (old backups live on the old
+        // line, reached only through the restore fallback).
+        let legacy = derive_keys_legacy(KEY).unwrap();
+        assert_ne!(a.pointer, legacy.pointer);
+        assert_ne!(a.enc, legacy.enc);
+        // And the signature→keys seam is the whole derivation: feeding
+        // the signature in by hand lands on the identical identity (the
+        // exact hardware-wallet path of phase 3).
+        let by_sig = derive_keys_from_signature(&identity_signature(KEY).unwrap());
+        assert_eq!(a.pointer, by_sig.pointer);
+        assert_eq!(a.enc, by_sig.enc);
+    }
+
+    #[test]
+    fn identity_signature_is_deterministic_and_key_bound() {
+        let a = identity_signature(KEY).unwrap();
+        let b = identity_signature(KEY).unwrap();
+        assert_eq!(a, b);
+        let other = identity_signature(
+            "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
+        )
+        .unwrap();
+        assert_ne!(a, other);
+        assert!(identity_signature("zz").is_err());
+        // The message is FROZEN: pin the bytes a hardware wallet will be
+        // shown and must sign — any drift orphans every v2 backup.
+        assert_eq!(
+            blake3::hash(IDENTITY_MESSAGE_V1.as_bytes()).to_hex().to_string(),
+            IDENTITY_MESSAGE_HASH_PIN,
+        );
+    }
+
+    // Frozen vectors for the hardhat key: the legacy pin guarantees the
+    // restore fallback keeps reaching pre-flip backups forever; the v2
+    // pin freezes the identity message + derivation chain end to end.
+    const IDENTITY_MESSAGE_HASH_PIN: &str =
+        "048d199807b3af402b0ab9f0ad4b012843d53bfda65b9102bc43a689f5056c9c";
+    // == the pointer the 2026-10-06 phase-1 live verify saw for this key
+    // (the pre-flip devserver smoke) — the fallback reaches real old lines.
+    const LEGACY_POINTER_PIN: &str =
+        "884a878e6f9da0ed566278602da3064bbb2f5ed5be0e97cb78238c74c2b3e0ae";
+    const V2_POINTER_PIN: &str =
+        "d478d0596351025560ddace86f555833601440037b7944309763ca0c3e3f3a09";
+    const V2_ENC_PIN: &str =
+        "2498b3cc81cc9c9d1d4a6a192d9524ad1fd9b75965a23e637b02be06ceff8bc2";
+
+    #[test]
+    fn derivation_vectors_are_pinned() {
+        let legacy = derive_keys_legacy(KEY).unwrap();
+        assert_eq!(hex::encode(legacy.pointer), LEGACY_POINTER_PIN);
+        let v2 = derive_keys(KEY).unwrap();
+        assert_eq!(hex::encode(v2.pointer), V2_POINTER_PIN);
+        assert_eq!(hex::encode(v2.enc), V2_ENC_PIN);
+    }
+
+    #[test]
+    fn state_resets_when_identity_changes() {
+        let dir = std::env::temp_dir()
+            .join(format!("wi-backup-identity-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mgr = BackupManager::new(dir.to_str());
+        // A pre-phase-1 state file carries no identity stamp: it must
+        // read as a foreign line (hidden last, clean object cache) for
+        // EVERY identity — its cache and head chain belong to the old
+        // raw-key derivation.
+        let mut old = BackupState::default();
+        old.objects.insert("aaa".into(), ("bWFw".into(), 9));
+        old.last = Some(serde_json::json!({"ms": 1, "head": "ff", "backups": 2}));
+        mgr.save_state(&old);
+        assert!(mgr.last_json(Some("f00d")).is_none());
+        let fresh = mgr.state_for("f00d");
+        assert!(fresh.objects.is_empty());
+        assert!(fresh.last.is_none());
+        assert_eq!(fresh.identity.as_deref(), Some("f00d"));
+        // Once stamped, the same identity sees its own state…
+        mgr.save_state(&fresh);
+        let mut mine = mgr.state_for("f00d");
+        mine.objects.insert("bbb".into(), ("bWFw".into(), 4));
+        mine.last = Some(serde_json::json!({"ms": 2, "head": "aa", "backups": 1}));
+        mgr.save_state(&mine);
+        assert_eq!(
+            mgr.last_json(Some("f00d"))
+                .unwrap()
+                .get("backups")
+                .and_then(|b| b.as_u64()),
+            Some(1)
+        );
+        assert_eq!(mgr.state_for("f00d").objects.len(), 1);
+        // …while a different identity (swapped wallet) starts clean, and
+        // an identity-less caller (no wallet) sees no last either.
+        assert!(mgr.last_json(Some("beef")).is_none());
+        assert!(mgr.last_json(None).is_none());
+        assert!(mgr.state_for("beef").objects.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

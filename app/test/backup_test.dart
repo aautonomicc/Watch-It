@@ -468,6 +468,31 @@ void main() {
       final states = await WatchStateStore.instance.all();
       expect(states.single.positionMs, 90);
       expect(summary.watchApplied, 0);
+      // A current-identity restore carries no legacy flag.
+      expect(summary.legacy, isFalse);
+    });
+
+    test('a legacy-line restore is flagged for the honest note', () async {
+      // The core fell back to the pre-sign-to-derive backup line
+      // (phase 1): the result carries `legacy: true` so the screen can
+      // say the next backup starts a fresh line under the upgraded keys.
+      await ProfileStore.instance.ensureLoaded();
+      fake.backupJobStates.add({
+        'kind': 'restore',
+        'phase': 'done',
+        'result': {
+          'created_ms': 5,
+          'doc': {'v': 1, 'lists': const []},
+          'legacy': true,
+          'maps_imported': 0,
+          'maps_failed': 0,
+          'art_files': const [],
+          'art_failed': 0,
+        },
+      });
+      final summary = await service.restore();
+      expect(summary.legacy, isTrue);
+      expect(summary.problems, isEmpty);
     });
   });
 

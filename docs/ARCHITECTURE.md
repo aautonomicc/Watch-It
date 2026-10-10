@@ -365,12 +365,25 @@ The all-devices-lost recovery layer (`native/watchit_core/src/backup.rs`
 + `app/lib/services/backup.dart`, Settings → Backup): the FULL state —
 lists + entries, ROOT data maps, user edits, TMDB rows, posters/art,
 watch states, profiles — published to Autonomi under keys derived
-OFFLINE from the upload wallet's private key, so the 12 words restore
-it anywhere. Derivation: `blake3::derive_key("watchit.backup.pointer.v1",
-wallet_key)` seeds an ML-DSA-65 owner pair whose
-`autonomi.pointer.address.v1` pointer address is the backup's location;
-a second domain (`watchit.backup.enc.v1`) yields the ChaCha20-Poly1305
-content key. Storage is a content-addressed encrypted object store:
+OFFLINE from the upload wallet, so the 12 words restore it anywhere.
+Derivation (SIGN-TO-DERIVE since the hw-wallet plan's phase 1,
+2026-10-10): the wallet signs the frozen versioned
+`IDENTITY_MESSAGE_V1` (EIP-191 personal-sign, RFC-6979 deterministic —
+signed twice and compared as a determinism guard, because a
+non-repeating signer would mint an identity nothing could re-derive);
+`blake3::derive_key("watchit.backup.identity.v1", r‖s)` is the root,
+`watchit.backup.pointer.v2` seeds an ML-DSA-65 owner pair whose
+`autonomi.pointer.address.v1` pointer address is the backup's location,
+and `watchit.backup.enc.v2` yields the ChaCha20-Poly1305 content key. A
+hardware wallet signing the same message lands on the SAME identity
+without its key ever leaving the device (`derive_keys_from_signature`
+is the phase-3 seam). The pre-phase-1 raw-key derivation
+(`…pointer.v1`/`…enc.v1` straight over the key bytes) is kept as
+`derive_keys_legacy` purely so restores fall back to the old line when
+the new pointer is empty; `backup_state.json` is identity-stamped so a
+changed identity starts a clean line (fresh head chain, no stale object
+cache), and `GET /backup` hides a `last` recorded under a different
+identity so the phase-2 key share never advertises an empty line. Storage is a content-addressed encrypted object store:
 each object (the sync-doc-shaped state document, the root-map bundle,
 each artwork file) is encrypted DETERMINISTICALLY (key/nonce from the
 backup key ‖ the object's blake3 content hash), so unchanged objects

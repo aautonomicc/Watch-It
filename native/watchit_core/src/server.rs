@@ -737,11 +737,19 @@ async fn backup_status(engine: &'static Engine) -> Response {
         .wallet
         .load()
         .and_then(|(key, _)| crate::backup::derive_keys(&key).ok());
+    // `last` is identity-gated: a summary recorded under a different
+    // identity (a pre-sign-to-derive backup, or a swapped wallet) reads
+    // as "never backed up on this line" — crucially the phase-2 section
+    // then stays unpublished, so followers never adopt keys to a line
+    // nothing has been written to yet.
+    let fp = keys
+        .as_ref()
+        .map(|k| crate::backup::identity_fingerprint(&k.enc));
     json_ok(serde_json::json!({
         "configured": keys.is_some(),
         "pointer": keys.as_ref().map(|k| hex::encode(k.pointer)),
         "key": keys.as_ref().map(|k| hex::encode(k.enc)),
-        "last": engine.backups.last_json(),
+        "last": engine.backups.last_json(fp.as_deref()),
         "job": engine.backups.job_json(),
     }))
 }

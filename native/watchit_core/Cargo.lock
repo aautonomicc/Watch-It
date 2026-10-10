@@ -8250,6 +8250,7 @@ dependencies = [
 name = "watchit_core"
 version = "0.1.0"
 dependencies = [
+ "alloy-signer 2.5.0",
  "alloy-signer-local 2.5.0",
  "ant-core",
  "async-trait",

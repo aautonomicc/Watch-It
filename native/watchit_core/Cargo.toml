@@ -41,6 +41,10 @@ async-trait = "0.1"
 # makes MnemonicBuilder reject our Wordlist type (hit at the 2026-09-14
 # upgrade when 0.13 was tried); the re-export can never diverge.
 alloy-signer-local = { version = "2.4.2", features = ["mnemonic"] }
+# Only for the SignerSync trait backup.rs needs to produce the
+# deterministic identity signature (sign-to-derive); same alloy 2.x tree
+# alloy-signer-local already pulls — no new code compiles.
+alloy-signer = "2.4"
 rand = "0.8"
 axum = "0.8"
 # blake3 + rmp-serde mirror ant-core's address derivation (compute_address
