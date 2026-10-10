@@ -132,6 +132,45 @@ class PublishApi {
     return json['id'] as int;
   }
 
+  /// Start the pooled batch upload — EVERY file in one paid batch, one
+  /// merkle payment transaction per ≤256-chunk sub-batch instead of one+
+  /// per file (the upload-all flow). Returns the job id to poll with
+  /// [batchStatus].
+  Future<int> startBatchUpload(List<({String path, String name})> files) async {
+    final json = await _request('POST', '/upload/batch', body: {
+      'files': [
+        for (final f in files) {'path': f.path, 'name': f.name},
+      ],
+    });
+    return json['id'] as int;
+  }
+
+  Future<BatchUploadJob> batchStatus(int id) async {
+    final json = await _request('GET', '/upload/batch/$id');
+    return BatchUploadJob(
+      id: id,
+      phase: json['phase'] as String? ?? 'unknown',
+      done: json['done'] as int? ?? 0,
+      total: json['total'] as int? ?? 0,
+      paymentsDone: json['payments_done'] as int? ?? 0,
+      paymentsTotal: json['payments_total'] as int? ?? 0,
+      error: json['error'] as String?,
+      costAtto: BigInt.tryParse(json['cost_atto'] as String? ?? '') ??
+          BigInt.zero,
+      files: [
+        for (final f in (json['files'] as List? ?? const []))
+          BatchUploadFile(
+            name: (f as Map<String, dynamic>)['name'] as String? ?? '',
+            status: f['status'] as String? ?? 'pending',
+            error: f['error'] as String?,
+            address: f['address'] as String?,
+            size: f['size'] as int? ?? 0,
+            chunks: f['chunks'] as int? ?? 0,
+          ),
+      ],
+    );
+  }
+
   Future<UploadJob> jobStatus(int id) async {
     final json = await _request('GET', '/upload/$id');
     final result = json['result'] as Map<String, dynamic>?;
@@ -217,6 +256,54 @@ class UploadJob {
   final UploadResult? result;
 
   bool get finished => phase == 'done' || phase == 'error';
+}
+
+/// `GET /upload/batch/{id}` — the pooled batch job: phase-scoped
+/// progress (encrypting counts files, quoting/storing count chunks),
+/// payment transactions done/expected, and per-file outcomes in input
+/// order.
+class BatchUploadJob {
+  const BatchUploadJob({
+    required this.id,
+    required this.phase,
+    required this.done,
+    required this.total,
+    required this.paymentsDone,
+    required this.paymentsTotal,
+    required this.costAtto,
+    required this.files,
+    this.error,
+  });
+  final int id;
+  final String phase;
+  final int done;
+  final int total;
+  final int paymentsDone;
+  final int paymentsTotal;
+  final BigInt costAtto;
+  final List<BatchUploadFile> files;
+  final String? error;
+
+  bool get finished => phase == 'done' || phase == 'error';
+}
+
+class BatchUploadFile {
+  const BatchUploadFile({
+    required this.name,
+    required this.status,
+    required this.size,
+    required this.chunks,
+    this.error,
+    this.address,
+  });
+  final String name;
+
+  /// pending → uploading → done | failed
+  final String status;
+  final String? error;
+  final String? address;
+  final int size;
+  final int chunks;
 }
 
 class UploadResult {

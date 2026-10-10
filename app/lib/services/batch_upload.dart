@@ -118,6 +118,10 @@ class BatchUploadSession extends MatchReviewSession {
   UploadJob? currentJob;
   String? currentUploadName;
   double? encodeFraction;
+
+  /// The pooled batch job while stage 2 runs (encodes done, everything
+  /// uploading together): phase + chunk progress + payment count.
+  BatchUploadJob? batchJob;
   String? bundlePath;
   List<_UploadTask> _tasks = [];
 
@@ -840,16 +844,29 @@ class BatchUploadSession extends MatchReviewSession {
     return raw == null ? null : BigInt.tryParse('$raw');
   }
 
+  /// Payment transactions the pooled batch is expected to need: one per
+  /// 256-chunk merkle sub-batch (an upper bound — chunks already on the
+  /// network only lower it). The review page says this up front so the
+  /// one-confirmation promise is honest about >~1 GB-encoded batches.
+  int? get estimatedPayments {
+    final chunks = costEstimate?['total_chunks'] as int?;
+    if (chunks == null || chunks <= 0) return null;
+    return (chunks + 255) ~/ 256;
+  }
+
   // ── upload ───────────────────────────────────────────────────────────
 
-  /// Upload every `ready` entry under its final name — the CLI's
-  /// runUpload with the core's named `/upload` replacing the staging
-  /// symlink + `ant file upload`. Video entries with selected quality
-  /// tiers expand into one upload per tier (encoded on the fly, sibling
-  /// manifest rows added so the bundle and library carry every
-  /// version). Manifest saved per state change; failures get one retry
-  /// pass; ends with the .watch-list bundle, a local metadata seed, and
-  /// the automatic add to the chosen list.
+  /// Upload every `ready` entry under its final name as ONE pooled paid
+  /// batch (`/upload/batch`): encodes run first (payment needs every
+  /// chunk address), then the core pools all chunks and pays one merkle
+  /// transaction per ≤256-chunk sub-batch — the upload-all flow, instead
+  /// of one+ payment per file. Video entries with selected quality tiers
+  /// expand into one staged file per tier (sibling manifest rows added
+  /// so the bundle and library carry every version). Manifest saved per
+  /// state change; failures get one free retry batch (paid proofs are
+  /// checkpointed core-side for 7 days); ends with the .watch-list
+  /// bundle, a local metadata seed, and the automatic add to the chosen
+  /// list.
   Future<void> startUpload() async {
     if (stage != BatchStage.review) return;
     stage = BatchStage.uploading;
@@ -919,23 +936,27 @@ class BatchUploadSession extends MatchReviewSession {
       ..createSync(recursive: true);
     final encodesDir = Directory(p.join(workDir!.path, 'encodes'));
 
-    Future<void> uploadOne(_UploadTask task) async {
+    // ── stage 1: encode every tier output ──────────────────────────────
+    // The pooled payment needs every chunk address up front — one
+    // payment for the whole batch is the point — so encodes finish
+    // before anything is quoted or paid.
+    final staged = <_UploadTask>[];
+    for (final task in tasks) {
+      if (_aborted) return;
       final entry = task.entry;
       final name = entry.name;
       if (name == null) {
         entry.status = 'failed';
         entry.error = 'no final name in manifest';
         m.save();
-        return;
+        continue;
       }
-      currentUploadName = name;
-      currentJob = null;
-      encodeFraction = null;
-      notifyListeners();
-      try {
-        var uploadPath = entry.source;
-        final item = task.tierItem;
-        if (item != null && item.needsEncode) {
+      final item = task.tierItem;
+      if (item != null && item.needsEncode) {
+        currentUploadName = name;
+        encodeFraction = null;
+        notifyListeners();
+        try {
           // A retry after an upload failure reuses the finished encode.
           var temp = task.tempPath;
           if (temp == null || !File(temp).existsSync()) {
@@ -960,74 +981,43 @@ class BatchUploadSession extends MatchReviewSession {
           entry.sha256 = await sha256OfFile(temp);
           entry.sizeBytes = File(temp).lengthSync();
           m.save();
-          uploadPath = temp;
+        } catch (e) {
+          entry.status = 'failed';
+          entry.error = '$e';
+          m.save();
+          continue;
         }
-        final id = await _api!.startUpload(uploadPath, name: name);
-        while (true) {
-          await Future<void>.delayed(const Duration(seconds: 1));
-          if (_aborted) return;
-          UploadJob job;
-          try {
-            job = await _api!.jobStatus(id);
-          } catch (_) {
-            continue; // Transient poll failure — next tick retries.
-          }
-          currentJob = job;
-          notifyListeners();
-          final result = job.result;
-          if (job.phase == 'done' && result != null) {
-            entry.address = result.address;
-            entry.uploadedAt = DateTime.now().toIso8601String();
-            final mapPath = p.join(datamapsDir.path, '$name.datamap');
-            await _saveDatamap(result.address, mapPath);
-            entry.datamap = mapPath;
-            entry.status = 'uploaded';
-            entry.error = null;
-            m.save();
-            _ledger!.append(LedgerEntry(
-              sha256: entry.sha256 ?? '',
-              name: name,
-              sizeBytes:
-                  entry.sizeBytes ?? File(uploadPath).lengthSync(),
-              date: entry.uploadedAt!,
-              address: entry.address,
-              datamapPath: mapPath,
-              manifestPath: m.file.absolute.path,
-            ));
-            task.deleteTemp();
-            return;
-          }
-          if (job.phase == 'error') {
-            throw PublishApiException(job.error ?? 'upload failed');
-          }
-        }
-      } catch (e) {
-        entry.status = 'failed';
-        entry.error = '$e';
-        m.save();
       }
+      staged.add(task);
     }
+    currentUploadName = null;
+    encodeFraction = null;
+    notifyListeners();
 
-    for (final task in tasks) {
-      if (_aborted) return;
-      await uploadOne(task);
-      uploadDone++;
-      notifyListeners();
+    // ── stage 2: one pooled batch — pay once, upload everything ────────
+    if (staged.isNotEmpty && !_aborted) {
+      await _uploadBatch(staged, datamapsDir);
     }
-    // Retry pass: one more attempt for anything that failed this run.
+    if (_aborted) return;
+    // Retry pass: one more batch for anything that failed this run —
+    // free for everything already paid (the core's payment checkpoint
+    // keeps the proofs; only the failed stores retry).
     final retries =
-        tasks.where((t) => t.entry.status == 'failed').toList();
-    for (final task in retries) {
-      if (_aborted) return;
-      task.entry.status = 'ready';
-      await uploadOne(task);
-      notifyListeners();
+        staged.where((t) => t.entry.status == 'failed').toList();
+    if (retries.isNotEmpty) {
+      for (final t in retries) {
+        t.entry.status = 'ready';
+      }
+      m.save();
+      await _uploadBatch(retries, datamapsDir);
     }
+    if (_aborted) return;
     _writeBundle();
     await _seedBundleLocally();
     await _autoAddToLibrary();
     currentUploadName = null;
     currentJob = null;
+    batchJob = null;
     encodeFraction = null;
     try {
       if (encodesDir.existsSync()) encodesDir.deleteSync(recursive: true);
@@ -1035,6 +1025,88 @@ class BatchUploadSession extends MatchReviewSession {
     stage = BatchStage.done;
     m.save();
     notifyListeners();
+  }
+
+  /// One pooled batch call: every task's staged file goes up together —
+  /// the core encrypts them all locally, pools every chunk, pays ONE
+  /// merkle transaction per ≤256-chunk sub-batch, and stores with
+  /// close-group replication. Per-file outcomes come back in input
+  /// order; finished files get their datamap + ledger row exactly like
+  /// the old per-file path.
+  Future<void> _uploadBatch(
+      List<_UploadTask> tasks, Directory datamapsDir) async {
+    final m = manifest!;
+    batchJob = null;
+    notifyListeners();
+    try {
+      final id = await _api!.startBatchUpload([
+        for (final t in tasks) (path: t.uploadPath, name: t.entry.name!),
+      ]);
+      BatchUploadJob job;
+      while (true) {
+        await Future<void>.delayed(const Duration(seconds: 1));
+        if (_aborted) return;
+        try {
+          job = await _api!.batchStatus(id);
+        } catch (_) {
+          continue; // Transient poll failure — next tick retries.
+        }
+        batchJob = job;
+        notifyListeners();
+        if (job.finished) break;
+      }
+      for (var i = 0; i < tasks.length; i++) {
+        if (_aborted) return;
+        final task = tasks[i];
+        final entry = task.entry;
+        final name = entry.name!;
+        final file = i < job.files.length ? job.files[i] : null;
+        if (file != null && file.status == 'done' && file.address != null) {
+          try {
+            entry.address = file.address;
+            entry.uploadedAt = DateTime.now().toIso8601String();
+            final mapPath = p.join(datamapsDir.path, '$name.datamap');
+            await _saveDatamap(file.address!, mapPath);
+            entry.datamap = mapPath;
+            entry.status = 'uploaded';
+            entry.error = null;
+            _ledger!.append(LedgerEntry(
+              sha256: entry.sha256 ?? '',
+              name: name,
+              sizeBytes: entry.sizeBytes ?? file.size,
+              date: entry.uploadedAt!,
+              address: entry.address,
+              datamapPath: mapPath,
+              manifestPath: m.file.absolute.path,
+            ));
+            task.deleteTemp();
+            uploadDone++;
+          } catch (e) {
+            // The upload itself landed — only the local bookkeeping
+            // failed. A retry batch re-runs it for free.
+            entry.status = 'failed';
+            entry.error = '$e';
+          }
+        } else {
+          entry.status = 'failed';
+          entry.error = file?.error ??
+              job.error ??
+              'upload failed — run the batch again (anything already '
+                  'paid for is remembered and never paid twice)';
+        }
+        m.save();
+        notifyListeners();
+      }
+    } catch (e) {
+      for (final t in tasks) {
+        if (t.entry.status == 'ready') {
+          t.entry.status = 'failed';
+          t.entry.error = '$e';
+        }
+      }
+      m.save();
+      notifyListeners();
+    }
   }
 
   /// The uploaded root map, ant-cli-compatible msgpack — same route the
@@ -1208,6 +1280,7 @@ class BatchUploadSession extends MatchReviewSession {
     hashFraction = null;
     currentUploadName = null;
     currentJob = null;
+    batchJob = null;
     encodeFraction = null;
     notifyListeners();
   }
@@ -1242,6 +1315,10 @@ class _UploadTask {
 
   /// Finished encode output, kept across a failed upload for the retry.
   String? tempPath;
+
+  /// What actually goes up: the finished encode when there is one, else
+  /// the source file as-is.
+  String get uploadPath => tempPath ?? entry.source;
 
   void deleteTemp() {
     final path = tempPath;

@@ -180,6 +180,14 @@ async fn run_batch(engine: &'static Engine, id: u64, job: Arc<Mutex<BatchJobStat
             Ok(()) => s.phase = "done",
             Err(e) => {
                 s.phase = "error";
+                // Files the per-file finish never reached (e.g. the whole
+                // batch died at the payment) read failed, not stuck
+                // "uploading" — the job error is their reason.
+                for f in s.files.iter_mut() {
+                    if f.status != "done" && f.status != "failed" {
+                        f.status = "failed";
+                    }
+                }
                 s.error = Some(e);
             }
         }

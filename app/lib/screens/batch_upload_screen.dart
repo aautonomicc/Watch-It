@@ -901,6 +901,16 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
                     fontSize: 15,
                     fontWeight: FontWeight.w600),
               ),
+              if (_session.estimatedPayments != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  _session.estimatedPayments == 1
+                      ? 'Paid together in 1 payment transaction'
+                      : 'Paid together in ~${_session.estimatedPayments} '
+                          'payment transactions (one per ~1 GB of chunks)',
+                  style: TextStyle(color: t.boneDim, fontSize: 12),
+                ),
+              ],
               if (_session.balances != null) ...[
                 const SizedBox(height: 4),
                 Text(
@@ -911,8 +921,9 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
               ],
               const SizedBox(height: 4),
               Text(
-                'Scaled from one live network quote; each file is quoted '
-                'and paid at live prices, so the total can differ.',
+                'Scaled from one live network quote; the whole batch is '
+                'quoted and paid together at live prices, so the total '
+                'can differ.',
                 style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
               ),
             ],
@@ -1234,27 +1245,40 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   // ── uploading ────────────────────────────────────────────────────────
 
   List<Widget> _uploadingChildren(WiTokens t) {
-    final job = _session.currentJob;
     final encoding = _session.encodeFraction;
-    final phase = job?.phase ?? 'starting';
-    final total = job?.total ?? 0;
-    final done = job?.done ?? 0;
+    final batch = _session.batchJob;
+    final phase = batch?.phase ?? 'starting';
+    final total = batch?.total ?? 0;
+    final done = batch?.done ?? 0;
+    // Stage 1 (per-file encodes) shows the file being encoded; stage 2
+    // is ONE pooled batch — everything uploads together behind a single
+    // payment per ≤256-chunk sub-batch, so the detail line talks about
+    // the batch, not a current file.
+    final headline = encoding != null || _session.currentUploadName != null
+        ? 'Preparing · encoding quality versions'
+        : 'Uploading ${_session.uploadTotal} '
+            'file${_session.uploadTotal == 1 ? '' : 's'} together';
     final label = encoding != null
         ? 'Encoding · ${(encoding * 100).round()}%'
         : switch (phase) {
             'starting' => 'Starting upload…',
-            'encrypting' => 'Encrypting file…',
+            'encrypting' =>
+              'Encrypting files${total > 0 ? ' ($done of $total)' : '…'}',
             'quoting' =>
-              'Getting storage quotes${total > 0 ? ' ($done of $total)' : '…'}',
-            'paying' => 'Paying for storage…',
+              'Checking chunks and getting quotes${total > 0 ? ' ($done of $total)' : '…'}',
+            'paying' => batch == null
+                ? 'Paying for storage…'
+                : 'Paying for storage — payment '
+                    '${batch.paymentsDone.clamp(0, batch.paymentsTotal)}'
+                    '${batch.paymentsTotal > 0 ? ' of ~${batch.paymentsTotal}' : ''}…',
             'storing' =>
               'Storing chunks${total > 0 ? ' ($done of $total)' : '…'}',
+            'finishing' => 'Finishing library entries…',
             _ => phase,
           };
     return [
       Text(
-        'Uploading · ${(_session.uploadDone + 1).clamp(1, _session.uploadTotal == 0 ? 1 : _session.uploadTotal)} '
-        'of ${_session.uploadTotal}',
+        headline,
         style: TextStyle(
             color: t.bone, fontSize: 16, fontWeight: FontWeight.w600),
       ),
@@ -1273,7 +1297,9 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       const SizedBox(height: 8),
       LinearProgressIndicator(
         value: encoding ??
-            (phase == 'storing' && total > 0 ? done / total : null),
+            ((phase == 'storing' || phase == 'encrypting') && total > 0
+                ? done / total
+                : null),
         backgroundColor: t.ink2,
       ),
       const SizedBox(height: 8),
@@ -1281,8 +1307,9 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       const SizedBox(height: 8),
       Text(
         'You can leave this page — uploading continues and picks up here '
-        'when you come back. Failures get one automatic retry at the '
-        'end. Just keep W@tch open until it finishes.',
+        'when you come back. The whole batch is paid together; anything '
+        'that fails gets one automatic free retry at the end. Just keep '
+        'W@tch open until it finishes.',
         style: TextStyle(color: t.ash, fontSize: 12),
       ),
       const SizedBox(height: 16),

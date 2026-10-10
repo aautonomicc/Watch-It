@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -327,6 +328,113 @@ void main() {
     expect(session.readyCount, 0);
     expect(session.entries.single.name, 'Dedup Movie (1980).mp4');
     expect(session.entries.single.address, addr);
+  });
+
+  test('upload-all: the whole set goes up as ONE pooled batch post, '
+      'per-file outcomes map back in order, and a failed file retries '
+      'free as a second failed-only batch', () async {
+    fake.wallet = {'configured': true, 'address': '0xabc', 'storage': 'file'};
+    mediaFile('one.mp4', 1);
+    mediaFile('two.mp4', 2);
+    final addrA = 'aa' * 32, addrB = 'bb' * 32;
+    final resultA = {'address': addrA, 'size': 64, 'chunks': 3,
+        'cost_atto': '1000', 'gas_wei': '1'};
+    final resultB = {'address': addrB, 'size': 64, 'chunks': 3,
+        'cost_atto': '1000', 'gas_wei': '1'};
+    fake.uploadResults = [resultA, resultB];
+    fake.datamaps[addrA] = [1, 2, 3];
+    fake.datamaps[addrB] = [4, 5, 6];
+    // The second file's chunks fail their first batch; by the time the
+    // automatic retry pass runs, the "network" has recovered (the
+    // payment survived core-side, so the retry batch is free).
+    fake.batchFailures['Two Movie (1971).mp4'] = 'close group store failed';
+
+    final session = BatchUploadSession.instance;
+    session.addListener(() {
+      if (session.entries.any((e) => e.status == 'failed') &&
+          fake.batchFailures.isNotEmpty) {
+        fake.batchFailures.clear();
+        // The retry batch carries only the failed file, so its per-order
+        // result slot is the first one.
+        fake.uploadResults = [resultB];
+      }
+    });
+    session.matchOverride = scriptedMatcher({
+      'one.mp4': cli.MatchOutcome(
+          type: 'video',
+          name: 'One Movie (1970).mp4',
+          method: 'tags',
+          confidence: 'high'),
+      'two.mp4': cli.MatchOutcome(
+          type: 'video',
+          name: 'Two Movie (1971).mp4',
+          method: 'tags',
+          confidence: 'high'),
+    });
+    session.probeOverride = (path) async => null;
+    await session.startPrepare(
+      api: api(),
+      paths: [tempDir.path],
+      listName: 'Pooled',
+      workDir: dirIn('work'),
+      configDir: dirIn('config'),
+    );
+    while (session.stage == BatchStage.preparing) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    while (session.costEstimate == null && session.estimateError == null) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    // Improvement (e): the review page can say how many payment
+    // transactions the pooled batch needs — here everything fits one
+    // ≤256-chunk merkle sub-batch.
+    expect(session.estimatedPayments, 1);
+
+    await session.startUpload();
+    while (session.stage == BatchStage.uploading) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    expect(session.stage, BatchStage.done);
+    expect(session.failedCount, 0);
+    expect(session.uploadedCount, 2);
+
+    // ONE pooled post carried the whole set (not one POST per file)…
+    expect(fake.batchUploadPosts, hasLength(2));
+    final first = jsonDecode(fake.batchUploadPosts.first)
+        as Map<String, dynamic>;
+    expect(
+      [for (final f in first['files'] as List) f['name']],
+      ['One Movie (1970).mp4', 'Two Movie (1971).mp4'],
+    );
+    // …and the retry batch carried ONLY the failed file.
+    final second = jsonDecode(fake.batchUploadPosts.last)
+        as Map<String, dynamic>;
+    expect(
+      [for (final f in second['files'] as List) f['name']],
+      ['Two Movie (1971).mp4'],
+    );
+    // Per-file outcomes mapped back by position.
+    final byName = {
+      for (final e in session.entries)
+        if (e.status == 'uploaded') e.name!: e,
+    };
+    expect(byName['One Movie (1970).mp4']!.address, addrA);
+    expect(byName['Two Movie (1971).mp4']!.address, addrB);
+  });
+
+  test('estimatedPayments: one merkle transaction per 256-chunk '
+      'sub-batch, upper bound', () {
+    final session = BatchUploadSession.instance;
+    session.costEstimate = {'total_chunks': 1};
+    expect(session.estimatedPayments, 1);
+    session.costEstimate = {'total_chunks': 256};
+    expect(session.estimatedPayments, 1);
+    session.costEstimate = {'total_chunks': 257};
+    expect(session.estimatedPayments, 2);
+    session.costEstimate = {'total_chunks': 0};
+    expect(session.estimatedPayments, isNull);
+    session.costEstimate = null;
+    expect(session.estimatedPayments, isNull);
   });
 
   test('confirm actions: skip and reject land the CLI statuses', () async {

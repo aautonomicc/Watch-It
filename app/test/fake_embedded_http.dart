@@ -106,6 +106,22 @@ class FakeEmbeddedHttp extends HttpOverrides {
   /// [uploadResult] when the list is shorter than the job id.
   List<Map<String, dynamic>> uploadResults = [];
 
+  /// Raw bodies of every `POST /upload/batch` (the pooled upload-all
+  /// route the batch uploader drives).
+  final List<String> batchUploadPosts = [];
+  int _batchStarted = 0;
+  int _batchPolls = 0;
+
+  /// States `GET /upload/batch/<id>` plays back in order (the last one
+  /// repeats), reset by every new `POST /upload/batch`. Empty → the job
+  /// reports done immediately: every posted file succeeds with the
+  /// per-order result from [uploadResults] (falling back to
+  /// [uploadResult], like the single-upload route) — except names listed
+  /// in [batchFailures], which come back failed with that error (and
+  /// flip the job phase to error, like the real core's partial outcome).
+  final List<Map<String, dynamic>> batchStates = [];
+  final Map<String, String> batchFailures = {};
+
   /// Non-null → `POST /upload/estimate` fails with (status, message).
   (int, String)? estimateFailure;
 
@@ -355,6 +371,76 @@ class FakeEmbeddedHttp extends HttpOverrides {
       _uploadPolls = 0;
       _uploadsStarted++;
       return (200, utf8.encode(jsonEncode({'id': _uploadsStarted})));
+    }
+    if (method == 'POST' && path == '/upload/batch') {
+      if (wallet == null) {
+        return (
+          400,
+          utf8.encode('no upload wallet configured — set one up in '
+              'Settings → Wallet')
+        );
+      }
+      batchUploadPosts.add(utf8.decode(body));
+      _batchPolls = 0;
+      _batchStarted++;
+      return (200, utf8.encode(jsonEncode({'id': _batchStarted})));
+    }
+    if (method == 'GET' && path.startsWith('/upload/batch/')) {
+      final id = int.parse(path.substring('/upload/batch/'.length));
+      Map<String, dynamic> state;
+      if (batchStates.isNotEmpty) {
+        state = batchStates[_batchPolls.clamp(0, batchStates.length - 1)];
+      } else {
+        final posted = jsonDecode(batchUploadPosts.last)
+            as Map<String, dynamic>;
+        final files = (posted['files'] as List).cast<Map>();
+        var failed = false;
+        var i = 0;
+        final out = <Map<String, dynamic>>[];
+        for (final f in files) {
+          final name = f['name'] as String? ?? '';
+          final error = batchFailures[name];
+          if (error != null) failed = true;
+          final result =
+              i < uploadResults.length ? uploadResults[i] : uploadResult;
+          out.add({
+            'name': name,
+            'path': f['path'],
+            'status': error == null ? 'done' : 'failed',
+            'error': error,
+            'address': error == null ? result['address'] : null,
+            'size': result['size'] ?? 5,
+            'chunks': result['chunks'] ?? 1,
+          });
+          i++;
+        }
+        state = {
+          'phase': failed ? 'error' : 'done',
+          'error': failed ? 'some chunks did not store' : null,
+          'done': files.length,
+          'total': files.length,
+          'payments_done': 1,
+          'payments_total': 1,
+          'cost_atto': '250000000000000000',
+          'files': out,
+        };
+      }
+      _batchPolls++;
+      return (
+        200,
+        utf8.encode(jsonEncode({
+          'id': id,
+          'phase': 'storing',
+          'done': 0,
+          'total': 0,
+          'payments_done': 0,
+          'payments_total': 1,
+          'cost_atto': '0',
+          'gas_wei': '0',
+          'files': const [],
+          ...state,
+        }))
+      );
     }
     if (method == 'GET' && path.startsWith('/upload/')) {
       final id = int.parse(path.substring('/upload/'.length));
