@@ -45,6 +45,15 @@ alloy-signer-local = { version = "2.4.2", features = ["mnemonic"] }
 # deterministic identity signature (sign-to-derive); same alloy 2.x tree
 # alloy-signer-local already pulls — no new code compiles.
 alloy-signer = "2.4"
+# The PAYMENT-signer tree (hw-wallet plan phase 2): evmlib's own alloy
+# facade — already in the lockfile via evmlib, resolves to the same copy
+# with the same features, so this adds zero compiles. Used ONLY by
+# signer.rs to build the `EthereumWallet` handed to `evmlib::Wallet::new`
+# (the seam every paid ant-core call signs through). Deliberately a
+# separate surface from the 2.x signer tree above: payment signers must
+# implement THIS tree's TxSigner, so phase 3's hardware signer comes from
+# the 1.x line (alloy-signer-trezor 1.8.x), not 2.4.x.
+alloy = { version = "1.0.32", default-features = false, features = ["std", "network", "signer-local"] }
 rand = "0.8"
 axum = "0.8"
 # blake3 + rmp-serde mirror ant-core's address derivation (compute_address

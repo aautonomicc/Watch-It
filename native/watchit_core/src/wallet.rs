@@ -1,4 +1,6 @@
 //! Internal upload wallet: key storage, BIP-39 derivation, balances.
+//! Everything that SIGNS with the key (payments, the backup identity)
+//! goes through signer.rs — the raw key never reaches ant-core.
 //!
 //! The private key lives in the OS keychain (Secret Service / Windows
 //! Credential Manager / macOS Keychain) when one is available, else in a
@@ -12,8 +14,6 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
-
-use ant_core::data::{EvmNetwork, Wallet as EvmWallet};
 
 const KEYCHAIN_SERVICE: &str = "watchit";
 const KEYCHAIN_USER: &str = "upload-wallet";
@@ -247,18 +247,13 @@ pub fn address_of(key_hex: &str) -> Result<String, String> {
     Ok(signer.address().to_string())
 }
 
-/// The evmlib wallet for the stored key on Arbitrum One (the network
-/// Autonomi mainnet payments live on; hardcoded RPC/token/vault).
-pub fn evm_wallet(key_hex: &str) -> Result<EvmWallet, String> {
-    EvmWallet::new_from_private_key(EvmNetwork::ArbitrumOne, key_hex)
-        .map_err(|e| format!("wallet init failed: {e:?}"))
-}
-
 /// ANT + ETH balances on Arbitrum One as raw base-unit decimal strings
 /// `(ant_atto, eth_wei)`. Talks to the public RPC, not the Autonomi
-/// network — works while the ant client is still connecting.
+/// network — works while the ant client is still connecting. The wallet
+/// object comes from the signer seam (signer.rs) like every other
+/// evmlib wallet in the app.
 pub async fn balances(key_hex: &str) -> Result<(String, String), String> {
-    let wallet = evm_wallet(key_hex)?;
+    let wallet = crate::signer::Signer::software(key_hex)?.payment_wallet()?;
     let ant = wallet
         .balance_of_tokens()
         .await
@@ -363,11 +358,5 @@ mod tests {
         let store = WalletStore::new(None, false);
         let err = store.store(VECTOR_KEY).unwrap_err();
         assert!(err.contains("no keychain"));
-    }
-
-    #[test]
-    fn evm_wallet_builds_on_arbitrum_one() {
-        let w = evm_wallet(VECTOR_KEY).unwrap();
-        assert_eq!(w.address().to_string(), VECTOR_ADDR);
     }
 }

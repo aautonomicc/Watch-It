@@ -6,9 +6,10 @@
 //! whole batch into ant-core's multi-record upload driver
 //! (`Client::upload_records`), which pays one `payForMerkleTree`
 //! transaction per ≤256-chunk merkle sub-batch — so a typical batch is
-//! ONE payment confirmation, and the same seam later takes an external
-//! signer (Ledger/Trezor) without reshaping the flow: the adapter below
-//! is the only place money is signed.
+//! ONE payment confirmation. Since phase 2 the adapter's wallet is built
+//! through the signer seam (signer.rs), so an external signer
+//! (Trezor/Ledger, phase 3) takes over without reshaping the flow: the
+//! adapter below is the only place money is signed.
 //!
 //! Flow: encrypt every file locally into a disk spill (no network, no
 //! payment — self-encryption is deterministic, so the chunk set is the
@@ -286,13 +287,9 @@ async fn drive_batch(
         .map(|d| d.join(format!("batch-{}.ckpt", &fingerprint[..16])));
     let mut state = load_checkpoint(ckpt_path.as_deref());
 
-    // ---- 4) Client for quoting/storing, wallet for paying ---------------
+    // ---- 4) Client for quoting/storing, signer for paying ----------------
     let client = engine.client().await?;
-    let (key, _) = engine
-        .wallet
-        .load()
-        .ok_or("no upload wallet configured — set one up in Settings → Wallet")?;
-    let wallet = crate::wallet::evm_wallet(&key)?;
+    let wallet = engine.signer()?.payment_wallet()?;
 
     let adapter = BatchAdapter {
         spill: spill_root.clone(),
@@ -513,9 +510,10 @@ fn encrypt_file_to_spill(spill: &Path, path: &Path) -> Result<EncryptedFile, Str
 }
 
 /// The money seam: byte staging + wallet submission for the pooled batch.
-/// Phase 2 of the hardware-wallet plan swaps the `Wallet` here for an
-/// external signer — `pay`/`pay_merkle` are the only two places a batch
-/// spends.
+/// Since phase 2 the `Wallet` here is signer-built (signer.rs wraps the
+/// configured signer in the `EthereumWallet` evmlib signs through), so a
+/// hardware signer (phase 3) plugs in without touching this adapter —
+/// `pay`/`pay_merkle` stay the only two places a batch spends.
 struct BatchAdapter {
     spill: PathBuf,
     wallet: Wallet,

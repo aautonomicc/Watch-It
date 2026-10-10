@@ -13,6 +13,7 @@ pub mod engine;
 pub mod mapstore;
 pub mod mywatch;
 pub mod server;
+pub mod signer;
 pub mod upload;
 pub mod verify;
 pub mod wallet;

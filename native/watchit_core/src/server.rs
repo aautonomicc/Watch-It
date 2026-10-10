@@ -734,9 +734,9 @@ async fn upload_batch_status(engine: &'static Engine, Path(id): Path<u64>) -> Re
 /// backup but never spend from the wallet.
 async fn backup_status(engine: &'static Engine) -> Response {
     let keys = engine
-        .wallet
-        .load()
-        .and_then(|(key, _)| crate::backup::derive_keys(&key).ok());
+        .signer()
+        .ok()
+        .and_then(|s| s.backup_keys().ok());
     // `last` is identity-gated: a summary recorded under a different
     // identity (a pre-sign-to-derive backup, or a swapped wallet) reads
     // as "never backed up on this line" — crucially the phase-2 section

@@ -231,8 +231,9 @@ the file's identity — pinned against the single-file path), the root
 map recovers with zero network rounds, and the pooled set pays **one
 `payForMerkleTree` transaction per ≤256-chunk merkle sub-batch** — a
 typical batch is one payment instead of one+ per file. The
-`UploadAdapter` implementation is the single money seam a later
-external signer (Trezor/Ledger, plan phase 2) replaces. Payment proofs
+`UploadAdapter` implementation is the batch's single money seam; since
+phase 2 its wallet is signer-built (see "The signer seam" below), so a
+hardware signer (Trezor/Ledger, phase 3) plugs in without touching it. Payment proofs
 checkpoint to `<data>/batch-upload/` (keyed by the batch's chunk
 fingerprint; merkle payments stay valid 7 days), so failed stores — and
 app restarts — retry free; a checkpoint that died inside the seconds-
@@ -244,6 +245,27 @@ every chunk address), posts one batch, maps per-file outcomes back in
 input order, and the review page states the payment count up front
 ("Paid together in 1 payment transaction" / "~N … one per ~1 GB of
 chunks").
+
+**The signer seam** (2026-10-10, unreleased — hardware-wallet plan
+phase 2): everything that signs goes through `signer.rs`'s `Signer`
+type — today a single `Software` variant wrapping the stored key;
+phase 3 adds a Trezor variant and nothing at the call sites changes.
+`Signer::payment_wallet()` builds the evmlib wallet with
+`Wallet::new(ArbitrumOne, EthereumWallet::from(signer))` — evmlib's
+`Wallet` is just an alloy `EthereumWallet` (any `TxSigner`) plus a
+network, so this ONE seam signs every paid call: the client's attached
+wallet (`engine.attach_wallet`, covering single-file uploads and the
+backup's `data_upload`/`chunk_put`/`pointer_update`), the batch
+adapter's `pay`/`pay_merkle`, and the balances query.
+`new_from_private_key` is gone from the tree — the raw key string
+never crosses into ant-core. The backup identity rides the same type
+(`identity_signature`/`backup_keys`; the pre-phase-1 legacy derivation
+is `backup_keys_legacy() -> Ok(None)` for signers with no raw key, so
+a hardware wallet correctly has no legacy restore line). Alloy-tree
+note: the payment signer must implement **evmlib's** alloy (1.x
+facade, already in the lockfile) — phase 3 therefore uses
+alloy-signer-trezor 1.8.x, not the 2.4.x tree backup.rs's identity
+signature uses (the r‖s bytes are identical across trees by RFC-6979).
 
 ### My W@tch — device linking & sync (shipped alpha.61/.62)
 

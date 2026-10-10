@@ -1057,7 +1057,7 @@ canonical names automatically. CLI docs in [UPLOAD-CLI.md](UPLOAD-CLI.md).
       uploads without encode tiers; see "Upload on Android" in the
       Publish section above; iOS deferred)
 
-## Hardware-wallet plan (adopted 2026-10-10; phases 0 + 4-now implemented 2026-10-10, unreleased)
+## Hardware-wallet plan (adopted 2026-10-10; phases 0–2 + 4-now implemented 2026-10-10 — 0 + 4-now shipped in alpha.113, 1–2 unreleased)
 
 The 5-phase plan from the 2026-10-10 discussion series (CLAUDE.md has
 the full record): make the upload wallet — which is also the backup
@@ -1104,14 +1104,34 @@ decision (2026-10-10).
       raw-key derivation when the new pointer is empty (old backups
       stay restorable from the same 12 words; the restore dialog
       says so). Legacy + v2 derivations pinned by test vectors.
-- [ ] Phase 2 — external-signer payments: a Signer-trait seam behind
-      the phase-0 adapter (software key / Trezor / Ledger
-      interchangeable), ant-core external-signer machinery
-- [ ] Phase 3 — transport + UI: alloy-signer-trezor (matches the
-      pinned alloy), direct USB via rusb, desktop-first, setup
+- [x] Phase 2 — the signer seam (implemented 2026-10-10, unreleased):
+      new `signer.rs` `Signer` type (today one variant, the stored
+      software key; phase 3 adds Trezor) through which EVERYTHING that
+      signs now flows — `payment_wallet()` builds the evmlib wallet
+      via `Wallet::new` over a signer-constructed `EthereumWallet`
+      (never `new_from_private_key`, which is gone from the tree), and
+      that one seam covers every paid call: the client's attached
+      wallet (single-file uploads, backup chunk/pointer writes) and
+      the phase-0 batch adapter's `pay`/`pay_merkle`. The backup
+      identity rides the same type (`identity_signature`/
+      `backup_keys`/`backup_keys_legacy` — legacy is `None` for
+      signers with no raw key, so a hardware wallet correctly has no
+      legacy restore line). DEVIATION from the plan sketch, for the
+      better: ant-core's external prepare/finalize machinery is NOT
+      needed — evmlib's `Wallet` is just an alloy `EthereumWallet`
+      (any `TxSigner`) + network, so wrapping the signer there keeps
+      every existing payment path working with no raw key handed to
+      ant-core and no reshaped flows. CORRECTION recorded: the
+      payment-signer tree is evmlib's alloy 1.x, so phase 3 uses
+      alloy-signer-trezor 1.8.x (exists), NOT the 2.4.x noted earlier.
+- [ ] Phase 3 — transport + UI: alloy-signer-trezor 1.8.x (evmlib's
+      alloy tree), direct USB via rusb, desktop-first, setup
       ceremony + per-payment confirm screens; Trezor first (user has
       one for e2e on their desktop — Ella is headless; unit tests
-      fake the Signer trait), Ledger later (BLE opens Android)
+      fake the Signer seam), Ledger later (BLE opens Android). UX
+      note for the confirm screens: evmlib approves a U256::MAX
+      token allowance when short, so a first payment can be TWO
+      device confirmations (approve, then pay), one thereafter
 
 ## Network & data control (shipped 2026-09-03→06, v0.1.0-alpha.85–.92)
 

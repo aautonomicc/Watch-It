@@ -505,45 +505,47 @@ impl Engine {
     /// Kick off a backup. `input` is the app-assembled payload:
     /// `{"doc": {...}, "art": [{"file","path"}...], "map_addrs": [...]}`.
     pub fn start_backup(&'static self, input: serde_json::Value) -> Result<(), String> {
-        let Some((key_hex, _)) = self.wallet.load() else {
+        if self.wallet.load().is_none() {
             return Err(
                 "no upload wallet configured — the backup identity derives from \
                  its 12 words (Settings → Wallet)"
                     .into(),
             );
-        };
+        }
+        let signer = self.signer()?;
         if input.get("doc").and_then(|d| d.as_object()).is_none() {
             return Err("backup payload needs a \"doc\" object".into());
         }
         let job = self.backups.begin("backup", "deriving")?;
-        tokio::spawn(run_backup(self, job, key_hex, input));
+        tokio::spawn(run_backup(self, job, signer, input));
         Ok(())
     }
 
     /// Kick off a restore. Reads are free: `key_hex` (a pasted wallet
     /// key, for fresh installs restoring before importing the wallet) or
-    /// the stored wallet provide the identity; decrypted artwork lands in
-    /// `art_dir` for the app to sort into place.
+    /// the configured signer provide the identity; decrypted artwork
+    /// lands in `art_dir` for the app to sort into place.
     pub fn start_restore(
         &'static self,
         key_hex: Option<String>,
         art_dir: String,
     ) -> Result<(), String> {
-        let key = match key_hex {
-            Some(k) => crate::wallet::normalize_private_key(&k)?,
+        let signer = match key_hex {
+            Some(k) => crate::signer::Signer::software(&k)?,
             None => {
-                self.wallet
-                    .load()
-                    .ok_or("no wallet on this device — paste the wallet key, or import \
-                            the 12 words in Settings → Wallet first")?
-                    .0
+                if self.wallet.load().is_none() {
+                    return Err("no wallet on this device — paste the wallet key, or import \
+                                the 12 words in Settings → Wallet first"
+                        .into());
+                }
+                self.signer()?
             }
         };
         if art_dir.trim().is_empty() {
             return Err("restore needs an art_dir".into());
         }
         let job = self.backups.begin("restore", "deriving")?;
-        tokio::spawn(run_restore(self, job, key, art_dir));
+        tokio::spawn(run_restore(self, job, signer, art_dir));
         Ok(())
     }
 
@@ -592,20 +594,20 @@ fn finish_job(
 async fn run_backup(
     engine: &'static Engine,
     job: Arc<Mutex<JobState>>,
-    key_hex: String,
+    signer: crate::signer::Signer,
     input: serde_json::Value,
 ) {
-    let outcome = drive_backup(engine, &job, &key_hex, &input).await;
+    let outcome = drive_backup(engine, &job, &signer, &input).await;
     finish_job(engine, &job, outcome);
 }
 
 async fn drive_backup(
     engine: &'static Engine,
     job: &Arc<Mutex<JobState>>,
-    key_hex: &str,
+    signer: &crate::signer::Signer,
     input: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let keys = derive_keys(key_hex)?;
+    let keys = signer.backup_keys()?;
     let now_ms = chrono::Utc::now().timestamp_millis();
 
     // -- pack the objects ------------------------------------------------
@@ -824,12 +826,12 @@ async fn drive_backup(
 async fn run_restore(
     engine: &'static Engine,
     job: Arc<Mutex<JobState>>,
-    key_hex: String,
+    signer: crate::signer::Signer,
     art_dir: String,
 ) {
     const MISSING: &str = "no backup found for this wallet — nothing has been \
                            backed up under these 12 words yet";
-    let outcome = match derive_keys(&key_hex) {
+    let outcome = match signer.backup_keys() {
         Ok(keys) => {
             match drive_restore(engine, &job, keys.read(), &art_dir, MISSING)
                 .await
@@ -839,9 +841,11 @@ async fn run_restore(
                 // made before the flip stay restorable from the same 12
                 // words. Only the clean not-found falls through — a
                 // transport error surfaces as itself (retrying the walk
-                // under different keys would not help it).
-                Err(e) if e == MISSING => match derive_keys_legacy(&key_hex) {
-                    Ok(old) => {
+                // under different keys would not help it). A signer with
+                // no raw key (hardware, phase 3) has no legacy line by
+                // construction and keeps the clean not-found.
+                Err(e) if e == MISSING => match signer.backup_keys_legacy() {
+                    Ok(Some(old)) => {
                         tracing::info!(
                             "no backup under the current identity — trying \
                              the pre-upgrade backup line"
@@ -854,6 +858,7 @@ async fn run_restore(
                                 v
                             })
                     }
+                    Ok(None) => Err(MISSING.into()),
                     Err(e) => Err(e),
                 },
                 other => other,
@@ -1070,26 +1075,24 @@ async fn drive_restore(
     // When this device's own wallet IS the backup identity, warm the
     // local object cache so its next backup skips re-uploading anything
     // the restored backup already holds.
-    if let Some((stored_key, _)) = engine.wallet.load() {
-        if let Ok(stored) = derive_keys(&stored_key) {
-            if stored.pointer == keys.pointer {
-                let mut state = engine
-                    .backups
-                    .state_for(&identity_fingerprint(&keys.enc));
-                for (hash, entry) in objects {
-                    let (Some(map_b64), Some(size)) = (
-                        entry.get("map").and_then(|m| m.as_str()),
-                        entry.get("size").and_then(|s| s.as_u64()),
-                    ) else {
-                        continue;
-                    };
-                    state
-                        .objects
-                        .entry(hash.clone())
-                        .or_insert((map_b64.to_string(), size));
-                }
-                engine.backups.save_state(&state);
+    if let Ok(stored) = engine.signer().and_then(|s| s.backup_keys()) {
+        if stored.pointer == keys.pointer {
+            let mut state = engine
+                .backups
+                .state_for(&identity_fingerprint(&keys.enc));
+            for (hash, entry) in objects {
+                let (Some(map_b64), Some(size)) = (
+                    entry.get("map").and_then(|m| m.as_str()),
+                    entry.get("size").and_then(|s| s.as_u64()),
+                ) else {
+                    continue;
+                };
+                state
+                    .objects
+                    .entry(hash.clone())
+                    .or_insert((map_b64.to_string(), size));
             }
+            engine.backups.save_state(&state);
         }
     }
 

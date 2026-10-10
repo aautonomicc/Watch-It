@@ -12,7 +12,6 @@ use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use std::time::Duration;
 
 use ant_core::data::{Client, ClientConfig, DataMap, Error as AntError};
-use ant_core::data::{EvmNetwork, Wallet as EvmWallet};
 use bytes::Bytes;
 use futures::StreamExt;
 use tokio::runtime::Handle;
@@ -339,21 +338,22 @@ impl Engine {
         }
     }
 
-    /// Attach the stored upload wallet, if any. Wallets are builder-set
-    /// (`with_wallet` consumes the client), so this runs on every fresh
-    /// connect; a bad stored key degrades to a wallet-less client rather
-    /// than blocking streaming.
+    /// Attach the configured upload wallet, if any — built through the
+    /// signer seam (signer.rs), never from the raw key. Wallets are
+    /// builder-set (`with_wallet` consumes the client), so this runs on
+    /// every fresh connect; a bad stored key degrades to a wallet-less
+    /// client rather than blocking streaming.
     fn attach_wallet(&self, client: Client) -> Client {
-        let Some((key, _)) = self.wallet.load() else {
+        if self.wallet.load().is_none() {
             return client;
-        };
-        match EvmWallet::new_from_private_key(EvmNetwork::ArbitrumOne, &key) {
+        }
+        match self.signer().and_then(|s| s.payment_wallet()) {
             Ok(w) => {
                 tracing::info!("upload wallet attached ({})", w.address());
                 client.with_wallet(w)
             }
             Err(e) => {
-                tracing::warn!("stored wallet key unusable, continuing without: {e:?}");
+                tracing::warn!("stored wallet key unusable, continuing without: {e}");
                 client
             }
         }
