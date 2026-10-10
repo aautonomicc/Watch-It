@@ -1057,7 +1057,7 @@ canonical names automatically. CLI docs in [UPLOAD-CLI.md](UPLOAD-CLI.md).
       uploads without encode tiers; see "Upload on Android" in the
       Publish section above; iOS deferred)
 
-## Hardware-wallet plan (adopted 2026-10-10; phases 0–2 + 4-now implemented 2026-10-10 — 0 + 4-now shipped in alpha.113, 1–2 unreleased)
+## Hardware-wallet plan (adopted 2026-10-10; phases 0–2 + 4-now implemented 2026-10-10 — 0 + 4-now shipped in alpha.113, 1–2 unreleased; phase-4 key policy settled 2026-10-10, rides phase 3)
 
 The 5-phase plan from the 2026-10-10 discussion series (CLAUDE.md has
 the full record): make the upload wallet — which is also the backup
@@ -1083,9 +1083,8 @@ decision (2026-10-10).
       moved from plaintext `backup_follow.json` into the OS keychain
       via the core's new `/backup/followkeys` store (0600-file
       fallback; automatic migration strips the legacy file only after
-      the keychain took the keys). The rest of phase 4 (optional
-      never-persist paranoid mode, zeroize-on-drop) rides the HW
-      phases.
+      the keychain took the keys). The rest of phase 4 is the settled
+      key policy below — it rides phase 3.
 - [x] Phase 1 — sign-to-derive backup identity (implemented
       2026-10-10, unreleased): backup keys now derive from the
       wallet's deterministic (RFC-6979) EIP-191 signature of the
@@ -1132,6 +1131,34 @@ decision (2026-10-10).
       note for the confirm screens: evmlib approves a U256::MAX
       token allowance when short, so a first payment can be TWO
       device confirmations (approve, then pay), one thereafter
+- [ ] Phase 4 (remainder) — key policy, SETTLED 2026-10-10, rides
+      phase 3 (the whole 2026-10-10 discussion series distilled):
+      (1) **paranoid payments are the DEFAULT with a hardware
+      wallet** — the master caches no derived backup keys; they
+      re-derive per use via one device tap (`IDENTITY_MESSAGE_V1`
+      sign). Nothing is lost by this: on a HW wallet unattended
+      auto-backup is impossible anyway, since every backup pays and
+      every payment needs a physical tap. The pointer ADDRESS is a
+      non-secret and stays persisted, so the Backup screen still
+      shows last-backup/counter with the device unplugged.
+      (2) **"Share backup read keys with linked devices" is a
+      separate toggle, DEFAULT ON whenever a My W@tch link exists**:
+      the read keys (pointer address + content key — can read the
+      backup line, can never spend) live in the sealed My W@tch
+      store and in follower keychains (the alpha.113 path), so
+      pairing a new device, follower bootstrap and Low-data mode all
+      work Trezor-free. Honest copy required: anyone on the My W@tch
+      link can read the backups. (3) The opt-out of (2) =
+      single-device maximal-paranoid: keys exist only as the
+      Trezor-derivable signature, no followers are possible at all,
+      and every backup needs the device. (4) Limits, unchanged and
+      documented: the write key is never shared or stored anywhere;
+      read-keys-at-rest on follower devices is the unavoidable price
+      of unattended followers; even paranoid mode has the keys in
+      RAM during each backup. Zeroize-on-drop rides along. Daily HW
+      UX this lands on: one tap at setup, one per upload batch, one
+      per backup — funds are 100% hardware-protected in EVERY mode.
+      Build order: phase 3 next, this policy ships with it.
 
 ## Network & data control (shipped 2026-09-03→06, v0.1.0-alpha.85–.92)
 
