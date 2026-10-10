@@ -1155,9 +1155,9 @@ dependencies = [
 
 [[package]]
 name = "ant-quic"
-version = "0.27.54"
+version = "0.27.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39b673f80aaf68d1245be706eda158c3e3334c127ac13998b9e4ae02522fbacf"
+checksum = "b80f89888f4ca74af0f2604d8931049088c253d66c8e81522d9e47313cd0c373"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4190,7 +4190,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.57.0",
 ]
 
 [[package]]
@@ -8453,19 +8453,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "windows-core"
-version = "0.62.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
-dependencies = [
- "windows-implement 0.60.2",
- "windows-interface 0.59.3",
- "windows-link 0.2.1",
- "windows-result 0.4.1",
- "windows-strings 0.5.1",
-]
-
-[[package]]
 name = "windows-future"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9005,9 +8992,9 @@ dependencies = [
 
 [[package]]
 name = "x0x"
-version = "0.46.5"
+version = "0.46.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "193bd36c8f39931defc58bca1611f6e379c998e5c6537883c044848286dc1916"
+checksum = "aaa59707004cfb87d7128bbbf923d21f77825907d90aae2201d4b739fe8d3276"
 dependencies = [
  "ant-quic",
  "anyhow",
