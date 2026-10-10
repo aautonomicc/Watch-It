@@ -126,7 +126,17 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   time so they can never drift from what actually shipped
 - Wallet (renamed from Publishing 2026-08-27: create with 12-word
   ceremony + retype confirm, import key/phrase, live ANT/ETH balances,
-  remove; funds the private uploads)
+  remove; funds the private uploads). Since 2026-10-10 (unreleased) a
+  third, desktop-only way in: "Connect a hardware wallet (Trezor)" —
+  plug-in + unlock instructions, a default-on "keep backup read keys
+  on this computer" choice with honest link-members-can-read copy,
+  then the on-device ceremony (confirm the backup-identity message
+  twice). Configured hardware wallets show accent copy ("the private
+  key never leaves the device"), no file-storage warning (only a
+  public marker is stored), and remove reads as a disconnect
+- During a batch upload's paying phase a hardware wallet adds the
+  line "Confirm each payment on your Trezor"; the backup job's
+  `trezor` phase reads "Confirm on your Trezor…"
 - Backup (2026-10-06, alpha.110 — beside Wallet, admin-only): the
   seed-phrase backup — "Back up now" publishes the full W@tch state
   to Autonomi encrypted under keys derived from the wallet (its 12

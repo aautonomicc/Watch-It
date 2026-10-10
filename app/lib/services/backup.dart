@@ -236,6 +236,7 @@ class BackupJob {
   /// A short progress line for the screen.
   String get label => switch (phase) {
         'deriving' => 'Preparing…',
+        'trezor' => 'Confirm on your Trezor…',
         'packing' => 'Packing your library…',
         'uploading' =>
           'Uploading changes… ${total == 0 ? '' : '($done of $total)'}',

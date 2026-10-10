@@ -1304,6 +1304,15 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       ),
       const SizedBox(height: 8),
       Text(label, style: TextStyle(color: t.boneDim, fontSize: 13)),
+      if (phase == 'paying' && (_wallet?.isHardware ?? false))
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(
+            'Confirm each payment on your Trezor — it must stay plugged in '
+            'and unlocked.',
+            style: TextStyle(color: t.accent, fontSize: 12.5),
+          ),
+        ),
       const SizedBox(height: 8),
       Text(
         'You can leave this page — uploading continues and picks up here '

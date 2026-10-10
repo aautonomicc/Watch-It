@@ -248,9 +248,9 @@ chunks").
 
 **The signer seam** (2026-10-10, unreleased — hardware-wallet plan
 phase 2): everything that signs goes through `signer.rs`'s `Signer`
-type — today a single `Software` variant wrapping the stored key;
-phase 3 adds a Trezor variant and nothing at the call sites changes.
-`Signer::payment_wallet()` builds the evmlib wallet with
+type — a `Software` variant wrapping the stored key, and (phase 3) a
+`Trezor` variant holding only public identity.
+`Signer::payment_wallet()` (async since phase 3) builds the evmlib wallet with
 `Wallet::new(ArbitrumOne, EthereumWallet::from(signer))` — evmlib's
 `Wallet` is just an alloy `EthereumWallet` (any `TxSigner`) plus a
 network, so this ONE seam signs every paid call: the client's attached
@@ -266,6 +266,42 @@ note: the payment signer must implement **evmlib's** alloy (1.x
 facade, already in the lockfile) — phase 3 therefore uses
 alloy-signer-trezor 1.8.x, not the 2.4.x tree backup.rs's identity
 signature uses (the r‖s bytes are identical across trees by RFC-6979).
+
+**Hardware wallet — Trezor** (2026-10-10, unreleased — hardware-wallet
+plan phase 3 + the settled phase-4 key policy): `trezor.rs` talks to
+the device over alloy-signer-trezor 1.8.3 → trezor-client → rusb
+(DIRECT USB, no Trezor Bridge; Linux needs the standard Trezor udev
+rules — the permission error says so; desktop-only, Android gets
+stubs). Every device conversation runs on a blocking thread
+(`spawn_blocking` + `Handle::block_on`) because the signer's async
+methods do synchronous USB inside and a signature takes as long as the
+user takes at the button. Setup (`POST /wallet/trezor`,
+`{"share_keys": bool}` default true): the device at m/44'/60'/0'/0/0
+(the software wallet's exact path — the same 12 words land on the same
+address and backup line) signs `IDENTITY_MESSAGE_V1` TWICE
+(determinism guard), the backup identity derives in RAM, and the
+wallet store keeps only the public marker
+`trezor:v1:<address>:<pointer_hex>:<fingerprint>` — address, backup
+pointer address and public line fingerprint, so the Backup screen
+shows the identity and its last-backup record with the device
+unplugged. Key policy: the WRITE half (ML-DSA pointer seed) is NEVER
+persisted — each backup sets job phase `trezor` ("Confirm on your
+Trezor…"), re-derives on-device, and the derived pointer must equal
+the configured one (wrong device / changed passphrase fails loudly
+instead of minting a parallel line). The READ half (content key)
+persists in the `backup-read-keys` keychain entry
+(`Engine::trezor_keys`, 0600-file fallback) only while "share backup
+read keys" is on (the setup default) — `GET /backup` serves `key`
+only then, so an opted-out install can never publish the phase-2
+key-share section by construction; opting out makes restore ask the
+device once. Payments: `Signer::payment_wallet()` opens a USB session
+bound to the configured address and every transaction waits for a
+physical confirmation (first payment may be two: evmlib's allowance
+approve, then pay); an unplugged device degrades to a wallet-less
+client with a plug-it-in hint at the paid call. `GET /wallet` reports
+`kind` (`software`/`trezor`) + `keys_held`; balances for a hardware
+wallet query by address via evmlib's free functions. A software import
+or wallet delete sweeps the kept read key with the marker.
 
 ### My W@tch — device linking & sync (shipped alpha.61/.62)
 

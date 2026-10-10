@@ -1057,7 +1057,7 @@ canonical names automatically. CLI docs in [UPLOAD-CLI.md](UPLOAD-CLI.md).
       uploads without encode tiers; see "Upload on Android" in the
       Publish section above; iOS deferred)
 
-## Hardware-wallet plan (adopted 2026-10-10; phases 0–2 + 4-now implemented 2026-10-10 — 0 + 4-now shipped in alpha.113, 1–2 unreleased; phase-4 key policy settled 2026-10-10, rides phase 3)
+## Hardware-wallet plan (adopted 2026-10-10; ALL PHASES 0–4 implemented 2026-10-10 — 0 + 4-now shipped in alpha.113, 1–3 + the phase-4 key policy unreleased; open: real-Trezor e2e on the user's desktop, Ledger, zeroize)
 
 The 5-phase plan from the 2026-10-10 discussion series (CLAUDE.md has
 the full record): make the upload wallet — which is also the backup
@@ -1123,16 +1123,37 @@ decision (2026-10-10).
       ant-core and no reshaped flows. CORRECTION recorded: the
       payment-signer tree is evmlib's alloy 1.x, so phase 3 uses
       alloy-signer-trezor 1.8.x (exists), NOT the 2.4.x noted earlier.
-- [ ] Phase 3 — transport + UI: alloy-signer-trezor 1.8.x (evmlib's
-      alloy tree), direct USB via rusb, desktop-first, setup
-      ceremony + per-payment confirm screens; Trezor first (user has
-      one for e2e on their desktop — Ella is headless; unit tests
-      fake the Signer seam), Ledger later (BLE opens Android). UX
-      note for the confirm screens: evmlib approves a U256::MAX
-      token allowance when short, so a first payment can be TWO
-      device confirmations (approve, then pay), one thereafter
-- [ ] Phase 4 (remainder) — key policy, SETTLED 2026-10-10, rides
-      phase 3 (the whole 2026-10-10 discussion series distilled):
+- [x] Phase 3 — Trezor transport + setup ceremony + confirm UI
+      (implemented 2026-10-10, unreleased; carries the settled
+      phase-4 key policy below): new `trezor.rs` over
+      alloy-signer-trezor 1.8.3 (evmlib's alloy tree — the TxSigner
+      unifies) → trezor-client → rusb, DIRECT USB, no Bridge; every
+      device conversation runs on a blocking thread (a signature
+      takes as long as the user takes at the button). Setup =
+      Settings → Wallet → "Connect a hardware wallet (Trezor)":
+      the device signs `IDENTITY_MESSAGE_V1` TWICE (the determinism
+      guard, now exercised for real) and the wallet store keeps only
+      a public `trezor:v1:<address>:<pointer>:<fingerprint>` marker —
+      no key material ever touches the computer. Payments
+      (`Signer::payment_wallet`, now async) open a USB session bound
+      to the configured address and every transaction waits for a
+      physical confirmation; backups re-derive the write keys
+      on-device per use (job phase `trezor` → "Confirm on your
+      Trezor…"), and the derived pointer must match the configured
+      one (wrong device / changed passphrase fails loudly). Routes:
+      `GET /wallet/trezor` (probe), `POST /wallet/trezor`
+      (ceremony, `share_keys` default true); `GET /wallet` gains
+      `kind` + `keys_held`, balances for a hardware wallet query by
+      address (evmlib free functions). Linux needs the standard
+      Trezor udev rules — the permission error says so. UX note
+      held: evmlib approves a U256::MAX token allowance when short,
+      so a FIRST payment can be two device confirmations (approve,
+      then pay), one thereafter. STILL OPEN: the real-device e2e
+      pass (user's desktop — Ella is headless; every device-free leg
+      is test-pinned), Ledger (BLE opens Android) later.
+- [x] Phase 4 (remainder) — key policy, SETTLED 2026-10-10,
+      IMPLEMENTED with phase 3 (zeroize-on-drop still open; the
+      whole 2026-10-10 discussion series distilled):
       (1) **paranoid payments are the DEFAULT with a hardware
       wallet** — the master caches no derived backup keys; they
       re-derive per use via one device tap (`IDENTITY_MESSAGE_V1`

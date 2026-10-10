@@ -158,6 +158,10 @@ pub struct Engine {
     /// gets the wallet key's at-rest treatment. Stored value: one JSON
     /// blob `{"ptr": 64-hex, "key": 64-hex}`.
     pub follow_keys: crate::wallet::WalletStore,
+    /// A hardware wallet's kept backup READ key (content key hex) —
+    /// phase-4 sharing default. The wallet store itself holds only the
+    /// public marker then; the write half is never persisted anywhere.
+    pub trezor_keys: crate::wallet::WalletStore,
     /// Publish upload jobs (`POST /upload` → poll `GET /upload/{id}`).
     pub uploads: crate::upload::UploadManager,
     /// Seed-phrase backup / restore jobs (`POST /backup/run`,
@@ -216,6 +220,12 @@ impl Engine {
                 true,
                 "backup-follow-keys",
                 "follow.keys",
+            ),
+            trezor_keys: crate::wallet::WalletStore::named(
+                data_dir,
+                true,
+                "backup-read-keys",
+                "backup_read.keys",
             ),
             uploads: crate::upload::UploadManager::default(),
             backups: crate::backup::BackupManager::new(data_dir),
@@ -325,7 +335,7 @@ impl Engine {
                         "network is paused — resume it in Settings".to_string()
                     );
                 }
-                let c = Arc::new(self.attach_wallet(c));
+                let c = Arc::new(self.attach_wallet(c).await);
                 *self.client.write().unwrap() = Some(c.clone());
                 *self.last_error.lock().unwrap() = None;
                 Ok(c)
@@ -343,17 +353,28 @@ impl Engine {
     /// builder-set (`with_wallet` consumes the client), so this runs on
     /// every fresh connect; a bad stored key degrades to a wallet-less
     /// client rather than blocking streaming.
-    fn attach_wallet(&self, client: Client) -> Client {
+    async fn attach_wallet(&self, client: Client) -> Client {
         if self.wallet.load().is_none() {
             return client;
         }
-        match self.signer().and_then(|s| s.payment_wallet()) {
+        let signer = match self.signer() {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("stored wallet unusable, continuing without: {e}");
+                return client;
+            }
+        };
+        // Hardware signers open a USB session here — an unplugged device
+        // degrades to a wallet-less client (streaming is never gated on
+        // the wallet), and wallet_client() reports the plug-it-in hint
+        // when a paid call then needs it.
+        match signer.payment_wallet().await {
             Ok(w) => {
                 tracing::info!("upload wallet attached ({})", w.address());
                 client.with_wallet(w)
             }
             Err(e) => {
-                tracing::warn!("stored wallet key unusable, continuing without: {e}");
+                tracing::warn!("configured wallet not attachable, continuing without: {e}");
                 client
             }
         }

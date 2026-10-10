@@ -84,6 +84,15 @@ class FakeEmbeddedHttp extends HttpOverrides {
   String generatedMnemonic =
       'test test test test test test test test test test test junk';
 
+  /// Hardware-wallet simulation for the `/wallet/trezor` routes: when
+  /// [trezorError] is null a "device" at [trezorAddress] answers; the
+  /// setup ceremony then configures the wallet as kind `trezor` with
+  /// `keys_held` following the posted `share_keys`.
+  String? trezorError = 'no Trezor found — plug it in, unlock it, and try again';
+  String trezorAddress = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
+  String trezorPointer =
+      '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff';
+
   /// Balances `GET /wallet/balances` reports (raw 18-decimal strings).
   String antAtto = '1500000000000000000';
   String ethWei = '20000000000000000';
@@ -676,6 +685,31 @@ class FakeEmbeddedHttp extends HttpOverrides {
             : {'configured': true, ...w}))
       );
     }
+    if (method == 'GET' && path == '/wallet/trezor') {
+      final err = trezorError;
+      return (
+        200,
+        utf8.encode(jsonEncode(err == null
+            ? {'found': true, 'address': trezorAddress}
+            : {'found': false, 'error': err}))
+      );
+    }
+    if (method == 'POST' && path == '/wallet/trezor') {
+      final err = trezorError;
+      if (err != null) return (400, utf8.encode(err));
+      final json = body.isEmpty
+          ? const <String, dynamic>{}
+          : jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
+      final share = json['share_keys'] as bool? ?? true;
+      wallet = {
+        'address': trezorAddress,
+        'storage': 'keychain',
+        'kind': 'trezor',
+        'keys_held': share,
+        'pointer': trezorPointer,
+      };
+      return (200, utf8.encode(jsonEncode(wallet)));
+    }
     if (method == 'POST' && path == '/wallet/generate') {
       return (
         200,
@@ -699,7 +733,11 @@ class FakeEmbeddedHttp extends HttpOverrides {
           utf8.encode('not a valid private key (expect 64 hex characters)')
         );
       }
-      wallet = {'address': _addressFor(secret), 'storage': 'keychain'};
+      wallet = {
+        'address': _addressFor(secret),
+        'storage': 'keychain',
+        'kind': 'software',
+      };
       return (200, utf8.encode(jsonEncode(wallet)));
     }
     if (method == 'DELETE' && path == '/wallet') {

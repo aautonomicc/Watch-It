@@ -289,7 +289,7 @@ async fn drive_batch(
 
     // ---- 4) Client for quoting/storing, signer for paying ----------------
     let client = engine.client().await?;
-    let wallet = engine.signer()?.payment_wallet()?;
+    let wallet = engine.signer()?.payment_wallet().await?;
 
     let adapter = BatchAdapter {
         spill: spill_root.clone(),

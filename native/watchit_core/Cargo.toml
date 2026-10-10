@@ -55,6 +55,11 @@ alloy-signer = "2.4"
 # the 1.x line (alloy-signer-trezor 1.8.x), not 2.4.x.
 alloy = { version = "1.0.32", default-features = false, features = ["std", "network", "signer-local"] }
 rand = "0.8"
+# Balance-by-address for hardware wallets (`GET /wallet/balances` has no
+# key to build a signing wallet from): the same evmlib copy ant-core
+# already pulls via ant-protocol — a direct dep adds zero new code and
+# the `Address`/`Network` types unify with ant_core::data's re-exports.
+evmlib = "0.10"
 axum = "0.8"
 # blake3 + rmp-serde mirror ant-core's address derivation (compute_address
 # over the rmp-serde-encoded shrunk data map) for offline map verification.
@@ -136,6 +141,16 @@ tokio-util = "0.7"
 # alpha.55 lesson); wallet.rs still runs every keyring call on a
 # dedicated plain thread as belt and braces.
 keyring = "4"
+# Hardware-wallet plan phase 3: Trezor over DIRECT USB (trezor-client →
+# rusb, no Trezor Bridge). Must come from the PAYMENT alloy tree (1.8.x,
+# the line evmlib's facade resolves to) — a 2.4.x signer's TxSigner impl
+# would not unify with evmlib's EthereumWallet (see signer.rs). Desktop
+# only: USB hardware, and the plan is desktop-first.
+alloy-signer-trezor = "1.8"
+# Feature-unification only: this box (and CI) may have no system
+# libusb-1.0 dev files, so force rusb's libusb1-sys to build its vendored
+# libusb from source (cc). Version matches rusb 0.9's own pin.
+libusb1-sys = { version = "0.7", features = ["vendored"] }
 
 # NOTE: ant-quic was vendored at ../third_party/ant-quic from 0.27.44
 # through 0.27.47 purely to bump its exact unicode-width =0.2.0 pin

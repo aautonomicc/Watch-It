@@ -130,7 +130,14 @@ pub(crate) async fn wallet_client(
         engine.reconnect_for_wallet();
         client = engine.client().await?;
         if client.wallet().is_none() {
-            return Err("wallet could not be attached to the network client".into());
+            let hardware = engine.signer().map(|s| s.is_hardware()).unwrap_or(false);
+            return Err(if hardware {
+                "the wallet could not be attached — is the Trezor plugged in \
+                 and unlocked?"
+                    .into()
+            } else {
+                "wallet could not be attached to the network client".into()
+            });
         }
     }
     Ok(client)

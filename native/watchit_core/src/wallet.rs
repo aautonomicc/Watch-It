@@ -18,6 +18,67 @@ use std::sync::RwLock;
 const KEYCHAIN_SERVICE: &str = "watchit";
 const KEYCHAIN_USER: &str = "upload-wallet";
 
+/// Marker prefix a hardware wallet stores in place of a private key.
+/// Everything in the marker is public: the address, the (non-secret)
+/// backup pointer address, and the backup line's public fingerprint — so
+/// the Backup screen can show the identity and its last-backup record
+/// with the device unplugged. The content READ key, if the user kept it,
+/// lives in its own store entry (Engine::trezor_keys); the WRITE half is
+/// never persisted anywhere.
+pub const TREZOR_MARKER_PREFIX: &str = "trezor:v1:";
+
+/// What the wallet store holds, decoded.
+#[derive(Debug, PartialEq)]
+pub enum StoredWallet {
+    /// A raw secp256k1 private key (0x-hex), the classic software wallet.
+    Software { key_hex: String },
+    /// A hardware wallet: the key never leaves the device, only its
+    /// public identity is stored.
+    Trezor {
+        address: String,
+        pointer: [u8; 32],
+        /// `backup::identity_fingerprint` of the backup line — public-safe
+        /// by construction, keeps the last-backup record readable without
+        /// the device or the read key.
+        fingerprint: String,
+    },
+}
+
+/// Build the stored marker for a hardware wallet.
+pub fn trezor_marker(address: &str, pointer: &[u8; 32], fingerprint: &str) -> String {
+    format!("{TREZOR_MARKER_PREFIX}{address}:{}:{fingerprint}", hex::encode(pointer))
+}
+
+/// Decode a wallet-store value. Anything without the hardware marker is
+/// a software key (stored normalized since alpha.55).
+pub fn parse_stored(stored: &str) -> Result<StoredWallet, String> {
+    const MALFORMED: &str = "the stored hardware-wallet marker is damaged — \
+                             re-run the hardware wallet setup";
+    let v = stored.trim();
+    let Some(rest) = v.strip_prefix(TREZOR_MARKER_PREFIX) else {
+        return Ok(StoredWallet::Software { key_hex: v.to_string() });
+    };
+    let parts: Vec<&str> = rest.split(':').collect();
+    if parts.len() != 3 {
+        return Err(MALFORMED.into());
+    }
+    let (address, ptr_hex, fingerprint) = (parts[0], parts[1], parts[2]);
+    let addr_ok = address.len() == 42
+        && address.starts_with("0x")
+        && address[2..].chars().all(|c| c.is_ascii_hexdigit());
+    let fp_ok = fingerprint.len() == 16
+        && fingerprint.chars().all(|c| c.is_ascii_hexdigit());
+    let pointer = crate::backup::addr_from_hex(ptr_hex);
+    match (addr_ok, fp_ok, pointer) {
+        (true, true, Some(pointer)) => Ok(StoredWallet::Trezor {
+            address: address.to_string(),
+            pointer,
+            fingerprint: fingerprint.to_string(),
+        }),
+        _ => Err(MALFORMED.into()),
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Storage {
     Keychain,
@@ -253,13 +314,33 @@ pub fn address_of(key_hex: &str) -> Result<String, String> {
 /// object comes from the signer seam (signer.rs) like every other
 /// evmlib wallet in the app.
 pub async fn balances(key_hex: &str) -> Result<(String, String), String> {
-    let wallet = crate::signer::Signer::software(key_hex)?.payment_wallet()?;
+    let wallet = crate::signer::Signer::software(key_hex)?
+        .payment_wallet()
+        .await?;
     let ant = wallet
         .balance_of_tokens()
         .await
         .map_err(|e| format!("ANT balance query failed: {e}"))?;
     let eth = wallet
         .balance_of_gas_tokens()
+        .await
+        .map_err(|e| format!("ETH balance query failed: {e}"))?;
+    Ok((ant.to_string(), eth.to_string()))
+}
+
+/// Balances for an ADDRESS alone — the hardware-wallet path, where no
+/// key exists to build a signing wallet from. Same RPC the signing
+/// variant uses, via evmlib's free functions.
+pub async fn balances_of_address(address: &str) -> Result<(String, String), String> {
+    let account: ant_core::data::EvmAddress = address
+        .trim()
+        .parse()
+        .map_err(|_| "stored wallet address is invalid".to_string())?;
+    let network = ant_core::data::EvmNetwork::ArbitrumOne;
+    let ant = evmlib::wallet::balance_of_tokens(account, &network)
+        .await
+        .map_err(|e| format!("ANT balance query failed: {e}"))?;
+    let eth = evmlib::wallet::balance_of_gas_tokens(account, &network)
         .await
         .map_err(|e| format!("ETH balance query failed: {e}"))?;
     Ok((ant.to_string(), eth.to_string()))
@@ -351,6 +432,38 @@ mod tests {
         assert!(store.load().is_none());
         assert!(WalletStore::new(dir.to_str(), false).load().is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn trezor_marker_round_trips() {
+        let pointer = [7u8; 32];
+        let marker = trezor_marker(VECTOR_ADDR, &pointer, "00aabbccddeeff11");
+        assert_eq!(
+            parse_stored(&marker).unwrap(),
+            StoredWallet::Trezor {
+                address: VECTOR_ADDR.to_string(),
+                pointer,
+                fingerprint: "00aabbccddeeff11".to_string(),
+            }
+        );
+        // A plain key stays a software wallet.
+        assert_eq!(
+            parse_stored(VECTOR_KEY).unwrap(),
+            StoredWallet::Software { key_hex: VECTOR_KEY.to_string() }
+        );
+    }
+
+    #[test]
+    fn damaged_trezor_markers_are_refused() {
+        for bad in [
+            "trezor:v1:0x1234",                                     // missing fields
+            &format!("trezor:v1:{VECTOR_ADDR}:zz:00aabbccddeeff11"), // bad pointer
+            &format!("trezor:v1:nothex:{}:00aabbccddeeff11", "0".repeat(64)), // bad address
+            &format!("trezor:v1:{VECTOR_ADDR}:{}:short", "0".repeat(64)), // bad fingerprint
+        ] {
+            let err = parse_stored(bad).unwrap_err();
+            assert!(err.contains("hardware-wallet marker"), "{bad}: {err}");
+        }
     }
 
     #[test]

@@ -607,7 +607,13 @@ async fn drive_backup(
     signer: &crate::signer::Signer,
     input: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let keys = signer.backup_keys()?;
+    // A hardware signer re-derives the write keys on-device (the settled
+    // paranoid policy: never persisted) — one physical confirmation. The
+    // dedicated phase keeps the UI honest about what it is waiting for.
+    if signer.is_hardware() {
+        set_phase(job, "trezor");
+    }
+    let keys = signer.backup_write_keys().await?;
     let now_ms = chrono::Utc::now().timestamp_millis();
 
     // -- pack the objects ------------------------------------------------
@@ -831,9 +837,20 @@ async fn run_restore(
 ) {
     const MISSING: &str = "no backup found for this wallet — nothing has been \
                            backed up under these 12 words yet";
-    let outcome = match signer.backup_keys() {
+    // Restores only READ. Software keys derive the read half offline; a
+    // hardware wallet uses the kept read key, or — in the paranoid
+    // opt-out where none is kept — asks the device once.
+    let read = match signer.read_keys() {
+        Ok(Some(r)) => Ok(r),
+        Ok(None) => {
+            set_phase(&job, "trezor");
+            signer.backup_write_keys().await.map(|k| k.read())
+        }
+        Err(e) => Err(e),
+    };
+    let outcome = match read {
         Ok(keys) => {
-            match drive_restore(engine, &job, keys.read(), &art_dir, MISSING)
+            match drive_restore(engine, &job, keys, &art_dir, MISSING)
                 .await
             {
                 // Nothing under the signature-derived (v2) pointer: fall
@@ -1075,7 +1092,7 @@ async fn drive_restore(
     // When this device's own wallet IS the backup identity, warm the
     // local object cache so its next backup skips re-uploading anything
     // the restored backup already holds.
-    if let Ok(stored) = engine.signer().and_then(|s| s.backup_keys()) {
+    if let Ok(Some(stored)) = engine.signer().and_then(|s| s.read_keys()) {
         if stored.pointer == keys.pointer {
             let mut state = engine
                 .backups

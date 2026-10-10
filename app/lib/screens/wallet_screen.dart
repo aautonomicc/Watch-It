@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../services/publish_api.dart';
 import '../theme/tokens.dart';
+import 'publish_screen.dart' show isDesktopPlatform;
 
 /// Settings → Wallet: the internal upload wallet behind Upload.
 ///
@@ -25,8 +26,10 @@ class WalletScreen extends StatefulWidget {
 }
 
 class _WalletScreenState extends State<WalletScreen> {
-  late final PublishApi _api =
-      PublishApi(base: widget.apiBase, token: widget.apiToken);
+  late final PublishApi _api = PublishApi(
+    base: widget.apiBase,
+    token: widget.apiToken,
+  );
 
   WalletStatus? _status;
   String? _error;
@@ -81,9 +84,11 @@ class _WalletScreenState extends State<WalletScreen> {
       return;
     }
     if (!mounted) return;
-    final done = await Navigator.of(context).push<bool>(MaterialPageRoute(
-      builder: (_) => SeedBackupScreen(wallet: generated, api: _api),
-    ));
+    final done = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => SeedBackupScreen(wallet: generated, api: _api),
+      ),
+    );
     if (done == true) {
       _snack('Wallet created');
       await _reload();
@@ -101,19 +106,38 @@ class _WalletScreenState extends State<WalletScreen> {
     }
   }
 
+  Future<void> _connectTrezor() async {
+    final done = await showDialog<bool>(
+      context: context,
+      builder: (_) => _TrezorSetupDialog(api: _api),
+    );
+    if (done == true) {
+      _snack('Hardware wallet connected');
+      await _reload();
+    }
+  }
+
   Future<void> _remove() async {
     final t = WiTokens.of(context);
+    final hardware = _status?.isHardware ?? false;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: t.ink2,
-        title: Text('Remove wallet?',
-            style: TextStyle(color: t.bone, fontSize: 16)),
+        title: Text(
+          'Remove wallet?',
+          style: TextStyle(color: t.bone, fontSize: 16),
+        ),
         content: Text(
-          'This deletes the wallet key from this computer. Any funds stay '
-          'on the address, but you can only reach them again with the '
-          'seed words or private key — make sure you have that backup '
-          'before removing.',
+          hardware
+              ? 'This disconnects the Trezor from W@tch on this computer. '
+                    'Nothing on the device itself changes — its keys and '
+                    'funds stay exactly where they are, and you can connect '
+                    'it again any time.'
+              : 'This deletes the wallet key from this computer. Any funds '
+                    'stay on the address, but you can only reach them again '
+                    'with the seed words or private key — make sure you have '
+                    'that backup before removing.',
           style: TextStyle(color: t.boneDim, fontSize: 13),
         ),
         actions: [
@@ -140,22 +164,23 @@ class _WalletScreenState extends State<WalletScreen> {
 
   void _snack(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Widget _sectionHeader(WiTokens t, String text) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
-        child: Text(
-          text,
-          style: TextStyle(
-            fontSize: 11,
-            letterSpacing: 1.5,
-            fontWeight: FontWeight.w700,
-            color: t.ash,
-          ),
-        ),
-      );
+    padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
+    child: Text(
+      text,
+      style: TextStyle(
+        fontSize: 11,
+        letterSpacing: 1.5,
+        fontWeight: FontWeight.w700,
+        color: t.ash,
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -170,10 +195,10 @@ class _WalletScreenState extends State<WalletScreen> {
       body: _error != null
           ? _ErrorRetry(message: _error!, onRetry: _reload)
           : status == null
-              ? const Center(child: CircularProgressIndicator())
-              : status.configured
-                  ? _configuredBody(t, status)
-                  : _setupBody(t),
+          ? const Center(child: CircularProgressIndicator())
+          : status.configured
+          ? _configuredBody(t, status)
+          : _setupBody(t),
     );
   }
 
@@ -205,6 +230,27 @@ class _WalletScreenState extends State<WalletScreen> {
           icon: const Icon(Icons.key_outlined),
           label: const Text('Import existing wallet'),
         ),
+        if (isDesktopPlatform) ...[
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: _connectTrezor,
+            icon: const Icon(Icons.usb_outlined),
+            label: const Text('Connect a hardware wallet (Trezor)'),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 10, 4, 0),
+            child: Builder(
+              builder: (context) {
+                final t = WiTokens.of(context);
+                return Text(
+                  'With a hardware wallet the private key never leaves the '
+                  'device — every payment is confirmed on the Trezor itself.',
+                  style: TextStyle(color: t.boneDim, fontSize: 12, height: 1.4),
+                );
+              },
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -233,15 +279,34 @@ class _WalletScreenState extends State<WalletScreen> {
                 tooltip: 'Copy address',
                 icon: Icon(Icons.copy, color: t.ash, size: 18),
                 onPressed: () {
-                  Clipboard.setData(
-                      ClipboardData(text: status.address ?? ''));
+                  Clipboard.setData(ClipboardData(text: status.address ?? ''));
                   _snack('Address copied');
                 },
               ),
             ],
           ),
         ),
-        if (status.storage == 'file')
+        if (status.isHardware) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Text(
+              'Hardware wallet (Trezor) — the private key never leaves the '
+              'device. Payments and backups ask for a confirmation on the '
+              'Trezor, so it needs to be plugged in and unlocked for them.',
+              style: TextStyle(color: t.accent, fontSize: 12, height: 1.4),
+            ),
+          ),
+          if (status.keysHeld == false)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Text(
+                'Backup read keys are not kept on this computer: restoring '
+                'or sharing backups with linked devices asks the Trezor '
+                'each time.',
+                style: TextStyle(color: t.boneDim, fontSize: 12, height: 1.4),
+              ),
+            ),
+        ] else if (status.storage == 'file')
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: Text(
@@ -259,8 +324,10 @@ class _WalletScreenState extends State<WalletScreen> {
                 : '${formatUnits(balances.antAtto)} ANT',
             style: TextStyle(color: t.bone, fontSize: 15),
           ),
-          subtitle: Text('Pays for storage',
-              style: TextStyle(color: t.ash, fontSize: 12)),
+          subtitle: Text(
+            'Pays for storage',
+            style: TextStyle(color: t.ash, fontSize: 12),
+          ),
         ),
         ListTile(
           leading: Icon(Icons.local_gas_station_outlined, color: t.accent),
@@ -270,8 +337,10 @@ class _WalletScreenState extends State<WalletScreen> {
                 : '${formatUnits(balances.ethWei)} ETH',
             style: TextStyle(color: t.bone, fontSize: 15),
           ),
-          subtitle: Text('Pays transaction gas',
-              style: TextStyle(color: t.ash, fontSize: 12)),
+          subtitle: Text(
+            'Pays transaction gas',
+            style: TextStyle(color: t.ash, fontSize: 12),
+          ),
           trailing: IconButton(
             tooltip: 'Refresh balances',
             icon: Icon(Icons.refresh, color: t.ash, size: 18),
@@ -281,8 +350,10 @@ class _WalletScreenState extends State<WalletScreen> {
         if (_balancesError != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text('Balance check failed: $_balancesError',
-                style: TextStyle(color: t.rust, fontSize: 12)),
+            child: Text(
+              'Balance check failed: $_balancesError',
+              style: TextStyle(color: t.rust, fontSize: 12),
+            ),
           ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -297,10 +368,15 @@ class _WalletScreenState extends State<WalletScreen> {
         _sectionHeader(t, 'DANGER ZONE'),
         ListTile(
           leading: Icon(Icons.delete_forever_outlined, color: t.rust),
-          title: Text('Remove wallet from this computer',
-              style: TextStyle(color: t.rust, fontSize: 15)),
+          title: Text(
+            'Remove wallet from this computer',
+            style: TextStyle(color: t.rust, fontSize: 15),
+          ),
           subtitle: Text(
-            'Funds stay on the address; only the local key is deleted',
+            status.isHardware
+                ? 'Disconnects the Trezor from W@tch; the device itself is '
+                      'untouched'
+                : 'Funds stay on the address; only the local key is deleted',
             style: TextStyle(color: t.ash, fontSize: 12),
           ),
           onTap: _remove,
@@ -325,9 +401,11 @@ class _ErrorRetry extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(message,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: t.boneDim, fontSize: 13)),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: t.boneDim, fontSize: 13),
+            ),
             const SizedBox(height: 16),
             OutlinedButton(onPressed: onRetry, child: const Text('Retry')),
           ],
@@ -361,11 +439,12 @@ class SeedBackupScreen extends StatefulWidget {
 
 class _SeedBackupScreenState extends State<SeedBackupScreen> {
   bool _confirming = false;
-  late final List<String> _words =
-      widget.wallet.mnemonic.split(RegExp(r'\s+'));
+  late final List<String> _words = widget.wallet.mnemonic.split(RegExp(r'\s+'));
   late final List<int> _indices = _pickIndices();
-  final List<TextEditingController> _controllers =
-      List.generate(3, (_) => TextEditingController());
+  final List<TextEditingController> _controllers = List.generate(
+    3,
+    (_) => TextEditingController(),
+  );
   String? _mismatch;
   bool _importing = false;
 
@@ -387,8 +466,10 @@ class _SeedBackupScreenState extends State<SeedBackupScreen> {
   Future<void> _finish() async {
     for (var i = 0; i < _indices.length; i++) {
       if (_controllers[i].text.trim().toLowerCase() != _words[_indices[i]]) {
-        setState(() => _mismatch =
-            'Word #${_indices[i] + 1} does not match — check your notes.');
+        setState(
+          () => _mismatch =
+              'Word #${_indices[i] + 1} does not match — check your notes.',
+        );
         return;
       }
     }
@@ -416,8 +497,10 @@ class _SeedBackupScreenState extends State<SeedBackupScreen> {
       appBar: AppBar(
         backgroundColor: t.ink,
         elevation: 0,
-        title: Text(_confirming ? 'Confirm backup' : 'Back up your wallet',
-            style: TextStyle(color: t.bone, fontSize: 18)),
+        title: Text(
+          _confirming ? 'Confirm backup' : 'Back up your wallet',
+          style: TextStyle(color: t.bone, fontSize: 18),
+        ),
       ),
       body: _confirming ? _confirmBody(t) : _wordsBody(t),
     );
@@ -446,8 +529,10 @@ class _SeedBackupScreenState extends State<SeedBackupScreen> {
             for (var i = 0; i < _words.length; i++)
               Container(
                 width: 150,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: t.ink2,
                   borderRadius: BorderRadius.circular(6),
@@ -516,8 +601,10 @@ class _SeedBackupScreenState extends State<SeedBackupScreen> {
         if (_mismatch != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: Text(_mismatch!,
-                style: TextStyle(color: t.rust, fontSize: 13)),
+            child: Text(
+              _mismatch!,
+              style: TextStyle(color: t.rust, fontSize: 13),
+            ),
           ),
         Row(
           children: [
@@ -525,8 +612,7 @@ class _SeedBackupScreenState extends State<SeedBackupScreen> {
               onPressed: _importing
                   ? null
                   : () => setState(() => _confirming = false),
-              child:
-                  Text('Show words again', style: TextStyle(color: t.ash)),
+              child: Text('Show words again', style: TextStyle(color: t.ash)),
             ),
             const Spacer(),
             FilledButton(
@@ -534,6 +620,136 @@ class _SeedBackupScreenState extends State<SeedBackupScreen> {
               child: Text(_importing ? 'Creating…' : 'Create wallet'),
             ),
           ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Hardware-wallet setup: plug-in instructions, the share-read-keys
+/// choice (phase-4 policy, default ON), then the on-device ceremony —
+/// the Trezor shows the backup-identity message twice and the user
+/// confirms each. Pops `true` once the wallet is configured.
+class _TrezorSetupDialog extends StatefulWidget {
+  const _TrezorSetupDialog({required this.api});
+  final PublishApi api;
+
+  @override
+  State<_TrezorSetupDialog> createState() => _TrezorSetupDialogState();
+}
+
+class _TrezorSetupDialogState extends State<_TrezorSetupDialog> {
+  bool _shareKeys = true;
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _connect() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.api.trezorSetup(shareKeys: _shareKeys);
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = '$e';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = WiTokens.of(context);
+    return AlertDialog(
+      backgroundColor: t.ink2,
+      title: Text(
+        'Connect a Trezor',
+        style: TextStyle(color: t.bone, fontSize: 16),
+      ),
+      content: SizedBox(
+        width: 440,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Plug the Trezor in and unlock it. W@tch will ask the device '
+                'to sign its backup-identity message twice — confirm both on '
+                'the Trezor. Signing costs nothing and authorizes no '
+                'transaction; afterwards, every payment is confirmed on the '
+                'device and the private key never touches this computer.',
+                style: TextStyle(color: t.boneDim, fontSize: 12.5, height: 1.4),
+              ),
+              const SizedBox(height: 8),
+              CheckboxListTile(
+                value: _shareKeys,
+                onChanged: _busy
+                    ? null
+                    : (v) => setState(() => _shareKeys = v ?? true),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: Text(
+                  'Keep backup read keys on this computer',
+                  style: TextStyle(color: t.bone, fontSize: 13.5),
+                ),
+                subtitle: Text(
+                  'Lets your linked devices follow this wallet\'s backups '
+                  'without the Trezor, and the Backup screen work with it '
+                  'unplugged. Anyone on your My W@tch link can read the '
+                  'backups; the keys can never spend funds. Turn off for a '
+                  'single-device setup where every backup and restore should '
+                  'ask the device.',
+                  style: TextStyle(color: t.ash, fontSize: 11.5, height: 1.35),
+                ),
+              ),
+              if (_busy)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Row(
+                    children: [
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Confirm the message on your Trezor — twice…',
+                          style: TextStyle(color: t.accent, fontSize: 12.5),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    _error!,
+                    style: TextStyle(color: t.rust, fontSize: 12),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.of(context).pop(false),
+          child: Text('Cancel', style: TextStyle(color: t.ash)),
+        ),
+        TextButton(
+          onPressed: _busy ? null : _connect,
+          child: Text(
+            _busy ? 'Connecting…' : 'Connect',
+            style: TextStyle(color: t.accent),
+          ),
         ),
       ],
     );
@@ -589,8 +805,10 @@ class _ImportWalletDialogState extends State<_ImportWalletDialog> {
     final t = WiTokens.of(context);
     return AlertDialog(
       backgroundColor: t.ink2,
-      title: Text('Import wallet',
-          style: TextStyle(color: t.bone, fontSize: 16)),
+      title: Text(
+        'Import wallet',
+        style: TextStyle(color: t.bone, fontSize: 16),
+      ),
       content: SizedBox(
         width: 420,
         child: Column(
@@ -625,8 +843,10 @@ class _ImportWalletDialogState extends State<_ImportWalletDialog> {
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 10),
-                child: Text(_error!,
-                    style: TextStyle(color: t.rust, fontSize: 12)),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: t.rust, fontSize: 12),
+                ),
               ),
           ],
         ),
@@ -638,8 +858,10 @@ class _ImportWalletDialogState extends State<_ImportWalletDialog> {
         ),
         TextButton(
           onPressed: _busy ? null : _submit,
-          child: Text(_busy ? 'Importing…' : 'Import',
-              style: TextStyle(color: t.accent)),
+          child: Text(
+            _busy ? 'Importing…' : 'Import',
+            style: TextStyle(color: t.accent),
+          ),
         ),
       ],
     );

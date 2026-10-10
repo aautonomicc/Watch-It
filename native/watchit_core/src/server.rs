@@ -64,6 +64,13 @@ fn protected_router(engine: &'static Engine) -> Router {
                 .delete(move || wallet_delete(engine)),
         )
         .route("/wallet/generate", post(wallet_generate))
+        // Hardware-wallet (Trezor) probe + setup ceremony. Protected like
+        // every wallet route: setup rebinds where payments come from.
+        .route(
+            "/wallet/trezor",
+            get(wallet_trezor_probe)
+                .post(move |body: Bytes| wallet_trezor_setup(engine, body)),
+        )
         // Pause/resume all network use. Protected: only the app should
         // be able to silence (or wake) the user's network client.
         .route(
@@ -509,16 +516,38 @@ async fn load_wallet(engine: &'static Engine) -> Option<(String, crate::wallet::
         .flatten()
 }
 
-/// `GET /wallet` — configured?, address, storage backend. Never returns
-/// key material.
+/// `GET /wallet` — configured?, kind (software | trezor), address,
+/// storage backend. Never returns key material. Hardware wallets also
+/// report whether the backup READ key was kept at setup (`keys_held`) —
+/// copy on the Dart side hangs off it.
 async fn wallet_status(engine: &'static Engine) -> Response {
     let body = match load_wallet(engine).await {
-        Some((key, storage)) => match crate::wallet::address_of(&key) {
-            Ok(address) => serde_json::json!({
-                "configured": true,
-                "address": address,
-                "storage": storage.as_str(),
-            }),
+        Some((stored, storage)) => match crate::wallet::parse_stored(&stored) {
+            Ok(crate::wallet::StoredWallet::Software { key_hex }) => {
+                match crate::wallet::address_of(&key_hex) {
+                    Ok(address) => serde_json::json!({
+                        "configured": true,
+                        "kind": "software",
+                        "address": address,
+                        "storage": storage.as_str(),
+                    }),
+                    Err(e) => serde_json::json!({ "configured": false, "error": e }),
+                }
+            }
+            Ok(crate::wallet::StoredWallet::Trezor { address, pointer, .. }) => {
+                let keys_held =
+                    tokio::task::spawn_blocking(move || engine.trezor_keys.load().is_some())
+                        .await
+                        .unwrap_or(false);
+                serde_json::json!({
+                    "configured": true,
+                    "kind": "trezor",
+                    "address": address,
+                    "storage": storage.as_str(),
+                    "pointer": hex::encode(pointer),
+                    "keys_held": keys_held,
+                })
+            }
             Err(e) => serde_json::json!({ "configured": false, "error": e }),
         },
         None => serde_json::json!({ "configured": false }),
@@ -563,7 +592,12 @@ async fn wallet_import(engine: &'static Engine, body: Bytes) -> Response {
     };
     let stored = tokio::task::spawn_blocking({
         let key = key.clone();
-        move || engine.wallet.store(&key)
+        move || {
+            // A software import replaces any hardware wallet whole — a
+            // stale kept read key must not outlive its marker.
+            engine.trezor_keys.remove();
+            engine.wallet.store(&key)
+        }
     })
     .await
     .map_err(|e| e.to_string())
@@ -583,7 +617,11 @@ async fn wallet_import(engine: &'static Engine, body: Bytes) -> Response {
 /// `DELETE /wallet` — remove the key from every backend and drop the
 /// wallet from the live client.
 async fn wallet_delete(engine: &'static Engine) -> Response {
-    let _ = tokio::task::spawn_blocking(move || engine.wallet.remove()).await;
+    let _ = tokio::task::spawn_blocking(move || {
+        engine.wallet.remove();
+        engine.trezor_keys.remove();
+    })
+    .await;
     engine.reconnect_for_wallet();
     StatusCode::NO_CONTENT.into_response()
 }
@@ -591,15 +629,87 @@ async fn wallet_delete(engine: &'static Engine) -> Response {
 /// `GET /wallet/balances` — ANT + ETH on Arbitrum One as raw base-unit
 /// decimal strings (UI formats; ANT and ETH are both 18 decimals).
 async fn wallet_balances(engine: &'static Engine) -> Response {
-    let Some((key, _)) = load_wallet(engine).await else {
+    let Some((stored, _)) = load_wallet(engine).await else {
         return (StatusCode::NOT_FOUND, "no wallet configured").into_response();
     };
-    match crate::wallet::balances(&key).await {
+    // Hardware wallets have no key to sign with — query by address.
+    let result = match crate::wallet::parse_stored(&stored) {
+        Ok(crate::wallet::StoredWallet::Software { key_hex }) => {
+            crate::wallet::balances(&key_hex).await
+        }
+        Ok(crate::wallet::StoredWallet::Trezor { address, .. }) => {
+            crate::wallet::balances_of_address(&address).await
+        }
+        Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    match result {
         Ok((ant_atto, eth_wei)) => json_ok(serde_json::json!({
             "ant_atto": ant_atto,
             "eth_wei": eth_wei,
         })),
         Err(e) => (StatusCode::BAD_GATEWAY, e).into_response(),
+    }
+}
+
+/// `GET /wallet/trezor` — is a Trezor answering on USB? `{found, address?,
+/// error?}`, always 200: "no device" is an answer, not a failure.
+async fn wallet_trezor_probe() -> Response {
+    match crate::trezor::probe().await {
+        Ok(address) => json_ok(serde_json::json!({ "found": true, "address": address })),
+        Err(e) => json_ok(serde_json::json!({ "found": false, "error": e })),
+    }
+}
+
+/// `POST /wallet/trezor` `{"share_keys"?: bool}` — the hardware-wallet
+/// setup ceremony: resolve the device's address, sign the frozen identity
+/// message twice (determinism guard — two confirmations on the device,
+/// nothing spent), derive the backup identity, persist the public marker
+/// (+ the content READ key when `share_keys`, the default, is on). The
+/// request blocks until the user confirms or cancels on the device.
+async fn wallet_trezor_setup(engine: &'static Engine, body: Bytes) -> Response {
+    let json: serde_json::Value = if body.is_empty() {
+        serde_json::json!({})
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(v) => v,
+            Err(e) => {
+                return (StatusCode::BAD_REQUEST, format!("bad JSON: {e}")).into_response()
+            }
+        }
+    };
+    let share_keys = json
+        .get("share_keys")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let identity = match crate::trezor::setup_ceremony().await {
+        Ok(id) => id,
+        Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
+    };
+    let fingerprint = crate::backup::identity_fingerprint(&identity.keys.enc);
+    let marker =
+        crate::wallet::trezor_marker(&identity.address, &identity.keys.pointer, &fingerprint);
+    let enc_hex = share_keys.then(|| hex::encode(identity.keys.enc));
+    let stored = tokio::task::spawn_blocking(move || {
+        match enc_hex {
+            Some(enc) => engine.trezor_keys.store(&enc).map(|_| ())?,
+            None => engine.trezor_keys.remove(),
+        }
+        engine.wallet.store(&marker)
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r);
+    match stored {
+        Ok(storage) => {
+            engine.reconnect_for_wallet();
+            json_ok(serde_json::json!({
+                "address": identity.address,
+                "pointer": hex::encode(identity.keys.pointer),
+                "keys_held": share_keys,
+                "storage": storage.as_str(),
+            }))
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     }
 }
 
@@ -733,22 +843,37 @@ async fn upload_batch_status(engine: &'static Engine, Path(id): Path<u64>) -> Re
 /// holder shares with its linked devices (phase 2) — it can open the
 /// backup but never spend from the wallet.
 async fn backup_status(engine: &'static Engine) -> Response {
-    let keys = engine
-        .signer()
+    // The signer may touch the OS keychain on a cold cache — off the
+    // async workers like every wallet-store read.
+    let signer = tokio::task::spawn_blocking(move || engine.signer().ok())
+        .await
         .ok()
-        .and_then(|s| s.backup_keys().ok());
+        .flatten();
+    // READ keys only: software derives them offline; a hardware wallet
+    // surfaces the kept key — or nothing, in the paranoid opt-out, where
+    // the pointer (public, from the marker) still shows. `key` is what
+    // the phase-2 section publishes, so an opted-out Trezor never shares.
+    let read = signer.as_ref().and_then(|s| s.read_keys().ok()).flatten();
+    let pointer = read
+        .as_ref()
+        .map(|r| r.pointer)
+        .or_else(|| signer.as_ref().and_then(|s| s.pointer().ok()));
     // `last` is identity-gated: a summary recorded under a different
     // identity (a pre-sign-to-derive backup, or a swapped wallet) reads
     // as "never backed up on this line" — crucially the phase-2 section
     // then stays unpublished, so followers never adopt keys to a line
-    // nothing has been written to yet.
-    let fp = keys
+    // nothing has been written to yet. Hardware markers persist the
+    // public fingerprint so the record stays readable without the key.
+    let fp = read
         .as_ref()
-        .map(|k| crate::backup::identity_fingerprint(&k.enc));
+        .map(|r| crate::backup::identity_fingerprint(&r.enc))
+        .or_else(|| signer.as_ref().and_then(|s| s.stored_fingerprint()));
     json_ok(serde_json::json!({
-        "configured": keys.is_some(),
-        "pointer": keys.as_ref().map(|k| hex::encode(k.pointer)),
-        "key": keys.as_ref().map(|k| hex::encode(k.enc)),
+        "configured": signer.is_some(),
+        "hardware": signer.as_ref().map(|s| s.is_hardware()).unwrap_or(false),
+        "keys_held": read.is_some(),
+        "pointer": pointer.map(hex::encode),
+        "key": read.as_ref().map(|r| hex::encode(r.enc)),
         "last": engine.backups.last_json(fp.as_deref()),
         "job": engine.backups.job_json(),
     }))
@@ -1568,6 +1693,7 @@ mod wallet_api_tests {
             Box::leak(Box::new(Engine::new(None, dir.to_str())));
         engine.wallet.disable_keychain();
         engine.follow_keys.disable_keychain();
+        engine.trezor_keys.disable_keychain();
         engine
     }
 
@@ -1701,9 +1827,105 @@ mod wallet_api_tests {
         let (status, _) =
             send_auth(&app, "GET", "/wallet", vec![], Some("sekrit")).await;
         assert_eq!(status, StatusCode::OK);
+        // The hardware-wallet routes sit behind the same token.
+        for (method, path) in [("GET", "/wallet/trezor"), ("POST", "/wallet/trezor")] {
+            let (status, _) = send_auth(&app, method, path, vec![], None).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {path}");
+        }
         // Open routes stay tokenless.
         let (status, _) = send_auth(&app, "GET", "/health", vec![], None).await;
         assert_eq!(status, StatusCode::OK);
+    }
+
+    /// A stored hardware marker drives both status routes: kind/address/
+    /// pointer surface with the device unplugged, the shareable read key
+    /// appears ONLY while the trezor_keys store holds it, and a software
+    /// import sweeps that kept key. Ends with the no-device setup refusal
+    /// (clean 400 — no Trezor is attached to a test box).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn trezor_marker_surfaces_through_wallet_and_backup_status() {
+        let engine = test_engine("trezorstatus");
+        let app = router_with_auth(engine, "sekrit");
+        const ADDR: &str = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+        // Seed the marker the setup ceremony would persist (the real
+        // ceremony needs a device; its derivation half is pinned in
+        // trezor.rs/backup.rs tests).
+        let keys = crate::backup::derive_keys_from_signature(&[7u8; 64]);
+        let fp = crate::backup::identity_fingerprint(&keys.enc);
+        let marker = crate::wallet::trezor_marker(ADDR, &keys.pointer, &fp);
+        engine.wallet.store(&marker).unwrap();
+
+        // Wallet status: hardware kind, address, no kept key yet.
+        let (status, body) =
+            send_auth(&app, "GET", "/wallet", vec![], Some("sekrit")).await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["configured"], serde_json::json!(true));
+        assert_eq!(json["kind"], serde_json::json!("trezor"));
+        assert_eq!(json["address"], serde_json::json!(ADDR));
+        assert_eq!(json["keys_held"], serde_json::json!(false));
+        assert_eq!(
+            json["pointer"],
+            serde_json::json!(hex::encode(keys.pointer))
+        );
+
+        // Backup status, paranoid opt-out: pointer shows (public, from
+        // the marker), the shareable key does NOT — so the phase-2
+        // section can never publish from an opted-out install.
+        let (status, body) =
+            send_auth(&app, "GET", "/backup", vec![], Some("sekrit")).await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["configured"], serde_json::json!(true));
+        assert_eq!(json["hardware"], serde_json::json!(true));
+        assert_eq!(json["keys_held"], serde_json::json!(false));
+        assert_eq!(
+            json["pointer"],
+            serde_json::json!(hex::encode(keys.pointer))
+        );
+        assert!(json["key"].is_null());
+
+        // Kept read key (the sharing default) → both routes surface it.
+        engine.trezor_keys.store(&hex::encode(keys.enc)).unwrap();
+        let (_, body) =
+            send_auth(&app, "GET", "/wallet", vec![], Some("sekrit")).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["keys_held"], serde_json::json!(true));
+        let (_, body) =
+            send_auth(&app, "GET", "/backup", vec![], Some("sekrit")).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["keys_held"], serde_json::json!(true));
+        assert_eq!(json["key"], serde_json::json!(hex::encode(keys.enc)));
+
+        // A software import replaces the hardware wallet whole: kind
+        // flips and the kept read key is swept with it.
+        let (status, _) = send_auth(
+            &app,
+            "POST",
+            "/wallet",
+            br#"{"private_key":"0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"}"#
+                .to_vec(),
+            Some("sekrit"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(engine.trezor_keys.load().is_none());
+        let (_, body) =
+            send_auth(&app, "GET", "/wallet", vec![], Some("sekrit")).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["kind"], serde_json::json!("software"));
+
+        // No device on a test box: the setup ceremony refuses cleanly.
+        let (status, body) = send_auth(
+            &app,
+            "POST",
+            "/wallet/trezor",
+            b"{}".to_vec(),
+            Some("sekrit"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(!body.is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]

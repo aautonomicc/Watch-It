@@ -75,6 +75,36 @@ class PublishApi {
       configured: json['configured'] as bool? ?? false,
       address: json['address'] as String?,
       storage: json['storage'] as String?,
+      kind: json['kind'] as String?,
+      keysHeld: json['keys_held'] as bool?,
+    );
+  }
+
+  /// Is a Trezor answering on USB? Silent on the device.
+  Future<TrezorProbe> trezorProbe() async {
+    final json = await _request('GET', '/wallet/trezor');
+    return TrezorProbe(
+      found: json['found'] as bool? ?? false,
+      address: json['address'] as String?,
+      error: json['error'] as String?,
+    );
+  }
+
+  /// Run the hardware-wallet setup ceremony: the device signs the frozen
+  /// backup-identity message twice (two confirmations on the Trezor,
+  /// nothing spent) and the wallet becomes this install's payment +
+  /// backup identity. [shareKeys] keeps the backup READ key on this
+  /// computer (the default) so linked devices can follow backups without
+  /// the device. Blocks until the user confirms or cancels on the Trezor.
+  Future<WalletStatus> trezorSetup({bool shareKeys = true}) async {
+    final json = await _request('POST', '/wallet/trezor',
+        body: {'share_keys': shareKeys});
+    return WalletStatus(
+      configured: true,
+      address: json['address'] as String?,
+      storage: json['storage'] as String?,
+      kind: 'trezor',
+      keysHeld: json['keys_held'] as bool?,
     );
   }
 
@@ -200,13 +230,38 @@ class PublishApiException implements Exception {
 }
 
 class WalletStatus {
-  const WalletStatus({required this.configured, this.address, this.storage});
+  const WalletStatus({
+    required this.configured,
+    this.address,
+    this.storage,
+    this.kind,
+    this.keysHeld,
+  });
   final bool configured;
   final String? address;
 
   /// `keychain` or `file` — `file` means no OS keychain was available and
-  /// the key sits in a mode-0600 app file; the UI says so.
+  /// the key sits in a mode-0600 app file; the UI says so. For a hardware
+  /// wallet only the public marker lives there, so the warning is moot.
   final String? storage;
+
+  /// `software` (key on this computer) or `trezor` (key stays in the
+  /// device; payments confirm on it). Old cores omit it — software.
+  final String? kind;
+
+  /// Hardware wallets only: whether the backup READ key was kept at
+  /// setup (the sharing default). Null for software wallets.
+  final bool? keysHeld;
+
+  bool get isHardware => kind == 'trezor';
+}
+
+/// `GET /wallet/trezor` — is a device answering on USB right now?
+class TrezorProbe {
+  const TrezorProbe({required this.found, this.address, this.error});
+  final bool found;
+  final String? address;
+  final String? error;
 }
 
 class GeneratedWallet {
