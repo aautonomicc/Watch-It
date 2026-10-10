@@ -222,6 +222,29 @@ does. Because the error fired *after* payment and storage, a file caught
 by the old bug is fully on the network — re-publishing it finishes the
 bookkeeping at no extra cost (already-stored chunks are free).
 
+**Upload-all batch payments** (2026-10-10, unreleased — hardware-wallet
+plan phase 0): the batch uploader no longer pays per file. A new
+`batch.rs` pools EVERY chunk of the whole batch into ant-core's public
+multi-record driver (`Client::upload_records`, `PaymentMode::Merkle`):
+each file stream-encrypts locally into a disk spill (the chunk set is
+the file's identity — pinned against the single-file path), the root
+map recovers with zero network rounds, and the pooled set pays **one
+`payForMerkleTree` transaction per ≤256-chunk merkle sub-batch** — a
+typical batch is one payment instead of one+ per file. The
+`UploadAdapter` implementation is the single money seam a later
+external signer (Trezor/Ledger, plan phase 2) replaces. Payment proofs
+checkpoint to `<data>/batch-upload/` (keyed by the batch's chunk
+fingerprint; merkle payments stay valid 7 days), so failed stores — and
+app restarts — retry free; a checkpoint that died inside the seconds-
+wide payment window is discarded rather than reconciled by guesswork.
+Routes: `POST /upload/batch` + `GET /upload/batch/{id}` (protected,
+same single active slot as `/upload`). The Dart session
+(`batch_upload.dart`) encodes all tier outputs first (payment needs
+every chunk address), posts one batch, maps per-file outcomes back in
+input order, and the review page states the payment count up front
+("Paid together in 1 payment transaction" / "~N … one per ~1 GB of
+chunks").
+
 ### My W@tch — device linking & sync (shipped alpha.61/.62)
 
 Keeps a user's **own devices** in sync — watch lists, viewing positions,
@@ -391,6 +414,17 @@ nothing). Keys deliberately do not rotate on unlink: rotation would
 re-encrypt every object (full re-upload) while the removed device
 keeps the old keys anyway — replacing the wallet starts a new backup
 line.
+
+At-rest hardening (2026-10-10, unreleased — hardware-wallet plan
+phase 4's recommended-now piece): the follower's adopted read keys no
+longer persist in plaintext `backup_follow.json` — they live in the
+core's keychain store (`Engine::follow_keys`, the wallet.rs
+`WalletStore::named` idiom: OS keychain with a 0600 `follow.keys`
+fallback) behind `GET/POST/DELETE /backup/followkeys`; the Dart
+service caches them in memory and migrates a pre-keychain state
+file's plaintext pair into the keychain on first launch, stripping
+the file only after the store confirmed. The state file keeps only
+non-secret bookkeeping (stamps, applied head, fingerprints).
 
 Low-data mode (2026-10-08, unreleased): a per-device switch on the
 linked My W@tch screen (`app/lib/services/low_data_mode.dart`, pref

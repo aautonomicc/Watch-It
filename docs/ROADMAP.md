@@ -1057,6 +1057,48 @@ canonical names automatically. CLI docs in [UPLOAD-CLI.md](UPLOAD-CLI.md).
       uploads without encode tiers; see "Upload on Android" in the
       Publish section above; iOS deferred)
 
+## Hardware-wallet plan (adopted 2026-10-10; phases 0 + 4-now implemented 2026-10-10, unreleased)
+
+The 5-phase plan from the 2026-10-10 discussion series (CLAUDE.md has
+the full record): make the upload wallet — which is also the backup
+identity since the seed-phrase backup — holdable on a Trezor/Ledger.
+The separate-backup-phrase alternative was explicitly rejected by
+decision (2026-10-10).
+
+- [x] Phase 0 — upload-all batch payments (implemented 2026-10-10,
+      ships next release; benefits software wallets too): the batch
+      uploader restructured encode-everything → ONE pooled
+      `/upload/batch` → every chunk of the batch paid in one
+      `payForMerkleTree` transaction per ≤256-chunk merkle sub-batch
+      via ant-core's public multi-record driver (`upload_records` +
+      a Watch-It `UploadAdapter` — the single money seam phase 2
+      swaps for an external signer). Payment proofs checkpoint to
+      disk (7-day validity): failed stores retry FREE, across app
+      restarts too. The review page says "Paid together in N payment
+      transaction(s)" up front (the sub-batch honesty item). NO
+      carried ant-core patch was needed — at the pinned 0.12.0 the
+      driver is public and the external merkle path already splits at
+      256 leaves, so the two planned upstream filings are moot.
+- [x] Phase 4 (recommended-now piece) — follower backup read keys
+      moved from plaintext `backup_follow.json` into the OS keychain
+      via the core's new `/backup/followkeys` store (0600-file
+      fallback; automatic migration strips the legacy file only after
+      the keychain took the keys). The rest of phase 4 (optional
+      never-persist paranoid mode, zeroize-on-drop) rides the HW
+      phases.
+- [ ] Phase 1 — sign-to-derive backup identity: backup keys from a
+      deterministic (RFC-6979) signature of a fixed, VERSIONED domain
+      message (`watchit.backup.hw.v1` + epoch), signed twice at setup
+      and compared (determinism guard); BREAKING = new backup line
+- [ ] Phase 2 — external-signer payments: a Signer-trait seam behind
+      the phase-0 adapter (software key / Trezor / Ledger
+      interchangeable), ant-core external-signer machinery
+- [ ] Phase 3 — transport + UI: alloy-signer-trezor (matches the
+      pinned alloy), direct USB via rusb, desktop-first, setup
+      ceremony + per-payment confirm screens; Trezor first (user has
+      one for e2e on their desktop — Ella is headless; unit tests
+      fake the Signer trait), Ledger later (BLE opens Android)
+
 ## Network & data control (shipped 2026-09-03→06, v0.1.0-alpha.85–.92)
 
 A measured idle-traffic campaign turned into a full set of data
