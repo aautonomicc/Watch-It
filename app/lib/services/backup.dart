@@ -66,6 +66,7 @@ class BackupApi {
         'GET' => await client.get(uri, headers: _headers),
         'POST' => await client.post(uri,
             headers: _headers, body: body == null ? null : jsonEncode(body)),
+        'DELETE' => await client.delete(uri, headers: _headers),
         _ => throw ArgumentError(method),
       };
       if (res.statusCode != 200) {
@@ -117,7 +118,26 @@ class BackupApi {
         'key': key,
         'art_dir': artDir,
       });
+
+  /// The followed line's read keys, held by the core in the OS keychain
+  /// (0600-file fallback) — never in a plaintext Dart state file.
+  Future<FollowKeys?> followKeysGet() async {
+    final json = await _request('GET', '/backup/followkeys');
+    if (json['configured'] != true) return null;
+    return (
+      ptr: (json['ptr'] as String).toLowerCase(),
+      key: (json['key'] as String).toLowerCase(),
+    );
+  }
+
+  Future<void> followKeysSet({required String ptr, required String key}) =>
+      _request('POST', '/backup/followkeys', body: {'ptr': ptr, 'key': key});
+
+  Future<void> followKeysClear() => _request('DELETE', '/backup/followkeys');
 }
+
+/// Shared backup read keys (64-hex pointer address + content key).
+typedef FollowKeys = ({String ptr, String key});
 
 typedef BackupPeek = ({bool found, String? head});
 

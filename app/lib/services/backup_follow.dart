@@ -85,6 +85,15 @@ class BackupFollowService {
   Timer? _timer;
   bool _checking = false;
 
+  /// The followed line's read keys, cached from the core's keychain
+  /// store (`/backup/followkeys`). The content key decrypts the whole
+  /// followed backup line forever, so at rest it lives in the OS
+  /// keychain (0600-file fallback) via the core — never in the plain
+  /// JSON state file this service keeps for its non-secret bookkeeping
+  /// (the derived-key at-rest hardening, hardware-wallet plan phase 4).
+  String? _ptr;
+  String? _key;
+
   /// Backup-first bootstrap (the phase-2 ride-along): once resolved —
   /// the first follow attempt completed or failed, or the deadline
   /// passed — the gossip merge is never deferred again this session.
@@ -206,7 +215,7 @@ class BackupFollowService {
       _bootstrapResolved = true;
       return false;
     }
-    final hasKeys = state.ptr != null && state.key != null;
+    final hasKeys = _ptr != null && _key != null;
     final hasSection = remote.any((d) {
       final b = d.doc['backup'];
       return b is Map<String, dynamic> &&
@@ -259,14 +268,23 @@ class BackupFollowService {
       if (own != null && own == record['ptr']) return;
       final state = _loadState();
       final changedKeys =
-          state.ptr != record['ptr'] || state.key != record['key'];
+          _ptr != record['ptr'] || _key != record['key'];
       final advanced = (record['ms'] as int) > state.sharedMs;
       if (!changedKeys && !advanced) return;
-      state
-        ..ptr = record['ptr'] as String
-        ..key = record['key'] as String
-        ..sharedMs = record['ms'] as int;
-      if (changedKeys) state.appliedHead = null;
+      _ptr = record['ptr'] as String;
+      _key = record['key'] as String;
+      state.sharedMs = record['ms'] as int;
+      if (changedKeys) {
+        state.appliedHead = null;
+        // Into the keychain store; a failure keeps the keys in memory
+        // only — they re-arrive with every sync cycle's docs, so the
+        // next adoption retries rather than falling back to plaintext.
+        try {
+          await _api.followKeysSet(ptr: _ptr!, key: _key!);
+        } catch (e) {
+          debugPrint('backup follow: keychain store failed: $e');
+        }
+      }
       _saveState(state);
       _publishStatus(state);
       // The master just advertised something newer than we applied —
@@ -282,8 +300,8 @@ class BackupFollowService {
   /// Returns a short user-readable outcome.
   Future<String> checkNow() async {
     final state = _loadState();
-    final ptr = state.ptr;
-    final key = state.key;
+    final ptr = _ptr;
+    final key = _key;
     if (ptr == null || key == null) {
       return 'Not following a backup — no linked device has shared one.';
     }
@@ -354,8 +372,8 @@ class BackupFollowService {
   void _publishStatus(_FollowState state,
       {String? lastSummary, String? error}) {
     status.value = BackupFollowStatus(
-      following: state.ptr != null,
-      pointer: state.ptr,
+      following: _ptr != null,
+      pointer: _ptr,
       lastCheckMs: state.lastCheckMs,
       lastAppliedMs: state.lastAppliedMs,
       lastSummary: lastSummary ?? status.value.lastSummary,
@@ -401,6 +419,7 @@ class BackupFollowService {
   /// Resolve the state path up front (called from [start]; tests use
   /// [statePathOverride] instead).
   Future<void> _resolvePath() async {
+    if (statePathOverride != null) return;
     _statePath ??=
         '${(await getApplicationSupportDirectory()).path}/backup_follow.json';
   }
@@ -413,8 +432,8 @@ class BackupFollowService {
       if (!file.existsSync()) return _FollowState();
       final json = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
       return _FollowState()
-        ..ptr = json['ptr'] as String?
-        ..key = json['key'] as String?
+        ..legacyPtr = json['ptr'] as String?
+        ..legacyKey = json['key'] as String?
         ..sharedMs = json['shared_ms'] as int? ?? 0
         ..appliedHead = json['applied_head'] as String?
         ..lastAppliedMs = json['last_applied_ms'] as int?
@@ -430,8 +449,10 @@ class BackupFollowService {
       final path = _resolveStatePath();
       if (path.isEmpty) return;
       File(path).writeAsStringSync(jsonEncode({
-        'ptr': state.ptr,
-        'key': state.key,
+        // Keys live in the core's keychain store; the legacy plaintext
+        // pair is carried only until its migration there succeeds.
+        'ptr': ?state.legacyPtr,
+        'key': ?state.legacyKey,
         'shared_ms': state.sharedMs,
         'applied_head': state.appliedHead,
         'last_applied_ms': state.lastAppliedMs,
@@ -443,19 +464,56 @@ class BackupFollowService {
     }
   }
 
-  /// Load persisted state into [status] and resolve the state path —
-  /// called once from main() before [start].
+  /// Load persisted state into [status], resolve the state path, and
+  /// load the followed line's keys from the core's keychain store —
+  /// migrating a pre-keychain state file's plaintext pair there first.
+  /// Called once from main() before [start].
   Future<void> initialize() async {
     await _resolvePath();
+    await _loadKeys();
     _publishStatus(_loadState());
+  }
+
+  Future<void> _loadKeys() async {
+    final state = _loadState();
+    final legacyPtr = state.legacyPtr;
+    final legacyKey = state.legacyKey;
+    if (legacyPtr != null && legacyKey != null) {
+      // Pre-keychain state file: adopt the plaintext pair in memory now,
+      // and strip it from the file only once the keychain truly has it —
+      // a failed store retries at the next launch (or the next sync
+      // cycle's re-adoption) instead of losing the keys.
+      _ptr = legacyPtr;
+      _key = legacyKey;
+      try {
+        await _api.followKeysSet(ptr: legacyPtr, key: legacyKey);
+        state
+          ..legacyPtr = null
+          ..legacyKey = null;
+        _saveState(state);
+        debugPrint('backup follow: shared keys moved into the keychain');
+      } catch (e) {
+        debugPrint('backup follow: keychain migration failed: $e');
+      }
+      return;
+    }
+    try {
+      final keys = await _api.followKeysGet();
+      _ptr = keys?.ptr;
+      _key = keys?.key;
+    } catch (e) {
+      // The embedded client not answering leaves this device "not
+      // following" until the next adoption — never fatal.
+      debugPrint('backup follow: keychain read failed: $e');
+    }
   }
 }
 
 class _FollowState {
-  /// The followed backup line's shared read keys (lowercase hex), or
-  /// null while no linked device has shared any.
-  String? ptr;
-  String? key;
+  /// Plaintext read keys from a pre-keychain state file, kept only until
+  /// their migration into the core's keychain store succeeds.
+  String? legacyPtr;
+  String? legacyKey;
 
   /// The `ms` stamp of the newest shared record adopted so far.
   int sharedMs = 0;

@@ -166,6 +166,11 @@ class FakeEmbeddedHttp extends HttpOverrides {
   /// What `POST /backup/peek` answers.
   Map<String, dynamic> backupPeek = {'found': false};
 
+  /// The core-held follower read keys (`/backup/followkeys`): null =
+  /// unconfigured; otherwise `{'ptr': …, 'key': …}`.
+  Map<String, String>? followKeys;
+  final List<String> followKeysPosts = [];
+
   /// Job states `GET /backup` plays back in order once a run/restore
   /// started (the last one repeats) — the poll-loop lifecycle.
   final List<Map<String, dynamic>> backupJobStates = [];
@@ -266,6 +271,37 @@ class FakeEmbeddedHttp extends HttpOverrides {
       final artDir = (jsonDecode(text) as Map)['art_dir'];
       if (artDir is String) onBackupRestore?.call(artDir);
       return (200, utf8.encode(jsonEncode({'ok': true})));
+    }
+    if (path == '/backup/followkeys') {
+      if (method == 'POST') {
+        final text = utf8.decode(body);
+        followKeysPosts.add(text);
+        final json = jsonDecode(text) as Map<String, dynamic>;
+        final ptr = (json['ptr'] as String? ?? '').toLowerCase();
+        final key = (json['key'] as String? ?? '').toLowerCase();
+        final hex64 = RegExp(r'^[0-9a-f]{64}$');
+        if (!hex64.hasMatch(ptr) || !hex64.hasMatch(key)) {
+          return (400, utf8.encode('ptr and key must both be 64 hex characters'));
+        }
+        followKeys = {'ptr': ptr, 'key': key};
+        return (200, utf8.encode(jsonEncode({'storage': 'file'})));
+      }
+      if (method == 'DELETE') {
+        followKeys = null;
+        return (200, utf8.encode(jsonEncode({'ok': true})));
+      }
+      final keys = followKeys;
+      return (
+        200,
+        utf8.encode(jsonEncode(keys == null
+            ? {'configured': false}
+            : {
+                'configured': true,
+                'ptr': keys['ptr'],
+                'key': keys['key'],
+                'storage': 'file',
+              })),
+      );
     }
     if (method == 'POST' && path == '/backup/peek') {
       backupPeekPosts.add(utf8.decode(body));

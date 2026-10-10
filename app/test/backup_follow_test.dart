@@ -124,23 +124,60 @@ void main() {
   });
 
   group('adopting shared keys', () {
-    test('newest valid section wins, junk is skipped, keys persist, and '
-        'adoption checks the pointer immediately', () async {
+    test('newest valid section wins, junk is skipped, keys land in the '
+        'keychain store (never the state file), and adoption checks the '
+        'pointer immediately', () async {
       await follow.noteRemoteDocs([
         docWith({'v': 1, 'ptr': 'nothex', 'key': keyA, 'ms': 999}),
         docWith({'v': 1, 'ptr': ptrA, 'key': keyA, 'ms': 500, 'n': 2}),
         docWith({'v': 1, 'ptr': _addr(7), 'key': _addr(8), 'ms': 100}),
         docWith(null),
       ]);
+      // The read keys go to the core's keychain store…
+      expect(fake.followKeys, {'ptr': ptrA, 'key': keyA});
+      // …and the plain state file holds only non-secret bookkeeping.
       final state = stateOnDisk();
-      expect(state['ptr'], ptrA);
-      expect(state['key'], keyA);
+      expect(state.containsKey('ptr'), isFalse);
+      expect(state.containsKey('key'), isFalse);
       expect(state['shared_ms'], 500);
       // The adoption ran a check right away: one free pointer peek, and
       // (nothing published yet) no follow fetch.
       expect(fake.backupPeekPosts, hasLength(1));
       expect(jsonDecode(fake.backupPeekPosts.single), {'ptr': ptrA});
       expect(fake.backupFollowPosts, isEmpty);
+      expect(BackupFollowService.status.value.following, isTrue);
+    });
+
+    test('a fresh instance loads the keys back from the keychain store, '
+        'and a legacy plaintext state file migrates into it', () async {
+      // Keys already in the keychain (an earlier session adopted them).
+      fake.followKeys = {'ptr': ptrA, 'key': keyA};
+      await follow.initialize();
+      expect(BackupFollowService.status.value.following, isTrue);
+      final outcome = await follow.checkNow();
+      expect(outcome, contains('No backup published'));
+      expect(jsonDecode(fake.backupPeekPosts.single), {'ptr': ptrA});
+
+      // Legacy migration: a pre-keychain state file still carrying the
+      // plaintext pair hands it to the keychain and strips the file.
+      fake.followKeys = null;
+      File('${tempDir.path}/backup_follow.json')
+          .writeAsStringSync(jsonEncode({
+        'ptr': _addr(7),
+        'key': _addr(8),
+        'shared_ms': 700,
+      }));
+      final fresh = BackupFollowService(
+        api: BackupApi(base: FakeEmbeddedHttp.base, token: 't'),
+        backup: backupService,
+        health: () async => health,
+      );
+      await fresh.initialize();
+      expect(fake.followKeys, {'ptr': _addr(7), 'key': _addr(8)});
+      final state = stateOnDisk();
+      expect(state.containsKey('ptr'), isFalse);
+      expect(state.containsKey('key'), isFalse);
+      expect(state['shared_ms'], 700);
       expect(BackupFollowService.status.value.following, isTrue);
     });
 
@@ -489,13 +526,14 @@ void main() {
   group('backup-first bootstrap gate', () {
     String statePath() => '${tempDir.path}/backup_follow.json';
 
-    void seedKeys({String? appliedHead}) =>
-        File(statePath()).writeAsStringSync(jsonEncode({
-          'ptr': ptrA,
-          'key': keyA,
-          'shared_ms': 900,
-          'applied_head': appliedHead,
-        }));
+    Future<void> seedKeys({String? appliedHead}) async {
+      fake.followKeys = {'ptr': ptrA, 'key': keyA};
+      File(statePath()).writeAsStringSync(jsonEncode({
+        'shared_ms': 900,
+        'applied_head': appliedHead,
+      }));
+      await follow.initialize();
+    }
 
     test('never activates without keys or a shared section in sight',
         () async {
@@ -528,14 +566,14 @@ void main() {
 
     test('a device that already folded this backup in never defers',
         () async {
-      seedKeys(appliedHead: 'ee' * 32);
+      await seedKeys(appliedHead: 'ee' * 32);
       expect(follow.deferGossipMergeFor(const []), isFalse);
     });
 
     test('the deadline ends the deferral even when the check cannot '
         'finish', () async {
       health = const ClientHealth(state: 'connecting', peers: 0);
-      seedKeys();
+      await seedKeys();
       expect(follow.deferGossipMergeFor(const [], nowMs: 1000), isTrue);
       expect(
         follow.deferGossipMergeFor(const [],
@@ -550,7 +588,7 @@ void main() {
     });
 
     test('a failed first follow resolves the gate', () async {
-      seedKeys();
+      await seedKeys();
       fake.backupPeek = {'found': true, 'head': 'ee' * 32, 'counter': 2};
       fake.backupJobStates.add({
         'kind': 'follow',
