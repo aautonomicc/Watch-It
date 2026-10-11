@@ -100,6 +100,12 @@ class FakeEmbeddedHttp extends HttpOverrides {
   /// `keys_held` following the posted `share_keys`.
   String? trezorError = 'no Trezor found — plug it in, unlock it, and try again';
   String trezorAddress = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
+
+  /// The attention beacon (`GET /trezor/activity`): tests flip these to
+  /// simulate the device waiting for a tap.
+  bool trezorActivityActive = false;
+  int trezorActivitySeq = 0;
+  String? trezorActivityAction;
   String trezorPointer =
       '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff';
 
@@ -361,6 +367,16 @@ class FakeEmbeddedHttp extends HttpOverrides {
     }
     if (path == '/wallet' || path.startsWith('/wallet/')) {
       return _handleWallet(method, path, body);
+    }
+    if (method == 'GET' && path == '/trezor/activity') {
+      return (
+        200,
+        utf8.encode(jsonEncode({
+          'active': trezorActivityActive,
+          'seq': trezorActivitySeq,
+          'action': ?trezorActivityAction,
+        }))
+      );
     }
     if (path == '/mywatch' || path.startsWith('/mywatch/')) {
       return _handleMyWatch(method, path, body);

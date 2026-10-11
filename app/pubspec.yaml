@@ -111,6 +111,7 @@ flutter:
     - assets/seed_metadata/posters/
     - assets/tmdb_logo.png
     - assets/qr_logo.png
+    - assets/sounds/trezor-chime.wav
     - assets/fonts/Anton-OFL.txt
     - assets/licenses/gpl-3.0.txt
 

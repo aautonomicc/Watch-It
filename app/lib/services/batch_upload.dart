@@ -9,6 +9,7 @@ import 'package:watchit_upload/watchit_upload.dart';
 import '../models/media_list.dart';
 import 'bundle.dart' show parseBundle, seedBundle;
 import 'embedded_client.dart';
+import 'trezor_attention.dart';
 import 'ffmpeg.dart' show FfmpegService;
 import 'library_store.dart' show addEntriesToLists;
 import 'match_review.dart';
@@ -874,7 +875,7 @@ class BatchUploadSession extends MatchReviewSession {
     _tasks = _buildTasks();
     uploadTotal = _tasks.length;
     notifyListeners();
-    unawaited(_upload(_tasks));
+    unawaited(TrezorAttentionService.instance.during(() => _upload(_tasks)));
   }
 
   List<_UploadTask> _buildTasks() {
@@ -1224,7 +1225,7 @@ class BatchUploadSession extends MatchReviewSession {
     uploadDone = 0;
     uploadTotal = retry.length;
     notifyListeners();
-    unawaited(_upload(retry));
+    unawaited(TrezorAttentionService.instance.during(() => _upload(retry)));
   }
 
   /// Abort whatever is running and forget the session (any uploads

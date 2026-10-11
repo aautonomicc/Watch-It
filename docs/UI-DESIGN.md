@@ -148,6 +148,14 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   line "Confirm each payment on your Trezor" + the one-time
   first-payment allowance note; the backup job's
   `trezor` phase reads "Confirm on your Trezor…"
+- Every Trezor wait pops an app-wide explanation dialog WITH A CHIME
+  the moment the device asks for a tap (2026-10-11): "Check your
+  Trezor" (identity signature — costs nothing, setup asks twice),
+  "Check the address on your Trezor" (match the device's screen),
+  "Confirm the payment on your Trezor" (check the amount; first
+  payment may ask twice — the one-time allowance). The dialog follows
+  the action live, dismisses itself when the device stops waiting,
+  and Hide silences only that tap — the next one announces again
 - The Backup screen shows a one-time amber "fresh line" card after
   the sign-to-derive update (or a wallet swap): the next backup
   re-uploads everything once; old backups still restore from the

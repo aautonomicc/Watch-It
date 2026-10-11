@@ -109,6 +109,19 @@ class PublishApi {
   Future<void> clearWalletPassphrase() =>
       _request('DELETE', '/wallet/passphrase');
 
+  /// Is a device conversation waiting for a HUMAN at the Trezor right
+  /// now (a confirmation tap, the address screen)? Polled by
+  /// TrezorAttentionService during hardware-wallet flows so the app can
+  /// explain each tap the moment the device asks for it.
+  Future<TrezorActivity> trezorActivity() async {
+    final json = await _request('GET', '/trezor/activity');
+    return TrezorActivity(
+      active: json['active'] as bool? ?? false,
+      seq: json['seq'] as int? ?? 0,
+      action: json['action'] as String?,
+    );
+  }
+
   /// Is a Trezor answering on USB? Silent on the device.
   Future<TrezorProbe> trezorProbe() async {
     final json = await _request('GET', '/wallet/trezor');
@@ -296,6 +309,18 @@ class WalletStatus {
 }
 
 /// `GET /wallet/trezor` — is a device answering on USB right now?
+/// One snapshot of the core's Trezor attention beacon: whether the
+/// device is waiting for a tap, which kind of tap (`sign-identity` |
+/// `confirm-address` | `sign-payment`), and a sequence number that grows
+/// per action so a poller can tell a new tap from one it has already
+/// announced.
+class TrezorActivity {
+  const TrezorActivity({required this.active, required this.seq, this.action});
+  final bool active;
+  final int seq;
+  final String? action;
+}
+
 class TrezorProbe {
   const TrezorProbe({required this.found, this.address, this.error});
   final bool found;

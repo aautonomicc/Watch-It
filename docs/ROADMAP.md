@@ -1254,6 +1254,32 @@ decision (2026-10-10).
       setup screen polls the probe every 4 s on desktop and flips
       the hardware door to "Trezor detected — ready to set up."
 
+- [x] Verified payment signing + Trezor attention prompts
+      (2026-10-11, unreleased — ships next release; response to the
+      first real-device Trezor backup failing at the payment tap
+      with evmlib's "journaled transaction does not match this
+      wallet, chain, or payment intent" — with an in-memory request
+      identical at prepare and validate time, the only journal check
+      that can fail is signer RECOVERY, i.e. the device signature
+      did not recover to the configured wallet). Payments now sign
+      through `VerifiedTrezor` (trezor.rs): a FRESH device session
+      per signature (the old signer held one session across the
+      whole upload — quoting takes minutes and a stale/re-initialized
+      session on a passphrase-capable device can bind a different
+      wallet state), a silent address re-check right before every
+      tap, and local recovery verification of each signature BEFORE
+      evmlib journals it — one automatic fresh-session retry, then a
+      precise error naming the address the device actually signed as
+      (nothing broadcast, nothing spent). Every step that waits for
+      a human at the device (identity signatures, the address
+      screen, each payment tap) now publishes on the attention
+      beacon (`trezor::attention`, `GET /trezor/activity`), and the
+      app pops a plain-language explanation WITH AN AUDIBLE CHIME
+      the moment the Trezor lights up (TrezorAttentionService +
+      TrezorPromptHost; armed during setup, backups/restores and
+      batch uploads). Still open: the real-device re-test of the
+      backup payment leg.
+
 ## Network & data control (shipped 2026-09-03→06, v0.1.0-alpha.85–.92)
 
 A measured idle-traffic campaign turned into a full set of data

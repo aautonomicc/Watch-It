@@ -67,6 +67,77 @@ pub fn ceremony_keys(first: &[u8; 64], second: &[u8; 64]) -> Result<BackupKeys, 
     Ok(derive_keys_from_signature(first))
 }
 
+/// The attention beacon: whenever a device conversation is WAITING FOR A
+/// HUMAN at the Trezor (a confirmation tap, the address screen), the
+/// action is published here and served over `GET /trezor/activity`, so
+/// the app can pop an explanation + play a sound the moment the device
+/// lights up. Silent USB round trips (probe, address reads) never set
+/// it — only steps that stall until someone touches the device.
+///
+/// Lives outside the desktop-only module so the route compiles on every
+/// target; nothing ever sets it off-desktop.
+pub mod attention {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Mutex;
+
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    static CURRENT: Mutex<Option<(u64, &'static str)>> = Mutex::new(None);
+
+    /// Clears the action on drop — but only if a newer action has not
+    /// replaced it (two overlapping guards never erase each other's
+    /// state out from under the poller).
+    pub struct Guard {
+        seq: u64,
+    }
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            let mut current = CURRENT.lock().unwrap_or_else(|p| p.into_inner());
+            if matches!(*current, Some((seq, _)) if seq == self.seq) {
+                *current = None;
+            }
+        }
+    }
+
+    /// Mark the start of a step that waits on the device's button.
+    /// `action` is a stable machine word the app maps to copy:
+    /// `sign-identity`, `confirm-address`, `sign-payment`.
+    pub fn begin(action: &'static str) -> Guard {
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed) + 1;
+        *CURRENT.lock().unwrap_or_else(|p| p.into_inner()) = Some((seq, action));
+        Guard { seq }
+    }
+
+    /// (active, seq, action) — seq grows per action so a poller can tell
+    /// a NEW tap apart from one it already announced.
+    pub fn snapshot() -> (bool, u64, Option<&'static str>) {
+        let current = CURRENT.lock().unwrap_or_else(|p| p.into_inner());
+        match *current {
+            Some((seq, action)) => (true, seq, Some(action)),
+            None => (false, SEQ.load(Ordering::Relaxed), None),
+        }
+    }
+}
+
+/// Did this signature really come from the expected wallet? Recover the
+/// signer over the transaction's own signature hash and compare — the
+/// local, tap-free version of the check evmlib's payment journal does
+/// right before broadcasting, pulled forward so a bad device signature
+/// fails HERE with a message that names the device instead of surfacing
+/// later as "journaled transaction does not match". On mismatch the
+/// recovered address (or the recovery error) comes back as the Err.
+pub fn verify_payment_signature(
+    hash: &alloy::primitives::B256,
+    sig: &alloy::primitives::Signature,
+    expected: alloy::primitives::Address,
+) -> Result<(), String> {
+    match sig.recover_address_from_prehash(hash) {
+        Ok(got) if got == expected => Ok(()),
+        Ok(got) => Err(format!("{got}")),
+        Err(e) => Err(format!("an unrecoverable signature ({e})")),
+    }
+}
+
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 mod device {
     use super::*;
@@ -185,10 +256,18 @@ mod device {
     pub async fn setup_ceremony() -> Result<TrezorIdentity, String> {
         with_signer(|s| async move {
             let address = signer_address(&s);
-            let first = sign_identity(&s).await?;
-            let second = sign_identity(&s).await?;
+            let (first, second) = {
+                // One attention span for both identity taps: the app's
+                // prompt explains the device asks twice (the determinism
+                // guard) instead of flashing two separate popups.
+                let _attention = super::attention::begin("sign-identity");
+                (sign_identity(&s).await?, sign_identity(&s).await?)
+            };
             let keys = ceremony_keys(&first, &second)?;
-            let shown = show_address_on_device()?;
+            let shown = {
+                let _attention = super::attention::begin("confirm-address");
+                show_address_on_device()?
+            };
             if shown.to_lowercase() != address.to_lowercase() {
                 return Err(format!(
                     "the Trezor displayed a different address ({shown}) than \
@@ -216,18 +295,51 @@ mod device {
                      hardware-wallet setup"
                 ));
             }
-            let sig = sign_identity(&s).await?;
+            let sig = {
+                let _attention = super::attention::begin("sign-identity");
+                sign_identity(&s).await?
+            };
             Ok(derive_keys_from_signature(&sig))
         })
         .await
     }
 
-    /// A payment signer bound to the configured address (device-swap
-    /// guard). Every transaction it signs asks for a physical
-    /// confirmation on the device.
-    pub async fn payment_signer(expected_address: &str) -> Result<TrezorSigner, String> {
+    /// The payment signer evmlib drives, bound to the configured address.
+    ///
+    /// Hardened after the first live backup failed with evmlib's
+    /// "journaled transaction does not match this wallet, chain, or
+    /// payment intent" (2026-10-11): with the same in-memory payment
+    /// request at prepare and validate time, the only check that can
+    /// fail there is signer RECOVERY — i.e. the device produced a
+    /// signature that does not recover to the configured wallet. The
+    /// old signer opened ONE USB session when the wallet was built and
+    /// held it across the whole upload; between quoting (minutes on
+    /// mainnet) and the tap the device can auto-lock or drop the
+    /// session, and a re-initialized session on a passphrase-capable
+    /// device can silently bind a different wallet state. So this
+    /// signer:
+    ///   1. opens a FRESH device session per signature, on a blocking
+    ///      thread (the signing waits for a human);
+    ///   2. re-checks the device address right before signing (silent
+    ///      USB read — a swapped device/passphrase fails loudly with no
+    ///      wasted tap);
+    ///   3. VERIFIES the returned signature recovers to the configured
+    ///      address before handing it to evmlib, retrying once on a
+    ///      completely fresh session;
+    ///   4. publishes `sign-payment` on the attention beacon while the
+    ///      device waits for the tap.
+    pub struct VerifiedTrezor {
+        address: alloy::primitives::Address,
+    }
+
+    /// Build the payment signer: probes the device once (friendly
+    /// "plug it in" errors surface before any encrypt/quote work) and
+    /// refuses a device whose address is not the configured one.
+    pub async fn verified_payment_signer(
+        expected_address: &str,
+    ) -> Result<VerifiedTrezor, String> {
         let expected = expected_address.to_lowercase();
-        with_signer(move |s| async move {
+        let address = with_signer(move |s| async move {
             let found = signer_address(&s);
             if found.to_lowercase() != expected {
                 return Err(format!(
@@ -235,9 +347,102 @@ mod device {
                      one configured"
                 ));
             }
-            Ok(s)
+            Ok(alloy::signers::Signer::address(&s))
         })
-        .await
+        .await?;
+        Ok(VerifiedTrezor { address })
+    }
+
+    impl VerifiedTrezor {
+        /// One fresh-session signing round for the concrete EIP-1559
+        /// transaction evmlib always builds. Runs entirely on a blocking
+        /// thread; the address re-check is silent on the device.
+        async fn sign_eip1559_once(
+            &self,
+            tx: alloy::consensus::TxEip1559,
+        ) -> Result<alloy::primitives::Signature, String> {
+            let expected = self.address.to_string().to_lowercase();
+            with_signer(move |s| async move {
+                let found = signer_address(&s);
+                if found.to_lowercase() != expected {
+                    return Err(format!(
+                        "this Trezor holds a different wallet ({found}) than \
+                         the one configured — if the device uses a \
+                         passphrase, open the same hidden wallet it was set \
+                         up with, then try again"
+                    ));
+                }
+                let mut tx = tx;
+                alloy::network::TxSigner::sign_transaction(&s, &mut tx)
+                    .await
+                    .map_err(|e| friendly(format!("payment signing failed: {e}")))
+            })
+            .await
+        }
+
+        async fn sign_verified(
+            &self,
+            tx: &mut dyn alloy::consensus::SignableTransaction<alloy::primitives::Signature>,
+        ) -> Result<alloy::primitives::Signature, String> {
+            // The hash the signature must verify against is the ORIGINAL
+            // transaction's — computed before anything is cloned, so no
+            // clone drift could ever slip past the check.
+            let hash = tx.signature_hash();
+            let _attention = super::attention::begin("sign-payment");
+            let eip1559 = (tx as &dyn std::any::Any)
+                .downcast_ref::<alloy::consensus::TxEip1559>()
+                .cloned();
+            let mut signed_as = String::new();
+            for attempt in 0..2u8 {
+                let sig = match &eip1559 {
+                    Some(t) => self.sign_eip1559_once(t.clone()).await?,
+                    None => {
+                        // Not a 1559 tx (never the case on evmlib's payment
+                        // path): sign inline on a fresh session.
+                        let s = TrezorSigner::new(HDPath::TrezorLive(0), Some(CHAIN_ID))
+                            .await
+                            .map_err(friendly)?;
+                        alloy::network::TxSigner::sign_transaction(&s, tx)
+                            .await
+                            .map_err(|e| friendly(format!("payment signing failed: {e}")))?
+                    }
+                };
+                match super::verify_payment_signature(&hash, &sig, self.address) {
+                    Ok(()) => return Ok(sig),
+                    Err(got) => {
+                        tracing::warn!(
+                            "Trezor payment signature attempt {} recovered to {got}, \
+                             expected {} — retrying on a fresh device session",
+                            attempt + 1,
+                            self.address
+                        );
+                        signed_as = got;
+                    }
+                }
+            }
+            Err(format!(
+                "the Trezor's payment signature did not verify: the device \
+                 signed as {signed_as} but this wallet is {} — if the device \
+                 uses a passphrase, open the same hidden wallet it was set up \
+                 with; otherwise unplug it, plug it back in, and try again. \
+                 Nothing was sent to the network and nothing was spent.",
+                self.address
+            ))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl alloy::network::TxSigner<alloy::primitives::Signature> for VerifiedTrezor {
+        fn address(&self) -> alloy::primitives::Address {
+            self.address
+        }
+
+        async fn sign_transaction(
+            &self,
+            tx: &mut dyn alloy::consensus::SignableTransaction<alloy::primitives::Signature>,
+        ) -> alloy::signers::Result<alloy::primitives::Signature> {
+            self.sign_verified(tx).await.map_err(alloy::signers::Error::other)
+        }
     }
 }
 
@@ -300,6 +505,96 @@ mod tests {
         let direct = crate::backup::derive_keys(KEY).unwrap();
         assert_eq!(keys.pointer, direct.pointer);
         assert_eq!(keys.enc, direct.enc);
+    }
+
+    /// The attention beacon: begin publishes, drop clears, and an OLDER
+    /// guard's drop never erases a NEWER action out from under the
+    /// poller. (The only test touching the process-global state.)
+    #[test]
+    fn attention_tracks_and_clears_actions() {
+        let (active, _, _) = attention::snapshot();
+        assert!(!active, "nothing should be active before the test begins");
+        let first = attention::begin("sign-payment");
+        let (active, seq1, action) = attention::snapshot();
+        assert!(active);
+        assert_eq!(action, Some("sign-payment"));
+        let second = attention::begin("confirm-address");
+        let (active, seq2, action) = attention::snapshot();
+        assert!(active);
+        assert!(seq2 > seq1, "every action gets a fresh seq");
+        assert_eq!(action, Some("confirm-address"));
+        drop(first);
+        let (active, _, action) = attention::snapshot();
+        assert!(active, "the stale guard must not clear the newer action");
+        assert_eq!(action, Some("confirm-address"));
+        drop(second);
+        let (active, _, action) = attention::snapshot();
+        assert!(!active);
+        assert_eq!(action, None);
+    }
+
+    /// The local recovery check behind VerifiedTrezor: a signature from
+    /// the right key verifies; the wrong expected wallet (or a
+    /// parity-flipped signature — the classic conversion-bug shape) is
+    /// refused with the RECOVERED address in the error, the diagnostic
+    /// evmlib's "journaled transaction does not match" never gives.
+    #[tokio::test]
+    async fn payment_signature_verification_names_the_signing_wallet() {
+        use alloy::consensus::{SignableTransaction, TxEip1559};
+        use alloy::network::TxSigner;
+        use alloy::signers::local::PrivateKeySigner;
+        let signer: PrivateKeySigner =
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+                .parse()
+                .unwrap();
+        let mut tx = TxEip1559 {
+            chain_id: 42161,
+            nonce: 7,
+            gas_limit: 100_000,
+            max_fee_per_gas: 100_000_000,
+            max_priority_fee_per_gas: 0,
+            to: alloy::primitives::TxKind::Call(alloy::primitives::Address::repeat_byte(0x11)),
+            value: alloy::primitives::U256::ZERO,
+            access_list: Default::default(),
+            input: alloy::primitives::Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]),
+        };
+        let hash = tx.signature_hash();
+        let sig = TxSigner::sign_transaction(&signer, &mut tx).await.unwrap();
+        verify_payment_signature(&hash, &sig, signer.address())
+            .expect("the right wallet's signature must verify");
+        let err = verify_payment_signature(
+            &hash,
+            &sig,
+            alloy::primitives::Address::repeat_byte(0x22),
+        )
+        .expect_err("a different expected wallet must refuse");
+        assert_eq!(
+            err.to_lowercase(),
+            signer.address().to_string().to_lowercase(),
+            "the error names who really signed"
+        );
+        let flipped = alloy::primitives::Signature::new(sig.r(), sig.s(), !sig.v());
+        assert!(
+            verify_payment_signature(&hash, &flipped, signer.address()).is_err(),
+            "a parity-flipped signature must never verify"
+        );
+    }
+
+    /// Pin the conversion the live Trezor payment path rides:
+    /// trezor-client turns a 1559 parity (0/1) into the EIP-155 form
+    /// `v = parity + 2*chain_id + 35`, and alloy-signer-trezor
+    /// normalize_v's it back — the round trip must preserve parity on
+    /// Arbitrum One for BOTH parities, or every device signature with
+    /// that parity would fail recovery.
+    #[test]
+    fn trezor_electrum_v_transform_preserves_parity_on_arbitrum() {
+        const CHAIN_ID: u64 = 42161;
+        for parity in [false, true] {
+            let electrum = u64::from(parity) + 2 * CHAIN_ID + 35;
+            let normalized = alloy::primitives::normalize_v(electrum)
+                .expect("the EIP-155 form must normalize");
+            assert_eq!(normalized, parity, "parity {parity} must survive");
+        }
     }
 
     /// The sign-twice guard: differing signatures must refuse BEFORE any

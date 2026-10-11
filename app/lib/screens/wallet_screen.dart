@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../services/publish_api.dart';
+import '../services/trezor_attention.dart';
 import '../theme/tokens.dart';
 import 'publish_screen.dart' show isDesktopPlatform;
 
@@ -916,7 +917,8 @@ class _TrezorSetupDialogState extends State<_TrezorSetupDialog> {
       _error = null;
     });
     try {
-      await widget.api.trezorSetup(shareKeys: _shareKeys);
+      await TrezorAttentionService.instance
+          .during(() => widget.api.trezorSetup(shareKeys: _shareKeys));
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) {

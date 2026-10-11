@@ -53,7 +53,7 @@ alloy-signer = "2.4"
 # separate surface from the 2.x signer tree above: payment signers must
 # implement THIS tree's TxSigner, so phase 3's hardware signer comes from
 # the 1.x line (alloy-signer-trezor 1.8.x), not 2.4.x.
-alloy = { version = "1.0.32", default-features = false, features = ["std", "network", "signer-local"] }
+alloy = { version = "1.0.32", default-features = false, features = ["std", "network", "signer-local", "consensus"] }
 rand = "0.8"
 # Transient key material (derivation intermediates, passphrase-derived
 # keys, decrypted wallet values in flight) is wiped on drop. Already in

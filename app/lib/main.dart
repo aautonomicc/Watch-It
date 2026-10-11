@@ -51,6 +51,7 @@ import 'services/window_state.dart';
 import 'services/x0x_cellular.dart';
 import 'theme/tokens.dart';
 import 'widgets/brand_mark.dart';
+import 'widgets/trezor_prompt.dart';
 import 'widgets/tv_app_frame.dart';
 import 'widgets/download_badge.dart';
 import 'widgets/downloads_indicator.dart';
@@ -340,7 +341,8 @@ class WatchItApp extends StatelessWidget {
         ),
         themeMode: wiThemeMode.value,
         builder: (context, child) => TvAppFrame(child: child!),
-        home: const TermsGate(child: ProfileGate(child: HomeScreen())),
+        home: const TrezorPromptHost(
+            child: TermsGate(child: ProfileGate(child: HomeScreen()))),
       ),
     );
   }

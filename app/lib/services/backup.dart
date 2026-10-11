@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import 'embedded_client.dart';
+import 'trezor_attention.dart';
 import 'library_store.dart';
 import 'metadata_service.dart';
 import 'my_watch_api.dart';
@@ -569,8 +570,14 @@ class BackupService {
       {Map<String, dynamic>? payload,
       void Function(BackupJob job)? onProgress}) async {
     payload ??= await buildPayload();
-    await _api.run(payload);
-    final job = await _awaitJob('backup', onProgress);
+    // Armed for the whole run: a hardware wallet asks for taps mid-run
+    // (the identity derive, then each payment) — the attention beacon
+    // turns each one into an on-screen explanation + chime. Costs
+    // nothing for software wallets (the beacon stays quiet).
+    final job = await TrezorAttentionService.instance.during(() async {
+      await _api.run(payload!);
+      return _awaitJob('backup', onProgress);
+    });
     final result = job.result ?? const {};
     try {
       onBackupPublished?.call(payloadFingerprint(payload));
@@ -643,8 +650,12 @@ class BackupService {
     if (staging.existsSync()) staging.deleteSync(recursive: true);
     staging.createSync(recursive: true);
     try {
-      await start(staging.path);
-      final job = await _awaitJob(kind, onProgress);
+      // A paranoid-mode hardware restore asks the device for one derive
+      // tap — announce it like every other Trezor wait.
+      final job = await TrezorAttentionService.instance.during(() async {
+        await start(staging.path);
+        return _awaitJob(kind, onProgress);
+      });
       return await _applyRestore(job.result ?? const {}, staging);
     } finally {
       // Covers the failed-job path too — a "no backup found" must not

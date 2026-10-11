@@ -82,6 +82,10 @@ fn protected_router(engine: &'static Engine) -> Router {
             get(wallet_trezor_probe)
                 .post(move |body: Bytes| wallet_trezor_setup(engine, body)),
         )
+        // Is a device conversation waiting for a HUMAN at the Trezor
+        // right now? The app polls this during hardware-wallet flows to
+        // pop an explanation + chime the moment the device wants a tap.
+        .route("/trezor/activity", get(trezor_activity))
         // Pause/resume all network use. Protected: only the app should
         // be able to silence (or wake) the user's network client.
         .route(
@@ -757,6 +761,20 @@ async fn wallet_balances(engine: &'static Engine) -> Response {
         })),
         Err(e) => (StatusCode::BAD_GATEWAY, e).into_response(),
     }
+}
+
+/// `GET /trezor/activity` — `{active, seq, action?}`: whether a Trezor
+/// conversation is waiting for a physical confirmation right now, and
+/// which kind (`sign-identity` | `confirm-address` | `sign-payment`).
+/// `seq` grows per action so the app can tell a new tap from one it has
+/// already announced.
+async fn trezor_activity() -> Response {
+    let (active, seq, action) = crate::trezor::attention::snapshot();
+    json_ok(serde_json::json!({
+        "active": active,
+        "seq": seq,
+        "action": action,
+    }))
 }
 
 /// `GET /wallet/trezor` — is a Trezor answering on USB? `{found, address?,
@@ -2104,6 +2122,7 @@ mod wallet_api_tests {
         for (method, path) in [
             ("GET", "/wallet/trezor"),
             ("POST", "/wallet/trezor"),
+            ("GET", "/trezor/activity"),
             ("POST", "/wallet/unlock"),
             ("POST", "/wallet/passphrase"),
             ("DELETE", "/wallet/passphrase"),
@@ -2111,6 +2130,14 @@ mod wallet_api_tests {
             let (status, _) = send_auth(&app, method, path, vec![], None).await;
             assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {path}");
         }
+        // The attention beacon answers with its shape under the token.
+        // (No value assert on `active` — the trezor.rs attention test
+        // may hold a guard in a parallel test thread.)
+        let (status, body) =
+            send_auth(&app, "GET", "/trezor/activity", vec![], Some("sekrit")).await;
+        assert_eq!(status, StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json.get("active").is_some() && json.get("seq").is_some());
         // Open routes stay tokenless.
         let (status, _) = send_auth(&app, "GET", "/health", vec![], None).await;
         assert_eq!(status, StatusCode::OK);

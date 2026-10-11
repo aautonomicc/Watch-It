@@ -313,11 +313,29 @@ persists in the `backup-read-keys` keychain entry
 read keys" is on (the setup default) — `GET /backup` serves `key`
 only then, so an opted-out install can never publish the phase-2
 key-share section by construction; opting out makes restore ask the
-device once. Payments: `Signer::payment_wallet()` opens a USB session
-bound to the configured address and every transaction waits for a
-physical confirmation (first payment may be two: evmlib's allowance
-approve, then pay); an unplugged device degrades to a wallet-less
-client with a plug-it-in hint at the paid call. `GET /wallet` reports
+device once. Payments: `Signer::payment_wallet()` probes the device
+(friendly plug-it-in errors before any encrypt/quote work) and hands
+evmlib a `VerifiedTrezor` signer (2026-10-11, after the first live
+backup failed at the payment tap with "journaled transaction does not
+match…" — a signer-recovery failure): each signature opens a FRESH
+device session on a blocking thread, silently re-checks the device
+address right before the tap (device swap / passphrase drift fails
+loudly with no wasted tap), and the returned signature is recovery-
+verified against the transaction's own signature hash BEFORE evmlib
+journals it — one automatic fresh-session retry, then a precise error
+naming the address the device actually signed as (first payment may
+still be two taps: evmlib's allowance approve, then pay); an
+unplugged device degrades to a wallet-less client with a plug-it-in
+hint at the paid call. Every step that waits for a human at the
+device publishes on the attention beacon (`trezor::attention` —
+actions `sign-identity` / `confirm-address` / `sign-payment`, served
+by protected `GET /trezor/activity`); the app polls it only while a
+hardware flow is in flight (TrezorAttentionService.during around
+setup, backup/restore and batch uploads) and pops an explanation
+dialog + plays a chime per tap (TrezorPromptHost, mounted above the
+first route; chime = bundled `assets/sounds/trezor-chime.wav` staged
+to a temp file and played through media_kit, desktop-only,
+fail-soft). `GET /wallet` reports
 `kind` (`software`/`trezor`) + `keys_held`; balances for a hardware
 wallet query by address via evmlib's free functions. A software import
 or wallet delete sweeps the kept read key with the marker.
