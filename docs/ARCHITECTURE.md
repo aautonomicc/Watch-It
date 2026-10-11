@@ -320,9 +320,16 @@ backup failed at the payment tap with "journaled transaction does not
 match…" — a signer-recovery failure): each signature opens a FRESH
 device session on a blocking thread, silently re-checks the device
 address right before the tap (device swap / passphrase drift fails
-loudly with no wasted tap), and the returned signature is recovery-
-verified against the transaction's own signature hash BEFORE evmlib
-journals it — one automatic fresh-session retry, then a precise error
+loudly with no wasted tap), ALWAYS signs with the concrete
+`TxEip1559` extracted from whatever dyn shape the wallet filler
+hands over (`concrete_eip1559` unwraps alloy's `TypedTransaction`
+enum — without this, alloy-signer-trezor's internal downcast misses
+and it silently sends the device a LEGACY signing request whose
+signature can never verify against the 1559 hash: the root cause of
+the 2026-10-11 "signed as a different wallet each run" failures;
+non-1559 non-legacy shapes are refused before any tap), and the
+returned signature is recovery-verified against the transaction's
+own signature hash BEFORE evmlib journals it — one automatic fresh-session retry, then a precise error
 naming the address the device actually signed as (first payment may
 still be two taps: evmlib's allowance approve, then pay); an
 unplugged device degrades to a wallet-less client with a plug-it-in

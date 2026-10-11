@@ -194,6 +194,32 @@ pub fn verify_or_repair_payment_signature(
     Err(original_err.unwrap_or_else(|| "an unrecoverable signature".into()))
 }
 
+/// The concrete EIP-1559 transaction behind whatever `dyn` shape the
+/// caller hands over. alloy's `EthereumWallet` signs through
+/// `sign_transaction_from(sender, tx: TypedTransaction)` and passes the
+/// ENUM itself down as the `dyn SignableTransaction` — so on evmlib's
+/// payment path the concrete `Any` type is `TypedTransaction`, never a
+/// bare `TxEip1559`. That matters because alloy-signer-trezor picks the
+/// device request by downcasting to the concrete `TxEip1559`: when the
+/// downcast misses, it silently falls back to a LEGACY
+/// `ethereum_sign_tx` request, the device signs the EIP-155 legacy hash
+/// of the same fields, and that signature can never recover over the
+/// EIP-1559 typed hash — recovery lands on a pseudo-random address that
+/// changes with every nonce/fee change (the 2026-10-11 "signed as a
+/// different wallet each run" failure, root-caused from the field dump:
+/// `tx: non-eip1559` proved the enum reaches the signer). The fix is to
+/// always sign with the CONCRETE transaction this helper extracts.
+pub fn concrete_eip1559(
+    tx: &dyn alloy::consensus::SignableTransaction<alloy::primitives::Signature>,
+) -> Option<alloy::consensus::TxEip1559> {
+    let any = tx as &dyn std::any::Any;
+    if let Some(t) = any.downcast_ref::<alloy::consensus::TxEip1559>() {
+        return Some(t.clone());
+    }
+    any.downcast_ref::<alloy::consensus::TypedTransaction>()
+        .and_then(|t| t.eip1559().cloned())
+}
+
 /// Does this EIP-191 signature of [crate::backup::IDENTITY_MESSAGE_V1]
 /// really come from `reported_address` (the address the device claims
 /// over USB)? Tried with the signature's own parity and flipped (v
@@ -546,16 +572,31 @@ mod device {
             // clone drift could ever slip past the check.
             let hash = tx.signature_hash();
             let _attention = super::attention::begin("sign-payment");
-            let eip1559 = (tx as &dyn std::any::Any)
-                .downcast_ref::<alloy::consensus::TxEip1559>()
-                .cloned();
+            // ALWAYS unwrap to the concrete TxEip1559 (see concrete_eip1559's
+            // doc comment): handing the TypedTransaction enum down as a dyn
+            // makes alloy-signer-trezor fall back to a LEGACY device request,
+            // whose signature can never verify against the 1559 hash.
+            let eip1559 = super::concrete_eip1559(tx);
+            if eip1559.is_none() && tx.ty() != 0 {
+                // Not 1559 in any shape and not legacy either: the driver
+                // would mis-encode it as legacy and the device would sign
+                // bytes that can never verify — refuse before wasting a tap.
+                return Err(format!(
+                    "this payment is a type-{} transaction, which the Trezor \
+                     driver cannot sign faithfully — nothing was sent and \
+                     nothing was spent; please copy this message into a bug \
+                     report",
+                    tx.ty()
+                ));
+            }
             let mut attempts: Vec<String> = Vec::new();
             for attempt in 0..2u8 {
                 let sig = match &eip1559 {
                     Some(t) => self.sign_eip1559_once(t.clone()).await?,
                     None => {
-                        // Not a 1559 tx (never the case on evmlib's payment
-                        // path): sign inline on a fresh session.
+                        // A true legacy tx: the generic path is correct here
+                        // (the driver's legacy request matches the legacy
+                        // EIP-155 hash). Sign inline on a fresh session.
                         let _guard = DEVICE_LOCK.lock().await;
                         let s = TrezorSigner::new(HDPath::TrezorLive(0), Some(CHAIN_ID))
                             .await
@@ -597,7 +638,7 @@ mod device {
                                     t.input.len()
                                 )
                             })
-                            .unwrap_or_else(|| "non-eip1559".into());
+                            .unwrap_or_else(|| "legacy (non-eip1559)".into());
                         tracing::warn!(
                             "Trezor payment signature attempt {} recovered to {got}, \
                              expected {} — sighash={hash} r={:#x} s={:#x} parity={} \
@@ -920,6 +961,63 @@ mod tests {
                 .expect("the EIP-155 form must normalize");
             assert_eq!(normalized, parity, "parity {parity} must survive");
         }
+    }
+
+    /// The 2026-10-11 live failure's regression pin: evmlib's payment
+    /// path hands the signer alloy's `TypedTransaction` ENUM as the dyn
+    /// tx (never the bare `TxEip1559`), and alloy-signer-trezor picks
+    /// the device request by downcasting to the CONCRETE `TxEip1559` —
+    /// a miss silently signs LEGACY and the signature can never recover
+    /// over the 1559 hash. concrete_eip1559 must therefore (a) unwrap
+    /// the enum to the exact inner tx, (b) still accept a bare concrete
+    /// tx, (c) return None for legacy (whose generic path IS correct),
+    /// and (d) the enum's signature_hash must equal the inner tx's, so
+    /// a signature made over the extracted concrete tx verifies against
+    /// the dyn caller's hash.
+    #[test]
+    fn concrete_eip1559_unwraps_the_wallet_fillers_typed_transaction() {
+        use alloy::consensus::{SignableTransaction, TxEip1559, TypedTransaction};
+        let tx = TxEip1559 {
+            chain_id: 42161,
+            nonce: 3,
+            gas_limit: 120_000,
+            max_fee_per_gas: 25_000_000,
+            max_priority_fee_per_gas: 0,
+            to: alloy::primitives::TxKind::Call(alloy::primitives::Address::repeat_byte(0x66)),
+            value: alloy::primitives::U256::ZERO,
+            access_list: Default::default(),
+            input: alloy::primitives::Bytes::from_static(&[0xaa, 0xbb]),
+        };
+        let typed: TypedTransaction = tx.clone().into();
+
+        // (a) the enum — the shape that actually reaches the signer live.
+        let dyn_typed: &dyn SignableTransaction<alloy::primitives::Signature> = &typed;
+        let extracted = concrete_eip1559(dyn_typed)
+            .expect("the TypedTransaction enum must unwrap to its 1559 payload");
+        assert_eq!(extracted, tx);
+
+        // (d) hash identity: signing the extracted tx answers the dyn's hash.
+        assert_eq!(dyn_typed.signature_hash(), tx.signature_hash());
+
+        // (b) a bare concrete tx still extracts.
+        let dyn_bare: &dyn SignableTransaction<alloy::primitives::Signature> = &tx;
+        assert_eq!(concrete_eip1559(dyn_bare), Some(tx.clone()));
+
+        // (c) a legacy tx yields None — its generic signing path is sound.
+        let legacy: TypedTransaction = alloy::consensus::TxLegacy {
+            chain_id: Some(42161),
+            nonce: 3,
+            gas_price: 25_000_000,
+            gas_limit: 120_000,
+            to: alloy::primitives::TxKind::Call(alloy::primitives::Address::repeat_byte(0x66)),
+            value: alloy::primitives::U256::ZERO,
+            input: alloy::primitives::Bytes::new(),
+        }
+        .into();
+        let dyn_legacy: &dyn SignableTransaction<alloy::primitives::Signature> = &legacy;
+        assert_eq!(concrete_eip1559(dyn_legacy), None);
+        use alloy::consensus::Transaction as _;
+        assert_eq!(dyn_legacy.ty(), 0);
     }
 
     /// The sign-twice guard: differing signatures must refuse BEFORE any
