@@ -6,6 +6,7 @@ import '../services/backup_follow.dart';
 import '../services/my_watch_api.dart';
 import '../theme/tokens.dart';
 import 'wallet_screen.dart';
+import '../widgets/copyable_error.dart';
 
 /// Settings → Backup: the seed-phrase backup. Everything W@tch knows —
 /// lists, watch points, profiles, edits, artwork, the data maps that
@@ -125,7 +126,7 @@ class _BackupScreenState extends State<BackupScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Backup failed: $e')));
+            .showSnackBar(copyableErrorSnackBar('Backup failed: $e'));
       }
     } finally {
       if (mounted) {
@@ -212,7 +213,7 @@ class _BackupScreenState extends State<BackupScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Restore failed: $e')));
+            .showSnackBar(copyableErrorSnackBar('Restore failed: $e'));
       }
     } finally {
       if (mounted) {
@@ -290,7 +291,7 @@ class _BackupScreenState extends State<BackupScreen> {
                         .showSnackBar(SnackBar(content: Text(outcome)));
                   } catch (e) {
                     messenger.showSnackBar(
-                        SnackBar(content: Text('Check failed: $e')));
+                        copyableErrorSnackBar('Check failed: $e'));
                   }
                 },
               ),
@@ -421,7 +422,7 @@ class _BackupScreenState extends State<BackupScreen> {
           ),
           const SizedBox(height: 20),
           if (_error != null) ...[
-            Text('Could not read the backup state: $_error',
+            CopyableErrorText('Could not read the backup state: $_error',
                 style: TextStyle(color: t.rust, fontSize: 13)),
             const SizedBox(height: 12),
             OutlinedButton(onPressed: _reload, child: const Text('Retry')),

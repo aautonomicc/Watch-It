@@ -139,12 +139,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Check the address on your Trezor'), findsOneWidget);
       expect(find.text('Check your Trezor'), findsNothing);
-      expect(find.byType(TrezorPromptDialog), findsOneWidget);
+      expect(find.byType(TrezorPromptCard), findsOneWidget);
       expect(chimes, 2, reason: 'every new tap chimes');
 
       service.emit(null);
       await tester.pumpAndSettle();
-      expect(find.byType(TrezorPromptDialog), findsNothing);
+      expect(find.byType(TrezorPromptCard), findsNothing);
     });
 
     testWidgets('Hide silences only that tap — the next one announces '
@@ -158,24 +158,90 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Hide'));
       await tester.pumpAndSettle();
-      expect(find.byType(TrezorPromptDialog), findsNothing);
+      expect(find.byType(TrezorPromptCard), findsNothing);
 
       // The same tap re-reported never re-opens…
       service.emit(
           const TrezorActivity(active: true, seq: 1, action: 'sign-payment'));
       await tester.pumpAndSettle();
-      expect(find.byType(TrezorPromptDialog), findsNothing);
+      expect(find.byType(TrezorPromptCard), findsNothing);
       expect(chimes, 1);
 
       // …but a fresh tap does.
       service.emit(
           const TrezorActivity(active: true, seq: 2, action: 'sign-payment'));
       await tester.pumpAndSettle();
-      expect(find.byType(TrezorPromptDialog), findsOneWidget);
+      expect(find.byType(TrezorPromptCard), findsOneWidget);
       expect(chimes, 2);
 
       service.emit(null);
       await tester.pumpAndSettle();
+    });
+
+    testWidgets('a dialog that closes while the prompt is up REALLY '
+        'closes — the prompt never absorbs another dialog\'s pop '
+        '(the stranded-Trezor-setup-dialog regression)', (tester) async {
+      TrezorChime.playOverride = () async {};
+      // A tall window: the bottom-anchored prompt card must not overlap
+      // the centered dialog's Done button for the tap below to land.
+      tester.view.physicalSize = const Size(900, 1400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final service = _FakeAttention();
+      bool? dialogResult;
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: TrezorPromptHost(
+          service: service,
+          child: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () async {
+                  dialogResult = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('setup dialog'),
+                      actions: [
+                        TextButton(
+                          // The exact shape of the Trezor setup dialog's
+                          // success path: pop the moment the core call
+                          // returns, while the prompt is still showing.
+                          onPressed: () => Navigator.of(context).pop(true),
+                          child: const Text('Done'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ));
+
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(find.text('setup dialog'), findsOneWidget);
+
+      // The ceremony's last tap is pending: the prompt card shows.
+      service.emit(const TrezorActivity(
+          active: true, seq: 1, action: 'confirm-address'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TrezorPromptCard), findsOneWidget);
+
+      // The dialog's own pop must close the DIALOG and deliver its
+      // result, with the prompt still up (the old dialog-route prompt
+      // swallowed this pop and stranded the setup dialog).
+      await tester.tap(find.text('Done'));
+      await tester.pumpAndSettle();
+      expect(dialogResult, isTrue);
+      expect(find.text('setup dialog'), findsNothing);
+      expect(find.byType(TrezorPromptCard), findsOneWidget);
+
+      service.emit(null);
+      await tester.pumpAndSettle();
+      expect(find.byType(TrezorPromptCard), findsNothing);
     });
   });
 

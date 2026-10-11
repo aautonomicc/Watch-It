@@ -148,14 +148,23 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   line "Confirm each payment on your Trezor" + the one-time
   first-payment allowance note; the backup job's
   `trezor` phase reads "Confirm on your Trezor…"
-- Every Trezor wait pops an app-wide explanation dialog WITH A CHIME
+- Every Trezor wait shows an app-wide explanation card WITH A CHIME
   the moment the device asks for a tap (2026-10-11): "Check your
   Trezor" (identity signature — costs nothing, setup asks twice),
   "Check the address on your Trezor" (match the device's screen),
   "Confirm the payment on your Trezor" (check the amount; first
-  payment may ask twice — the one-time allowance). The dialog follows
-  the action live, dismisses itself when the device stops waiting,
-  and Hide silences only that tap — the next one announces again
+  payment may ask twice — the one-time allowance). The card follows
+  the action live, removes itself when the device stops waiting, and
+  Hide silences only that tap — the next one announces again. It is
+  a bottom-centred non-modal OVERLAY, not a dialog route: a dialog
+  route here once swallowed the setup dialog's success-pop (pop
+  removes the TOP-MOST route) and stranded the ceremony screen
+- Error messages are tap-to-copy (2026-10-11): error snackbars
+  (backup/restore failures and the like) carry a "Tap to copy" line
+  and stay up 10s, and inline error paragraphs (wallet dialogs, the
+  Backup screen's state error) copy themselves on tap with an "Error
+  message copied" confirmation — long core errors land in bug
+  reports without retyping (widgets/copyable_error.dart)
 - The Backup screen shows a one-time amber "fresh line" card after
   the sign-to-derive update (or a wallet swap): the next backup
   re-uploads everything once; old backups still restore from the

@@ -138,6 +138,101 @@ pub fn verify_payment_signature(
     }
 }
 
+/// The secp256k1 group order — needed to try the low-s normalization of
+/// a signature some stack handed over in high-s form.
+fn secp256k1_order() -> alloy::primitives::U256 {
+    alloy::primitives::U256::from_str_radix(
+        "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+        16,
+    )
+    .expect("the secp256k1 order is a valid hex constant")
+}
+
+/// The signature shapes a CORRECT device signature could arrive in after
+/// a v-conversion or canonicalization quirk somewhere in the transport
+/// stack: as handed over, parity-flipped, and (for a high-s signature)
+/// the low-s normalization under both parities. The original always
+/// comes first so an already-good signature is returned untouched.
+fn signature_repair_candidates(
+    sig: &alloy::primitives::Signature,
+) -> Vec<alloy::primitives::Signature> {
+    use alloy::primitives::Signature;
+    let mut out = vec![*sig, Signature::new(sig.r(), sig.s(), !sig.v())];
+    let order = secp256k1_order();
+    let half = order >> 1;
+    if sig.s() > half {
+        let low = order - sig.s();
+        out.push(Signature::new(sig.r(), low, sig.v()));
+        out.push(Signature::new(sig.r(), low, !sig.v()));
+    }
+    out
+}
+
+/// [verify_payment_signature] with self-repair: when the signature as
+/// handed over does not recover to the expected wallet but one of its
+/// parity/low-s siblings DOES, that sibling is returned — recovery to
+/// the expected address over the transaction's own hash is the final
+/// arbiter, so a repaired signature is by definition a valid signature
+/// of this wallet over this transaction and accepting it loses nothing.
+/// Err carries what the ORIGINAL recovered to (the diagnostic).
+pub fn verify_or_repair_payment_signature(
+    hash: &alloy::primitives::B256,
+    sig: &alloy::primitives::Signature,
+    expected: alloy::primitives::Address,
+) -> Result<alloy::primitives::Signature, String> {
+    let mut original_err = None;
+    for candidate in signature_repair_candidates(sig) {
+        match verify_payment_signature(hash, &candidate, expected) {
+            Ok(()) => return Ok(candidate),
+            Err(e) => {
+                if original_err.is_none() {
+                    original_err = Some(e);
+                }
+            }
+        }
+    }
+    Err(original_err.unwrap_or_else(|| "an unrecoverable signature".into()))
+}
+
+/// Does this EIP-191 signature of [crate::backup::IDENTITY_MESSAGE_V1]
+/// really come from `reported_address` (the address the device claims
+/// over USB)? Tried with the signature's own parity and flipped (v
+/// encodings vary across firmware); a key that matches under NEITHER
+/// means the device signs with a different key than the account it
+/// reports — the one failure the ceremony's address checks can never
+/// see, caught here BEFORE anything is persisted. Err names what the
+/// signature actually recovered to.
+pub fn identity_recovers_to(
+    sig: &alloy::primitives::Signature,
+    reported_address: &str,
+) -> Result<(), String> {
+    let expected: alloy::primitives::Address = reported_address
+        .parse()
+        .map_err(|_| format!("the device reported an unparseable address ({reported_address})"))?;
+    let hash =
+        alloy::primitives::eip191_hash_message(crate::backup::IDENTITY_MESSAGE_V1.as_bytes());
+    let mut got = String::new();
+    for candidate in [
+        *sig,
+        alloy::primitives::Signature::new(sig.r(), sig.s(), !sig.v()),
+    ] {
+        match candidate.recover_address_from_prehash(&hash) {
+            Ok(addr) if addr == expected => return Ok(()),
+            Ok(addr) => {
+                if got.is_empty() {
+                    got = format!("{addr}");
+                }
+            }
+            Err(e) => {
+                if got.is_empty() {
+                    got = format!("an unrecoverable signature ({e})");
+                }
+            }
+        }
+    }
+    Err(got)
+}
+
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 mod device {
     use super::*;
@@ -176,11 +271,23 @@ mod device {
         format!("Trezor: {msg}")
     }
 
-    /// Run one device conversation on a blocking thread. The closure gets
-    /// a freshly connected signer; everything it awaits is synchronous
-    /// USB underneath, plus however long the user takes at the device's
-    /// own confirm screen.
-    async fn with_signer<T, F, Fut>(f: F) -> Result<T, String>
+    /// ONE device conversation at a time, process-wide: two concurrent
+    /// USB conversations with the same Trezor interleave messages and
+    /// can abort each other's in-progress workflow (the wallet screen's
+    /// presence probe racing a setup ceremony was the live case). Every
+    /// full conversation holds this; the probe only try-locks so it can
+    /// answer "busy" instead of stalling behind a minutes-long tap wait.
+    static DEVICE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    /// Run one device conversation on a blocking thread, holding the
+    /// already-acquired conversation lock for its whole duration. The
+    /// closure gets a freshly connected signer; everything it awaits is
+    /// synchronous USB underneath, plus however long the user takes at
+    /// the device's own confirm screen.
+    async fn with_signer_locked<T, F, Fut>(
+        guard: tokio::sync::MutexGuard<'static, ()>,
+        f: F,
+    ) -> Result<T, String>
     where
         T: Send + 'static,
         F: FnOnce(TrezorSigner) -> Fut + Send + 'static,
@@ -188,6 +295,7 @@ mod device {
     {
         let handle = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
+            let _guard = guard;
             handle.block_on(async move {
                 let signer = TrezorSigner::new(HDPath::TrezorLive(0), Some(CHAIN_ID))
                     .await
@@ -199,13 +307,27 @@ mod device {
         .map_err(|e| format!("Trezor task failed: {e}"))?
     }
 
+    /// [with_signer_locked] behind a plain wait on the conversation lock.
+    async fn with_signer<T, F, Fut>(f: F) -> Result<T, String>
+    where
+        T: Send + 'static,
+        F: FnOnce(TrezorSigner) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<T, String>>,
+    {
+        with_signer_locked(DEVICE_LOCK.lock().await, f).await
+    }
+
     fn signer_address(s: &TrezorSigner) -> String {
         // EIP-55 checksummed via alloy's Address Display. Fully qualified:
         // TrezorSigner carries both Signer::address and TxSigner::address.
         alloy::signers::Signer::address(s).to_string()
     }
 
-    async fn sign_identity(s: &TrezorSigner) -> Result<[u8; 64], String> {
+    /// The full signature (for recovery checks) plus the r‖s bytes the
+    /// backup identity derives from.
+    async fn sign_identity(
+        s: &TrezorSigner,
+    ) -> Result<(alloy::primitives::Signature, [u8; 64]), String> {
         use alloy::signers::Signer as _;
         let sig = s
             .sign_message(crate::backup::IDENTITY_MESSAGE_V1.as_bytes())
@@ -214,13 +336,22 @@ mod device {
         let mut rs = [0u8; 64];
         rs[..32].copy_from_slice(&sig.r().to_be_bytes::<32>());
         rs[32..].copy_from_slice(&sig.s().to_be_bytes::<32>());
-        Ok(rs)
+        Ok((sig, rs))
     }
 
     /// Does a Trezor answer on USB? Returns its address at
     /// [DERIVATION_PATH] — silent on the device, nothing is signed.
+    /// Never waits behind a running conversation: a ceremony or payment
+    /// in flight answers "busy" instead (the Dart presence poll treats
+    /// any error as "not found", which is the right door copy while the
+    /// device is mid-ceremony anyway).
     pub async fn probe() -> Result<String, String> {
-        with_signer(|s| async move { Ok(signer_address(&s)) }).await
+        let Ok(guard) = DEVICE_LOCK.try_lock() else {
+            return Err(
+                "the Trezor is busy with another W@tch request right now".into()
+            );
+        };
+        with_signer_locked(guard, |s| async move { Ok(signer_address(&s)) }).await
     }
 
     /// Show the wallet address on the DEVICE's own screen and return what
@@ -256,13 +387,27 @@ mod device {
     pub async fn setup_ceremony() -> Result<TrezorIdentity, String> {
         with_signer(|s| async move {
             let address = signer_address(&s);
-            let (first, second) = {
+            let ((first_sig, first), (_, second)) = {
                 // One attention span for both identity taps: the app's
                 // prompt explains the device asks twice (the determinism
                 // guard) instead of flashing two separate popups.
                 let _attention = super::attention::begin("sign-identity");
                 (sign_identity(&s).await?, sign_identity(&s).await?)
             };
+            // The signature must really come from the address the device
+            // reports — every later check (backup pointer, payment
+            // pre-tap address read) compares against this address, so a
+            // device whose signatures recover elsewhere must be refused
+            // BEFORE the marker is ever stored.
+            if let Err(got) = identity_recovers_to(&first_sig, &address) {
+                return Err(format!(
+                    "the Trezor reports address {address} but its signature \
+                     comes from {got} — refusing to set up. If the device \
+                     uses a passphrase, make sure the same hidden wallet \
+                     stays open for the whole setup; otherwise unplug it, \
+                     plug it back in, and try again."
+                ));
+            }
             let keys = ceremony_keys(&first, &second)?;
             let shown = {
                 let _attention = super::attention::begin("confirm-address");
@@ -295,11 +440,23 @@ mod device {
                      hardware-wallet setup"
                 ));
             }
-            let sig = {
+            let (sig, rs) = {
                 let _attention = super::attention::begin("sign-identity");
                 sign_identity(&s).await?
             };
-            Ok(derive_keys_from_signature(&sig))
+            // Same guard as the ceremony: a signature that does not come
+            // from the configured address means the device key and the
+            // reported account disagree — name it instead of letting the
+            // pointer check (or a payment) fail with less to go on.
+            if let Err(got) = identity_recovers_to(&sig, &found) {
+                return Err(format!(
+                    "the Trezor reports address {found} but its signature \
+                     comes from {got} — if the device uses a passphrase, \
+                     open the same hidden wallet it was set up with; \
+                     otherwise unplug it, plug it back in, and try again"
+                ));
+            }
+            Ok(derive_keys_from_signature(&rs))
         })
         .await
     }
@@ -392,13 +549,14 @@ mod device {
             let eip1559 = (tx as &dyn std::any::Any)
                 .downcast_ref::<alloy::consensus::TxEip1559>()
                 .cloned();
-            let mut signed_as = String::new();
+            let mut attempts: Vec<String> = Vec::new();
             for attempt in 0..2u8 {
                 let sig = match &eip1559 {
                     Some(t) => self.sign_eip1559_once(t.clone()).await?,
                     None => {
                         // Not a 1559 tx (never the case on evmlib's payment
                         // path): sign inline on a fresh session.
+                        let _guard = DEVICE_LOCK.lock().await;
                         let s = TrezorSigner::new(HDPath::TrezorLive(0), Some(CHAIN_ID))
                             .await
                             .map_err(friendly)?;
@@ -407,25 +565,96 @@ mod device {
                             .map_err(|e| friendly(format!("payment signing failed: {e}")))?
                     }
                 };
-                match super::verify_payment_signature(&hash, &sig, self.address) {
-                    Ok(()) => return Ok(sig),
+                match super::verify_or_repair_payment_signature(&hash, &sig, self.address) {
+                    Ok(good) => {
+                        if good != sig {
+                            tracing::warn!(
+                                "Trezor payment signature arrived in a non-canonical \
+                                 shape (parity/s) and was repaired — it recovers to \
+                                 the configured wallet {} and is used as repaired",
+                                self.address
+                            );
+                        }
+                        return Ok(good);
+                    }
                     Err(got) => {
+                        // Everything a field report needs to pin where the
+                        // chain breaks: the tx the hash covers, the hash,
+                        // and the signature the device returned.
+                        let tx_line = eip1559
+                            .as_ref()
+                            .map(|t| {
+                                format!(
+                                    "chain_id={} nonce={} to={:?} gas_limit={} \
+                                     max_fee={} max_priority={} value={} data_len={}",
+                                    t.chain_id,
+                                    t.nonce,
+                                    t.to,
+                                    t.gas_limit,
+                                    t.max_fee_per_gas,
+                                    t.max_priority_fee_per_gas,
+                                    t.value,
+                                    t.input.len()
+                                )
+                            })
+                            .unwrap_or_else(|| "non-eip1559".into());
                         tracing::warn!(
                             "Trezor payment signature attempt {} recovered to {got}, \
-                             expected {} — retrying on a fresh device session",
+                             expected {} — sighash={hash} r={:#x} s={:#x} parity={} \
+                             tx: {tx_line}; retrying on a fresh device session",
                             attempt + 1,
-                            self.address
+                            self.address,
+                            sig.r(),
+                            sig.s(),
+                            sig.v(),
                         );
-                        signed_as = got;
+                        attempts.push(got);
                     }
                 }
             }
+            // Both attempts failed. One more SILENT device read tells the
+            // user (and us) which failure class this is: a device that now
+            // reports a different wallet (passphrase/hidden-wallet drift)
+            // vs one that still reports the right wallet while its
+            // signatures recover elsewhere (device/transport fault).
+            let now_reports = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                with_signer(|s| async move { Ok(signer_address(&s)) }),
+            )
+            .await
+            .ok()
+            .and_then(|r| r.ok());
+            let signed_as = if attempts.len() == 2 && attempts[0] == attempts[1] {
+                format!("consistently signed as {}", attempts[0])
+            } else {
+                format!("signed as {}", attempts.join(", then "))
+            };
+            let diagnosis = match &now_reports {
+                Some(z) if z.to_lowercase() != self.address.to_string().to_lowercase() => {
+                    format!(
+                        " The device is on a different wallet right now (it \
+                         reports {z}): if it uses a passphrase, open the same \
+                         hidden wallet it was set up with, then try again."
+                    )
+                }
+                Some(_) => {
+                    " The device still reports the right wallet, so this looks \
+                     like a device or transport fault — unplug it, plug it \
+                     back in, and try again; if it keeps happening, copy this \
+                     message into a bug report."
+                        .to_string()
+                }
+                None => {
+                    " If the device uses a passphrase, open the same hidden \
+                     wallet it was set up with; otherwise unplug it, plug it \
+                     back in, and try again."
+                        .to_string()
+                }
+            };
             Err(format!(
                 "the Trezor's payment signature did not verify: the device \
-                 signed as {signed_as} but this wallet is {} — if the device \
-                 uses a passphrase, open the same hidden wallet it was set up \
-                 with; otherwise unplug it, plug it back in, and try again. \
-                 Nothing was sent to the network and nothing was spent.",
+                 {signed_as} but this wallet is {}.{diagnosis} Nothing was \
+                 sent to the network and nothing was spent.",
                 self.address
             ))
         }
@@ -578,6 +807,102 @@ mod tests {
             verify_payment_signature(&hash, &flipped, signer.address()).is_err(),
             "a parity-flipped signature must never verify"
         );
+    }
+
+    /// The self-repair wrapper: a correct signature passes untouched, a
+    /// parity-flipped one (the classic v-conversion bug shape) is
+    /// repaired back to a signature that recovers to the expected
+    /// wallet, a high-s sibling is normalized, and a signature from the
+    /// WRONG key is still refused naming who really signed — repair can
+    /// never accept a signature the expected wallet did not make.
+    #[tokio::test]
+    async fn payment_signature_repair_fixes_parity_and_s_but_never_the_key() {
+        use alloy::consensus::{SignableTransaction, TxEip1559};
+        use alloy::network::TxSigner;
+        use alloy::signers::local::PrivateKeySigner;
+        let signer: PrivateKeySigner =
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+                .parse()
+                .unwrap();
+        let mut tx = TxEip1559 {
+            chain_id: 42161,
+            nonce: 9,
+            gas_limit: 90_000,
+            max_fee_per_gas: 50_000_000,
+            max_priority_fee_per_gas: 0,
+            to: alloy::primitives::TxKind::Call(alloy::primitives::Address::repeat_byte(0x33)),
+            value: alloy::primitives::U256::ZERO,
+            access_list: Default::default(),
+            input: alloy::primitives::Bytes::from_static(&[0x01, 0x02]),
+        };
+        let hash = tx.signature_hash();
+        let sig = TxSigner::sign_transaction(&signer, &mut tx).await.unwrap();
+
+        let good = verify_or_repair_payment_signature(&hash, &sig, signer.address())
+            .expect("a correct signature must pass");
+        assert_eq!(good, sig, "a correct signature is returned untouched");
+
+        let flipped = alloy::primitives::Signature::new(sig.r(), sig.s(), !sig.v());
+        let repaired = verify_or_repair_payment_signature(&hash, &flipped, signer.address())
+            .expect("a parity-flipped signature must repair");
+        assert_eq!(
+            repaired.recover_address_from_prehash(&hash).unwrap(),
+            signer.address(),
+            "the repaired signature recovers to the expected wallet"
+        );
+
+        // The high-s sibling (r, N-s, !parity) signs the same message with
+        // the same key in non-canonical form — repair must land on the
+        // expected wallet whichever candidate gets there.
+        let high_s = alloy::primitives::Signature::new(
+            sig.r(),
+            secp256k1_order() - sig.s(),
+            !sig.v(),
+        );
+        let healed = verify_or_repair_payment_signature(&hash, &high_s, signer.address())
+            .expect("a high-s sibling must repair");
+        assert_eq!(
+            healed.recover_address_from_prehash(&hash).unwrap(),
+            signer.address()
+        );
+
+        let err = verify_or_repair_payment_signature(
+            &hash,
+            &sig,
+            alloy::primitives::Address::repeat_byte(0x44),
+        )
+        .expect_err("the wrong expected wallet must still refuse");
+        assert_eq!(
+            err.to_lowercase(),
+            signer.address().to_string().to_lowercase(),
+            "the error names who really signed (the ORIGINAL recovery)"
+        );
+    }
+
+    /// The ceremony's new key↔address guard: the identity signature must
+    /// recover to the address the device reports — with the signature's
+    /// own parity or flipped (v encodings vary) — and a mismatch names
+    /// the address the key really belongs to.
+    #[tokio::test]
+    async fn identity_recovery_binds_the_signature_to_the_reported_address() {
+        use alloy::signers::{local::PrivateKeySigner, Signer as _};
+        let signer: PrivateKeySigner =
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+                .parse()
+                .unwrap();
+        let sig = signer
+            .sign_message(crate::backup::IDENTITY_MESSAGE_V1.as_bytes())
+            .await
+            .unwrap();
+        let addr = signer.address().to_string();
+        identity_recovers_to(&sig, &addr).expect("the signer's own address matches");
+        let flipped = alloy::primitives::Signature::new(sig.r(), sig.s(), !sig.v());
+        identity_recovers_to(&flipped, &addr)
+            .expect("a flipped-parity encoding of the same signature still matches");
+        let other = format!("{}", alloy::primitives::Address::repeat_byte(0x55));
+        let err = identity_recovers_to(&sig, &other)
+            .expect_err("a different reported address must refuse");
+        assert_eq!(err.to_lowercase(), addr.to_lowercase(), "names the real key");
     }
 
     /// Pin the conversion the live Trezor payment path rides:

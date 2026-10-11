@@ -33,7 +33,7 @@ String trezorPromptBody(String? action) {
   }
 }
 
-/// Short title per action, used as the dialog headline.
+/// Short title per action, used as the card headline.
 String trezorPromptTitle(String? action) {
   switch (action) {
     case 'confirm-address':
@@ -47,10 +47,17 @@ String trezorPromptTitle(String? action) {
 
 /// Mounts once above the app's first route and watches
 /// [TrezorAttentionService]: the moment the core reports the Trezor is
-/// waiting for a human, it plays the chime and pops an explanation
-/// dialog; the dialog follows the action live and dismisses itself when
-/// the device stops waiting. Manually closing it only silences THAT tap
-/// — the next one announces again.
+/// waiting for a human, it plays the chime and shows an explanation
+/// card; the card follows the action live and removes itself when the
+/// device stops waiting. Manually hiding it only silences THAT tap —
+/// the next one announces again.
+///
+/// The card is an [OverlayEntry], deliberately NOT a dialog route: a
+/// navigator route here once absorbed another dialog's `Navigator.pop`
+/// (the Trezor setup dialog's success-pop landed on the still-open
+/// prompt, stranding the setup dialog forever), because `pop` always
+/// removes the TOP-MOST route. An overlay entry sits outside the route
+/// stack, so other dialogs open and close as if it weren't there.
 class TrezorPromptHost extends StatefulWidget {
   const TrezorPromptHost({super.key, required this.child, this.service});
 
@@ -68,7 +75,7 @@ class _TrezorPromptHostState extends State<TrezorPromptHost> {
       widget.service ?? TrezorAttentionService.instance;
 
   int _announcedSeq = 0;
-  bool _dialogOpen = false;
+  OverlayEntry? _entry;
 
   @override
   void initState() {
@@ -79,83 +86,115 @@ class _TrezorPromptHostState extends State<TrezorPromptHost> {
   @override
   void dispose() {
     _service.removeListener(_onChange);
+    _removeCard();
     super.dispose();
   }
 
   void _onChange() {
     final activity = _service.current;
-    // The dialog pops itself when the activity clears (it listens too);
-    // the host only ANNOUNCES new taps.
-    if (activity == null || activity.seq == _announcedSeq) return;
+    if (activity == null) {
+      // The device stopped waiting — the card goes with it.
+      _removeCard();
+      return;
+    }
+    // Same tap as before: an open card already follows it live (the card
+    // listens too), and a hidden one stays hidden.
+    if (activity.seq == _announcedSeq) return;
     _announcedSeq = activity.seq;
     unawaited(TrezorChime.play());
-    if (_dialogOpen || !mounted) return;
-    _dialogOpen = true;
-    unawaited(showDialog<void>(
-      context: context,
-      useRootNavigator: true,
-      builder: (_) => TrezorPromptDialog(service: _service),
-    ).whenComplete(() => _dialogOpen = false));
+    _showCard();
+  }
+
+  void _showCard() {
+    if (!mounted || _entry != null) return;
+    final entry = OverlayEntry(
+      builder: (_) => TrezorPromptCard(service: _service, onHide: _removeCard),
+    );
+    _entry = entry;
+    Overlay.of(context, rootOverlay: true).insert(entry);
+  }
+
+  void _removeCard() {
+    _entry?.remove();
+    _entry = null;
   }
 
   @override
   Widget build(BuildContext context) => widget.child;
 }
 
-/// The popup itself: explains the current device action in plain words
-/// and dismisses itself the moment the device stops waiting.
-class TrezorPromptDialog extends StatefulWidget {
-  const TrezorPromptDialog({super.key, required this.service});
+/// The floating card itself: explains the current device action in plain
+/// words and follows it live. Non-modal — the app behind it stays
+/// usable, and only the card itself absorbs taps.
+class TrezorPromptCard extends StatelessWidget {
+  const TrezorPromptCard({
+    super.key,
+    required this.service,
+    required this.onHide,
+  });
 
   final TrezorAttentionService service;
-
-  @override
-  State<TrezorPromptDialog> createState() => _TrezorPromptDialogState();
-}
-
-class _TrezorPromptDialogState extends State<TrezorPromptDialog> {
-  bool _popped = false;
-
-  void _popSelf(BuildContext context) {
-    if (_popped) return;
-    _popped = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) Navigator.of(context).pop();
-    });
-  }
+  final VoidCallback onHide;
 
   @override
   Widget build(BuildContext context) {
     final t = WiTokens.of(context);
     return ListenableBuilder(
-      listenable: widget.service,
+      listenable: service,
       builder: (context, _) {
-        final activity = widget.service.current;
-        if (activity == null) {
-          _popSelf(context);
-          return const SizedBox.shrink();
-        }
-        return AlertDialog(
-          backgroundColor: t.ink2,
-          icon: Icon(Icons.vibration, color: t.accent, size: 32),
-          title: Text(
-            trezorPromptTitle(activity.action),
-            style: TextStyle(color: t.bone, fontSize: 16),
-            textAlign: TextAlign.center,
-          ),
-          content: SizedBox(
-            width: 380,
-            child: Text(
-              trezorPromptBody(activity.action),
-              style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.45),
+        final activity = service.current;
+        // The host removes the entry when the beacon clears; render
+        // nothing for the frame in between.
+        if (activity == null) return const SizedBox.shrink();
+        return SafeArea(
+          // Bottom-centered like a rich toast: the card never covers a
+          // centered dialog's buttons, and the app stays usable behind it.
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 20, left: 16, right: 16),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 440),
+                child: Material(
+                  color: t.ink2,
+                  elevation: 12,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 20, 24, 10),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.vibration, color: t.accent, size: 32),
+                        const SizedBox(height: 10),
+                        Text(
+                          trezorPromptTitle(activity.action),
+                          style: TextStyle(color: t.bone, fontSize: 16),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          trezorPromptBody(activity.action),
+                          style: TextStyle(
+                            color: t.boneDim,
+                            fontSize: 13,
+                            height: 1.45,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: onHide,
+                            child: const Text('Hide'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Hide'),
-            ),
-          ],
         );
       },
     );

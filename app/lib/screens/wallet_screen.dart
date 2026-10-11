@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../services/publish_api.dart';
 import '../services/trezor_attention.dart';
+import '../widgets/copyable_error.dart';
 import '../theme/tokens.dart';
 import 'publish_screen.dart' show isDesktopPlatform;
 
@@ -107,6 +108,11 @@ class _WalletScreenState extends State<WalletScreen> {
   }
 
   Future<void> _probeOnce() async {
+    // Never probe while a hardware flow is running: a second USB
+    // conversation with the same Trezor can interrupt the ceremony's
+    // in-progress workflow (the core also refuses with "busy", but not
+    // opening the device at all is strictly safer).
+    if (TrezorAttentionService.instance.armed) return;
     bool found;
     try {
       found = (await _api.trezorProbe()).found;
@@ -159,7 +165,7 @@ class _WalletScreenState extends State<WalletScreen> {
     try {
       generated = await _api.generateWallet();
     } catch (e) {
-      _snack('$e');
+      _errorSnack('$e');
       return;
     }
     if (!mounted) return;
@@ -240,7 +246,7 @@ class _WalletScreenState extends State<WalletScreen> {
       await _api.clearWalletPassphrase();
       _snack('Passphrase protection removed');
     } catch (e) {
-      _snack('$e');
+      _errorSnack('$e');
     }
     await _reload();
   }
@@ -295,6 +301,13 @@ class _WalletScreenState extends State<WalletScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// Errors go out tap-to-copy, so a long core message (hardware wallet,
+  /// payment) can land in a bug report without retyping.
+  void _errorSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(copyableErrorSnackBar(message));
   }
 
   Widget _sectionHeader(WiTokens t, String text) => Padding(
@@ -386,7 +399,7 @@ class _WalletScreenState extends State<WalletScreen> {
         if (_unlockError != null)
           Padding(
             padding: const EdgeInsets.only(top: 10),
-            child: Text(
+            child: CopyableErrorText(
               _unlockError!,
               style: TextStyle(color: t.rust, fontSize: 12.5),
             ),
@@ -618,7 +631,7 @@ class _WalletScreenState extends State<WalletScreen> {
         if (_balancesError != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
+            child: CopyableErrorText(
               'Balance check failed: $_balancesError',
               style: TextStyle(color: t.rust, fontSize: 12),
             ),
@@ -669,9 +682,8 @@ class _ErrorRetry extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
+            CopyableErrorText(
               message,
-              textAlign: TextAlign.center,
               style: TextStyle(color: t.boneDim, fontSize: 13),
             ),
             const SizedBox(height: 16),
@@ -1003,7 +1015,7 @@ class _TrezorSetupDialogState extends State<_TrezorSetupDialog> {
               if (_error != null) ...[
                 Padding(
                   padding: const EdgeInsets.only(top: 10),
-                  child: Text(
+                  child: CopyableErrorText(
                     _error!,
                     style: TextStyle(color: t.rust, fontSize: 12),
                   ),
@@ -1149,7 +1161,7 @@ class _SetPassphraseDialogState extends State<_SetPassphraseDialog> {
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 10),
-                child: Text(
+                child: CopyableErrorText(
                   _error!,
                   style: TextStyle(color: t.rust, fontSize: 12),
                 ),
@@ -1346,7 +1358,7 @@ class _ImportWalletDialogState extends State<_ImportWalletDialog> {
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 10),
-                child: Text(
+                child: CopyableErrorText(
                   _error!,
                   style: TextStyle(color: t.rust, fontSize: 12),
                 ),

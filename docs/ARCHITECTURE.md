@@ -331,11 +331,22 @@ device publishes on the attention beacon (`trezor::attention` —
 actions `sign-identity` / `confirm-address` / `sign-payment`, served
 by protected `GET /trezor/activity`); the app polls it only while a
 hardware flow is in flight (TrezorAttentionService.during around
-setup, backup/restore and batch uploads) and pops an explanation
-dialog + plays a chime per tap (TrezorPromptHost, mounted above the
-first route; chime = bundled `assets/sounds/trezor-chime.wav` staged
-to a temp file and played through media_kit, desktop-only,
-fail-soft). `GET /wallet` reports
+setup, backup/restore and batch uploads) and shows an explanation
+card + plays a chime per tap (TrezorPromptHost, mounted above the
+first route; the card is an OverlayEntry, never a dialog route — a
+route would absorb other dialogs' `Navigator.pop`; chime = bundled
+`assets/sounds/trezor-chime.wav` staged to a temp file and played
+through media_kit, desktop-only, fail-soft). Device conversations
+serialize on a process-wide lock (`trezor.rs::DEVICE_LOCK`) and the
+presence probe only try-locks (answers "busy"), so a probe can never
+interleave USB messages with a ceremony or payment; the Dart
+presence poll additionally skips while a flow is armed. The setup
+ceremony and each backup derive verify that the device's identity
+signature RECOVERS to the address the device reports, and every
+payment signature is recovery-verified (with parity/low-s
+self-repair) against the configured wallet before evmlib sees it —
+on failure the error names what the device signed as and what the
+device reports NOW (passphrase drift vs device fault). `GET /wallet` reports
 `kind` (`software`/`trezor`) + `keys_held`; balances for a hardware
 wallet query by address via evmlib's free functions. A software import
 or wallet delete sweeps the kept read key with the marker.
