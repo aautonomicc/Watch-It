@@ -64,6 +64,7 @@ dependencies:
   watchit_upload:
     path: ../cli
   window_manager: ^0.5.2
+  pointycastle: ^4.0.0
 
 # Vendored media_kit_video 2.0.1 with a Linux H/W-rendering fix: upstream
 # reads Flutter's EGL display via eglGetCurrentDisplay() on the platform

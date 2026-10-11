@@ -77,8 +77,37 @@ class PublishApi {
       storage: json['storage'] as String?,
       kind: json['kind'] as String?,
       keysHeld: json['keys_held'] as bool?,
+      locked: json['locked'] as bool? ?? false,
+      protected: json['protected'] as bool? ?? false,
     );
   }
+
+  /// Decrypt the passphrase-protected wallet file into memory for this
+  /// run (the file stays encrypted on disk). Returns the unlocked status.
+  Future<WalletStatus> unlockWallet(String passphrase) async {
+    final json = await _request('POST', '/wallet/unlock',
+        body: {'passphrase': passphrase});
+    return WalletStatus(
+      configured: json['configured'] as bool? ?? false,
+      address: json['address'] as String?,
+      storage: json['storage'] as String?,
+      kind: json['kind'] as String?,
+      keysHeld: json['keys_held'] as bool?,
+      locked: json['locked'] as bool? ?? false,
+      protected: json['protected'] as bool? ?? false,
+    );
+  }
+
+  /// Encrypt the fallback wallet file at rest under [passphrase]
+  /// (file-stored software keys only — W@tch asks for the passphrase
+  /// after each restart from then on).
+  Future<void> setWalletPassphrase(String passphrase) =>
+      _request('POST', '/wallet/passphrase', body: {'passphrase': passphrase});
+
+  /// Rewrite the fallback wallet file in the clear (requires the wallet
+  /// to be unlocked).
+  Future<void> clearWalletPassphrase() =>
+      _request('DELETE', '/wallet/passphrase');
 
   /// Is a Trezor answering on USB? Silent on the device.
   Future<TrezorProbe> trezorProbe() async {
@@ -236,9 +265,19 @@ class WalletStatus {
     this.storage,
     this.kind,
     this.keysHeld,
+    this.locked = false,
+    this.protected = false,
   });
   final bool configured;
   final String? address;
+
+  /// The passphrase-protected wallet file has not been unlocked this run:
+  /// only the public address is known until `POST /wallet/unlock`.
+  final bool locked;
+
+  /// The fallback wallet file is passphrase-encrypted at rest (whether or
+  /// not it is currently unlocked).
+  final bool protected;
 
   /// `keychain` or `file` — `file` means no OS keychain was available and
   /// the key sits in a mode-0600 app file; the UI says so. For a hardware

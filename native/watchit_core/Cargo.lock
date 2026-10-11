@@ -1258,6 +1258,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "argon2"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c3610892ee6e0cbce8ae2700349fcf8f98adb0dbfbee85aec3c9179d29cc072"
+dependencies = [
+ "base64ct",
+ "blake2",
+ "cpufeatures 0.2.17",
+ "password-hash",
+]
+
+[[package]]
 name = "ark-ff"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2031,6 +2043,15 @@ dependencies = [
  "radium",
  "tap",
  "wyz",
+]
+
+[[package]]
+name = "blake2"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46502ad458c9a52b69d4d4d32775c788b7a1b85e8bc9d482d92250fc0e3f8efe"
+dependencies = [
+ "digest 0.10.7",
 ]
 
 [[package]]
@@ -8328,6 +8349,7 @@ dependencies = [
  "alloy-signer-local 2.5.0",
  "alloy-signer-trezor",
  "ant-core",
+ "argon2",
  "async-trait",
  "axum 0.8.9",
  "base64 0.22.1",
@@ -8355,9 +8377,11 @@ dependencies = [
  "tracing",
  "tracing-android",
  "tracing-subscriber",
+ "trezor-client",
  "x0x",
  "x25519-dalek",
  "xor_name",
+ "zeroize",
 ]
 
 [[package]]

@@ -187,7 +187,18 @@ fallback). iOS deferred. Two new Rust modules in `watchit_core`:
   phrase (MetaMask-compatible `m/44'/60'/0'/0/0`); the mnemonic itself is
   never stored. Settings → Wallet shows the address and live ANT/ETH
   balances (Arbitrum One). It is deliberately a **hot wallet** — the docs
-  and UI say to fund it small.
+  and UI say to fund it small. Since 2026-10-11 the file fallback can be
+  **passphrase-protected**: Argon2id derives a ChaCha20-Poly1305 key and
+  the file becomes `wenck1:<address>:<salt>:<nonce>:<ciphertext>` (the
+  public address rides in the clear so the locked state still shows which
+  wallet is waiting). After a restart the wallet reads as `locked` until
+  `POST /wallet/unlock` decrypts it into memory for the session —
+  balances, uploads and backups all refuse with "unlock it in Settings →
+  Wallet" until then. Keychain-stored keys never need this (already
+  protected at rest), and a hardware marker is public by construction so
+  protection is refused for it. Transient key material (derivation
+  intermediates, passphrase-derived keys, the removed wallet's in-memory
+  copy) is zeroized on drop throughout wallet.rs/backup.rs.
 - **Upload** (`upload.rs`): a single-slot job around ant-core's
   `file_upload_with_progress` (automatic payment) that the UI polls for
   phase/progress. The finished upload's root map goes straight into the
@@ -279,7 +290,12 @@ user takes at the button. Setup (`POST /wallet/trezor`,
 `{"share_keys": bool}` default true): the device at m/44'/60'/0'/0/0
 (the software wallet's exact path — the same 12 words land on the same
 address and backup line) signs `IDENTITY_MESSAGE_V1` TWICE
-(determinism guard), the backup identity derives in RAM, and the
+(determinism guard), then SHOWS the wallet address on its own screen
+for a third confirmation (raw trezor-client
+`EthereumGetAddress{show_display:true}` — the compromised-host
+wrong-account defense: the address the user verifies is drawn by the
+device, and a mismatch with the USB-reported address aborts setup);
+the backup identity derives in RAM, and the
 wallet store keeps only the public marker
 `trezor:v1:<address>:<pointer_hex>:<fingerprint>` — address, backup
 pointer address and public line fingerprint, so the Backup screen
@@ -555,7 +571,11 @@ v17 dropped the channel columns and lists. History in
   and colour scheme are keyed per profile (drift schema v13 —
   `profiles` + `profile_list_access` tables, `watch_states.profile_id`),
   while the library, downloads, wallet and the network
-  identity stay install-global. PINs are salted-hashed and rate-limited; the
+  identity stay install-global. PINs are salted-hashed and rate-limited —
+  stretched with Argon2id since 2026-10-11 (parameters embedded in the hash
+  with hostile-input ceilings, since hashes travel to link members over the
+  profiles sync; legacy single-SHA-256 hashes still verify and upgrade on
+  the next successful entry) — and the
   admin PIN has a one-time recovery code, itself stored hashed. Since
   alpha.95 profiles can optionally ride a library bundle (export
   checkbox → `profiles.json` + avatar members; import merges by name,

@@ -6,6 +6,9 @@ import 'package:crypto/crypto.dart' show sha256;
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pointycastle/key_derivators/api.dart' show Argon2Parameters;
+import 'package:pointycastle/key_derivators/argon2_native_int_impl.dart'
+    show Argon2BytesGenerator;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../db/app_database.dart';
@@ -66,7 +69,9 @@ class Profile {
   /// `preset:<n>` or a posters-dir file name; null = initial letter.
   final String? avatar;
 
-  /// `<salt-hex>:<sha256-hex>`; null = no PIN.
+  /// Salted PIN hash — stretched `a2:…` (Argon2id, current) or the
+  /// legacy `<salt-hex>:<sha256-hex>` form (still verified; upgraded on
+  /// the next successful entry). Null = no PIN.
   final String? pinHash;
   final bool autoLogin;
   final int position;
@@ -535,6 +540,34 @@ class ProfileStore extends ChangeNotifier {
   }
 
   // ---- PINs -----------------------------------------------------------
+  //
+  // Stored hash formats:
+  //   stretched (current): `a2:1:<memKiB>:<iters>:<lanes>:<salt>:<hash>`
+  //     — Argon2id over the PIN; parameters ride the string so they can
+  //     be raised later without re-breaking verification. PINs are 4–6
+  //     digits, and since alpha.108 their hashes travel to every My
+  //     W@tch link member inside the profiles sync section — a single
+  //     salted SHA-256 there brute-forces instantly, memory-hard
+  //     stretching makes it take real machine-hours instead.
+  //   legacy: `<salt-hex>:<sha256-hex>` — still verified (synced rows
+  //     from not-yet-updated devices), silently re-hashed to the
+  //     stretched form on the next successful local entry.
+
+  /// Argon2id cost for NEWLY minted hashes (verification always uses the
+  /// parameters embedded in the stored hash). ~100 ms per check on a
+  /// desktop — imperceptible at a PIN prompt, caps brute force at ~10
+  /// guesses/second/core.
+  static const pinStretchMemoryKb = 8192;
+  static const pinStretchIterations = 3;
+  static const pinStretchLanes = 1;
+
+  /// Hostile-input ceilings: PIN hashes arrive over sync from link
+  /// members, and a crafted hash demanding gigabytes of Argon2 memory
+  /// must not be able to stall or OOM the verifying device. Out of
+  /// bounds → the hash simply never matches.
+  static const _maxStretchMemoryKb = 65536;
+  static const _maxStretchIterations = 10;
+  static const _maxStretchLanes = 4;
 
   static String _hashPin(String pin, String saltHex) =>
       sha256.convert([...saltHex.codeUnits, ...pin.codeUnits]).toString();
@@ -547,12 +580,81 @@ class ProfileStore extends ChangeNotifier {
     ).join();
   }
 
-  static String encodePin(String pin) {
-    final salt = _newSalt();
-    return '$salt:${_hashPin(pin, salt)}';
+  static Uint8List? _bytesFromHex(String hex) {
+    if (hex.isEmpty || hex.length.isOdd) return null;
+    final out = Uint8List(hex.length ~/ 2);
+    for (var i = 0; i < out.length; i++) {
+      final b = int.tryParse(hex.substring(i * 2, i * 2 + 2), radix: 16);
+      if (b == null) return null;
+      out[i] = b;
+    }
+    return out;
   }
 
+  static String _stretchHash(
+    String pin,
+    Uint8List salt, {
+    required int memoryKb,
+    required int iterations,
+    required int lanes,
+  }) {
+    final gen = Argon2BytesGenerator()
+      ..init(Argon2Parameters(
+        Argon2Parameters.ARGON2_id,
+        salt,
+        desiredKeyLength: 32,
+        iterations: iterations,
+        memory: memoryKb,
+        lanes: lanes,
+      ));
+    final out = Uint8List(32);
+    gen.deriveKey(Uint8List.fromList(utf8.encode(pin)), 0, out, 0);
+    return out.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  static String encodePin(String pin) {
+    final saltHex = _newSalt();
+    final hash = _stretchHash(
+      pin,
+      _bytesFromHex(saltHex)!,
+      memoryKb: pinStretchMemoryKb,
+      iterations: pinStretchIterations,
+      lanes: pinStretchLanes,
+    );
+    return 'a2:1:$pinStretchMemoryKb:$pinStretchIterations:'
+        '$pinStretchLanes:$saltHex:$hash';
+  }
+
+  /// Is [stored] the stretched (Argon2id) format? Legacy hashes upgrade
+  /// in place on the next successful verification.
+  static bool isStretchedHash(String stored) => stored.startsWith('a2:');
+
+  /// Test hook for the private matcher (hostile-parameter ceilings).
+  @visibleForTesting
+  static bool debugMatches(String pin, String stored) => _matches(pin, stored);
+
   static bool _matches(String pin, String stored) {
+    if (isStretchedHash(stored)) {
+      final parts = stored.split(':');
+      if (parts.length != 7 || parts[1] != '1') return false;
+      final memoryKb = int.tryParse(parts[2]) ?? -1;
+      final iterations = int.tryParse(parts[3]) ?? -1;
+      final lanes = int.tryParse(parts[4]) ?? -1;
+      final salt = _bytesFromHex(parts[5]);
+      if (salt == null ||
+          salt.isEmpty ||
+          memoryKb < 8 ||
+          memoryKb > _maxStretchMemoryKb ||
+          iterations < 1 ||
+          iterations > _maxStretchIterations ||
+          lanes < 1 ||
+          lanes > _maxStretchLanes) {
+        return false;
+      }
+      return _stretchHash(pin, salt,
+              memoryKb: memoryKb, iterations: iterations, lanes: lanes) ==
+          parts[6];
+    }
     final i = stored.indexOf(':');
     if (i <= 0) return false;
     final salt = stored.substring(0, i);
@@ -584,6 +686,15 @@ class ProfileStore extends ChangeNotifier {
     if (stored == null) return PinVerify.ok;
     if (_matches(pin, stored)) {
       await _clearFailures(profileId);
+      // A legacy (single-SHA-256) hash upgrades to the stretched form the
+      // moment its PIN is proven here. The LWW stamp is deliberately
+      // KEPT: the hash format is a local strengthening, not a user edit —
+      // bumping the stamp would make this device's row beat genuinely
+      // newer remote edits in the next sync round.
+      if (p != null && !isStretchedHash(stored)) {
+        await updateProfile(p.copyWith(pinHash: encodePin(pin)),
+            updatedMs: p.updatedMs);
+      }
       return PinVerify.ok;
     }
     final fails = (prefs.getInt('$_pinFailPrefix$profileId') ?? 0) + 1;

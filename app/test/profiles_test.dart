@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -287,6 +288,72 @@ void main() {
       expect(first, isNot(second));
       expect(await store.recoverAdminPin(first), isFalse);
       expect(await store.recoverAdminPin(second), isTrue);
+    });
+
+    test('new hashes are stretched (Argon2id) with embedded parameters',
+        () {
+      final stored = ProfileStore.encodePin('1234');
+      expect(ProfileStore.isStretchedHash(stored), isTrue);
+      final parts = stored.split(':');
+      expect(parts, hasLength(7));
+      expect(parts[0], 'a2');
+      expect(parts[1], '1');
+      expect(int.parse(parts[2]), ProfileStore.pinStretchMemoryKb);
+      expect(int.parse(parts[3]), ProfileStore.pinStretchIterations);
+      expect(int.parse(parts[4]), ProfileStore.pinStretchLanes);
+      // 16-byte salt + 32-byte hash, hex.
+      expect(parts[5], matches(RegExp(r'^[0-9a-f]{32}$')));
+      expect(parts[6], matches(RegExp(r'^[0-9a-f]{64}$')));
+    });
+
+    test('legacy single-SHA-256 hashes still verify and upgrade in place '
+        'without touching the LWW stamp', () async {
+      final store = ProfileStore.instance;
+      await store.ensureLoaded();
+      final kid = await store.create(name: 'Kid', kind: ProfileKind.kid);
+      // Plant a legacy-format hash the way a pre-update device minted it
+      // (salt-hex ':' sha256(salt+pin)) with a known LWW stamp.
+      const saltHex = '00112233445566778899aabbccddeeff';
+      final legacy =
+          '$saltHex:${sha256.convert([
+        ...saltHex.codeUnits,
+        ...'1234'.codeUnits,
+      ])}';
+      await store.updateProfile(kid.copyWith(pinHash: legacy),
+          updatedMs: 777000);
+
+      expect(await store.verifyPin(kid.id, '9999'), PinVerify.wrong);
+      expect(await store.verifyPin(kid.id, '1234'), PinVerify.ok);
+      final upgraded = store.profiles.firstWhere((p) => p.id == kid.id);
+      expect(ProfileStore.isStretchedHash(upgraded.pinHash!), isTrue,
+          reason: 'a proven legacy hash re-mints as Argon2id');
+      expect(upgraded.updatedMs, 777000,
+          reason: 'the silent upgrade must not win LWW sync rounds');
+      // The upgraded hash verifies the same PIN.
+      expect(await store.verifyPin(kid.id, '1234'), PinVerify.ok);
+    });
+
+    test('hostile stretched hashes with huge parameters never match '
+        '(and never run)', () {
+      final good = ProfileStore.encodePin('1234').split(':');
+      for (final hostile in [
+        // 4 GiB memory demand — must be rejected by the ceiling, fast.
+        'a2:1:4194304:${good[3]}:${good[4]}:${good[5]}:${good[6]}',
+        // Absurd iteration/lane counts.
+        'a2:1:${good[2]}:1000:${good[4]}:${good[5]}:${good[6]}',
+        'a2:1:${good[2]}:${good[3]}:64:${good[5]}:${good[6]}',
+        // Unknown version / malformed shapes.
+        'a2:9:${good[2]}:${good[3]}:${good[4]}:${good[5]}:${good[6]}',
+        'a2:1:junk:3:1:${good[5]}:${good[6]}',
+        'a2:1:8192:3:1:nothex:${good[6]}',
+        'a2:1:8192',
+      ]) {
+        final sw = Stopwatch()..start();
+        expect(ProfileStore.debugMatches('1234', hostile), isFalse,
+            reason: hostile);
+        expect(sw.elapsedMilliseconds, lessThan(1000),
+            reason: 'ceilings must refuse before any expensive work');
+      }
     });
   });
 

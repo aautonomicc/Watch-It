@@ -247,10 +247,13 @@ impl Engine {
     /// left on at setup). May touch the OS keychain on a cold cache —
     /// same blocking discipline as `wallet.load()` applies.
     pub fn signer(&self) -> Result<Signer, String> {
-        let (stored, _) = self
-            .wallet
-            .load()
-            .ok_or("no upload wallet configured — set one up in Settings → Wallet")?;
+        let Some((stored, _)) = self.wallet.load() else {
+            return Err(if self.wallet.locked() {
+                "the wallet is passphrase-locked — unlock it in Settings → Wallet".into()
+            } else {
+                "no upload wallet configured — set one up in Settings → Wallet".into()
+            });
+        };
         match crate::wallet::parse_stored(&stored)? {
             crate::wallet::StoredWallet::Software { key_hex } => Signer::software(&key_hex),
             crate::wallet::StoredWallet::Trezor {

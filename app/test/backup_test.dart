@@ -556,6 +556,67 @@ void main() {
       expect(find.text('Never backed up from this device'), findsOneWidget);
     });
 
+    testWidgets(
+        'a previous-identity line shows the one-time fresh-line notice',
+        (tester) async {
+      fake.backupStatus = {
+        'configured': true,
+        'pointer': 'aa' * 32,
+        'last': null,
+        'last_is_legacy': true,
+        'job': null,
+      };
+      final screenService = BackupService(
+        api: BackupApi(base: FakeEmbeddedHttp.base, token: 't'),
+      );
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: BackupScreen(service: screenService),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('uploads everything once'), findsOneWidget);
+      expect(find.textContaining('still restore from the same 12 words'),
+          findsOneWidget);
+      // Without the flag (a fresh install, or after the first new-line
+      // backup recorded) the notice is gone.
+      await tester.pumpWidget(const SizedBox());
+      fake.backupStatus = {
+        'configured': true,
+        'pointer': 'aa' * 32,
+        'last': null,
+        'job': null,
+      };
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: BackupScreen(
+            service: BackupService(
+          api: BackupApi(base: FakeEmbeddedHttp.base, token: 't'),
+        )),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('uploads everything once'), findsNothing);
+    });
+
+    testWidgets('a passphrase-locked wallet points at the unlock',
+        (tester) async {
+      fake.backupStatus = {
+        'configured': false,
+        'locked': true,
+        'job': null,
+      };
+      final screenService = BackupService(
+        api: BackupApi(base: FakeEmbeddedHttp.base, token: 't'),
+      );
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: BackupScreen(service: screenService),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('Unlock the wallet'), findsOneWidget);
+      expect(find.textContaining('passphrase-locked'), findsOneWidget);
+      expect(find.text('Set up the wallet'), findsNothing);
+    });
+
     testWidgets('the automatic-backup switch persists the opt-in',
         (tester) async {
       fake.backupStatus = {

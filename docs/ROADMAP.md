@@ -1057,7 +1057,7 @@ canonical names automatically. CLI docs in [UPLOAD-CLI.md](UPLOAD-CLI.md).
       uploads without encode tiers; see "Upload on Android" in the
       Publish section above; iOS deferred)
 
-## Hardware-wallet plan (adopted 2026-10-10; ALL PHASES 0–4 implemented 2026-10-10 — 0 + 4-now shipped in alpha.113, 1–3 + the phase-4 key policy unreleased; open: real-Trezor e2e on the user's desktop, Ledger, zeroize)
+## Hardware-wallet plan (adopted 2026-10-10; ALL PHASES 0–4 implemented — 0 + 4-now shipped in alpha.113, 1–3 + key policy in alpha.114; hardening/UX wave + zeroize implemented 2026-10-11; open: real-Trezor e2e on the user's desktop, Ledger)
 
 The 5-phase plan from the 2026-10-10 discussion series (CLAUDE.md has
 the full record): make the upload wallet — which is also the backup
@@ -1180,6 +1180,51 @@ decision (2026-10-10).
       UX this lands on: one tap at setup, one per upload batch, one
       per backup — funds are 100% hardware-protected in EVERY mode.
       Build order: phase 3 next, this policy ships with it.
+- [x] Hardening + ease-of-use wave (implemented 2026-10-11,
+      unreleased — the 2026-10-11 recommendations a–i in full):
+      (a) **zeroize** — transient key material (derivation
+      intermediates in backup.rs, mnemonic-derived key bytes,
+      passphrase-derived file keys, the removed wallet's in-memory
+      copy) wipes on drop; long-lived keys the app needs to operate
+      stay, by design. (b) **ceremony address confirmation** — the
+      Trezor setup is now THREE device confirmations: sign twice,
+      then the device SHOWS the wallet address on its own screen
+      (raw trezor-client `EthereumGetAddress{show_display}`; the
+      alloy wrapper doesn't expose it) — the compromised-host
+      wrong-account defense; a mismatch with the USB-reported
+      address refuses setup, and the configured view tells the user
+      to compare. (c) **Argon2id PIN stretching** — profile PIN +
+      recovery-code hashes mint as `a2:1:<m>:<t>:<p>:<salt>:<hash>`
+      (8 MiB / t=3, ~100 ms per check), parameters embedded with
+      hostile-input ceilings (a synced hash can't demand gigabytes);
+      legacy single-SHA-256 hashes still verify and silently upgrade
+      on the next successful entry WITHOUT touching the LWW stamp.
+      Mixed-fleet note: an old build can't verify a new hash — the
+      standing update-together guidance covers it. (d) **passphrase-
+      encrypted wallet.key fallback** — when no OS keychain exists,
+      Settings → Wallet offers "Protect the wallet file with a
+      passphrase" (Argon2id → ChaCha20-Poly1305, file format
+      `wenck1:<address>:<salt>:<nonce>:<ct>` — the public address
+      rides in the clear so the locked screen shows WHICH wallet
+      waits); after a restart the wallet is LOCKED until
+      `POST /wallet/unlock` (new routes + `locked`/`protected` on
+      `GET /wallet`, `locked` on `GET /backup`; signer errors say
+      "unlock it" instead of "no wallet"). Replacing the wallet
+      drops the old file's protection with it. (e+g) **allowance
+      honesty** — the wallet screen's hardware copy and the batch
+      paying phase both say the FIRST payment asks one extra
+      confirmation (the one-time U256::MAX allowance approve).
+      (f) **udev fix-it helper** — a device error carrying the udev
+      hint grows "Show me the fix (USB permissions)" → a dialog with
+      the one copyable command installing Trezor's official rules
+      (`kTrezorUdevCommand`). (h) **fresh-line notice** — `GET
+      /backup` gains `last_is_legacy` (a state file recorded under a
+      DIFFERENT identity with ≥1 backup) and the Backup screen shows
+      a one-time card: the next backup re-uploads everything once,
+      old backups still restore from the same words; clears itself
+      after that backup. (i) **live Trezor presence** — the wallet
+      setup screen polls the probe every 4 s on desktop and flips
+      the hardware door to "Trezor detected — ready to set up."
 
 ## Network & data control (shipped 2026-09-03→06, v0.1.0-alpha.85–.92)
 

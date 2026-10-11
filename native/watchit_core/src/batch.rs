@@ -128,7 +128,9 @@ impl Engine {
             }
         }
         if self.wallet.load().is_none() {
-            return Err("no upload wallet configured — set one up in Settings → Wallet".into());
+            return Err(self.wallet_unavailable(
+                "no upload wallet configured — set one up in Settings → Wallet",
+            ));
         }
         if self.uploads.active.swap(true, Ordering::SeqCst) {
             return Err("an upload is already running — wait for it to finish".into());

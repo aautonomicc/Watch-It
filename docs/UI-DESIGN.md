@@ -131,12 +131,27 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   plug-in + unlock instructions, a default-on "keep backup read keys
   on this computer" choice with honest link-members-can-read copy,
   then the on-device ceremony (confirm the backup-identity message
-  twice). Configured hardware wallets show accent copy ("the private
-  key never leaves the device"), no file-storage warning (only a
-  public marker is stored), and remove reads as a disconnect
+  twice, then the address the device shows on its own screen —
+  2026-10-11). Configured hardware wallets show accent copy ("the
+  private key never leaves the device"), a compare-the-address note +
+  the first-payment allowance note, no file-storage warning (only a
+  public marker is stored), and remove reads as a disconnect. The
+  setup screen polls for a plugged-in device and flips the door to
+  "Trezor detected — ready to set up."; a udev permission error grows
+  a "Show me the fix (USB permissions)" helper with the one copyable
+  install command (2026-10-11). File-fallback software wallets offer
+  "Protect the wallet file with a passphrase" (entered twice, ≥8
+  chars); a protected wallet reads as locked after a restart — the
+  Wallet screen asks for the passphrase, the Backup screen points at
+  the unlock (2026-10-11)
 - During a batch upload's paying phase a hardware wallet adds the
-  line "Confirm each payment on your Trezor"; the backup job's
+  line "Confirm each payment on your Trezor" + the one-time
+  first-payment allowance note; the backup job's
   `trezor` phase reads "Confirm on your Trezor…"
+- The Backup screen shows a one-time amber "fresh line" card after
+  the sign-to-derive update (or a wallet swap): the next backup
+  re-uploads everything once; old backups still restore from the
+  same 12 words. Clears itself after that backup (2026-10-11)
 - Backup (2026-10-06, alpha.110 — beside Wallet, admin-only): the
   seed-phrase backup — "Back up now" publishes the full W@tch state
   to Autonomi encrypted under keys derived from the wallet (its 12

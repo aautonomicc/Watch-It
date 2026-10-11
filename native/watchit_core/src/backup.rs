@@ -171,10 +171,11 @@ pub fn derive_keys(wallet_key_hex: &str) -> Result<BackupKeys, String> {
 /// signer (phase 3) feeds — hand it the 64-byte r‖s of the device's
 /// [IDENTITY_MESSAGE_V1] signature and it lands on the same identity.
 pub fn derive_keys_from_signature(sig_rs: &[u8; 64]) -> BackupKeys {
-    let root = blake3::derive_key(DOMAIN_IDENTITY, sig_rs);
-    let seed = blake3::derive_key(DOMAIN_POINTER, &root);
+    use zeroize::Zeroizing;
+    let root = Zeroizing::new(blake3::derive_key(DOMAIN_IDENTITY, sig_rs));
+    let seed = Zeroizing::new(blake3::derive_key(DOMAIN_POINTER, root.as_ref()));
     let (pk, sk) = ml_dsa_65().generate_keypair_from_seed(&seed);
-    let enc = blake3::derive_key(DOMAIN_ENC, &root);
+    let enc = blake3::derive_key(DOMAIN_ENC, root.as_ref());
     let pointer = pointer_address(&pk);
     BackupKeys { sk, pk, enc, pointer }
 }
@@ -183,13 +184,15 @@ pub fn derive_keys_from_signature(sig_rs: &[u8; 64]) -> BackupKeys {
 /// Kept ONLY so restores reach backups made before the sign-to-derive
 /// flip; nothing ever writes under this identity again.
 pub fn derive_keys_legacy(wallet_key_hex: &str) -> Result<BackupKeys, String> {
+    use zeroize::Zeroizing;
     let cleaned = wallet_key_hex.trim().trim_start_matches("0x");
-    let bytes = hex::decode(cleaned)
-        .map_err(|_| "wallet key is not valid hex".to_string())?;
+    let bytes = Zeroizing::new(
+        hex::decode(cleaned).map_err(|_| "wallet key is not valid hex".to_string())?,
+    );
     if bytes.len() != 32 {
         return Err("wallet key must be 32 bytes".into());
     }
-    let seed = blake3::derive_key(DOMAIN_POINTER_LEGACY, &bytes);
+    let seed = Zeroizing::new(blake3::derive_key(DOMAIN_POINTER_LEGACY, &bytes));
     let (pk, sk) = ml_dsa_65().generate_keypair_from_seed(&seed);
     let enc = blake3::derive_key(DOMAIN_ENC_LEGACY, &bytes);
     let pointer = pointer_address(&pk);
@@ -212,14 +215,16 @@ pub fn object_hash(plain: &[u8]) -> String {
 }
 
 fn object_cipher(enc: &[u8; 32], hash_hex: &str) -> (ChaCha20Poly1305, Nonce) {
+    use zeroize::Zeroizing;
     let mut material = Vec::with_capacity(32 + hash_hex.len());
     material.extend_from_slice(enc);
     material.extend_from_slice(hash_hex.as_bytes());
-    let key = blake3::derive_key(DOMAIN_OBJECT_KEY, &material);
-    let nonce_full = blake3::derive_key(DOMAIN_OBJECT_NONCE, &material);
+    let material = Zeroizing::new(material);
+    let key = Zeroizing::new(blake3::derive_key(DOMAIN_OBJECT_KEY, &material));
+    let nonce_full = Zeroizing::new(blake3::derive_key(DOMAIN_OBJECT_NONCE, &material));
     let mut nonce = Nonce::default();
     nonce.copy_from_slice(&nonce_full[..12]);
-    (ChaCha20Poly1305::new(Key::from_slice(&key)), nonce)
+    (ChaCha20Poly1305::new(Key::from_slice(key.as_ref())), nonce)
 }
 
 /// Deterministic seal: same plaintext (under the same backup key) is
@@ -448,6 +453,18 @@ impl BackupManager {
         }
     }
 
+    /// True when the state file belongs to a DIFFERENT identity that has
+    /// recorded at least one backup — i.e. the configured identity's
+    /// first backup will start a fresh line and re-upload everything once
+    /// (the post-sign-to-derive-update / swapped-wallet case). Drives the
+    /// Backup screen's one-time notice; clears itself the moment a backup
+    /// runs under the current identity (the state re-stamps).
+    pub fn previous_line_exists(&self, identity_fp: &str) -> bool {
+        let state = self.state();
+        state.identity.as_deref() != Some(identity_fp)
+            && (state.last.is_some() || !state.objects.is_empty())
+    }
+
     /// The last backup recorded for THIS identity — a summary left behind
     /// by a different (pre-flip) identity reads as "never backed up", so
     /// the UI and the phase-2 key-share section never present the new
@@ -506,11 +523,10 @@ impl Engine {
     /// `{"doc": {...}, "art": [{"file","path"}...], "map_addrs": [...]}`.
     pub fn start_backup(&'static self, input: serde_json::Value) -> Result<(), String> {
         if self.wallet.load().is_none() {
-            return Err(
+            return Err(self.wallet_unavailable(
                 "no upload wallet configured — the backup identity derives from \
-                 its 12 words (Settings → Wallet)"
-                    .into(),
-            );
+                 its 12 words (Settings → Wallet)",
+            ));
         }
         let signer = self.signer()?;
         if input.get("doc").and_then(|d| d.as_object()).is_none() {

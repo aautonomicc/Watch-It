@@ -302,6 +302,40 @@ class _BackupScreenState extends State<BackupScreen> {
     );
   }
 
+  /// Shown while this install still carries a backup line recorded under
+  /// a PREVIOUS identity (the sign-to-derive update, or a swapped
+  /// wallet): the next backup starts fresh and re-uploads everything
+  /// once — said up front so the one-time size/cost never reads as a
+  /// bug. Disappears by itself after that first backup.
+  Widget _freshLineCard(WiTokens t) {
+    return Card(
+      color: t.ink2,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.info_outline,
+                size: 18, color: WiTokens.warnAmber),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'This update changed how backup keys derive, so your '
+                'next backup starts a fresh line and uploads everything '
+                'once — expect it to take longer and cost more than '
+                'usual, one time only. After that, backups go back to '
+                'paying for changes only. Your earlier backups still '
+                'restore from the same 12 words.',
+                style: TextStyle(fontSize: 13, color: t.bone, height: 1.4),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// One-time nudge once another linked device exists: followers only
   /// ever see this device's LAST backup, so without automatic backups
   /// they go stale between manual ones.
@@ -396,16 +430,23 @@ class _BackupScreenState extends State<BackupScreen> {
           ] else if (!status.configured) ...[
             _followerCard(t),
             Text(
-              'No upload wallet is set up on this device yet. The '
-              'backup lives under keys derived from the wallet, so set '
-              'one up first — to restore an existing backup, import '
-              'the same 12 words.',
+              status.locked
+                  ? 'The wallet on this device is passphrase-locked. '
+                        'Unlock it in Settings → Wallet, then come back '
+                        'here to back up or restore.'
+                  : 'No upload wallet is set up on this device yet. The '
+                        'backup lives under keys derived from the wallet, so set '
+                        'one up first — to restore an existing backup, import '
+                        'the same 12 words.',
               style: TextStyle(color: t.bone, fontSize: 14, height: 1.4),
             ),
             const SizedBox(height: 16),
             FilledButton.icon(
-              icon: const Icon(Icons.account_balance_wallet_outlined),
-              label: const Text('Set up the wallet'),
+              icon: Icon(status.locked
+                  ? Icons.lock_open_outlined
+                  : Icons.account_balance_wallet_outlined),
+              label: Text(
+                  status.locked ? 'Unlock the wallet' : 'Set up the wallet'),
               onPressed: () async {
                 await Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const WalletScreen()),
@@ -426,6 +467,7 @@ class _BackupScreenState extends State<BackupScreen> {
                 style: TextStyle(color: t.ash, fontSize: 12),
               ),
             ),
+            if (status.lastIsLegacy) _freshLineCard(t),
             if (!_auto &&
                 !_nudgeDismissed &&
                 _hasFollowers &&

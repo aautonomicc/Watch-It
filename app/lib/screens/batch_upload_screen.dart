@@ -1309,7 +1309,9 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
           padding: const EdgeInsets.only(top: 6),
           child: Text(
             'Confirm each payment on your Trezor — it must stay plugged in '
-            'and unlocked.',
+            'and unlocked. The very first payment from this wallet asks for '
+            'one extra confirmation: a one-time spending allowance for the '
+            'network\'s payment contract.',
             style: TextStyle(color: t.accent, fontSize: 12.5),
           ),
         ),

@@ -15,8 +15,19 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 
+use chacha20poly1305::aead::{Aead, KeyInit};
+use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+use rand::RngCore;
+use zeroize::{Zeroize, Zeroizing};
+
 const KEYCHAIN_SERVICE: &str = "watchit";
 const KEYCHAIN_USER: &str = "upload-wallet";
+
+/// First token of a passphrase-encrypted fallback file:
+/// `wenck1:<public address>:<salt hex>:<nonce hex>:<ciphertext hex>`.
+/// The address rides along in the clear (it is public anyway) so the
+/// locked wallet still shows WHICH wallet is waiting for its passphrase.
+const ENC_FILE_PREFIX: &str = "wenck1";
 
 /// Marker prefix a hardware wallet stores in place of a private key.
 /// Everything in the marker is public: the address, the (non-secret)
@@ -77,6 +88,71 @@ pub fn parse_stored(stored: &str) -> Result<StoredWallet, String> {
         }),
         _ => Err(MALFORMED.into()),
     }
+}
+
+/// The public address of a stored wallet value (either kind) — what a
+/// locked file may show without revealing anything secret.
+fn display_address(stored: &str) -> Option<String> {
+    match parse_stored(stored).ok()? {
+        StoredWallet::Software { key_hex } => address_of(&key_hex).ok(),
+        StoredWallet::Trezor { address, .. } => Some(address),
+    }
+}
+
+/// Argon2id over the passphrase (default params: 19 MiB, t=2) → the
+/// ChaCha20-Poly1305 file key. Wiped on drop.
+fn passphrase_key(passphrase: &str, salt: &[u8]) -> Result<Zeroizing<[u8; 32]>, String> {
+    let mut key = Zeroizing::new([0u8; 32]);
+    argon2::Argon2::default()
+        .hash_password_into(passphrase.as_bytes(), salt, key.as_mut())
+        .map_err(|e| format!("passphrase derivation failed: {e}"))?;
+    Ok(key)
+}
+
+/// Encrypt a stored wallet value for the fallback file.
+fn encrypt_stored(stored: &str, passphrase: &str) -> Result<String, String> {
+    let mut salt = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut salt);
+    let mut nonce = [0u8; 12];
+    rand::thread_rng().fill_bytes(&mut nonce);
+    let key = passphrase_key(passphrase, &salt)?;
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_ref()));
+    let ct = cipher
+        .encrypt(Nonce::from_slice(&nonce), stored.as_bytes())
+        .map_err(|e| format!("wallet file encryption failed: {e}"))?;
+    Ok(format!(
+        "{ENC_FILE_PREFIX}:{}:{}:{}:{}",
+        display_address(stored).unwrap_or_default(),
+        hex::encode(salt),
+        hex::encode(nonce),
+        hex::encode(ct),
+    ))
+}
+
+/// Decrypt an encrypted fallback file; a bad passphrase (or tampered
+/// file) reads as "wrong passphrase" — AEAD can't tell them apart.
+fn decrypt_stored(file_text: &str, passphrase: &str) -> Result<Zeroizing<String>, String> {
+    let parts: Vec<&str> = file_text.trim().splitn(5, ':').collect();
+    if parts.len() != 5 || parts[0] != ENC_FILE_PREFIX {
+        return Err("the wallet file is not passphrase-protected".into());
+    }
+    let salt = hex::decode(parts[2]).map_err(|_| "wallet file damaged".to_string())?;
+    let nonce = hex::decode(parts[3]).map_err(|_| "wallet file damaged".to_string())?;
+    let ct = hex::decode(parts[4]).map_err(|_| "wallet file damaged".to_string())?;
+    if nonce.len() != 12 {
+        return Err("wallet file damaged".into());
+    }
+    let key = passphrase_key(passphrase, &salt)?;
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_ref()));
+    let plain = Zeroizing::new(
+        cipher
+            .decrypt(Nonce::from_slice(&nonce), ct.as_slice())
+            .map_err(|_| "wrong passphrase".to_string())?,
+    );
+    let text = std::str::from_utf8(&plain)
+        .map_err(|_| "wrong passphrase".to_string())?
+        .to_string();
+    Ok(Zeroizing::new(text))
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -146,8 +222,93 @@ impl WalletStore {
         Some(found)
     }
 
+    /// Is the fallback file passphrase-encrypted? True whether or not it
+    /// has been unlocked this run.
+    pub fn passphrase_protected(&self) -> bool {
+        self.file_path
+            .as_ref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .map(|t| t.trim().starts_with(ENC_FILE_PREFIX))
+            .unwrap_or(false)
+    }
+
+    /// The passphrase-encrypted file is present but has NOT been unlocked
+    /// this run → the public address it carries (possibly empty). `None`
+    /// when not locked (no file, plaintext file, or already unlocked).
+    /// Callers reach here after `load()` returned `None`, so the keychain
+    /// has already been ruled out.
+    pub fn locked_address(&self) -> Option<String> {
+        if self.cached.read().unwrap().is_some() {
+            return None;
+        }
+        let text = std::fs::read_to_string(self.file_path.as_ref()?).ok()?;
+        let t = text.trim();
+        if !t.starts_with(ENC_FILE_PREFIX) {
+            return None;
+        }
+        Some(t.splitn(5, ':').nth(1).unwrap_or("").to_string())
+    }
+
+    pub fn locked(&self) -> bool {
+        self.locked_address().is_some()
+    }
+
+    /// Decrypt the passphrase-protected file into the in-memory cache so
+    /// the wallet works for the rest of this run. The file stays
+    /// encrypted on disk.
+    pub fn unlock(&self, passphrase: &str) -> Result<(), String> {
+        let path = self
+            .file_path
+            .as_ref()
+            .ok_or("no wallet file on this install")?;
+        let text = std::fs::read_to_string(path)
+            .map_err(|_| "no wallet file on this install".to_string())?;
+        let stored = decrypt_stored(&text, passphrase)?;
+        *self.cached.write().unwrap() =
+            Some((stored.trim().to_string(), Storage::File));
+        Ok(())
+    }
+
+    /// Encrypt the fallback file under a passphrase. Only meaningful for
+    /// file-stored SOFTWARE keys: the keychain already protects at rest,
+    /// and a hardware marker is public by construction. The wallet stays
+    /// unlocked for the rest of this run.
+    pub fn set_passphrase(&self, passphrase: &str) -> Result<(), String> {
+        let (stored, storage) = self
+            .load()
+            .ok_or("no wallet to protect — set one up (or unlock it) first")?;
+        if storage != Storage::File {
+            return Err(
+                "the key lives in the OS keychain — it is already protected at rest".into(),
+            );
+        }
+        if stored.starts_with(TREZOR_MARKER_PREFIX) {
+            return Err(
+                "a hardware wallet stores only a public marker on this computer — \
+                 there is nothing secret to protect"
+                    .into(),
+            );
+        }
+        let enc = encrypt_stored(&stored, passphrase)?;
+        self.file_set(&enc)
+    }
+
+    /// Rewrite the fallback file in the clear (requires the wallet to be
+    /// unlocked/loaded). A no-op when it was never protected.
+    pub fn clear_passphrase(&self) -> Result<(), String> {
+        let (stored, storage) = self
+            .load()
+            .ok_or("unlock the wallet first")?;
+        if storage != Storage::File || !self.passphrase_protected() {
+            return Ok(());
+        }
+        self.file_set(&stored)
+    }
+
     /// Persist a key, keychain first, file fallback. Returns the backend
-    /// that took it.
+    /// that took it. Replacing the wallet writes a fresh plaintext file —
+    /// any previous passphrase protection belongs to the old key and is
+    /// dropped with it.
     pub fn store(&self, key_hex: &str) -> Result<Storage, String> {
         let storage = if self.keychain_set(key_hex) {
             // A stale fallback file must not shadow (or outlive) the
@@ -162,11 +323,14 @@ impl WalletStore {
         Ok(storage)
     }
 
-    /// Remove the key from every backend it could live in.
+    /// Remove the key from every backend it could live in (and wipe the
+    /// in-memory copy).
     pub fn remove(&self) {
         self.keychain_delete();
         self.file_delete();
-        *self.cached.write().unwrap() = None;
+        if let Some((mut key, _)) = self.cached.write().unwrap().take() {
+            key.zeroize();
+        }
     }
 
     /// Run a keyring operation on a dedicated plain thread. The Secret
@@ -231,6 +395,11 @@ impl WalletStore {
     fn file_get(&self) -> Option<String> {
         let path = self.file_path.as_ref()?;
         let key = std::fs::read_to_string(path).ok()?;
+        // A passphrase-encrypted file can't be read without unlock(); it
+        // must never be mistaken for a (junk) plaintext key.
+        if key.trim().starts_with(ENC_FILE_PREFIX) {
+            return None;
+        }
         (!key.trim().is_empty()).then(|| key.trim().to_string())
     }
 
@@ -284,7 +453,8 @@ pub fn key_from_mnemonic(phrase: &str) -> Result<String, String> {
         .map_err(|e| format!("derivation path invalid: {e}"))?
         .build()
         .map_err(|e| format!("not a valid seed phrase: {e}"))?;
-    Ok(format!("0x{}", hex::encode(signer.to_bytes())))
+    let raw = Zeroizing::new(signer.to_bytes().0);
+    Ok(format!("0x{}", hex::encode(raw.as_slice())))
 }
 
 /// Validate a pasted private key and return its canonical 0x-hex form.
@@ -294,7 +464,8 @@ pub fn normalize_private_key(input: &str) -> Result<String, String> {
     let signer: PrivateKeySigner = cleaned
         .parse()
         .map_err(|_| "not a valid private key (expect 64 hex characters)".to_string())?;
-    Ok(format!("0x{}", hex::encode(signer.to_bytes())))
+    let raw = Zeroizing::new(signer.to_bytes().0);
+    Ok(format!("0x{}", hex::encode(raw.as_slice())))
 }
 
 /// EIP-55 checksummed address of a stored key.
@@ -464,6 +635,71 @@ mod tests {
             let err = parse_stored(bad).unwrap_err();
             assert!(err.contains("hardware-wallet marker"), "{bad}: {err}");
         }
+    }
+
+    #[test]
+    fn passphrase_round_trip_on_the_file_fallback() {
+        let dir = std::env::temp_dir().join(format!("wi-wallet-pp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = WalletStore::new(dir.to_str(), false);
+        store.store(VECTOR_KEY).unwrap();
+        assert!(!store.passphrase_protected());
+        store.set_passphrase("correct horse battery").unwrap();
+        assert!(store.passphrase_protected());
+        // Still unlocked for the rest of this run.
+        assert_eq!(store.load().unwrap().0, VECTOR_KEY);
+        assert!(store.locked_address().is_none());
+        // On disk: ciphertext carrying only the public address.
+        let text = std::fs::read_to_string(dir.join("wallet.key")).unwrap();
+        assert!(text.starts_with("wenck1:"));
+        assert!(text.contains(VECTOR_ADDR));
+        assert!(!text.to_lowercase().contains(&VECTOR_KEY[2..10]));
+        // A fresh store (an app restart) is LOCKED: no load, address only.
+        let cold = WalletStore::new(dir.to_str(), false);
+        assert!(cold.load().is_none());
+        assert_eq!(cold.locked_address().unwrap(), VECTOR_ADDR);
+        assert!(cold.locked());
+        let err = cold.unlock("not the passphrase").unwrap_err();
+        assert!(err.contains("wrong passphrase"), "{err}");
+        cold.unlock("correct horse battery").unwrap();
+        assert_eq!(cold.load().unwrap(), (VECTOR_KEY.to_string(), Storage::File));
+        assert!(!cold.locked());
+        assert!(cold.passphrase_protected());
+        // Clearing rewrites the file in the clear.
+        cold.clear_passphrase().unwrap();
+        assert!(!cold.passphrase_protected());
+        let fresh = WalletStore::new(dir.to_str(), false);
+        assert_eq!(fresh.load().unwrap().0, VECTOR_KEY);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn passphrase_refused_for_hardware_markers() {
+        let dir = std::env::temp_dir().join(format!("wi-wallet-ppm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = WalletStore::new(dir.to_str(), false);
+        let marker = trezor_marker(VECTOR_ADDR, &[7u8; 32], "00aabbccddeeff11");
+        store.store(&marker).unwrap();
+        let err = store.set_passphrase("whatever passphrase").unwrap_err();
+        assert!(err.contains("public marker"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn storing_a_new_wallet_drops_old_protection() {
+        // Hardhat/foundry account 1 — a second well-known test key.
+        const KEY2: &str =
+            "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+        let dir = std::env::temp_dir().join(format!("wi-wallet-ppn-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = WalletStore::new(dir.to_str(), false);
+        store.store(VECTOR_KEY).unwrap();
+        store.set_passphrase("correct horse battery").unwrap();
+        store.store(KEY2).unwrap();
+        assert!(!store.passphrase_protected());
+        let fresh = WalletStore::new(dir.to_str(), false);
+        assert_eq!(fresh.load().unwrap().0, KEY2);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

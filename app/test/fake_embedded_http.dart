@@ -80,6 +80,16 @@ class FakeEmbeddedHttp extends HttpOverrides {
   /// (missing sha → 400, like an offline/refusing owner).
   Map<String, String> myWatchArtFiles = {};
 
+  /// Passphrase protection of the fallback wallet file: [walletPassphrase]
+  /// non-null = protected; [walletLocked] = the file has not been
+  /// unlocked this run (`GET /wallet` then shows only the address).
+  String? walletPassphrase;
+  bool walletLocked = false;
+
+  /// Raw bodies of every `POST /wallet/unlock` and `POST /wallet/passphrase`.
+  final List<String> walletUnlockPosts = [];
+  final List<String> walletPassphrasePosts = [];
+
   /// Mnemonic that `POST /wallet/generate` hands out.
   String generatedMnemonic =
       'test test test test test test test test test test test junk';
@@ -678,12 +688,64 @@ class FakeEmbeddedHttp extends HttpOverrides {
   (int, List<int>) _handleWallet(String method, String path, List<int> body) {
     if (method == 'GET' && path == '/wallet') {
       final w = wallet;
+      if (w != null && walletLocked) {
+        return (
+          200,
+          utf8.encode(jsonEncode({
+            'configured': true,
+            'locked': true,
+            'protected': true,
+            'kind': 'software',
+            'storage': 'file',
+            'address': w['address'],
+          }))
+        );
+      }
       return (
         200,
         utf8.encode(jsonEncode(w == null
             ? {'configured': false}
-            : {'configured': true, ...w}))
+            : {
+                'configured': true,
+                ...w,
+                'protected': walletPassphrase != null,
+              }))
       );
+    }
+    if (method == 'POST' && path == '/wallet/unlock') {
+      final text = utf8.decode(body);
+      walletUnlockPosts.add(text);
+      final json = jsonDecode(text) as Map<String, dynamic>;
+      if (walletPassphrase == null || json['passphrase'] != walletPassphrase) {
+        return (400, utf8.encode('wrong passphrase'));
+      }
+      walletLocked = false;
+      return (
+        200,
+        utf8.encode(jsonEncode({
+          'configured': true,
+          ...?wallet,
+          'protected': true,
+        }))
+      );
+    }
+    if (method == 'POST' && path == '/wallet/passphrase') {
+      final text = utf8.decode(body);
+      walletPassphrasePosts.add(text);
+      final json = jsonDecode(text) as Map<String, dynamic>;
+      final pass = json['passphrase'] as String? ?? '';
+      if (pass.length < 8) {
+        return (400, utf8.encode('the passphrase must be at least 8 characters'));
+      }
+      if (wallet == null) {
+        return (400, utf8.encode('no wallet to protect'));
+      }
+      walletPassphrase = pass;
+      return (200, utf8.encode(jsonEncode({'protected': true})));
+    }
+    if (method == 'DELETE' && path == '/wallet/passphrase') {
+      walletPassphrase = null;
+      return (204, const <int>[]);
     }
     if (method == 'GET' && path == '/wallet/trezor') {
       final err = trezorError;
@@ -742,6 +804,8 @@ class FakeEmbeddedHttp extends HttpOverrides {
     }
     if (method == 'DELETE' && path == '/wallet') {
       wallet = null;
+      walletPassphrase = null;
+      walletLocked = false;
       return (204, const <int>[]);
     }
     if (method == 'GET' && path == '/wallet/balances') {

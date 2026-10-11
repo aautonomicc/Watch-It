@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,15 @@ import 'package:flutter/services.dart';
 import '../services/publish_api.dart';
 import '../theme/tokens.dart';
 import 'publish_screen.dart' show isDesktopPlatform;
+
+/// The standard Trezor udev rules install, for the Linux first-run
+/// permission stumble: one copyable command fetching Trezor's own rules
+/// file into place and reloading udev. Shown by [TrezorUdevHelpDialog]
+/// when a device conversation fails with the permissions hint.
+const kTrezorUdevCommand =
+    "sudo sh -c 'curl -fsSL https://data.trezor.io/udev/51-trezor.rules "
+    "-o /etc/udev/rules.d/51-trezor.rules && "
+    "udevadm control --reload-rules && udevadm trigger'";
 
 /// Settings → Wallet: the internal upload wallet behind Upload.
 ///
@@ -37,10 +47,28 @@ class _WalletScreenState extends State<WalletScreen> {
   String? _balancesError;
   bool _balancesLoading = false;
 
+  /// Live Trezor presence while the setup choices are on screen: a
+  /// silent USB probe every few seconds flips the hardware-wallet door
+  /// to "Trezor detected" the moment a device is plugged in.
+  Timer? _probeTimer;
+  bool _trezorFound = false;
+
+  /// Passphrase-locked wallet: the unlock field's state.
+  final _unlockController = TextEditingController();
+  String? _unlockError;
+  bool _unlocking = false;
+
   @override
   void initState() {
     super.initState();
     _reload();
+  }
+
+  @override
+  void dispose() {
+    _probeTimer?.cancel();
+    _unlockController.dispose();
+    super.dispose();
   }
 
   Future<void> _reload() async {
@@ -54,9 +82,59 @@ class _WalletScreenState extends State<WalletScreen> {
       final status = await _api.walletStatus();
       if (!mounted) return;
       setState(() => _status = status);
-      if (status.configured) await _loadBalances();
+      _syncProbeTimer(status);
+      if (status.configured && !status.locked) await _loadBalances();
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
+    }
+  }
+
+  /// Poll for a plugged-in Trezor only while the setup body (no wallet
+  /// yet) is showing on a desktop — silent on the device, and silent on
+  /// errors ("no device" is the normal answer).
+  void _syncProbeTimer(WalletStatus status) {
+    final wantPoll = !status.configured && isDesktopPlatform;
+    if (!wantPoll) {
+      _probeTimer?.cancel();
+      _probeTimer = null;
+      return;
+    }
+    if (_probeTimer != null) return;
+    _probeOnce();
+    _probeTimer =
+        Timer.periodic(const Duration(seconds: 4), (_) => _probeOnce());
+  }
+
+  Future<void> _probeOnce() async {
+    bool found;
+    try {
+      found = (await _api.trezorProbe()).found;
+    } catch (_) {
+      found = false;
+    }
+    if (mounted && found != _trezorFound) {
+      setState(() => _trezorFound = found);
+    }
+  }
+
+  Future<void> _unlock() async {
+    final passphrase = _unlockController.text;
+    if (passphrase.isEmpty) return;
+    setState(() {
+      _unlocking = true;
+      _unlockError = null;
+    });
+    try {
+      await _api.unlockWallet(passphrase);
+      _unlockController.clear();
+      _snack('Wallet unlocked');
+      await _reload();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _unlockError = '$e');
+      }
+    } finally {
+      if (mounted) setState(() => _unlocking = false);
     }
   }
 
@@ -115,6 +193,55 @@ class _WalletScreenState extends State<WalletScreen> {
       _snack('Hardware wallet connected');
       await _reload();
     }
+  }
+
+  Future<void> _setPassphrase() async {
+    final done = await showDialog<bool>(
+      context: context,
+      builder: (_) => _SetPassphraseDialog(api: _api),
+    );
+    if (done == true) {
+      _snack('Wallet file is now passphrase-protected');
+      await _reload();
+    }
+  }
+
+  Future<void> _clearPassphrase() async {
+    final t = WiTokens.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text(
+          'Remove passphrase protection?',
+          style: TextStyle(color: t.bone, fontSize: 16),
+        ),
+        content: Text(
+          'The wallet file goes back to being readable by anything '
+          'running as your user on this computer (it stays a private, '
+          'owner-only file).',
+          style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel', style: TextStyle(color: t.ash)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Remove protection', style: TextStyle(color: t.rust)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await _api.clearWalletPassphrase();
+      _snack('Passphrase protection removed');
+    } catch (e) {
+      _snack('$e');
+    }
+    await _reload();
   }
 
   Future<void> _remove() async {
@@ -196,9 +323,95 @@ class _WalletScreenState extends State<WalletScreen> {
           ? _ErrorRetry(message: _error!, onRetry: _reload)
           : status == null
           ? const Center(child: CircularProgressIndicator())
+          : status.locked
+          ? _lockedBody(t, status)
           : status.configured
           ? _configuredBody(t, status)
           : _setupBody(t),
+    );
+  }
+
+  /// The passphrase-protected wallet file has not been unlocked this run:
+  /// show which wallet is waiting and ask for the passphrase. Nothing
+  /// that needs the key (balances, uploads, backups) works until then.
+  Widget _lockedBody(WiTokens t, WalletStatus status) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(
+          children: [
+            Icon(Icons.lock_outline, color: t.accent, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'This wallet is protected with a passphrase',
+                style: TextStyle(color: t.bone, fontSize: 15),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (status.address != null)
+          Text(
+            status.address!,
+            style: TextStyle(
+              fontFamily: wiMonoFamily,
+              fontFamilyFallback: wiMonoFallback,
+              fontSize: 12.5,
+              color: t.accent,
+            ),
+          ),
+        const SizedBox(height: 10),
+        Text(
+          'The wallet file on this computer is encrypted. Enter the '
+          'passphrase to unlock it for this session — uploads, backups '
+          'and balances need it.',
+          style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _unlockController,
+          obscureText: true,
+          autocorrect: false,
+          enableSuggestions: false,
+          onSubmitted: (_) => _unlocking ? null : _unlock(),
+          decoration: InputDecoration(
+            labelText: 'Passphrase',
+            labelStyle: TextStyle(color: t.ash),
+            border: const OutlineInputBorder(),
+          ),
+          style: TextStyle(color: t.bone),
+        ),
+        if (_unlockError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(
+              _unlockError!,
+              style: TextStyle(color: t.rust, fontSize: 12.5),
+            ),
+          ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: _unlocking ? null : _unlock,
+          icon: const Icon(Icons.lock_open_outlined),
+          label: Text(_unlocking ? 'Unlocking…' : 'Unlock wallet'),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Forgot the passphrase? The wallet can still be restored by '
+          'removing it here and importing its 12 words or private key '
+          'again.',
+          style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+        ),
+        const SizedBox(height: 8),
+        TextButton(
+          onPressed: _remove,
+          child: Text(
+            'Remove wallet from this computer',
+            style: TextStyle(color: t.rust, fontSize: 13),
+          ),
+        ),
+      ],
     );
   }
 
@@ -243,9 +456,16 @@ class _WalletScreenState extends State<WalletScreen> {
               builder: (context) {
                 final t = WiTokens.of(context);
                 return Text(
-                  'With a hardware wallet the private key never leaves the '
-                  'device — every payment is confirmed on the Trezor itself.',
-                  style: TextStyle(color: t.boneDim, fontSize: 12, height: 1.4),
+                  _trezorFound
+                      ? 'Trezor detected — ready to set up.'
+                      : 'With a hardware wallet the private key never leaves '
+                            'the device — every payment is confirmed on the '
+                            'Trezor itself.',
+                  style: TextStyle(
+                    color: _trezorFound ? t.accent : t.boneDim,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
                 );
               },
             ),
@@ -296,6 +516,18 @@ class _WalletScreenState extends State<WalletScreen> {
               style: TextStyle(color: t.accent, fontSize: 12, height: 1.4),
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Text(
+              'At setup the Trezor showed this address on its own screen '
+              '— if the address above ever differs from what the device '
+              'shows, stop and re-run the hardware-wallet setup. The very '
+              'first payment from this wallet also asks for one extra '
+              'confirmation on the device: a one-time spending allowance '
+              'for the network\'s payment contract.',
+              style: TextStyle(color: t.boneDim, fontSize: 12, height: 1.4),
+            ),
+          ),
           if (status.keysHeld == false)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -306,15 +538,50 @@ class _WalletScreenState extends State<WalletScreen> {
                 style: TextStyle(color: t.boneDim, fontSize: 12, height: 1.4),
               ),
             ),
-        ] else if (status.storage == 'file')
+        ] else if (status.storage == 'file') ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: Text(
-              'No system keychain was found, so the key is stored in an '
-              'app file on this computer.',
-              style: TextStyle(color: t.rust, fontSize: 12),
+              status.protected
+                  ? 'No system keychain was found, so the key is stored in '
+                        'an app file on this computer — encrypted with your '
+                        'passphrase. W@tch asks for the passphrase after '
+                        'each restart before it can pay for uploads or '
+                        'backups.'
+                  : 'No system keychain was found, so the key is stored in '
+                        'an app file on this computer.',
+              style: TextStyle(
+                color: status.protected ? t.boneDim : t.rust,
+                fontSize: 12,
+                height: 1.4,
+              ),
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: status.protected
+                ? Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: _clearPassphrase,
+                      child: Text(
+                        'Remove passphrase protection',
+                        style: TextStyle(color: t.ash, fontSize: 13),
+                      ),
+                    ),
+                  )
+                : Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed: _setPassphrase,
+                      icon: const Icon(Icons.lock_outline, size: 18),
+                      label: const Text(
+                        'Protect the wallet file with a passphrase',
+                      ),
+                    ),
+                  ),
+          ),
+        ],
         _sectionHeader(t, 'BALANCE'),
         ListTile(
           leading: Icon(Icons.toll_outlined, color: t.accent),
@@ -679,10 +946,13 @@ class _TrezorSetupDialogState extends State<_TrezorSetupDialog> {
             children: [
               Text(
                 'Plug the Trezor in and unlock it. W@tch will ask the device '
-                'to sign its backup-identity message twice — confirm both on '
-                'the Trezor. Signing costs nothing and authorizes no '
-                'transaction; afterwards, every payment is confirmed on the '
-                'device and the private key never touches this computer.',
+                'to sign its backup-identity message twice, then to show the '
+                'wallet address on its own screen — confirm all three on the '
+                'Trezor, and check that the address on the device matches '
+                'the one W@tch shows afterwards. Signing costs nothing and '
+                'authorizes no transaction; from then on every payment is '
+                'confirmed on the device and the private key never touches '
+                'this computer.',
                 style: TextStyle(color: t.boneDim, fontSize: 12.5, height: 1.4),
               ),
               const SizedBox(height: 8),
@@ -720,14 +990,15 @@ class _TrezorSetupDialogState extends State<_TrezorSetupDialog> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'Confirm the message on your Trezor — twice…',
+                          'Confirm the message on your Trezor — twice — then '
+                          'the address it shows…',
                           style: TextStyle(color: t.accent, fontSize: 12.5),
                         ),
                       ),
                     ],
                   ),
                 ),
-              if (_error != null)
+              if (_error != null) ...[
                 Padding(
                   padding: const EdgeInsets.only(top: 10),
                   child: Text(
@@ -735,6 +1006,21 @@ class _TrezorSetupDialogState extends State<_TrezorSetupDialog> {
                     style: TextStyle(color: t.rust, fontSize: 12),
                   ),
                 ),
+                // The #1 Linux first-run stumble: no udev rules. The core's
+                // permission errors carry the hint — offer the actual fix.
+                if (_error!.toLowerCase().contains('udev'))
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => showDialog<void>(
+                        context: context,
+                        builder: (_) => const TrezorUdevHelpDialog(),
+                      ),
+                      icon: const Icon(Icons.build_outlined, size: 16),
+                      label: const Text('Show me the fix (USB permissions)'),
+                    ),
+                  ),
+              ],
             ],
           ),
         ),
@@ -750,6 +1036,221 @@ class _TrezorSetupDialogState extends State<_TrezorSetupDialog> {
             _busy ? 'Connecting…' : 'Connect',
             style: TextStyle(color: t.accent),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Set a passphrase on the fallback wallet file: entered twice, at least
+/// 8 characters, encrypted server-side (Argon2id → ChaCha20-Poly1305).
+/// Pops `true` when the file is protected.
+class _SetPassphraseDialog extends StatefulWidget {
+  const _SetPassphraseDialog({required this.api});
+  final PublishApi api;
+
+  @override
+  State<_SetPassphraseDialog> createState() => _SetPassphraseDialogState();
+}
+
+class _SetPassphraseDialogState extends State<_SetPassphraseDialog> {
+  final _first = TextEditingController();
+  final _second = TextEditingController();
+  String? _error;
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _first.dispose();
+    _second.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final passphrase = _first.text;
+    if (passphrase.length < 8) {
+      setState(() => _error = 'Use at least 8 characters.');
+      return;
+    }
+    if (passphrase != _second.text) {
+      setState(() => _error = 'The two entries do not match.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.api.setWalletPassphrase(passphrase);
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = '$e';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = WiTokens.of(context);
+    return AlertDialog(
+      backgroundColor: t.ink2,
+      title: Text(
+        'Protect the wallet file',
+        style: TextStyle(color: t.bone, fontSize: 16),
+      ),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'The wallet file is encrypted with this passphrase. W@tch '
+              'will ask for it after each restart before it can pay for '
+              'uploads or backups — there is no way to recover a '
+              'forgotten passphrase, only re-importing the wallet from '
+              'its 12 words or private key.',
+              style: TextStyle(color: t.boneDim, fontSize: 12, height: 1.4),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _first,
+              obscureText: true,
+              autofocus: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              style: TextStyle(color: t.bone),
+              decoration: InputDecoration(
+                labelText: 'Passphrase (at least 8 characters)',
+                labelStyle: TextStyle(color: t.ash),
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _second,
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              onSubmitted: (_) => _busy ? null : _submit(),
+              style: TextStyle(color: t.bone),
+              decoration: InputDecoration(
+                labelText: 'Repeat passphrase',
+                labelStyle: TextStyle(color: t.ash),
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: t.rust, fontSize: 12),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.of(context).pop(false),
+          child: Text('Cancel', style: TextStyle(color: t.ash)),
+        ),
+        TextButton(
+          onPressed: _busy ? null : _submit,
+          child: Text(
+            _busy ? 'Protecting…' : 'Protect',
+            style: TextStyle(color: t.accent),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// How to fix the Linux udev-rules stumble: one copyable command that
+/// installs Trezor's own rules file and reloads udev. Shown from the
+/// setup dialog when the device conversation fails on permissions.
+class TrezorUdevHelpDialog extends StatelessWidget {
+  const TrezorUdevHelpDialog({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = WiTokens.of(context);
+    return AlertDialog(
+      backgroundColor: t.ink2,
+      title: Text(
+        'Give W@tch access to the Trezor',
+        style: TextStyle(color: t.bone, fontSize: 16),
+      ),
+      content: SizedBox(
+        width: 480,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'On Linux, USB devices like the Trezor need a one-time '
+              'permission rule ("udev rules") before ordinary programs '
+              'may talk to them. Run this once in a terminal — it '
+              'installs Trezor\'s official rules file and reloads udev:',
+              style: TextStyle(color: t.boneDim, fontSize: 12.5, height: 1.4),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: t.ink,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: t.line),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: SelectableText(
+                      kTrezorUdevCommand,
+                      style: TextStyle(
+                        fontFamily: wiMonoFamily,
+                        fontFamilyFallback: wiMonoFallback,
+                        fontSize: 11.5,
+                        color: t.bone,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Copy command',
+                    icon: Icon(Icons.copy, color: t.ash, size: 16),
+                    onPressed: () {
+                      Clipboard.setData(
+                          const ClipboardData(text: kTrezorUdevCommand));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Command copied')),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Then unplug and replug the Trezor and try the setup again. '
+              'The rules come straight from data.trezor.io; you can read '
+              'the file before or after installing it.',
+              style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text('Close', style: TextStyle(color: t.accent)),
         ),
       ],
     );

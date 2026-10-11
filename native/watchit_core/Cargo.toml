@@ -55,6 +55,17 @@ alloy-signer = "2.4"
 # the 1.x line (alloy-signer-trezor 1.8.x), not 2.4.x.
 alloy = { version = "1.0.32", default-features = false, features = ["std", "network", "signer-local"] }
 rand = "0.8"
+# Transient key material (derivation intermediates, passphrase-derived
+# keys, decrypted wallet values in flight) is wiped on drop. Already in
+# the dependency tree via the dalek crates — zero new code compiles.
+# Long-lived keys (the in-memory wallet cache, the live signer) exist
+# for the process lifetime by design and are out of scope.
+zeroize = "1"
+# Passphrase KDF for the OPTIONAL wallet.key file encryption: when no OS
+# keychain exists (headless/minimal Linux), the fallback file can be
+# passphrase-protected at rest (Argon2id → ChaCha20-Poly1305). Small
+# pure-Rust RustCrypto crate.
+argon2 = "0.5"
 # Balance-by-address for hardware wallets (`GET /wallet/balances` has no
 # key to build a signing wallet from): the same evmlib copy ant-core
 # already pulls via ant-protocol — a direct dep adds zero new code and
@@ -147,6 +158,13 @@ keyring = "4"
 # would not unify with evmlib's EthereumWallet (see signer.rs). Desktop
 # only: USB hardware, and the plan is desktop-first.
 alloy-signer-trezor = "1.8"
+# The SAME trezor-client copy alloy-signer-trezor pins (=0.1.5, zero new
+# compiles): the setup ceremony's show-address-on-device step needs the
+# raw EthereumGetAddress{show_display:true} call the alloy wrapper does
+# not expose — the device displaying the address (and the user confirming
+# it there) is the defense against a compromised host binding the wrong
+# account.
+trezor-client = { version = "=0.1.5", default-features = false, features = ["ethereum"] }
 # Feature-unification only: this box (and CI) may have no system
 # libusb-1.0 dev files, so force rusb's libusb1-sys to build its vendored
 # libusb from source (cc). Version matches rusb 0.9's own pin.

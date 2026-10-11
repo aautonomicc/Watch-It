@@ -64,6 +64,17 @@ fn protected_router(engine: &'static Engine) -> Router {
                 .delete(move || wallet_delete(engine)),
         )
         .route("/wallet/generate", post(wallet_generate))
+        // Passphrase protection of the fallback wallet file + the unlock
+        // that reads a protected file back into memory after a restart.
+        .route(
+            "/wallet/unlock",
+            post(move |body: Bytes| wallet_unlock(engine, body)),
+        )
+        .route(
+            "/wallet/passphrase",
+            post(move |body: Bytes| wallet_passphrase_set(engine, body))
+                .delete(move || wallet_passphrase_clear(engine)),
+        )
         // Hardware-wallet (Trezor) probe + setup ceremony. Protected like
         // every wallet route: setup rebinds where payments come from.
         .route(
@@ -519,9 +530,22 @@ async fn load_wallet(engine: &'static Engine) -> Option<(String, crate::wallet::
 /// `GET /wallet` — configured?, kind (software | trezor), address,
 /// storage backend. Never returns key material. Hardware wallets also
 /// report whether the backup READ key was kept at setup (`keys_held`) —
-/// copy on the Dart side hangs off it.
+/// copy on the Dart side hangs off it. A passphrase-protected fallback
+/// file reports `protected`; before `POST /wallet/unlock` it reads as
+/// `locked` with only the public address.
 async fn wallet_status(engine: &'static Engine) -> Response {
-    let body = match load_wallet(engine).await {
+    // Protected-state probes are plain small-file reads beside the load.
+    let (loaded, locked_addr, protected) = tokio::task::spawn_blocking(move || {
+        let loaded = engine.wallet.load();
+        (
+            loaded,
+            engine.wallet.locked_address(),
+            engine.wallet.passphrase_protected(),
+        )
+    })
+    .await
+    .unwrap_or((None, None, false));
+    let body = match loaded {
         Some((stored, storage)) => match crate::wallet::parse_stored(&stored) {
             Ok(crate::wallet::StoredWallet::Software { key_hex }) => {
                 match crate::wallet::address_of(&key_hex) {
@@ -530,6 +554,7 @@ async fn wallet_status(engine: &'static Engine) -> Response {
                         "kind": "software",
                         "address": address,
                         "storage": storage.as_str(),
+                        "protected": protected,
                     }),
                     Err(e) => serde_json::json!({ "configured": false, "error": e }),
                 }
@@ -550,9 +575,92 @@ async fn wallet_status(engine: &'static Engine) -> Response {
             }
             Err(e) => serde_json::json!({ "configured": false, "error": e }),
         },
-        None => serde_json::json!({ "configured": false }),
+        // No readable wallet: either truly unconfigured, or a passphrase-
+        // locked file waiting for `POST /wallet/unlock`. Only a software
+        // key can be locked (markers are public and never encrypted).
+        None => match locked_addr {
+            Some(address) => serde_json::json!({
+                "configured": true,
+                "locked": true,
+                "protected": true,
+                "kind": "software",
+                "storage": "file",
+                "address": if address.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::Value::String(address)
+                },
+            }),
+            None => serde_json::json!({ "configured": false }),
+        },
     };
     json_ok(body)
+}
+
+/// `POST /wallet/unlock` `{"passphrase": …}` — decrypt the passphrase-
+/// protected wallet file into memory for this run and re-attach the
+/// wallet to the live client. The file stays encrypted on disk.
+async fn wallet_unlock(engine: &'static Engine, body: Bytes) -> Response {
+    let json: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("bad JSON: {e}")).into_response(),
+    };
+    let Some(pass) = json.get("passphrase").and_then(|v| v.as_str()) else {
+        return (StatusCode::BAD_REQUEST, "body must have \"passphrase\"").into_response();
+    };
+    let pass = pass.to_string();
+    let unlocked = tokio::task::spawn_blocking(move || engine.wallet.unlock(&pass))
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r);
+    match unlocked {
+        Ok(()) => {
+            engine.reconnect_for_wallet();
+            wallet_status(engine).await
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+/// `POST /wallet/passphrase` `{"passphrase": …}` — encrypt the fallback
+/// wallet file at rest; `DELETE` rewrites it in the clear. File-stored
+/// software keys only (the keychain already protects at rest; hardware
+/// markers hold nothing secret).
+async fn wallet_passphrase_set(engine: &'static Engine, body: Bytes) -> Response {
+    let json: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("bad JSON: {e}")).into_response(),
+    };
+    let Some(pass) = json.get("passphrase").and_then(|v| v.as_str()) else {
+        return (StatusCode::BAD_REQUEST, "body must have \"passphrase\"").into_response();
+    };
+    if pass.chars().count() < 8 {
+        return (
+            StatusCode::BAD_REQUEST,
+            "the passphrase must be at least 8 characters",
+        )
+            .into_response();
+    }
+    let pass = pass.to_string();
+    let set = tokio::task::spawn_blocking(move || engine.wallet.set_passphrase(&pass))
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r);
+    match set {
+        Ok(()) => json_ok(serde_json::json!({ "protected": true })),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+async fn wallet_passphrase_clear(engine: &'static Engine) -> Response {
+    let cleared = tokio::task::spawn_blocking(move || engine.wallet.clear_passphrase())
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r);
+    match cleared {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
 }
 
 /// `POST /wallet/generate` — a fresh 12-word mnemonic + its address for
@@ -844,11 +952,14 @@ async fn upload_batch_status(engine: &'static Engine, Path(id): Path<u64>) -> Re
 /// backup but never spend from the wallet.
 async fn backup_status(engine: &'static Engine) -> Response {
     // The signer may touch the OS keychain on a cold cache — off the
-    // async workers like every wallet-store read.
-    let signer = tokio::task::spawn_blocking(move || engine.signer().ok())
-        .await
-        .ok()
-        .flatten();
+    // async workers like every wallet-store read. `locked` lets the
+    // Backup screen say "unlock the wallet" instead of "set one up"
+    // while the passphrase-protected file waits for its passphrase.
+    let (signer, locked) = tokio::task::spawn_blocking(move || {
+        (engine.signer().ok(), engine.wallet.locked())
+    })
+    .await
+    .unwrap_or((None, false));
     // READ keys only: software derives them offline; a hardware wallet
     // surfaces the kept key — or nothing, in the paranoid opt-out, where
     // the pointer (public, from the marker) still shows. `key` is what
@@ -870,11 +981,21 @@ async fn backup_status(engine: &'static Engine) -> Response {
         .or_else(|| signer.as_ref().and_then(|s| s.stored_fingerprint()));
     json_ok(serde_json::json!({
         "configured": signer.is_some(),
+        "locked": locked,
         "hardware": signer.as_ref().map(|s| s.is_hardware()).unwrap_or(false),
         "keys_held": read.is_some(),
         "pointer": pointer.map(hex::encode),
         "key": read.as_ref().map(|r| hex::encode(r.enc)),
         "last": engine.backups.last_json(fp.as_deref()),
+        // A previous backup line exists on this install under a DIFFERENT
+        // identity (the sign-to-derive update, or a swapped wallet): the
+        // next backup starts fresh and re-uploads everything once. The
+        // Backup screen explains that up front so the one-time cost never
+        // reads as a bug.
+        "last_is_legacy": fp
+            .as_deref()
+            .map(|f| engine.backups.previous_line_exists(f))
+            .unwrap_or(false),
         "job": engine.backups.job_json(),
     }))
 }
@@ -1813,6 +1934,158 @@ mod wallet_api_tests {
         assert_eq!(imported["address"], json["address"]);
     }
 
+    /// The passphrase feature end to end over the routes: protect the
+    /// file-stored key, "restart" (a fresh engine over the same data dir)
+    /// reads as locked with only the public address, a wrong passphrase
+    /// refuses, the right one unlocks + re-reports the full status, and
+    /// clearing protection leaves a plainly readable file again.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn wallet_passphrase_protect_lock_unlock_round_trip() {
+        let dir = std::env::temp_dir()
+            .join(format!("wi-wallet-api-pp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fresh_engine = || -> &'static Engine {
+            let engine: &'static Engine =
+                Box::leak(Box::new(Engine::new(None, dir.to_str())));
+            engine.wallet.disable_keychain();
+            engine.follow_keys.disable_keychain();
+            engine.trezor_keys.disable_keychain();
+            engine
+        };
+        let app = router(fresh_engine());
+        let (status, _) = send_auth(
+            &app,
+            "POST",
+            "/wallet",
+            serde_json::json!({ "private_key": KEY }).to_string().into_bytes(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        // Too-short passphrases are refused before anything changes.
+        let (status, body) = send_auth(
+            &app,
+            "POST",
+            "/wallet/passphrase",
+            serde_json::json!({ "passphrase": "short" }).to_string().into_bytes(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(String::from_utf8_lossy(&body).contains("at least 8"));
+        let (status, _) = send_auth(
+            &app,
+            "POST",
+            "/wallet/passphrase",
+            serde_json::json!({ "passphrase": "open sesame now" })
+                .to_string()
+                .into_bytes(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        // Still fully usable this run, now flagged protected.
+        let (_, body) = send_auth(&app, "GET", "/wallet", vec![], None).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["configured"], serde_json::json!(true));
+        assert_eq!(json["protected"], serde_json::json!(true));
+        assert_eq!(json["address"], serde_json::json!(ADDR));
+        assert!(json.get("locked").is_none());
+
+        // "Restart": a fresh engine over the same dir is LOCKED.
+        let app2 = router(fresh_engine());
+        let (_, body) = send_auth(&app2, "GET", "/wallet", vec![], None).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["configured"], serde_json::json!(true));
+        assert_eq!(json["locked"], serde_json::json!(true));
+        assert_eq!(json["address"], serde_json::json!(ADDR));
+        // Backup status explains the lock instead of "no wallet".
+        let (_, body) = send_auth(&app2, "GET", "/backup", vec![], None).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["configured"], serde_json::json!(false));
+        assert_eq!(json["locked"], serde_json::json!(true));
+        // Wrong passphrase refuses; the right one unlocks.
+        let (status, body) = send_auth(
+            &app2,
+            "POST",
+            "/wallet/unlock",
+            serde_json::json!({ "passphrase": "not the one" })
+                .to_string()
+                .into_bytes(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(String::from_utf8_lossy(&body).contains("wrong passphrase"));
+        let (status, body) = send_auth(
+            &app2,
+            "POST",
+            "/wallet/unlock",
+            serde_json::json!({ "passphrase": "open sesame now" })
+                .to_string()
+                .into_bytes(),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["configured"], serde_json::json!(true));
+        assert_eq!(json["address"], serde_json::json!(ADDR));
+        assert_eq!(json["protected"], serde_json::json!(true));
+        assert!(json.get("locked").is_none());
+        // Clearing protection leaves a plainly readable file again.
+        let (status, _) =
+            send_auth(&app2, "DELETE", "/wallet/passphrase", vec![], None).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let app3 = router(fresh_engine());
+        let (_, body) = send_auth(&app3, "GET", "/wallet", vec![], None).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["configured"], serde_json::json!(true));
+        assert_eq!(json["protected"], serde_json::json!(false));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A state file recorded under a DIFFERENT backup identity (the
+    /// sign-to-derive update, or a swapped wallet) surfaces as
+    /// `last_is_legacy` with `last` hidden — the Backup screen's one-time
+    /// fresh-line notice hangs off it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn backup_status_flags_a_previous_identity_line() {
+        let dir = std::env::temp_dir()
+            .join(format!("wi-backup-legacy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let engine: &'static Engine =
+            Box::leak(Box::new(Engine::new(None, dir.to_str())));
+        engine.wallet.disable_keychain();
+        engine.follow_keys.disable_keychain();
+        engine.trezor_keys.disable_keychain();
+        engine.wallet.store(KEY).unwrap();
+        let app = router(engine);
+        // No state file yet → nothing legacy.
+        let (_, body) = send_auth(&app, "GET", "/backup", vec![], None).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["configured"], serde_json::json!(true));
+        assert_eq!(json["last_is_legacy"], serde_json::json!(false));
+        // A state file left behind by another identity, with a backup.
+        std::fs::write(
+            dir.join("backup_state.json"),
+            serde_json::json!({
+                "identity": "00112233445566aa",
+                "objects": {},
+                "last": {"ms": 1, "backups": 3, "objects": 4, "uploaded": 5},
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let (_, body) = send_auth(&app, "GET", "/backup", vec![], None).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["last_is_legacy"], serde_json::json!(true));
+        assert!(json["last"].is_null(), "foreign-identity last must stay hidden");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn auth_token_guards_wallet_routes_but_not_streaming() {
         let engine = test_engine("auth");
@@ -1827,8 +2100,14 @@ mod wallet_api_tests {
         let (status, _) =
             send_auth(&app, "GET", "/wallet", vec![], Some("sekrit")).await;
         assert_eq!(status, StatusCode::OK);
-        // The hardware-wallet routes sit behind the same token.
-        for (method, path) in [("GET", "/wallet/trezor"), ("POST", "/wallet/trezor")] {
+        // The hardware-wallet + passphrase routes sit behind the same token.
+        for (method, path) in [
+            ("GET", "/wallet/trezor"),
+            ("POST", "/wallet/trezor"),
+            ("POST", "/wallet/unlock"),
+            ("POST", "/wallet/passphrase"),
+            ("DELETE", "/wallet/passphrase"),
+        ] {
             let (status, _) = send_auth(&app, method, path, vec![], None).await;
             assert_eq!(status, StatusCode::UNAUTHORIZED, "{method} {path}");
         }

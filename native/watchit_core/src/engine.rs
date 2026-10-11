@@ -236,6 +236,17 @@ impl Engine {
         }
     }
 
+    /// A clear "can't pay" explanation when no wallet value is loadable:
+    /// a passphrase-locked file asks for its unlock instead of pretending
+    /// nothing is configured.
+    pub fn wallet_unavailable(&self, absent_msg: &str) -> String {
+        if self.wallet.locked() {
+            "the wallet is passphrase-locked — unlock it in Settings → Wallet".to_string()
+        } else {
+            absent_msg.to_string()
+        }
+    }
+
     pub fn data_dir(&self) -> Option<&std::path::Path> {
         self.data_dir.as_deref()
     }

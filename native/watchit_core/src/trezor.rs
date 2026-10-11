@@ -34,8 +34,18 @@ use crate::backup::{derive_keys_from_signature, BackupKeys};
 /// in a Trezor land on the same address and backup line as an import.
 pub const DERIVATION_PATH: &str = "m/44'/60'/0'/0/0";
 
+/// [DERIVATION_PATH] as the BIP-32 integer path trezor-client takes
+/// (hardened = bit 31) — must stay in lock-step with the constant above;
+/// pinned against a string parse in the tests.
+pub fn derivation_path_vec() -> Vec<u32> {
+    const H: u32 = 0x8000_0000;
+    vec![44 | H, 60 | H, H, 0, 0]
+}
+
 /// What the setup ceremony yields: the device's address at
-/// [DERIVATION_PATH] and the backup identity its signature derives.
+/// [DERIVATION_PATH] — shown AND confirmed on the device's own screen as
+/// the ceremony's last step — and the backup identity its signature
+/// derives.
 pub struct TrezorIdentity {
     pub address: String,
     pub keys: BackupKeys,
@@ -78,6 +88,9 @@ mod device {
             || lower.contains("unable to connect")
         {
             return "no Trezor found — plug it in, unlock it, and try again".into();
+        }
+        if lower.contains("cancel") {
+            return "cancelled on the Trezor — nothing was changed".into();
         }
         if lower.contains("denied") || lower.contains("permission") || lower.contains("access") {
             let hint = if cfg!(target_os = "linux") {
@@ -139,15 +152,49 @@ mod device {
         with_signer(|s| async move { Ok(signer_address(&s)) }).await
     }
 
+    /// Show the wallet address on the DEVICE's own screen and return what
+    /// it displayed (one confirmation tap). This is the defense against a
+    /// compromised host binding the wrong account at setup: the address
+    /// the user verifies comes from the Trezor's screen, which no
+    /// software on this computer can draw. Synchronous USB — callers are
+    /// already on the blocking thread.
+    fn show_address_on_device() -> Result<String, String> {
+        let mut client = trezor_client::unique(false).map_err(friendly)?;
+        client.init_device(None).map_err(friendly)?;
+        let mut req = trezor_client::protos::EthereumGetAddress::new();
+        req.address_n = super::derivation_path_vec();
+        req.set_show_display(true);
+        let resp = client
+            .call(
+                req,
+                Box::new(|_, m: trezor_client::protos::EthereumAddress| {
+                    Ok(m.address().to_string())
+                }),
+            )
+            .map_err(friendly)?;
+        trezor_client::client::handle_interaction(resp).map_err(friendly)
+    }
+
     /// The one-time setup ceremony: resolve the address, sign the frozen
     /// identity message twice (the determinism guard), derive the backup
-    /// identity. Two confirmations on the device; nothing is spent.
+    /// identity, then SHOW THE ADDRESS ON THE DEVICE for the user to
+    /// confirm against what the app displays (the compromised-host
+    /// wrong-account defense). Three confirmations on the device; nothing
+    /// is spent. Cancelling the address screen aborts the whole setup —
+    /// nothing has been persisted yet.
     pub async fn setup_ceremony() -> Result<TrezorIdentity, String> {
         with_signer(|s| async move {
             let address = signer_address(&s);
             let first = sign_identity(&s).await?;
             let second = sign_identity(&s).await?;
             let keys = ceremony_keys(&first, &second)?;
+            let shown = show_address_on_device()?;
+            if shown.to_lowercase() != address.to_lowercase() {
+                return Err(format!(
+                    "the Trezor displayed a different address ({shown}) than \
+                     it reported over USB ({address}) — refusing to continue"
+                ));
+            }
             Ok(TrezorIdentity { address, keys })
         })
         .await
@@ -222,6 +269,24 @@ pub use device_stub::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// derivation_path_vec must stay the integer form of DERIVATION_PATH
+    /// — parse the string exactly the way alloy-signer-trezor's
+    /// convert_path does and compare, so the show-address call can never
+    /// drift onto a different account than the signer.
+    #[test]
+    fn path_vec_matches_the_derivation_path_string() {
+        let parsed: Vec<u32> = DERIVATION_PATH
+            .split('/')
+            .skip(1)
+            .map(|e| {
+                let hardened = e.contains('\'');
+                let idx: u32 = e.replace('\'', "").parse().unwrap();
+                if hardened { idx | 0x8000_0000 } else { idx }
+            })
+            .collect();
+        assert_eq!(derivation_path_vec(), parsed);
+    }
 
     /// Equal signatures derive exactly the signature-derived identity;
     /// the vectors behind derive_keys_from_signature are frozen in

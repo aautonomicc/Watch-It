@@ -155,6 +155,8 @@ class BackupStatus {
     this.pointer,
     this.key,
     this.last,
+    this.lastIsLegacy = false,
+    this.locked = false,
     this.job,
   });
 
@@ -165,6 +167,8 @@ class BackupStatus {
         last: json['last'] is Map<String, dynamic>
             ? BackupLast.fromJson(json['last'] as Map<String, dynamic>)
             : null,
+        lastIsLegacy: json['last_is_legacy'] as bool? ?? false,
+        locked: json['locked'] as bool? ?? false,
         job: json['job'] is Map<String, dynamic>
             ? BackupJob.fromJson(json['job'] as Map<String, dynamic>)
             : null,
@@ -179,6 +183,16 @@ class BackupStatus {
   /// backups. Never the wallet key; it cannot spend anything.
   final String? key;
   final BackupLast? last;
+
+  /// A previous backup line exists on this install under a DIFFERENT
+  /// identity (the sign-to-derive update, or a swapped wallet): the next
+  /// backup starts a fresh line and uploads everything once. Drives the
+  /// Backup screen's one-time notice; clears itself after that backup.
+  final bool lastIsLegacy;
+
+  /// The wallet file is passphrase-locked — unlock it (Settings → Wallet)
+  /// before backups can run.
+  final bool locked;
   final BackupJob? job;
 }
 

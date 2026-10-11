@@ -76,6 +76,9 @@ void main() {
       expect(find.textContaining('Hardware wallet (Trezor)'), findsOneWidget);
       expect(find.textContaining('No system keychain'), findsNothing);
       expect(find.textContaining('read keys are not kept'), findsNothing);
+      await tester.scrollUntilVisible(
+          find.textContaining('Disconnects the Trezor'), 200,
+          scrollable: find.byType(Scrollable).first);
       expect(find.textContaining('Disconnects the Trezor'), findsOneWidget);
     });
 
@@ -109,6 +112,78 @@ void main() {
       expect(find.text('Create new wallet'), findsOneWidget);
     });
 
+    testWidgets('the live presence poll flips the door to "Trezor detected"',
+        (tester) async {
+      await openWallet(tester);
+      // No device yet: the generic helper line.
+      expect(find.textContaining('never leaves the'), findsOneWidget);
+      expect(find.text('Trezor detected — ready to set up.'), findsNothing);
+      // Plug one in: the next 4-second poll notices.
+      fake.trezorError = null;
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      expect(find.text('Trezor detected — ready to set up.'), findsOneWidget);
+      expect(find.textContaining('never leaves the'), findsNothing);
+      // Unplugged again: the line reverts.
+      fake.trezorError = 'no Trezor found — plug it in, unlock it, and try again';
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      expect(find.text('Trezor detected — ready to set up.'), findsNothing);
+    });
+
+    testWidgets('a udev permission error offers the USB-permissions fix',
+        (tester) async {
+      fake.trezorError =
+          'the Trezor was found but could not be opened (Access denied). '
+          'On Linux this usually means the Trezor udev rules are not '
+          'installed — install them (trezor.io → Learn → udev rules), '
+          'replug the device, and try again.';
+      await openWallet(tester);
+      await tester.tap(find.text('Connect a hardware wallet (Trezor)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Connect'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('udev rules'), findsWidgets);
+      final fix = find.text('Show me the fix (USB permissions)');
+      expect(fix, findsOneWidget);
+      await tester.ensureVisible(fix);
+      await tester.pumpAndSettle();
+      await tester.tap(fix);
+      await tester.pumpAndSettle();
+      // The helper dialog carries the one-liner install command.
+      expect(find.text('Give W@tch access to the Trezor'), findsOneWidget);
+      expect(find.textContaining('data.trezor.io'), findsWidgets);
+      expect(find.text(kTrezorUdevCommand), findsOneWidget);
+      // A plain no-device error does NOT offer the fix.
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      fake.trezorError = 'no Trezor found — plug it in, unlock it, and try again';
+      await tester.tap(find.text('Connect a hardware wallet (Trezor)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Connect'));
+      await tester.pumpAndSettle();
+      expect(find.text('Show me the fix (USB permissions)'), findsNothing);
+    });
+
+    testWidgets(
+        'the configured hardware view explains the on-device address check '
+        'and the one-time allowance confirmation', (tester) async {
+      fake.wallet = {
+        'address': '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+        'storage': 'keychain',
+        'kind': 'trezor',
+        'keys_held': true,
+      };
+      await openWallet(tester);
+      expect(find.textContaining('showed this address on its own screen'),
+          findsOneWidget);
+      expect(find.textContaining('one extra confirmation'), findsOneWidget);
+      expect(find.textContaining('one-time spending allowance'),
+          findsOneWidget);
+    });
+
     testWidgets('removing a hardware wallet reads as a disconnect',
         (tester) async {
       fake.wallet = {
@@ -118,6 +193,9 @@ void main() {
         'keys_held': true,
       };
       await openWallet(tester);
+      await tester.scrollUntilVisible(
+          find.text('Remove wallet from this computer'), 200,
+          scrollable: find.byType(Scrollable).first);
       await tester.tap(find.text('Remove wallet from this computer'));
       await tester.pumpAndSettle();
       expect(find.textContaining('Nothing on the device itself changes'),
