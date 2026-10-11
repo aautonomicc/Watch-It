@@ -126,7 +126,7 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   time so they can never drift from what actually shipped
 - Wallet (renamed from Publishing 2026-08-27: create with 12-word
   ceremony + retype confirm, import key/phrase, live ANT/ETH balances,
-  remove; funds the private uploads). Since 2026-10-10 (unreleased) a
+  remove; funds the private uploads). Since 2026-10-10 (alpha.114) a
   third, desktop-only way in: "Connect a hardware wallet (Trezor)" —
   plug-in + unlock instructions, a default-on "keep backup read keys
   on this computer" choice with honest link-members-can-read copy,
@@ -165,7 +165,7 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   info and a "Check the backup now" button; a one-time nudge card
   ("your linked devices follow this device's backups — turn on
   automatic backups") appears once another linked device exists,
-  with Turn on / Not now (2026-10-08, unreleased). The linked My
+  with Turn on / Not now (2026-10-08, alpha.112). The linked My
   W@tch screen gains a **Low-data mode** switch the same day: x0x
   stays off, the shared backup carries the sync, and Sync now runs
   one bounded live session behind an honest ~100–150 MB cost dialog
@@ -367,7 +367,7 @@ interaction spec in [ANDROID-TV.md](ANDROID-TV.md). The app still runs
 the *normal* layout inside the safe area; the 10-foot column above
 remains the target.
 
-## Built so far (alpha.103)
+## Built so far (alpha.115)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,
@@ -490,7 +490,27 @@ showing a code a linked phone scans) and the TV-friendly invite
 dialog, and adds the Software video
 decoding toggle; alpha.103 points the update snackbar at the in-app
 updater and makes TV audio seeking work from any focus with the seek
-bar autofocused in the full-screen audio player.
+bar autofocused in the full-screen audio player. Alpha.104/.105 are
+TV compatibility and polish (Impeller off by default on Tegra plus
+the Graphics compatibility toggle; persistent update prompts, visible
+entry focus on TV screens, D-pad-escapable text fields, QR dialogs
+that fit small TV viewports). Alpha.106 ships the desktop polish trio
+— the mpv-style keyboard map with a `?` help sheet, window
+size/position memory with an 800×600 minimum, hover seek thumbnails
+on downloaded files — plus the Data page's 7-day two-tone
+Wi-Fi/mobile usage graph with tap-a-day rescope and the daily data
+alert, honest My W@tch sync reporting (pending maps/art, i-of-N
+stages, per-device doc age), and Settings → About reachable on TV
+with a manual Check-for-updates-now row. Alpha.108 syncs profiles
+over My W@tch (with the per-device "Show on this device" toggle) and
+removes the Channels surfaces; alpha.110–.115 add the wallet-security
+surfaces described in the Settings section above: the Backup screen
+(backup/restore/auto-backup/following-a-shared-backup), the sealed
+link store's `wtch2-`/`wtchp2-` codes with the update-that-device
+message, the linked screen's Low-data mode switch with its burst-cost
+dialog, the batch review page's "Paid together in N payment
+transaction(s)" line, the Trezor door with its three-confirmation
+setup ceremony and live device detection, and the wallet-file
+passphrase protect/locked-unlock flow.
 Still to come from this document: filter/sort + fast-scroller on
-the grid, the full desktop keyboard map, mobile gestures, and the
-10-foot TV layout.
+the grid, mobile gestures, and the 10-foot TV layout.

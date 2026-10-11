@@ -6,13 +6,39 @@ private Upload and My W@tch stay. Channel mentions in the release
 history below are historical; the Channels section itself is collapsed
 to a dated note.
 
-**Status (2026-10-08):** latest release is **v0.1.0-alpha.111**
+**Status (2026-10-11):** latest release is **v0.1.0-alpha.115**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
 a release ships **four artifacts**: a signed APK (dual-ABI
 armeabi-v7a + arm64-v8a since alpha.98, so Fire TV Sticks and other
 32-bit-app devices install the normal APK), a Linux AppImage, a
 Windows portable zip (since alpha.55), and a macOS universal dmg
-(since alpha.92 — unsigned, right-click → Open). The newest release is
+(since alpha.92 — unsigned, right-click → Open). The newest wave is
+**wallet security & hardware wallets** (alpha.112–.115): alpha.112
+ships **Low-data mode** — a linked device syncs from the shared
+backup with the x0x mesh OFF (free pointer reads instead of tens of
+MB per minute of idle mesh traffic; "Sync now" runs a bounded live
+burst behind an honest ~100–150 MB cost dialog), plus backup-first
+bootstrap for joining devices, an auto-backup nudge, the
+TV found-update-reachable-by-D-pad fix and ant-core 0.12.0 (pointer
+read-freshness). Alpha.113 ships **upload-all batch payments**: every
+chunk of a multi-file batch pools into ONE payment transaction per
+≤256-chunk sub-batch (instead of one+ per file), with payment proofs
+checkpointed for 7 days so failed stores and app restarts retry free;
+follower backup read keys move into the OS keychain, and x0x 0.46.6
+makes the agent off-toggle complete in seconds. Alpha.114 ships
+**Trezor hardware-wallet support** (desktop, direct USB, no Bridge:
+the keys never leave the device, every payment is a physical tap,
+and the backup identity derives from an on-device signature via the
+new **sign-to-derive** scheme — ⚠️ breaking: a new backup line, so
+every user's first post-update backup re-uploads once; old backups
+stay restorable via an automatic legacy fallback). Alpha.115 is the
+**wallet security hardening wave**: wallet-file passphrase protection
+(Argon2id + ChaCha20-Poly1305 with a locked/unlock screen), a third
+Trezor setup tap confirming the address on the device's own screen,
+Argon2id stretching for profile PINs (legacy hashes upgrade silently),
+zeroize of transient key material, and Trezor ease-of-use (udev
+fix-it helper, live device detection, first-payment allowance copy,
+fresh-backup-line notice). Before that wave came
 **link-store encryption** (alpha.111 — "W@tch your wallet"): every
 My W@tch store value (sync doc parts, entry maps, device records)
 travels sealed with ChaCha20-Poly1305 under a key derived from the
@@ -841,7 +867,7 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       write was live-proven 2026-10-07, this leg still needs a second
       linked device)
 - [x] **Low-data mode, backup-first bootstrap, auto-backup nudge**
-      (implemented 2026-10-08, UNRELEASED — ships next release; the
+      (implemented 2026-10-08, shipped in alpha.112; the
       2026-10-08 backup-first design discussion's recommendations,
       built because x0x's idle mesh cost — ~52 MB/min with shedding,
       an unsheddable Critical-class floor upstream (#504, P2, months
@@ -1057,7 +1083,7 @@ canonical names automatically. CLI docs in [UPLOAD-CLI.md](UPLOAD-CLI.md).
       uploads without encode tiers; see "Upload on Android" in the
       Publish section above; iOS deferred)
 
-## Hardware-wallet plan (adopted 2026-10-10; ALL PHASES 0–4 implemented — 0 + 4-now shipped in alpha.113, 1–3 + key policy in alpha.114; hardening/UX wave + zeroize implemented 2026-10-11; open: real-Trezor e2e on the user's desktop, Ledger)
+## Hardware-wallet plan (adopted 2026-10-10; ALL PHASES 0–4 implemented — 0 + 4-now shipped in alpha.113, 1–3 + key policy in alpha.114; hardening/UX wave + zeroize shipped in alpha.115; open: real-Trezor e2e on the user's desktop, Ledger)
 
 The 5-phase plan from the 2026-10-10 discussion series (CLAUDE.md has
 the full record): make the upload wallet — which is also the backup
@@ -1066,7 +1092,7 @@ The separate-backup-phrase alternative was explicitly rejected by
 decision (2026-10-10).
 
 - [x] Phase 0 — upload-all batch payments (implemented 2026-10-10,
-      ships next release; benefits software wallets too): the batch
+      shipped in alpha.113; benefits software wallets too): the batch
       uploader restructured encode-everything → ONE pooled
       `/upload/batch` → every chunk of the batch paid in one
       `payForMerkleTree` transaction per ≤256-chunk merkle sub-batch
@@ -1086,7 +1112,7 @@ decision (2026-10-10).
       the keychain took the keys). The rest of phase 4 is the settled
       key policy below — it rides phase 3.
 - [x] Phase 1 — sign-to-derive backup identity (implemented
-      2026-10-10, unreleased): backup keys now derive from the
+      2026-10-10, shipped in alpha.114): backup keys now derive from the
       wallet's deterministic (RFC-6979) EIP-191 signature of the
       frozen, versioned `IDENTITY_MESSAGE_V1` (version + epoch lines
       baked into the message), signed twice and compared on every
@@ -1103,7 +1129,8 @@ decision (2026-10-10).
       raw-key derivation when the new pointer is empty (old backups
       stay restorable from the same 12 words; the restore dialog
       says so). Legacy + v2 derivations pinned by test vectors.
-- [x] Phase 2 — the signer seam (implemented 2026-10-10, unreleased):
+- [x] Phase 2 — the signer seam (implemented 2026-10-10, shipped in
+      alpha.114):
       new `signer.rs` `Signer` type (today one variant, the stored
       software key; phase 3 adds Trezor) through which EVERYTHING that
       signs now flows — `payment_wallet()` builds the evmlib wallet
@@ -1124,8 +1151,8 @@ decision (2026-10-10).
       payment-signer tree is evmlib's alloy 1.x, so phase 3 uses
       alloy-signer-trezor 1.8.x (exists), NOT the 2.4.x noted earlier.
 - [x] Phase 3 — Trezor transport + setup ceremony + confirm UI
-      (implemented 2026-10-10, unreleased; carries the settled
-      phase-4 key policy below): new `trezor.rs` over
+      (implemented 2026-10-10, shipped in alpha.114; carries the
+      settled phase-4 key policy below): new `trezor.rs` over
       alloy-signer-trezor 1.8.3 (evmlib's alloy tree — the TxSigner
       unifies) → trezor-client → rusb, DIRECT USB, no Bridge; every
       device conversation runs on a blocking thread (a signature
@@ -1152,7 +1179,8 @@ decision (2026-10-10).
       pass (user's desktop — Ella is headless; every device-free leg
       is test-pinned), Ledger (BLE opens Android) later.
 - [x] Phase 4 (remainder) — key policy, SETTLED 2026-10-10,
-      IMPLEMENTED with phase 3 (zeroize-on-drop still open; the
+      IMPLEMENTED with phase 3 and shipped in alpha.114
+      (zeroize-on-drop followed in alpha.115; the
       whole 2026-10-10 discussion series distilled):
       (1) **paranoid payments are the DEFAULT with a hardware
       wallet** — the master caches no derived backup keys; they
@@ -1180,8 +1208,8 @@ decision (2026-10-10).
       UX this lands on: one tap at setup, one per upload batch, one
       per backup — funds are 100% hardware-protected in EVERY mode.
       Build order: phase 3 next, this policy ships with it.
-- [x] Hardening + ease-of-use wave (implemented 2026-10-11,
-      unreleased — the 2026-10-11 recommendations a–i in full):
+- [x] Hardening + ease-of-use wave (implemented 2026-10-11, shipped
+      in alpha.115 — the 2026-10-11 recommendations a–i in full):
       (a) **zeroize** — transient key material (derivation
       intermediates in backup.rs, mnemonic-derived key bytes,
       passphrase-derived file keys, the removed wallet's in-memory
@@ -1442,7 +1470,7 @@ iOS version. The v1.0 six-platform goal below still includes iOS.)
       bar and the page stuck at the bottom; they are now tappable
       stepping stones (tap = copy for a bug report / refresh) and the
       list is fully laid out on TV like Settings. From the Android TV
-      update-check report (unreleased — ships next release): when the
+      update-check report (alpha.112): when the
       manual check finds a release, the focus ring moves straight onto
       the Update available row (one OK press installs — the row
       appears above the Check-now tile while the result snackbar sits

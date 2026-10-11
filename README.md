@@ -475,6 +475,56 @@ device first" message for old codes. The release also bumps x0x to
 authority, plus dropping unsigned pub/sub payloads before they reach
 the app).
 
+Alpha.112 adds **Low-data mode**: a linked device can keep its My
+W@tch in sync *from the shared backup* with the background mesh
+switched off entirely — free, lightweight network reads on a slow
+cadence instead of tens of megabytes per minute of idle gossip — and
+"Sync now" runs one bounded live session behind a dialog that names
+the real cost (~100–150 MB). A joining device also bootstraps
+backup-first (one bulk fetch instead of trickling a big library
+through sync cycles), a one-time nudge suggests auto-backup once
+other devices follow yours, a found update on Android TV is now
+reachable by D-pad, and the Autonomi client moves to ant-core 0.12.0
+(fresher, corroborated pointer reads on the backup path).
+
+Alpha.113 makes multi-file uploads **pay in one go**: every chunk of
+a batch pools into a single payment transaction per ~1 GB of chunks
+(instead of one or more transactions per file), the review page says
+so up front, and payment proofs are kept for seven days so failed
+stores — and app restarts — retry without paying again. Follower
+devices' backup read keys move from a plaintext file into the OS
+keychain, and x0x 0.46.6 makes switching the sync agent off complete
+in seconds.
+
+Alpha.114 brings **hardware-wallet support (Trezor)**: on desktop,
+connect a Trezor over plain USB (no Bridge software) and the upload
+wallet's keys never touch the computer — setup is a short on-device
+ceremony, every payment waits for a physical tap on the device, and
+backups work because the backup identity now derives from a
+deterministic on-device signature (**sign-to-derive**). That
+derivation change is breaking by design: every user's first backup
+after updating starts a fresh backup line and re-uploads once —
+older backups stay restorable from the same 12 words via an
+automatic fallback. By default a linked fleet keeps working
+Trezor-free day to day: the read-only backup keys (which can never
+spend) are shared over the sealed My W@tch link, with honest copy
+that link members can read backups — opting out gives a
+single-device, maximally paranoid setup.
+
+Alpha.115 hardens the wallet all round: software wallets stored in
+the file fallback (no OS keychain) can be **protected with a
+passphrase** — Argon2id-stretched, ChaCha20-Poly1305-encrypted, with
+a locked screen asking for the passphrase after a restart; the
+Trezor setup ceremony gains a third confirmation where the device
+shows the wallet address on its *own* screen (so a compromised
+computer can't swap accounts unnoticed); profile PINs are stretched
+with Argon2id (old PINs upgrade silently on the next correct entry);
+transient key material is wiped from memory after use; and Trezor
+ease-of-use lands — a copyable one-line fix when Linux USB
+permissions bite, live "Trezor detected" feedback, a note that the
+first payment asks one extra confirmation, and a one-time heads-up
+before the first backup on the new line.
+
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users

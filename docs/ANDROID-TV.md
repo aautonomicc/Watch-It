@@ -40,7 +40,7 @@ channel falls back to the ordinary interface.
   throttle and reports its result in a snackbar (up to date / update
   found / could not reach GitHub) — the background check is deliberately
   silent, which on a TV read as "updates aren't working".
-- A found update is reachable by D-pad (unreleased — ships next release):
+- A found update is reachable by D-pad (alpha.112):
   when the manual check finds a release on TV, the focus ring moves straight
   onto the **Update available** row (which appears ABOVE the Check-now tile,
   the one direction "down" never goes) so one OK press starts the install,

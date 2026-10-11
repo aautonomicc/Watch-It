@@ -31,7 +31,7 @@ APK covers it — no extra platform port. What it needs on top:
 - Hardware decode matters more here (TV boxes have weak CPUs) — libmpv uses
   MediaCodec on Android, same path as phones.
 
-Status (alpha.103): the manifest work (leanback entry, TV banner,
+Status (alpha.115): the manifest work (leanback entry, TV banner,
 leanback/touchscreen not-required) and card-level D-pad focus shipped
 in alpha.95; alpha.96 merged the full TV UX wave (the first external
 PR): UiModeManager TV detection over a method channel, an overscan
@@ -43,9 +43,11 @@ optional Grove palette — interaction spec in
 [ANDROID-TV.md](ANDROID-TV.md). Since alpha.98 the release APK is
 dual-ABI (armeabi-v7a + arm64-v8a), so 32-bit-app TV devices (Fire TV
 Stick, Google TV Streamer) install the normal APK, and real-device
-testing runs on both via the tester group — the alpha.98–.103 TV
+testing runs on both via the tester group — the alpha.98–.112 TV
 fixes (seek-bar D-pad traversal, single control bar for music, audio
-media keys from any focus) all came out of it. The 10-foot layout
+media keys from any focus, Tegra Impeller default-off + the Graphics
+compatibility toggle, About reachable by D-pad with a focusable
+found-update row) all came out of it. The 10-foot layout
 mode is still open.
 
 ## High-level structure
@@ -233,8 +235,8 @@ does. Because the error fired *after* payment and storage, a file caught
 by the old bug is fully on the network — re-publishing it finishes the
 bookkeeping at no extra cost (already-stored chunks are free).
 
-**Upload-all batch payments** (2026-10-10, unreleased — hardware-wallet
-plan phase 0): the batch uploader no longer pays per file. A new
+**Upload-all batch payments** (2026-10-10, shipped in alpha.113 —
+hardware-wallet plan phase 0): the batch uploader no longer pays per file. A new
 `batch.rs` pools EVERY chunk of the whole batch into ant-core's public
 multi-record driver (`Client::upload_records`, `PaymentMode::Merkle`):
 each file stream-encrypts locally into a disk spill (the chunk set is
@@ -257,8 +259,8 @@ input order, and the review page states the payment count up front
 ("Paid together in 1 payment transaction" / "~N … one per ~1 GB of
 chunks").
 
-**The signer seam** (2026-10-10, unreleased — hardware-wallet plan
-phase 2): everything that signs goes through `signer.rs`'s `Signer`
+**The signer seam** (2026-10-10, shipped in alpha.114 —
+hardware-wallet plan phase 2): everything that signs goes through `signer.rs`'s `Signer`
 type — a `Software` variant wrapping the stored key, and (phase 3) a
 `Trezor` variant holding only public identity.
 `Signer::payment_wallet()` (async since phase 3) builds the evmlib wallet with
@@ -278,7 +280,8 @@ facade, already in the lockfile) — phase 3 therefore uses
 alloy-signer-trezor 1.8.x, not the 2.4.x tree backup.rs's identity
 signature uses (the r‖s bytes are identical across trees by RFC-6979).
 
-**Hardware wallet — Trezor** (2026-10-10, unreleased — hardware-wallet
+**Hardware wallet — Trezor** (2026-10-10, shipped in alpha.114;
+hardened in alpha.115 — hardware-wallet
 plan phase 3 + the settled phase-4 key policy): `trezor.rs` talks to
 the device over alloy-signer-trezor 1.8.3 → trezor-client → rusb
 (DIRECT USB, no Trezor Bridge; Linux needs the standard Trezor udev
@@ -502,8 +505,8 @@ re-encrypt every object (full re-upload) while the removed device
 keeps the old keys anyway — replacing the wallet starts a new backup
 line.
 
-At-rest hardening (2026-10-10, unreleased — hardware-wallet plan
-phase 4's recommended-now piece): the follower's adopted read keys no
+At-rest hardening (2026-10-10, shipped in alpha.113 — hardware-wallet
+plan phase 4's recommended-now piece): the follower's adopted read keys no
 longer persist in plaintext `backup_follow.json` — they live in the
 core's keychain store (`Engine::follow_keys`, the wallet.rs
 `WalletStore::named` idiom: OS keychain with a 0600 `follow.keys`
@@ -513,7 +516,7 @@ file's plaintext pair into the keychain on first launch, stripping
 the file only after the store confirmed. The state file keeps only
 non-secret bookkeeping (stamps, applied head, fingerprints).
 
-Low-data mode (2026-10-08, unreleased): a per-device switch on the
+Low-data mode (2026-10-08, shipped in alpha.112): a per-device switch on the
 linked My W@tch screen (`app/lib/services/low_data_mode.dart`, pref
 `low_data_mode_v1`) that keeps the x0x agent off — the idle mesh
 costs ~tens of MB per minute just by being connected — and lets the
