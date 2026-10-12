@@ -7,8 +7,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watchit/db/app_database.dart';
 import 'package:watchit/main.dart';
 import 'package:watchit/screens/my_watch_screen.dart';
+import 'package:watchit/services/backup_follow.dart';
 import 'package:watchit/services/embedded_client.dart';
 import 'package:watchit/services/library_store.dart';
+import 'package:watchit/services/low_data_mode.dart';
 import 'package:watchit/services/my_watch_sync.dart';
 import 'package:watchit/services/network_pause.dart';
 import 'package:watchit/services/terms.dart';
@@ -16,6 +18,13 @@ import 'package:watchit/services/x0x_cellular.dart';
 import 'package:watchit/theme/tokens.dart';
 import 'package:watchit/widgets/drawer_status.dart';
 import 'package:watchit/widgets/library_drawer.dart';
+import 'package:watchit/widgets/pair_dialogs.dart';
+
+/// A LowDataMode frozen mid-burst, for the drawer's live-activity row.
+class _BurstingMode extends LowDataMode {
+  @override
+  String? get burstStage => 'Joining your devices…';
+}
 
 Widget _status({
   String state = 'ready',
@@ -41,6 +50,9 @@ void main() {
     await LibraryStore.useForTesting(
         AppDatabase.forTesting(NativeDatabase.memory()));
     MyWatchSync.status.value = const MyWatchSyncStatus();
+    BackupFollowService.status.value = const BackupFollowStatus();
+    MyWatchPairActivity.status.value = null;
+    LowDataMode.instance = LowDataMode();
   });
 
   group('WiDrawerStatus peers row', () {
@@ -110,6 +122,70 @@ void main() {
           supported: true, linked: true, enabled: false, agentState: 'off');
       await tester.pump();
       expect(find.text('My W@tch: switched off'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('narrates live activity: pairing, a low-data burst, a '
+        'backup follow fetch, and the sync cycle\'s own stage',
+        (tester) async {
+      await tester.pumpWidget(_status());
+      await tester.pump();
+
+      // A pairing in flight shows even before the device is linked.
+      MyWatchSync.status.value =
+          const MyWatchSyncStatus(supported: true, linked: false);
+      MyWatchPairActivity.status.value =
+          'pairing — waiting for a linked device to scan…';
+      await tester.pump();
+      expect(
+        find.text(
+            'My W@tch: pairing — waiting for a linked device to scan…'),
+        findsOneWidget,
+      );
+      MyWatchPairActivity.status.value = null;
+
+      // A low-data "Sync now" burst narrates its stage (the mode holds
+      // the agent off, which used to read as a bare "low-data mode").
+      LowDataMode.instance = _BurstingMode();
+      MyWatchSync.status.value = const MyWatchSyncStatus(
+          supported: true, linked: true, enabled: false, agentState: 'off');
+      await tester.pump();
+      expect(find.text('My W@tch: joining your devices…'), findsOneWidget);
+      LowDataMode.instance = LowDataMode();
+
+      // A running backup follow fetch shows its x-of-N — beating the
+      // low-data resting label too (recovery IS the low-data sync).
+      BackupFollowService.status.value = const BackupFollowStatus(
+        following: true,
+        fetching: true,
+        firstTime: true,
+        done: 3,
+        total: 12,
+      );
+      await tester.pump();
+      expect(
+        find.text(
+            'My W@tch: recovering the library from the backup (3 of 12)'),
+        findsOneWidget,
+      );
+      BackupFollowService.status.value = const BackupFollowStatus(
+          following: true, fetching: true);
+      await tester.pump();
+      expect(find.text('My W@tch: catching up from the backup…'),
+          findsOneWidget);
+      BackupFollowService.status.value = const BackupFollowStatus();
+
+      // The sync cycle's own stage replaces the bare "syncing…".
+      MyWatchSync.status.value = const MyWatchSyncStatus(
+        supported: true,
+        linked: true,
+        agentState: 'ready',
+        syncing: true,
+        activity: 'Fetching data maps… (1 of 3)',
+      );
+      await tester.pump();
+      expect(find.text('My W@tch: fetching data maps… (1 of 3)'),
+          findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 

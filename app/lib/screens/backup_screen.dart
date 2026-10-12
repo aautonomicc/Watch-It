@@ -279,6 +279,34 @@ class _BackupScreenState extends State<BackupScreen> {
                   style: TextStyle(color: t.ash, fontSize: 12, height: 1.4),
                 ),
               ),
+              // Live stage while a fetch runs — a first-time follow can
+              // move a whole library and must not look like nothing is
+              // happening (the 2026-10-12 round-trip test's wrinkle).
+              if (follow.fetching)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: t.accent),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          follow.firstTime
+                              ? 'Recovering the library — '
+                                  '${follow.stage ?? '…'}'
+                              : 'Catching up — ${follow.stage ?? '…'}',
+                          style:
+                              TextStyle(color: t.accent, fontSize: 12.5),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               OutlinedButton.icon(
                 icon: const Icon(Icons.refresh),
                 label: const Text('Check the backup now'),

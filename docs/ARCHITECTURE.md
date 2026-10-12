@@ -588,6 +588,20 @@ it instead of many doc-budget cycles — the own publish still runs,
 the gate needs keys in sight to activate, and it resolves when the
 first follow completes/fails or at a 5-minute deadline.
 
+Follower resilience + live activity (2026-10-12, unreleased — ships
+next release; the round-trip test's triage): a follow fetch publishes
+its live stage/x-of-N into `BackupFollowStatus` — shown on the Backup
+screen's follower card, a bottom-of-home info bar
+(`widgets/backup_follow_bar.dart`, "Recovering your library from the
+backup — 3 of 12") and the drawer's My W@tch row; while `applied_head`
+is null a failed/soft-failed check retries on a progressive backoff
+(1 min doubling to a 10-min cap) instead of the bare 6-hour poll, and
+every low-data burst ends with `checkAfterBurst` (keys held + nothing
+applied → immediate check over the always-on Autonomi core). The
+drawer row also narrates a running pairing (the `MyWatchPairActivity`
+beacon set by both pair dialogs), a burst's stage, and the sync
+cycle's own activity line.
+
 ### Channels — public signed media lists (REMOVED 2026-09-27)
 
 The public content space (Ed25519 channel identities with `wchn1-…`

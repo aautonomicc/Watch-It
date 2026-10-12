@@ -7,6 +7,21 @@ import '../services/tv_settings.dart';
 import '../theme/tokens.dart';
 import 'wi_qr.dart';
 
+/// What a pairing flow is doing right now, for ambient status surfaces
+/// (the library drawer's My W@tch row): set while either pairing dialog
+/// is up, null otherwise. Value changes are deferred to the next frame
+/// so a dialog mounting mid-build can never mark an already-built
+/// listener dirty.
+class MyWatchPairActivity {
+  static final ValueNotifier<String?> status = ValueNotifier(null);
+
+  static void announce(String? what) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      status.value = what;
+    });
+  }
+}
+
 /// Reverse-QR pairing, unlinked side: shows the `wtchp2-` pairing code
 /// as a QR for a linked device (with a camera) to scan, and polls until
 /// this device has joined the link. Pops `true` once linked, `false`
@@ -41,11 +56,14 @@ class _PairCodeDialogState extends State<PairCodeDialog> {
   @override
   void initState() {
     super.initState();
+    MyWatchPairActivity.announce(
+        'pairing — waiting for a linked device to scan…');
     _timer = Timer.periodic(widget.pollInterval, (_) => _poll());
   }
 
   @override
   void dispose() {
+    MyWatchPairActivity.announce(null);
     _timer?.cancel();
     super.dispose();
   }
@@ -61,6 +79,7 @@ class _PairCodeDialogState extends State<PairCodeDialog> {
       }
       final pair = await widget.api.pairStatus();
       if (pair.active && pair.state == 'failed' && mounted) {
+        MyWatchPairActivity.announce(null);
         setState(() => _failure = pair.message ?? 'Pairing failed');
       }
     } catch (_) {
@@ -163,11 +182,14 @@ class _PairSendDialogState extends State<PairSendDialog> {
   @override
   void initState() {
     super.initState();
+    MyWatchPairActivity.announce(
+        'pairing — sending the link to the new device…');
     _timer = Timer.periodic(widget.pollInterval, (_) => _poll());
   }
 
   @override
   void dispose() {
+    MyWatchPairActivity.announce(null);
     _timer?.cancel();
     super.dispose();
   }
@@ -186,6 +208,7 @@ class _PairSendDialogState extends State<PairSendDialog> {
         return;
       }
       if (pair.active && pair.state == 'failed' && mounted) {
+        MyWatchPairActivity.announce(null);
         setState(() => _failure = pair.message ?? 'Pairing failed');
       }
     } catch (_) {

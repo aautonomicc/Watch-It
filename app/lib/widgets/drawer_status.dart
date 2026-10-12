@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../screens/my_watch_screen.dart';
+import '../services/backup_follow.dart';
 import '../services/embedded_client.dart';
 import '../services/low_data_mode.dart';
 import '../services/my_watch_sync.dart';
@@ -10,6 +11,7 @@ import '../services/network_pause.dart';
 import '../services/profiles.dart';
 import '../services/x0x_cellular.dart';
 import '../theme/tokens.dart';
+import 'pair_dialogs.dart';
 
 /// Connection/status rows at the top of the library drawer, above the
 /// list section — one per network surface, top to bottom: the
@@ -46,15 +48,23 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
     _pollHealth();
     // "Paused on mobile data" vs "switched off" wording can flip while
     // the drawer is open (walking out of Wi-Fi range); same for the
-    // all-network pause.
+    // all-network pause — and the live-activity sources (a low-data
+    // burst's stage, a running pairing, a backup follow fetch) all
+    // change while the drawer sits open.
     X0xCellularGate.instance.addListener(_onGateChanged);
     NetworkPause.instance.addListener(_onGateChanged);
+    LowDataMode.instance.addListener(_onGateChanged);
+    BackupFollowService.status.addListener(_onGateChanged);
+    MyWatchPairActivity.status.addListener(_onGateChanged);
   }
 
   @override
   void dispose() {
     X0xCellularGate.instance.removeListener(_onGateChanged);
     NetworkPause.instance.removeListener(_onGateChanged);
+    LowDataMode.instance.removeListener(_onGateChanged);
+    BackupFollowService.status.removeListener(_onGateChanged);
+    MyWatchPairActivity.status.removeListener(_onGateChanged);
     _healthTimer?.cancel();
     super.dispose();
   }
@@ -144,8 +154,52 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
     return _row(t, color: color, text: text);
   }
 
+  /// Lowercase a stage line's first letter so it reads naturally after
+  /// the "My W@tch: " prefix ("Joining your devices…" → "joining …").
+  static String _lower(String s) =>
+      s.isEmpty ? s : s[0].toLowerCase() + s.substring(1);
+
   Widget _myWatchRow(WiTokens t, MyWatchSyncStatus s) {
     if (!s.supported) return const SizedBox.shrink();
+    // Status is fine for everyone; the page behind it is an admin
+    // surface (device linking).
+    final onTap = ProfileStore.instance.isAdmin
+        ? () => _openPage(const MyWatchScreen())
+        : null;
+
+    // Live activity beats the resting states — the row narrates what
+    // My W@tch is doing RIGHT NOW during a pairing, a low-data "Sync
+    // now" burst, or a backup follow fetch (user ask 2026-10-12).
+    final pairing = MyWatchPairActivity.status.value;
+    if (pairing != null) {
+      return _row(t,
+          color: t.accent,
+          spinner: true,
+          text: 'My W@tch: $pairing',
+          onTap: onTap);
+    }
+    if (s.linked) {
+      final burst = LowDataMode.instance.burstStage;
+      if (burst != null) {
+        return _row(t,
+            color: t.accent,
+            spinner: true,
+            text: 'My W@tch: ${_lower(burst)}',
+            onTap: onTap);
+      }
+      final follow = BackupFollowService.status.value;
+      if (follow.fetching) {
+        final n = follow.total > 0
+            ? ' (${follow.done} of ${follow.total})'
+            : '…';
+        return _row(t,
+            color: t.accent,
+            spinner: true,
+            text:
+                'My W@tch: ${follow.firstTime ? 'recovering the library from the backup' : 'catching up from the backup'}$n',
+            onTap: onTap);
+      }
+    }
     final (color, text) = switch (s) {
       MyWatchSyncStatus(linked: false) => (t.ash, 'My W@tch: not linked'),
       MyWatchSyncStatus(enabled: false) => (
@@ -162,6 +216,10 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
         t.accent,
         'My W@tch: connecting…',
       ),
+      MyWatchSyncStatus(syncing: true, activity: final a?) => (
+        t.accent,
+        'My W@tch: ${_lower(a)}',
+      ),
       MyWatchSyncStatus(syncing: true) => (t.accent, 'My W@tch: syncing…'),
       MyWatchSyncStatus(problems: [_, ...]) => (
         const Color(0xffffb74d),
@@ -173,15 +231,12 @@ class _WiDrawerStatusState extends State<WiDrawerStatus> {
       ),
       _ => (const Color(0xff4caf50), 'My W@tch: linked'),
     };
-    // Status is fine for everyone; the page behind it is an admin
-    // surface (device linking).
     return _row(
       t,
       color: color,
       text: text,
-      onTap: ProfileStore.instance.isAdmin
-          ? () => _openPage(const MyWatchScreen())
-          : null,
+      onTap: onTap,
+      spinner: s.syncing,
     );
   }
 

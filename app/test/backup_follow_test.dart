@@ -76,6 +76,7 @@ void main() {
   });
 
   tearDown(() {
+    follow.stop(); // cancels any armed retry-ladder timer
     HttpOverrides.global = null;
     BackupService.postersDirOverride = null;
     BackupService.stagingDirOverride = null;
@@ -308,6 +309,162 @@ void main() {
       expect(outcome, contains('No backup published'));
       expect(fake.backupFollowPosts, isEmpty);
       expect(stateOnDisk()['last_check_ms'], isNotNull);
+    });
+  });
+
+  group('retry ladder', () {
+    test('retryDelay doubles from the base to the cap', () {
+      expect(follow.retryDelay(0), const Duration(minutes: 1));
+      expect(follow.retryDelay(1), const Duration(minutes: 2));
+      expect(follow.retryDelay(3), const Duration(minutes: 8));
+      expect(follow.retryDelay(4), const Duration(minutes: 10));
+      expect(follow.retryDelay(9), const Duration(minutes: 10));
+    });
+
+    test('a soft-failed first check retries on the ladder and stands down '
+        'once a check lands', () async {
+      follow.retryBase = const Duration(milliseconds: 30);
+      follow.retryCap = const Duration(milliseconds: 60);
+      health = const ClientHealth(state: 'connecting');
+      await follow.noteRemoteDocs([
+        docWith({'v': 1, 'ptr': ptrA, 'key': keyA, 'ms': 500}),
+      ]);
+      // The adoption's immediate check could only wait for the network —
+      // the ladder is armed instead of leaving it to the 6-hour poll.
+      expect(follow.retryScheduled, isTrue);
+      expect(follow.retryAttempts, 1);
+      expect(fake.backupPeekPosts, isEmpty);
+      // Still offline when the first rung fires → the next rung arms.
+      await Future<void>.delayed(const Duration(milliseconds: 45));
+      expect(follow.retryAttempts, 2);
+      expect(follow.retryScheduled, isTrue);
+      // The network comes back; the next rung's check gets a definitive
+      // answer (nothing published) and the ladder stands down.
+      health = const ClientHealth(state: 'ready', peers: 5);
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+      expect(fake.backupPeekPosts, hasLength(1));
+      expect(follow.retryScheduled, isFalse);
+      expect(follow.retryAttempts, 0);
+    });
+
+    test('a failed fetch arms the ladder only while nothing was ever '
+        'applied', () async {
+      follow.retryBase = const Duration(minutes: 1); // never fires in-test
+      fake.backupPeek = {'found': true, 'head': 'ee' * 32, 'counter': 2};
+      fake.backupJobStates.add({
+        'kind': 'follow',
+        'phase': 'error',
+        'error': 'chunk fetch failed',
+      });
+      await follow.noteRemoteDocs([
+        docWith({'v': 1, 'ptr': ptrA, 'key': keyA, 'ms': 500}),
+      ]);
+      // The adoption's check failed mid-fetch (the post-burst hiccup
+      // class) — the ladder is armed.
+      expect(follow.retryScheduled, isTrue);
+
+      // A later successful fold resets it… (the fake replays its job
+      // states from the top at every fetch start, so REPLACE the list)
+      fake.backupJobStates.clear();
+      fake.backupJobStates.add({
+        'kind': 'follow',
+        'phase': 'done',
+        'result': {
+          'created_ms': 1,
+          'head': 'ee' * 32,
+          'doc': {'v': 1, 'lists': const []},
+          'maps_imported': 0,
+          'maps_failed': 0,
+          'art_failed': 0,
+        },
+      });
+      await follow.checkNow();
+      expect(follow.retryScheduled, isFalse);
+      expect(stateOnDisk()['applied_head'], 'ee' * 32);
+
+      // …and once a backup HAS been folded in, a failure goes back to
+      // the slow cadence — no ladder for a populated device.
+      fake.backupPeek = {'found': true, 'head': 'ff' * 32, 'counter': 3};
+      fake.backupJobStates.clear();
+      fake.backupJobStates.add({
+        'kind': 'follow',
+        'phase': 'error',
+        'error': 'chunk fetch failed again',
+      });
+      await expectLater(follow.checkNow(), throwsA(anything));
+      expect(follow.retryScheduled, isFalse);
+    });
+  });
+
+  group('after a low-data burst', () {
+    test('checkAfterBurst checks only while following with nothing '
+        'applied yet', () async {
+      // Not following → quiet.
+      await follow.checkAfterBurst();
+      expect(fake.backupPeekPosts, isEmpty);
+
+      // Following, never applied → one check runs.
+      fake.followKeys = {'ptr': ptrA, 'key': keyA};
+      await follow.initialize();
+      await follow.checkAfterBurst();
+      expect(fake.backupPeekPosts, hasLength(1));
+
+      // Already folded a backup in → quiet again.
+      File('${tempDir.path}/backup_follow.json').writeAsStringSync(
+          jsonEncode({'shared_ms': 900, 'applied_head': 'ee' * 32}));
+      await follow.checkAfterBurst();
+      expect(fake.backupPeekPosts, hasLength(1));
+    });
+  });
+
+  group('live fetch progress', () {
+    test('a follow fetch publishes its stage and x-of-N, first-time '
+        'flagged, and ends with the summary', () async {
+      fake.followKeys = {'ptr': ptrA, 'key': keyA};
+      await follow.initialize();
+      fake.backupPeek = {'found': true, 'head': 'ee' * 32, 'counter': 1};
+      // The fetch start resets the fake's playback, so the poll loop
+      // reads these in order: one mid-fetch state, then done.
+      fake.backupJobStates.addAll([
+        {'kind': 'follow', 'phase': 'fetching', 'done': 2, 'total': 5},
+        {
+          'kind': 'follow',
+          'phase': 'done',
+          'result': {
+            'created_ms': 1,
+            'head': 'ee' * 32,
+            'doc': {'v': 1, 'lists': const []},
+            'maps_imported': 0,
+            'maps_failed': 0,
+            'art_failed': 0,
+          },
+        },
+      ]);
+      final seen = <BackupFollowStatus>[];
+      void listener() => seen.add(BackupFollowService.status.value);
+      BackupFollowService.status.addListener(listener);
+      addTearDown(() => BackupFollowService.status.removeListener(listener));
+
+      await follow.checkNow();
+
+      expect(
+        seen.any((s) =>
+            s.fetching && s.firstTime && s.stage == 'Looking up the backup…'),
+        isTrue,
+      );
+      expect(
+        seen.any((s) =>
+            s.fetching &&
+            s.firstTime &&
+            s.done == 2 &&
+            s.total == 5 &&
+            (s.stage ?? '').contains('2 of 5')),
+        isTrue,
+      );
+      final after = BackupFollowService.status.value;
+      expect(after.fetching, isFalse);
+      expect(after.stage, isNull);
+      expect(after.lastSummary, contains('Caught up'));
     });
   });
 

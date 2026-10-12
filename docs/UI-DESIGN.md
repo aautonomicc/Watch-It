@@ -89,8 +89,16 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   and on the home screen's bar before that) — Autonomi peers
   ("Connected · N peers") and My W@tch (sync state, tap opens the page,
   "not linked" when unlinked, "switched off" when disabled in the x0x
-  client page); the home screen has no
-  status bar anymore
+  client page). Since 2026-10-12 (unreleased) the My W@tch row
+  NARRATES live activity with a small spinner instead of resting
+  labels: a running pairing ("pairing — waiting for a linked device to
+  scan…"), a low-data burst's stage ("joining your devices…"), a
+  backup follow fetch ("recovering the library from the backup
+  (3 of 12)"), and the sync cycle's own stage ("fetching data maps…
+  (1 of 3)") instead of a bare "syncing…". The home screen has no
+  status bar anymore — but while a shared-backup fetch runs, a thin
+  info bar sits at the bottom of the home screen ("Recovering your
+  library from the backup — 3 of 12", with a progress strip)
 - Lists (manage, import/export)
 - Network (slimmed to three tiles in the 2026-09-06 Data-page merge,
   which absorbed the 2026-09-05 reorg's four sub-pages): **Offline

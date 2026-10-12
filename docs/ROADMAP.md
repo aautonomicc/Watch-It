@@ -912,6 +912,32 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       see what you back up") with Turn on / Not now
       (`backup_auto_nudge_dismissed_v1`); the default stays OFF
       (backups spend ANT).
+- [x] **Follower resilience + live sync activity** (implemented
+      2026-10-12, unreleased — ships next release; the 2026-10-12
+      round-trip test's triage items (1)+(2) built together, which
+      also makes (3) — auto-start after pairing, already built —
+      visible; plus the drawer live-activity ask from the same
+      report): **(1) progress visibility** — a running follow fetch
+      publishes its live stage and x-of-N into
+      `BackupFollowStatus` (fetching/stage/done/total/firstTime);
+      the Backup screen's follower card shows the stage line, the
+      home screen gains a bottom info bar ("Recovering your library
+      from the backup — 3 of 12", `widgets/backup_follow_bar.dart`)
+      while a fetch runs, and the drawer's My W@tch row narrates it
+      too. **(2) retry ladder** — while `applied_head` is null (the
+      backup never folded in), a failed or soft-failed follow
+      retries on a progressive backoff (1 min doubling to a 10-min
+      cap, the art-retry idiom) instead of waiting out the 6-hour
+      poll; once a backup HAS been applied, failures go back to the
+      slow cadence. Every low-data burst also ends with a follower
+      check when keys are held and nothing was applied yet
+      (`checkAfterBurst`, the fetch rides the always-on Autonomi
+      core). **(3) drawer live activity** — the drawer's My W@tch
+      row shows what is happening right now: a running pairing
+      (either dialog, via the `MyWatchPairActivity` beacon), a
+      low-data burst's stage, a follow fetch's x-of-N, and the sync
+      cycle's own stage line ("fetching data maps… (1 of 3)")
+      instead of a bare "syncing…".
 - [x] **Link-store encryption** (implemented 2026-10-07, shipped in
       alpha.111;
       [PLAN-mywatch-store-encryption.md](PLAN-mywatch-store-encryption.md)):

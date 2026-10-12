@@ -143,6 +143,37 @@ void main() {
       expect(fake.myWatchEnabledPosts.last, jsonEncode({'enabled': false}));
     });
 
+    test('every burst ends with the follower check — success or failure — '
+        'so just-arrived backup keys get fetched right away', () async {
+      var checks = 0;
+      LowDataMode burstMode() => LowDataMode(
+            api: api(),
+            gate: X0xCellularGate(myWatchApi: api()),
+            syncNow: () async => 'Synced: 1 added.',
+            afterBurst: () async => checks++,
+          )
+        ..joinTimeout = const Duration(milliseconds: 200)
+        ..joinPollInterval = const Duration(milliseconds: 5)
+        ..linger = Duration.zero;
+
+      fake.myWatchStatus = linkedStatus(enabled: false);
+      await burstMode().runBurst();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(checks, 1);
+
+      // A failed burst still runs the check: the burst's docs may have
+      // delivered the keys before the failure.
+      fake.myWatchStatus = {
+        'supported': true,
+        'linked': false,
+        'state': 'off',
+        'devices': const [],
+      };
+      await expectLater(burstMode().runBurst(), throwsA(anything));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(checks, 2);
+    });
+
     test('initialize re-asserts agent-off while the mode is on', () async {
       SharedPreferences.setMockInitialValues({'low_data_mode_v1': true});
       fake.myWatchStatus = linkedStatus();

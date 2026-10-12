@@ -93,7 +93,13 @@ void main() {
       expect(qr.data, fake.myWatchPairCode);
       expect(find.textContaining('Waiting for a linked device'),
           findsOneWidget);
+      // While the dialog is up, the ambient pairing beacon is lit (the
+      // drawer's My W@tch row narrates it) — and clears with the dialog.
+      expect(MyWatchPairActivity.status.value,
+          'pairing — waiting for a linked device to scan…');
       await close(tester);
+      await tester.pump();
+      expect(MyWatchPairActivity.status.value, isNull);
     });
 
     testWidgets('on TV the code dialog opens with Cancel focused '
@@ -239,6 +245,8 @@ void main() {
       };
       await openSendDialog(tester);
       expect(find.textContaining('Sending the link'), findsOneWidget);
+      expect(MyWatchPairActivity.status.value,
+          'pairing — sending the link to the new device…');
       fake.myWatchPairStatus = {
         'active': true,
         'role': 'send',
@@ -251,8 +259,11 @@ void main() {
         await tester.pump(const Duration(milliseconds: 50));
       }
       expect(find.byType(PairSendDialog), findsNothing);
-      // The finished session is swept so the next attempt starts clean.
+      // The finished session is swept so the next attempt starts clean,
+      // and the ambient pairing beacon went out with the dialog.
       expect(fake.myWatchPairPosts, contains('cancel'));
+      await tester.pump();
+      expect(MyWatchPairActivity.status.value, isNull);
       await close(tester);
     });
 

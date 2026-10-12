@@ -767,6 +767,31 @@ void main() {
       expect(find.text('Check the backup now'), findsOneWidget);
       // The wallet CTA stays available below the card.
       expect(find.text('Set up the wallet'), findsOneWidget);
+
+      // A running fetch narrates its live stage on the card — a
+      // first-time follow moves the whole library and must not look
+      // like nothing is happening.
+      BackupFollowService.status.value = const BackupFollowStatus(
+        following: true,
+        fetching: true,
+        firstTime: true,
+        stage: 'Fetching the backup… (3 of 12)',
+        done: 3,
+        total: 12,
+      );
+      await tester.pump();
+      expect(
+        find.text('Recovering the library — Fetching the backup… (3 of 12)'),
+        findsOneWidget,
+      );
+      BackupFollowService.status.value = const BackupFollowStatus(
+        following: true,
+        fetching: true,
+        stage: 'Importing data maps…',
+      );
+      await tester.pump();
+      expect(find.text('Catching up — Importing data maps…'),
+          findsOneWidget);
     });
   });
 }

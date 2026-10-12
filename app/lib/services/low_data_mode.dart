@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'backup_follow.dart';
 import 'my_watch_api.dart';
 import 'my_watch_sync.dart';
 import 'x0x_cellular.dart';
@@ -38,6 +39,7 @@ class LowDataMode extends ChangeNotifier {
     MyWatchApi? api,
     this._gate,
     this._syncNow,
+    this._afterBurst,
   }) : _api = api ?? MyWatchApi();
 
   /// Replaceable for tests.
@@ -48,6 +50,7 @@ class LowDataMode extends ChangeNotifier {
   final MyWatchApi _api;
   final X0xCellularGate? _gate;
   final Future<String> Function()? _syncNow;
+  final Future<void> Function()? _afterBurst;
 
   /// Burst tuning — fields so tests can shrink the real-time waits.
   /// Joining the mesh takes ~1–2 minutes on real networks.
@@ -166,6 +169,23 @@ class LowDataMode extends ChangeNotifier {
       } catch (_) {}
       _bursting = false;
       _setStage(null);
+      // The burst's docs may have just delivered the backup read keys:
+      // when this device is following but has never folded the backup
+      // in, check it right away (free pointer read over the always-on
+      // Autonomi core — no mesh needed) instead of leaving the user
+      // staring at "Following a shared backup" with nothing arriving,
+      // the 2026-10-12 round-trip test's one wrinkle. Not awaited: the
+      // fetch can take minutes and the burst's summary should land now.
+      unawaited(_runAfterBurst());
+    }
+  }
+
+  Future<void> _runAfterBurst() async {
+    try {
+      await (_afterBurst ??
+          BackupFollowService.instance.checkAfterBurst)();
+    } catch (_) {
+      // checkAfterBurst reports its own failures; never let this leak.
     }
   }
 }

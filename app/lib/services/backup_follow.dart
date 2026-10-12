@@ -77,6 +77,19 @@ class BackupFollowService {
   /// First check after launch, once the client has had time to connect.
   static const firstCheckDelay = Duration(minutes: 3);
 
+  /// Progressive retry while the FIRST follow has not landed: a failed
+  /// or soft-failed check (network not ready yet, or a fetch hiccup
+  /// right after a mesh-burst load — the live round-trip test's
+  /// stranding) retries on this ladder instead of waiting out the
+  /// six-hour poll or the master's next backup. Starts at [retryBase],
+  /// doubles per attempt, caps at [retryCap] (the art-retry idiom);
+  /// resets on any successful check. Mutable so tests can shrink the
+  /// real-time waits. Once a backup has been folded in (applied_head
+  /// set), failures go back to the slow cadence — only the never-
+  /// populated device is worth hammering for.
+  Duration retryBase = const Duration(minutes: 1);
+  Duration retryCap = const Duration(minutes: 10);
+
   /// An automatic backup never runs sooner than this after the last one
   /// (manual or automatic) — "once a day", with slack so a slightly
   /// early timer tick does not skip a whole period.
@@ -84,6 +97,15 @@ class BackupFollowService {
 
   Timer? _timer;
   bool _checking = false;
+  Timer? _retryTimer;
+  int _retryAttempts = 0;
+
+  /// Whether a retry-ladder check is waiting to fire (for tests).
+  @visibleForTesting
+  bool get retryScheduled => _retryTimer?.isActive ?? false;
+
+  @visibleForTesting
+  int get retryAttempts => _retryAttempts;
 
   /// The followed line's read keys, cached from the core's keychain
   /// store (`/backup/followkeys`). The content key decrypts the whole
@@ -115,6 +137,34 @@ class BackupFollowService {
   void stop() {
     _timer?.cancel();
     _timer = null;
+    _retryTimer?.cancel();
+    _retryTimer = null;
+  }
+
+  /// The ladder's delay for retry number [attempt] (0-based).
+  Duration retryDelay(int attempt) {
+    final shift = attempt.clamp(0, 10);
+    final d = retryBase * (1 << shift);
+    return d > retryCap ? retryCap : d;
+  }
+
+  /// Arm the next ladder step — only while this device is following and
+  /// has never folded the backup in (the stranded-follower case).
+  void _scheduleRetry() {
+    if (_ptr == null || _key == null) return;
+    if (_loadState().appliedHead != null) return;
+    _retryTimer?.cancel();
+    final delay = retryDelay(_retryAttempts);
+    _retryAttempts++;
+    _retryTimer = Timer(delay, () {
+      unawaited(checkNow().then((_) {}, onError: (_) {}));
+    });
+  }
+
+  void _cancelRetry() {
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    _retryAttempts = 0;
   }
 
   void _tick() {
@@ -311,12 +361,15 @@ class BackupFollowService {
       final own = await _ownPointer();
       if (own != null && own == ptr) {
         _bootstrapResolved = true;
+        _cancelRetry();
         return 'This device makes that backup itself.';
       }
       if (!await _networkOk()) {
         // Not a terminal outcome: the bootstrap gate stays armed (its
         // deadline bounds the wait) so connectivity returning still
-        // gets the backup-first population.
+        // gets the backup-first population — and the retry ladder keeps
+        // knocking while this device has never folded a backup in.
+        _scheduleRetry();
         return 'Waiting for the network connection.';
       }
       final nowMs = DateTime.now().millisecondsSinceEpoch;
@@ -324,18 +377,37 @@ class BackupFollowService {
       state.lastCheckMs = nowMs;
       if (!peek.found) {
         _bootstrapResolved = true;
+        _cancelRetry();
         _saveState(state);
         _publishStatus(state);
         return 'No backup published under the shared keys yet.';
       }
       if (peek.head != null && peek.head == state.appliedHead) {
         _bootstrapResolved = true;
+        _cancelRetry();
         _saveState(state);
         _publishStatus(state);
         return 'Already caught up with the latest backup.';
       }
-      final summary = await _backupService.followFetch(ptr: ptr, key: key);
+      // Live progress for the follower card, the drawer row and the
+      // home info bar — a first-time follow can move a whole library,
+      // and invisibly is exactly how it read as "not working" in the
+      // 2026-10-12 round-trip test.
+      final firstTime = state.appliedHead == null;
+      _publishStatus(state,
+          fetching: true, firstTime: firstTime, stage: 'Looking up the backup…');
+      final summary = await _backupService.followFetch(
+        ptr: ptr,
+        key: key,
+        onProgress: (job) => _publishStatus(state,
+            fetching: true,
+            firstTime: firstTime,
+            stage: job.label,
+            done: job.done,
+            total: job.total),
+      );
       _bootstrapResolved = true;
+      _cancelRetry();
       state
         ..appliedHead = summary.head ?? peek.head
         ..lastAppliedMs = DateTime.now().millisecondsSinceEpoch;
@@ -345,12 +417,30 @@ class BackupFollowService {
     } catch (e) {
       // A failed first follow resolves the bootstrap gate too —
       // "until the first follow completes or FAILS" — so live sync
-      // takes over instead of waiting out the gate's deadline.
+      // takes over instead of waiting out the gate's deadline; the
+      // retry ladder (not the gate) owns getting the backup in later.
       _bootstrapResolved = true;
+      _scheduleRetry();
       _publishStatus(_loadState(), error: '$e');
       rethrow;
     } finally {
       _checking = false;
+    }
+  }
+
+  /// End-of-burst safety net (called by LowDataMode after every "Sync
+  /// now" session): the burst's docs may have just delivered the read
+  /// keys, and the fetch rides the always-on Autonomi core — no mesh
+  /// needed — so a device that is following but has never folded the
+  /// backup in checks right away instead of waiting out the ladder or
+  /// the slow poll. Quiet no-op otherwise.
+  Future<void> checkAfterBurst() async {
+    if (_ptr == null || _key == null) return;
+    if (_loadState().appliedHead != null) return;
+    try {
+      await checkNow();
+    } catch (e) {
+      debugPrint('backup follow: post-burst check failed: $e');
     }
   }
 
@@ -369,8 +459,16 @@ class BackupFollowService {
         : 'Caught up from the backup: ${parts.join(', ')}.';
   }
 
-  void _publishStatus(_FollowState state,
-      {String? lastSummary, String? error}) {
+  void _publishStatus(
+    _FollowState state, {
+    String? lastSummary,
+    String? error,
+    bool fetching = false,
+    String? stage,
+    int done = 0,
+    int total = 0,
+    bool firstTime = false,
+  }) {
     status.value = BackupFollowStatus(
       following: _ptr != null,
       pointer: _ptr,
@@ -378,6 +476,11 @@ class BackupFollowService {
       lastAppliedMs: state.lastAppliedMs,
       lastSummary: lastSummary ?? status.value.lastSummary,
       error: error,
+      fetching: fetching,
+      stage: stage,
+      done: done,
+      total: total,
+      firstTime: firstTime,
     );
   }
 
@@ -537,6 +640,11 @@ class BackupFollowStatus {
     this.lastAppliedMs,
     this.lastSummary,
     this.error,
+    this.fetching = false,
+    this.stage,
+    this.done = 0,
+    this.total = 0,
+    this.firstTime = false,
   });
 
   /// A linked device has shared its backup read keys with this one.
@@ -546,4 +654,21 @@ class BackupFollowStatus {
   final int? lastAppliedMs;
   final String? lastSummary;
   final String? error;
+
+  /// A follow fetch is running right now — drives the live progress
+  /// surfaces (follower card, drawer row, home info bar).
+  final bool fetching;
+
+  /// What the running fetch is doing, user-readable ("Fetching the
+  /// backup… (3 of 12)"); null when idle.
+  final String? stage;
+
+  /// The running fetch's x-of-N progress (0/0 until the job reports).
+  final int done;
+  final int total;
+
+  /// This fetch is the device's FIRST fold-in of the followed backup —
+  /// the "recovering your library" case worth announcing on the home
+  /// screen, not just a routine catch-up.
+  final bool firstTime;
 }

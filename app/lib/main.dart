@@ -50,6 +50,7 @@ import 'services/watch_state.dart';
 import 'services/window_state.dart';
 import 'services/x0x_cellular.dart';
 import 'theme/tokens.dart';
+import 'widgets/backup_follow_bar.dart';
 import 'widgets/brand_mark.dart';
 import 'widgets/trezor_prompt.dart';
 import 'widgets/tv_app_frame.dart';
@@ -632,6 +633,10 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
                 )
               : _libraryView(t, visible),
         ),
+        // Narrates a running shared-backup fetch (nothing when idle) —
+        // a first-time follow is the whole library arriving and must
+        // not run invisibly.
+        const BackupFollowBar(),
       ],
     );
     return Scaffold(
