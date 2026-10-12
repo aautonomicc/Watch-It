@@ -186,13 +186,17 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getString(UpdateCheck.availablePref), isNotNull);
 
-      // "Next launch" inside the 24h throttle: no request runs, but the
-      // About row / snackbar state comes back from the persisted result
-      // (previously it was in-memory only — a rolling blind window).
+      // "Next launch" right away: the About row / snackbar state comes
+      // back from the persisted result (previously it was in-memory
+      // only — a rolling blind window). A pending announcement
+      // normally also refreshes past the 24h throttle, but the
+      // seconds-old check stamp sits inside the 15-minute floor, so no
+      // request runs here.
       UpdateCheck.resetForTesting();
       final relaunch = UpdateCheck.instance
         ..client = MockClient((_) async {
-          fail('throttled launch must not hit the network');
+          fail('a launch inside the 15-minute floor must not hit the '
+              'network');
         });
       var notified = 0;
       relaunch.addListener(() => notified++);
@@ -207,6 +211,113 @@ void main() {
       // Same launch, second call (app resume): already restored — quiet.
       await relaunch.maybeCheck();
       expect(notified, 1);
+    }, skip: !Platform.isLinux && !Platform.isWindows && !Platform.isMacOS);
+
+    test(
+        'a pending announcement bypasses the 24h throttle and swaps to '
+        'the fresh release', () async {
+      // The Android stale-bar report: the persisted alpha.57 offer's
+      // binaries were swept when alpha.58 released, and the launch sat
+      // inside the 24h throttle, so the bar kept naming an
+      // un-downloadable release. A pending announcement now refreshes
+      // on launch (past the 15-minute floor).
+      final now = DateTime(2026, 10, 12, 12);
+      SharedPreferences.setMockInitialValues({
+        UpdateCheck.lastCheckPref:
+            now.subtract(const Duration(hours: 2)).millisecondsSinceEpoch,
+        UpdateCheck.availablePref: jsonEncode({
+          'tag': 'v0.1.0-alpha.57',
+          'url': 'https://example.com/old',
+          'assets': [
+            {
+              'name': 'Watch-It-0.1.0-alpha.57.apk',
+              'browser_download_url': 'https://example.com/old.apk',
+              'size': 10,
+            },
+          ],
+        }),
+      });
+      var requests = 0;
+      final check = UpdateCheck.instance
+        ..client = MockClient((request) async {
+          requests++;
+          return http.Response(
+              jsonEncode({
+                'tag_name': 'v0.1.0-alpha.58',
+                'html_url': 'https://example.com/new',
+                'assets': [
+                  {
+                    'name': 'Watch-It-0.1.0-alpha.58.apk',
+                    'browser_download_url': 'https://example.com/new.apk',
+                    'size': 20,
+                  },
+                ],
+              }),
+              200);
+        });
+      final tags = <String?>[];
+      check.addListener(() => tags.add(check.availableTag));
+      await check.maybeCheck(now: () => now);
+      expect(requests, 1);
+      // Restored first (instant surface), then swapped to the real one.
+      expect(tags, ['v0.1.0-alpha.57', 'v0.1.0-alpha.58']);
+      expect(check.availableTag, 'v0.1.0-alpha.58');
+      expect(check.apkAsset?.url, 'https://example.com/new.apk');
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(UpdateCheck.availablePref),
+          contains('alpha.58'));
+
+      // Right away again (app resume): the fresh stamp is inside the
+      // 15-minute floor — no second request.
+      await check.maybeCheck(now: () => now);
+      expect(requests, 1);
+    }, skip: !Platform.isLinux && !Platform.isWindows && !Platform.isMacOS);
+
+    test('the pending refresh re-confirming the same release stays quiet',
+        () async {
+      // Identical release on GitHub: the refresh runs, but notifying
+      // again would queue a duplicate startup snackbar.
+      final now = DateTime(2026, 10, 12, 12);
+      final blob = jsonEncode({
+        'tag': 'v0.1.0-alpha.57',
+        'url': 'https://example.com/tag',
+        'assets': [
+          {
+            'name': 'Watch-It-0.1.0-alpha.57.apk',
+            'browser_download_url': 'https://example.com/app.apk',
+            'size': 10,
+          },
+        ],
+      });
+      SharedPreferences.setMockInitialValues({
+        UpdateCheck.lastCheckPref:
+            now.subtract(const Duration(hours: 2)).millisecondsSinceEpoch,
+        UpdateCheck.availablePref: blob,
+      });
+      var requests = 0;
+      final check = UpdateCheck.instance
+        ..client = MockClient((request) async {
+          requests++;
+          return http.Response(
+              jsonEncode({
+                'tag_name': 'v0.1.0-alpha.57',
+                'html_url': 'https://example.com/tag',
+                'assets': [
+                  {
+                    'name': 'Watch-It-0.1.0-alpha.57.apk',
+                    'browser_download_url': 'https://example.com/app.apk',
+                    'size': 10,
+                  },
+                ],
+              }),
+              200);
+        });
+      var notified = 0;
+      check.addListener(() => notified++);
+      await check.maybeCheck(now: () => now);
+      expect(requests, 1);
+      expect(check.availableTag, 'v0.1.0-alpha.57');
+      expect(notified, 1); // the restore only — the confirm is silent
     }, skip: !Platform.isLinux && !Platform.isWindows && !Platform.isMacOS);
 
     test('persisted update is dropped once the app has caught up',

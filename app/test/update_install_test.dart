@@ -16,6 +16,9 @@ void main() {
   setUp(() {
     tmp = Directory.systemTemp.createTempSync('wi-update-test');
     UpdateInstaller.resetForTesting();
+    // A stale-asset failure re-runs the update check; keep the default
+    // (a real GitHub fetch) out of tests.
+    UpdateInstaller.instance.updateRecheck = () async => null;
     UpdateInstaller.appImagePathOverride = null;
     UpdateInstaller.androidPlatformOverride = null;
   });
@@ -67,14 +70,17 @@ void main() {
       expect(old.existsSync(), false);
     });
 
-    test('size mismatch fails and leaves the running image untouched',
-        () async {
+    test(
+        'size mismatch fails, leaves the running image untouched, and '
+        're-runs the update check', () async {
       final current = File('${tmp.path}/W.AppImage')
         ..writeAsStringSync('old-version');
       UpdateInstaller.appImagePathOverride = current.path;
       final newBytes = utf8.encode('short');
+      var rechecks = 0;
       final installer = UpdateInstaller.instance
-        ..client = bytesClient(newBytes);
+        ..client = bytesClient(newBytes)
+        ..updateRecheck = () async => rechecks++;
 
       await installer.downloadAndSwapAppImage(
           assetFor(newBytes, 'W.AppImage', size: newBytes.length + 99));
@@ -84,15 +90,20 @@ void main() {
       expect(current.readAsStringSync(), 'old-version');
       expect(File('${current.path}.part').existsSync(), false);
       expect(File('${current.path}.old').existsSync(), false);
+      // A short body is what a swept/replaced release asset looks like
+      // mid-stream — the announcement refreshes itself.
+      expect(rechecks, 1);
     });
 
-    test('checksum mismatch fails', () async {
+    test('checksum mismatch fails and re-runs the update check', () async {
       final current = File('${tmp.path}/W.AppImage')
         ..writeAsStringSync('old-version');
       UpdateInstaller.appImagePathOverride = current.path;
       final newBytes = utf8.encode('tampered-bytes');
+      var rechecks = 0;
       final installer = UpdateInstaller.instance
-        ..client = bytesClient(newBytes);
+        ..client = bytesClient(newBytes)
+        ..updateRecheck = () async => rechecks++;
 
       await installer.downloadAndSwapAppImage(assetFor(newBytes,
           'W.AppImage', sha: 'deadbeef${'0' * 56}'));
@@ -100,21 +111,51 @@ void main() {
       expect(installer.stage, UpdateInstallStage.failed);
       expect(installer.error, contains('checksum'));
       expect(current.readAsStringSync(), 'old-version');
+      expect(rechecks, 1);
     });
 
-    test('HTTP error fails cleanly', () async {
+    test(
+        'a 404 names the swept release and re-runs the update check '
+        '(the stale Android bar)', () async {
+      // The persisted announcement outlived its release: the standing
+      // per-release sweep deleted its binaries when the next release
+      // landed, so the download 404s. The error says so in plain words
+      // and the check refreshes to the real latest release.
       final current = File('${tmp.path}/W.AppImage')
         ..writeAsStringSync('old-version');
       UpdateInstaller.appImagePathOverride = current.path;
+      var rechecks = 0;
       final installer = UpdateInstaller.instance
-        ..client = MockClient((_) async => http.Response('nope', 404));
+        ..client = MockClient((_) async => http.Response('nope', 404))
+        ..updateRecheck = () async => rechecks++;
 
       await installer
           .downloadAndSwapAppImage(assetFor([1, 2, 3], 'W.AppImage'));
 
       expect(installer.stage, UpdateInstallStage.failed);
-      expect(installer.error, contains('404'));
+      expect(installer.error, contains('no longer available'));
       expect(current.readAsStringSync(), 'old-version');
+      expect(rechecks, 1);
+    });
+
+    test('other HTTP errors fail cleanly without a recheck', () async {
+      final current = File('${tmp.path}/W.AppImage')
+        ..writeAsStringSync('old-version');
+      UpdateInstaller.appImagePathOverride = current.path;
+      var rechecks = 0;
+      final installer = UpdateInstaller.instance
+        ..client = MockClient((_) async => http.Response('nope', 500))
+        ..updateRecheck = () async => rechecks++;
+
+      await installer
+          .downloadAndSwapAppImage(assetFor([1, 2, 3], 'W.AppImage'));
+
+      expect(installer.stage, UpdateInstallStage.failed);
+      expect(installer.error, contains('500'));
+      expect(current.readAsStringSync(), 'old-version');
+      // A 500/offline blip says nothing about the release — retrying
+      // the same download is the right move, not a recheck.
+      expect(rechecks, 0);
     });
 
     test('missing running image refuses up front', () async {

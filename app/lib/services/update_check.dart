@@ -61,7 +61,10 @@ enum UpdateCheckOutcome { updateFound, upToDate, failed }
 ///
 /// At most once per 24h — on startup and whenever the app returns to
 /// the foreground (phones often go weeks without a cold start, so a
-/// startup-only check never ran there) — asks GitHub for the latest
+/// startup-only check never ran there); while an update is already
+/// announced the refresh instead runs on nearly every launch/resume,
+/// because the per-release asset sweep can make a stale announcement
+/// un-downloadable (see [maybeCheck]) — asks GitHub for the latest
 /// release and compares its tag to the running version; a newer one
 /// sets [availableTag]/[releaseUrl]/[assets], persists the result so
 /// later launches inside the throttle window still show it, and
@@ -144,7 +147,14 @@ class UpdateCheck extends ChangeNotifier {
   /// Entry point on startup AND app resume; no-op on unsupported
   /// platforms or when switched off. A persisted earlier result is
   /// restored first so the update surfaces even inside the 24h
-  /// throttle; the network check itself still runs at most once a day.
+  /// throttle. While an update is PENDING the fresh fetch runs almost
+  /// every time instead of once a day: the per-release asset sweep
+  /// deletes a superseded release's binaries, so a restored
+  /// announcement can point at downloads that no longer exist (the
+  /// Android "update bar names an unreachable version" report) — the
+  /// immediate refresh replaces it with the real latest release. A
+  /// short 15-minute floor keeps rapid relaunch/resume cycles from
+  /// hammering GitHub's unauthenticated rate limit.
   Future<void> maybeCheck({DateTime Function() now = DateTime.now}) async {
     if (!supportedPlatform) return;
     final prefs = await SharedPreferences.getInstance();
@@ -152,7 +162,12 @@ class UpdateCheck extends ChangeNotifier {
     await _restorePersisted(prefs);
     final nowMs = now().millisecondsSinceEpoch;
     final last = prefs.getInt(lastCheckPref) ?? 0;
-    if (nowMs - last < const Duration(hours: 24).inMilliseconds) return;
+    // _restorePersisted drops a stale/garbage value, so a surviving
+    // pref really is a pending announcement.
+    final pending = prefs.getString(availablePref) != null;
+    final throttle =
+        pending ? const Duration(minutes: 15) : const Duration(hours: 24);
+    if (nowMs - last < throttle.inMilliseconds) return;
     await _fetchAndCompare(prefs, nowMs);
   }
 
@@ -191,14 +206,19 @@ class UpdateCheck extends ChangeNotifier {
         assets = rawAssets is List
             ? rawAssets.map(UpdateAsset.fromJson).nonNulls.toList()
             : const [];
-        await prefs.setString(
-            availablePref,
-            jsonEncode({
-              'tag': availableTag,
-              'url': releaseUrl,
-              'assets': [for (final a in assets) a.toJson()],
-            }));
-        notifyListeners();
+        final blob = jsonEncode({
+          'tag': availableTag,
+          'url': releaseUrl,
+          'assets': [for (final a in assets) a.toJson()],
+        });
+        // A refresh that merely re-confirms the announced release (the
+        // pending-update fast path above) stays quiet — notifying again
+        // would queue a duplicate startup snackbar. Changed assets
+        // (a release repin swaps binaries under the same tag) count as
+        // news: the updater must see the fresh digests.
+        final changed = prefs.getString(availablePref) != blob;
+        await prefs.setString(availablePref, blob);
+        if (changed) notifyListeners();
         return UpdateCheckOutcome.updateFound;
       } else {
         // Up to date: a stale restored/announced update (the app was

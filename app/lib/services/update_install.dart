@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -41,8 +42,18 @@ enum UpdateInstallStage {
 enum SelfUpdateKind { apk, appImage, windows, mac }
 
 class UpdateInstallException implements Exception {
-  UpdateInstallException(this.message);
+  UpdateInstallException(this.message, {this.staleAsset = false});
+
   final String message;
+
+  /// True when the failure smells like the announced release's asset no
+  /// longer matching what GitHub serves (404, short body, checksum
+  /// mismatch) — the standing per-release sweep deletes a superseded
+  /// release's binaries, so a stale announcement downloads nothing.
+  /// [UpdateInstaller] answers by re-running the update check so the
+  /// row/snackbar swap to the real latest release.
+  final bool staleAsset;
+
   @override
   String toString() => message;
 }
@@ -122,6 +133,8 @@ class UpdateInstaller extends ChangeNotifier {
       processRunner;
   @visibleForTesting
   void Function()? exitOverride;
+  @visibleForTesting
+  Future<Object?> Function()? updateRecheck;
 
   UpdateInstallStage stage = UpdateInstallStage.idle;
 
@@ -594,6 +607,13 @@ class UpdateInstaller extends ChangeNotifier {
     stage = UpdateInstallStage.failed;
     error = e is UpdateInstallException ? e.message : 'Update failed: $e';
     notifyListeners();
+    if (e is UpdateInstallException && e.staleAsset) {
+      // Belt-and-braces for the swept-asset race: the announcement
+      // pointed at binaries that no longer verify, so refresh it right
+      // away — checkNow replaces (or clears) the row/snackbar and the
+      // next attempt downloads the real latest release's assets.
+      unawaited((updateRecheck ?? UpdateCheck.instance.checkNow)());
+    }
   }
 
   static void _tryDelete(File? f) {
@@ -617,6 +637,15 @@ class UpdateInstaller extends ChangeNotifier {
       final req = http.Request('GET', Uri.parse(asset.url))
         ..headers['accept'] = 'application/octet-stream';
       final res = await c.send(req);
+      if (res.statusCode == 404) {
+        // The announced release's binaries were swept (only the latest
+        // release carries assets) — this offer can never download.
+        throw UpdateInstallException(
+            'That update is no longer available to download — it was '
+            'probably replaced by a newer release. Checking for the '
+            'latest version now; try again in a moment.',
+            staleAsset: true);
+      }
       if (res.statusCode != 200) {
         throw UpdateInstallException(
             'Download failed (HTTP ${res.statusCode}).');
@@ -647,12 +676,14 @@ class UpdateInstaller extends ChangeNotifier {
       if (asset.size > 0 && received != asset.size) {
         throw UpdateInstallException(
             'The download was incomplete ($received of ${asset.size} '
-            'bytes) — try again.');
+            'bytes) — try again.',
+            staleAsset: true);
       }
       final sha = asset.sha256;
       if (sha != null && digestSink.value.toString() != sha) {
         throw UpdateInstallException(
-            'The downloaded file failed its checksum — try again.');
+            'The downloaded file failed its checksum — try again.',
+            staleAsset: true);
       }
     } finally {
       if (ownsClient) c.close();

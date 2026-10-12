@@ -615,7 +615,16 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       the check also runs on app resume (phones can go weeks without
       a cold start, so a startup-only check never ran there) and a
       found update persists, so the About row and snackbar survive
-      the 24h throttle instead of vanishing for a day per launch
+      the 24h throttle instead of vanishing for a day per launch.
+      Unreleased (2026-10-12): while an update is pending the check
+      refreshes on nearly every launch/resume (15-minute floor)
+      instead of once a day — the per-release asset sweep deletes a
+      superseded release's binaries, so a frozen announcement could
+      name a version that no longer downloads (the Android stale-bar
+      report); a confirming refresh stays quiet (no duplicate
+      snackbar), and a download that 404s / comes up short / fails
+      its checksum re-runs the check so the offer swaps to the real
+      latest release
 - [x] Edit details (alpha.57): user metadata (title/year/description)
       plus artwork from an image file, a picked video frame (bundled
       ffmpeg, desktop), or the player's "use this frame" button (all
