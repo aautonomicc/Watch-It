@@ -317,9 +317,15 @@ device once. Payments: `Signer::payment_wallet()` probes the device
 (friendly plug-it-in errors before any encrypt/quote work) and hands
 evmlib a `VerifiedTrezor` signer (2026-10-11, after the first live
 backup failed at the payment tap with "journaled transaction does not
-match…" — a signer-recovery failure): each signature opens a FRESH
-device session on a blocking thread, silently re-checks the device
-address right before the tap (device swap / passphrase drift fails
+match…" — a signer-recovery failure): every job (backup, batch
+upload, single upload) opens ONE device session up front via
+`trezor::begin_job_session` — the Trezor caches its passphrase per
+session, so one on-device passphrase entry covers the identity
+derive and every payment signature of the whole run (the 2026-10-12
+passphrase-storm fix; a fresh session per signature is kept only as
+the signing retry's fallback and for conversations outside a job) —
+each signature does a LIVE address re-check right before the tap
+(device swap / passphrase drift / a silently-degraded session fails
 loudly with no wasted tap), ALWAYS signs with the concrete
 `TxEip1559` extracted from whatever dyn shape the wallet filler
 hands over (`concrete_eip1559` unwraps alloy's `TypedTransaction`
@@ -327,15 +333,26 @@ enum — without this, alloy-signer-trezor's internal downcast misses
 and it silently sends the device a LEGACY signing request whose
 signature can never verify against the 1559 hash: the root cause of
 the 2026-10-11 "signed as a different wallet each run" failures;
-non-1559 non-legacy shapes are refused before any tap), and the
-returned signature is recovery-verified against the transaction's
-own signature hash BEFORE evmlib journals it — one automatic fresh-session retry, then a precise error
+true legacy txs carry through `concrete_legacy`, other shapes are
+refused before any tap), and the returned signature is
+recovery-verified against the transaction's own signature hash
+BEFORE evmlib journals it — one automatic fresh-session retry, then a precise error
 naming the address the device actually signed as (first payment may
-still be two taps: evmlib's allowance approve, then pay); an
-unplugged device degrades to a wallet-less client with a plug-it-in
-hint at the paid call. Every step that waits for a human at the
+still be two taps: evmlib's allowance approve, then pay). The whole
+device conversation runs DETACHED and the verified signature is
+MEMOIZED by sighash (`trezor::sigcache`): evmlib 0.10.0 hardcodes a
+5s broadcast timeout around `send_transaction`, which with alloy's
+wallet filler INCLUDES signing — impossible for a human tap — so the
+dropped future no longer cancels the conversation, and evmlib's
+retry of the same transaction returns the finished signature in
+milliseconds instead of prompting again (fee drift between attempts
+changes the sighash and simply costs one more tap; filed upstream as
+WithAutonomi/evmlib#21). An unplugged device degrades to a
+wallet-less client with a plug-it-in hint at the paid call. Every
+step that waits for a human at the
 device publishes on the attention beacon (`trezor::attention` —
-actions `sign-identity` / `confirm-address` / `sign-payment`, served
+actions `sign-identity` / `confirm-address` / `sign-payment` /
+`unlock-wallet` for the job-session open, served
 by protected `GET /trezor/activity`); the app polls it only while a
 hardware flow is in flight (TrezorAttentionService.during around
 setup, backup/restore and batch uploads) and shows an explanation

@@ -27,6 +27,10 @@ String trezorPromptBody(String? action) {
           'the upload carries on by itself afterwards. The first payment '
           'after setup may ask twice: the extra confirmation is a one-time '
           'spending allowance for the payment contract.';
+    case 'unlock-wallet':
+      return 'W@tch is opening a wallet session on your Trezor for this '
+          'job. If the device asks for its PIN or passphrase, enter it on '
+          'the device — one entry covers every signature in this run.';
     default:
       return 'The Trezor needs a confirmation on its own screen — pick it '
           'up and follow what the device shows.';
@@ -40,6 +44,8 @@ String trezorPromptTitle(String? action) {
       return 'Check the address on your Trezor';
     case 'sign-payment':
       return 'Confirm the payment on your Trezor';
+    case 'unlock-wallet':
+      return 'Unlock the wallet on your Trezor';
     default:
       return 'Check your Trezor';
   }

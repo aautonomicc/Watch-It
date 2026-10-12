@@ -226,6 +226,19 @@ async fn drive_batch(
         )
     };
 
+    // The signer up front — and for a hardware wallet, ONE device
+    // session for the whole batch, opened BEFORE any encrypt/quote work:
+    // the Trezor caches its passphrase per session, so every payment
+    // signature below reuses this session (one passphrase entry per
+    // batch), and a missing/wrong device fails here in seconds instead
+    // of after minutes of encryption.
+    let signer = engine.signer()?;
+    let _job_session = if signer.is_hardware() {
+        Some(crate::trezor::begin_job_session(&signer.address()?).await?)
+    } else {
+        None
+    };
+
     // ---- 1) Encrypt everything locally (free, no network) ---------------
     let spill_root = engine
         .batch_dir()
@@ -291,7 +304,7 @@ async fn drive_batch(
 
     // ---- 4) Client for quoting/storing, signer for paying ----------------
     let client = engine.client().await?;
-    let wallet = engine.signer()?.payment_wallet().await?;
+    let wallet = signer.payment_wallet().await?;
 
     let adapter = BatchAdapter {
         spill: spill_root.clone(),

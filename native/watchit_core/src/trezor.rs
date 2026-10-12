@@ -101,7 +101,9 @@ pub mod attention {
 
     /// Mark the start of a step that waits on the device's button.
     /// `action` is a stable machine word the app maps to copy:
-    /// `sign-identity`, `confirm-address`, `sign-payment`.
+    /// `sign-identity`, `confirm-address`, `sign-payment`,
+    /// `unlock-wallet` (the per-job session open, where a
+    /// passphrase-protected device asks for its passphrase once).
     pub fn begin(action: &'static str) -> Guard {
         let seq = SEQ.fetch_add(1, Ordering::Relaxed) + 1;
         *CURRENT.lock().unwrap_or_else(|p| p.into_inner()) = Some((seq, action));
@@ -220,6 +222,147 @@ pub fn concrete_eip1559(
         .and_then(|t| t.eip1559().cloned())
 }
 
+/// The owned legacy transaction behind a dyn shape — [concrete_eip1559]'s
+/// mirror for true legacy transactions. The trezor driver's generic path
+/// encodes a legacy request correctly (its legacy hash matches), but the
+/// signature-memoization path needs an OWNED transaction to carry into
+/// the detached signing task, so the enum/bare shapes are unwrapped here
+/// the same way.
+pub fn concrete_legacy(
+    tx: &dyn alloy::consensus::SignableTransaction<alloy::primitives::Signature>,
+) -> Option<alloy::consensus::TxLegacy> {
+    let any = tx as &dyn std::any::Any;
+    if let Some(t) = any.downcast_ref::<alloy::consensus::TxLegacy>() {
+        return Some(t.clone());
+    }
+    any.downcast_ref::<alloy::consensus::TypedTransaction>()
+        .and_then(|t| t.legacy().cloned())
+}
+
+/// Signature memoization keyed by the transaction's signature hash.
+///
+/// Why this exists: evmlib 0.10.0 wraps `provider.send_transaction` in a
+/// hardcoded 5-second broadcast timeout, and with alloy's wallet-filler
+/// provider that call INCLUDES SIGNING — for a hardware wallet that is a
+/// human passphrase entry plus a physical tap, impossible in 5s by
+/// construction. The dropped future used to discard the eventually-
+/// completed signature, so every evmlib retry opened a brand-new device
+/// conversation (another prompt), and a payment only succeeded when one
+/// attempt's tap squeaked under the window (the 2026-10-12 live "15
+/// passphrase entries per backup" report).
+///
+/// The fix, with no evmlib fork: the device conversation runs as a
+/// DETACHED task — a caller dropped at the timeout never cancels it —
+/// and the locally VERIFIED signature lands here keyed by sighash.
+/// evmlib's retry rebuilds the same transaction (same pending nonce;
+/// fees are re-queried but near-constant on Arbitrum), so its sign
+/// request joins the still-waiting conversation or hits the completed
+/// cache and returns in milliseconds — well inside the 5s window — and
+/// the broadcast proceeds. Fee drift between attempts changes the
+/// sighash and simply costs one more confirmation (safe fallback).
+///
+/// Errors are delivered to whoever is waiting but never cached: a
+/// cancelled tap or a transport fault must not poison the next attempt.
+pub mod sigcache {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    use alloy::primitives::{Signature, B256};
+    use tokio::sync::watch;
+
+    /// Completed signatures stay reusable this long — generously past
+    /// evmlib's whole retry ladder (~1 min), and a signature over a
+    /// given sighash never stops being valid, so the horizon only
+    /// bounds memory.
+    const TTL: Duration = Duration::from_secs(15 * 60);
+
+    type Slot = watch::Receiver<Option<Result<Signature, String>>>;
+
+    struct Entry {
+        created: Instant,
+        slot: Slot,
+    }
+
+    /// One cache per signer object (evmlib wallets hold their signer for
+    /// as long as the wallet lives, so the cache spans a whole retry
+    /// ladder by construction).
+    pub struct SigCache {
+        entries: Arc<Mutex<HashMap<B256, Entry>>>,
+    }
+
+    impl SigCache {
+        pub fn new() -> Self {
+            Self {
+                entries: Arc::new(Mutex::new(HashMap::new())),
+            }
+        }
+
+        /// The signature for `hash`: served from the completed cache,
+        /// joined onto a conversation already in flight, or produced by
+        /// `sign` spawned as a detached task (so it survives this caller
+        /// being dropped at a timeout).
+        pub async fn get_or_sign<F, Fut>(
+            &self,
+            hash: B256,
+            sign: F,
+        ) -> Result<Signature, String>
+        where
+            F: FnOnce() -> Fut,
+            Fut: std::future::Future<Output = Result<Signature, String>> + Send + 'static,
+        {
+            let mut slot = {
+                let mut map = self.entries.lock().unwrap_or_else(|p| p.into_inner());
+                // Prune stale COMPLETED entries; in-flight ones stay put —
+                // a second concurrent device conversation for the same tx
+                // would be strictly worse than a long-lived entry.
+                map.retain(|_, e| {
+                    e.created.elapsed() < TTL || e.slot.borrow().is_none()
+                });
+                if let Some(e) = map.get(&hash) {
+                    tracing::info!(
+                        "payment signature request for sighash {hash} joins the \
+                         signing cache (an earlier conversation covers it)"
+                    );
+                    e.slot.clone()
+                } else {
+                    let (tx, rx) = watch::channel(None);
+                    map.insert(
+                        hash,
+                        Entry {
+                            created: Instant::now(),
+                            slot: rx.clone(),
+                        },
+                    );
+                    let entries = Arc::clone(&self.entries);
+                    let fut = sign();
+                    tokio::spawn(async move {
+                        let result = fut.await;
+                        if result.is_err() {
+                            // Never cache a failure — the next attempt
+                            // deserves a fresh conversation.
+                            entries
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .remove(&hash);
+                        }
+                        let _ = tx.send(Some(result));
+                    });
+                    rx
+                }
+            };
+            let value = {
+                let guard = slot
+                    .wait_for(|v| v.is_some())
+                    .await
+                    .map_err(|_| "the signing task ended without a result".to_string())?;
+                guard.clone()
+            };
+            value.expect("wait_for guarantees Some")
+        }
+    }
+}
+
 /// Does this EIP-191 signature of [crate::backup::IDENTITY_MESSAGE_V1]
 /// really come from `reported_address` (the address the device claims
 /// over USB)? Tried with the signature's own parity and flipped (v
@@ -305,27 +448,98 @@ mod device {
     /// answer "busy" instead of stalling behind a minutes-long tap wait.
     static DEVICE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+    /// The one device session a whole JOB (backup, batch upload, single
+    /// upload) signs through. Trezor caches its passphrase PER SESSION,
+    /// and the old fresh-session-per-signature design (alpha.116's
+    /// journal-mismatch workaround, no longer load-bearing since the
+    /// alpha.118 legacy-enum fix) therefore re-prompted the passphrase at
+    /// every signature — ~15 entries per backup in the 2026-10-12 live
+    /// report. A job opens ONE session up front (one passphrase entry),
+    /// every conversation below reuses it while it is open, and the
+    /// silent pre-tap LIVE address re-check stays as the real guard.
+    static JOB_SESSION: std::sync::Mutex<Option<std::sync::Arc<TrezorSigner>>> =
+        std::sync::Mutex::new(None);
+
+    /// Guard handed to the job that opened the session; dropping it (job
+    /// end, success or failure) closes the reuse window. A newer session
+    /// is never clobbered by an older guard's drop.
+    pub struct TrezorJobSession {
+        signer: std::sync::Arc<TrezorSigner>,
+    }
+
+    impl Drop for TrezorJobSession {
+        fn drop(&mut self) {
+            let mut slot = JOB_SESSION.lock().unwrap_or_else(|p| p.into_inner());
+            if slot
+                .as_ref()
+                .is_some_and(|s| std::sync::Arc::ptr_eq(s, &self.signer))
+            {
+                *slot = None;
+            }
+        }
+    }
+
+    /// Open the job's one device session, BEFORE any ant-core work: the
+    /// address read inside `TrezorSigner::new` is where a
+    /// passphrase-protected device asks for its passphrase — once, on
+    /// the device, covering the identity derive and every payment
+    /// signature of the whole job. Refuses a device whose address is not
+    /// the configured one (and fails with the friendly "plug it in"
+    /// message before any encrypt/quote work when no device answers).
+    pub async fn begin_job_session(
+        expected_address: &str,
+    ) -> Result<TrezorJobSession, String> {
+        let expected = expected_address.to_lowercase();
+        let _attention = super::attention::begin("unlock-wallet");
+        let signer = with_fresh_signer(move |s| async move {
+            let found = signer_address(&s);
+            if found.to_lowercase() != expected {
+                return Err(format!(
+                    "this Trezor holds a different wallet ({found}) than the \
+                     one configured — if the device uses a passphrase, open \
+                     the same hidden wallet it was set up with, then try again"
+                ));
+            }
+            Ok(s)
+        })
+        .await?;
+        *JOB_SESSION.lock().unwrap_or_else(|p| p.into_inner()) = Some(signer.clone());
+        Ok(TrezorJobSession { signer })
+    }
+
     /// Run one device conversation on a blocking thread, holding the
     /// already-acquired conversation lock for its whole duration. The
-    /// closure gets a freshly connected signer; everything it awaits is
-    /// synchronous USB underneath, plus however long the user takes at
-    /// the device's own confirm screen.
+    /// closure gets the open job-session signer when `reuse_job_session`
+    /// allows and one is open, else a freshly connected signer;
+    /// everything it awaits is synchronous USB underneath, plus however
+    /// long the user takes at the device's own confirm screen.
     async fn with_signer_locked<T, F, Fut>(
         guard: tokio::sync::MutexGuard<'static, ()>,
+        reuse_job_session: bool,
         f: F,
     ) -> Result<T, String>
     where
         T: Send + 'static,
-        F: FnOnce(TrezorSigner) -> Fut + Send + 'static,
+        F: FnOnce(std::sync::Arc<TrezorSigner>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<T, String>>,
     {
+        let session = if reuse_job_session {
+            JOB_SESSION.lock().unwrap_or_else(|p| p.into_inner()).clone()
+        } else {
+            None
+        };
         let handle = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
             let _guard = guard;
             handle.block_on(async move {
-                let signer = TrezorSigner::new(HDPath::TrezorLive(0), Some(CHAIN_ID))
-                    .await
-                    .map_err(friendly)?;
+                let signer = match session {
+                    Some(s) => s,
+                    None => std::sync::Arc::new(
+                        TrezorSigner::new(HDPath::TrezorLive(0), Some(CHAIN_ID))
+                            .await
+                            .map_err(friendly)?,
+                    ),
+                };
                 f(signer).await
             })
         })
@@ -333,14 +547,39 @@ mod device {
         .map_err(|e| format!("Trezor task failed: {e}"))?
     }
 
-    /// [with_signer_locked] behind a plain wait on the conversation lock.
+    /// [with_signer_locked] behind a plain wait on the conversation lock,
+    /// reusing the job session when one is open.
     async fn with_signer<T, F, Fut>(f: F) -> Result<T, String>
     where
         T: Send + 'static,
-        F: FnOnce(TrezorSigner) -> Fut + Send + 'static,
+        F: FnOnce(std::sync::Arc<TrezorSigner>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<T, String>>,
     {
-        with_signer_locked(DEVICE_LOCK.lock().await, f).await
+        with_signer_locked(DEVICE_LOCK.lock().await, true, f).await
+    }
+
+    /// [with_signer] forced onto a brand-new device session — the setup
+    /// ceremony (a fresh binding by intent), the job-session open itself,
+    /// and a signing retry that assumes the session went bad.
+    async fn with_fresh_signer<T, F, Fut>(f: F) -> Result<T, String>
+    where
+        T: Send + 'static,
+        F: FnOnce(std::sync::Arc<TrezorSigner>) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<T, String>>,
+    {
+        with_signer_locked(DEVICE_LOCK.lock().await, false, f).await
+    }
+
+    /// The device's CURRENT address at the signer's path — a real USB
+    /// round trip, never the construction-time cache. A reused session
+    /// that silently degraded (stale session id after a replug → the
+    /// device minted a fresh session, possibly on a different hidden
+    /// wallet) is caught by exactly this read before any tap is wasted.
+    async fn live_address(s: &TrezorSigner) -> Result<String, String> {
+        s.get_address()
+            .await
+            .map(|a| a.to_string())
+            .map_err(friendly)
     }
 
     fn signer_address(s: &TrezorSigner) -> String {
@@ -377,7 +616,10 @@ mod device {
                 "the Trezor is busy with another W@tch request right now".into()
             );
         };
-        with_signer_locked(guard, |s| async move { Ok(signer_address(&s)) }).await
+        // Live read: with a job session open this must still touch USB
+        // (presence is the question), and reusing the session keeps a
+        // passphrase-protected device from prompting for the probe.
+        with_signer_locked(guard, true, |s| async move { live_address(&s).await }).await
     }
 
     /// Show the wallet address on the DEVICE's own screen and return what
@@ -411,7 +653,9 @@ mod device {
     /// is spent. Cancelling the address screen aborts the whole setup —
     /// nothing has been persisted yet.
     pub async fn setup_ceremony() -> Result<TrezorIdentity, String> {
-        with_signer(|s| async move {
+        // A fresh session by intent: the ceremony binds a wallet, so it
+        // must never silently ride another job's open session.
+        with_fresh_signer(|s| async move {
             let address = signer_address(&s);
             let ((first_sig, first), (_, second)) = {
                 // One attention span for both identity taps: the app's
@@ -458,7 +702,10 @@ mod device {
     pub async fn derive_write_keys(expected_address: &str) -> Result<BackupKeys, String> {
         let expected = expected_address.to_lowercase();
         with_signer(move |s| async move {
-            let found = signer_address(&s);
+            // Live read, not the session's construction-time cache — a
+            // reused job session must still prove it is on the right
+            // wallet right now.
+            let found = live_address(&s).await?;
             if found.to_lowercase() != expected {
                 return Err(format!(
                     "this Trezor holds a different wallet ({found}) than the \
@@ -489,30 +736,29 @@ mod device {
 
     /// The payment signer evmlib drives, bound to the configured address.
     ///
-    /// Hardened after the first live backup failed with evmlib's
-    /// "journaled transaction does not match this wallet, chain, or
-    /// payment intent" (2026-10-11): with the same in-memory payment
-    /// request at prepare and validate time, the only check that can
-    /// fail there is signer RECOVERY — i.e. the device produced a
-    /// signature that does not recover to the configured wallet. The
-    /// old signer opened ONE USB session when the wallet was built and
-    /// held it across the whole upload; between quoting (minutes on
-    /// mainnet) and the tap the device can auto-lock or drop the
-    /// session, and a re-initialized session on a passphrase-capable
-    /// device can silently bind a different wallet state. So this
-    /// signer:
-    ///   1. opens a FRESH device session per signature, on a blocking
-    ///      thread (the signing waits for a human);
-    ///   2. re-checks the device address right before signing (silent
-    ///      USB read — a swapped device/passphrase fails loudly with no
-    ///      wasted tap);
-    ///   3. VERIFIES the returned signature recovers to the configured
-    ///      address before handing it to evmlib, retrying once on a
-    ///      completely fresh session;
-    ///   4. publishes `sign-payment` on the attention beacon while the
+    /// Hardened across the alpha.115–.118 Trezor payment saga; the shape
+    /// that stands (2026-10-12):
+    ///   1. signs on the JOB SESSION when one is open (one passphrase
+    ///      entry per backup/batch, entered at [begin_job_session]),
+    ///      else on a fresh session; the retry attempt always forces a
+    ///      fresh session in case the reused one went bad;
+    ///   2. re-checks the device address with a LIVE read right before
+    ///      every tap (a swapped device, passphrase drift, or a
+    ///      silently-replaced session fails loudly with no wasted tap);
+    ///   3. VERIFIES each signature recovers to the configured address
+    ///      before evmlib journals it (parity/low-s self-repair; the
+    ///      double-failure error names what the device signed as);
+    ///   4. MEMOIZES the verified signature by sighash (see [sigcache]):
+    ///      the device conversation runs detached, so evmlib's 5-second
+    ///      broadcast timeout dropping the future never cancels the tap
+    ///      wait, and the retry's identical sign request returns the
+    ///      finished signature in milliseconds instead of prompting
+    ///      again;
+    ///   5. publishes `sign-payment` on the attention beacon while the
     ///      device waits for the tap.
     pub struct VerifiedTrezor {
         address: alloy::primitives::Address,
+        cache: super::sigcache::SigCache,
     }
 
     /// Build the payment signer: probes the device once (friendly
@@ -523,46 +769,173 @@ mod device {
     ) -> Result<VerifiedTrezor, String> {
         let expected = expected_address.to_lowercase();
         let address = with_signer(move |s| async move {
-            let found = signer_address(&s);
-            if found.to_lowercase() != expected {
+            let found = s.get_address().await.map_err(friendly)?;
+            if found.to_string().to_lowercase() != expected {
                 return Err(format!(
                     "this Trezor holds a different wallet ({found}) than the \
                      one configured"
                 ));
             }
-            Ok(alloy::signers::Signer::address(&s))
+            Ok(found)
         })
         .await?;
-        Ok(VerifiedTrezor { address })
+        Ok(VerifiedTrezor {
+            address,
+            cache: super::sigcache::SigCache::new(),
+        })
+    }
+
+    /// The owned transaction a detached signing job carries (the
+    /// caller's `dyn` borrow cannot cross into a task that outlives it).
+    #[derive(Clone)]
+    enum OwnedTx {
+        Eip1559(alloy::consensus::TxEip1559),
+        Legacy(alloy::consensus::TxLegacy),
+    }
+
+    /// One signing round on the device: job session unless `force_fresh`
+    /// (the second attempt's "assume the session went bad" lever), LIVE
+    /// address re-check, then the type-matched device request — the
+    /// concrete EIP-1559 path alloy-signer-trezor downcasts correctly,
+    /// or the generic legacy path (correct for true legacy by
+    /// construction).
+    async fn sign_tx_once(
+        expected: alloy::primitives::Address,
+        tx: OwnedTx,
+        force_fresh: bool,
+    ) -> Result<alloy::primitives::Signature, String> {
+        let expected_lower = expected.to_string().to_lowercase();
+        with_signer_locked(DEVICE_LOCK.lock().await, !force_fresh, move |s| async move {
+            let found = live_address(&s).await?;
+            if found.to_lowercase() != expected_lower {
+                return Err(format!(
+                    "this Trezor holds a different wallet ({found}) than \
+                     the one configured — if the device uses a \
+                     passphrase, open the same hidden wallet it was set \
+                     up with, then try again"
+                ));
+            }
+            match tx {
+                OwnedTx::Eip1559(t) => {
+                    let mut t = t;
+                    alloy::network::TxSigner::sign_transaction(&*s, &mut t)
+                        .await
+                        .map_err(|e| friendly(format!("payment signing failed: {e}")))
+                }
+                OwnedTx::Legacy(l) => {
+                    let mut l = l;
+                    alloy::network::TxSigner::sign_transaction(&*s, &mut l)
+                        .await
+                        .map_err(|e| friendly(format!("payment signing failed: {e}")))
+                }
+            }
+        })
+        .await
+    }
+
+    /// The whole device conversation for one payment, run DETACHED under
+    /// [sigcache]: both attempts, local verification/repair, and the
+    /// double-failure diagnosis. Returns the VERIFIED signature, so a
+    /// cache hit is a signature evmlib can journal as-is.
+    async fn sign_payment_job(
+        address: alloy::primitives::Address,
+        tx: OwnedTx,
+        hash: alloy::primitives::B256,
+    ) -> Result<alloy::primitives::Signature, String> {
+        let _attention = super::attention::begin("sign-payment");
+        let mut attempts: Vec<String> = Vec::new();
+        for attempt in 0..2u8 {
+            let sig = sign_tx_once(address, tx.clone(), attempt > 0).await?;
+            match super::verify_or_repair_payment_signature(&hash, &sig, address) {
+                Ok(good) => {
+                    if good != sig {
+                        tracing::warn!(
+                            "Trezor payment signature arrived in a non-canonical \
+                             shape (parity/s) and was repaired — it recovers to \
+                             the configured wallet {address} and is used as repaired"
+                        );
+                    }
+                    return Ok(good);
+                }
+                Err(got) => {
+                    // Everything a field report needs to pin where the
+                    // chain breaks: the tx the hash covers, the hash,
+                    // and the signature the device returned.
+                    let tx_line = match &tx {
+                        OwnedTx::Eip1559(t) => format!(
+                            "chain_id={} nonce={} to={:?} gas_limit={} \
+                             max_fee={} max_priority={} value={} data_len={}",
+                            t.chain_id,
+                            t.nonce,
+                            t.to,
+                            t.gas_limit,
+                            t.max_fee_per_gas,
+                            t.max_priority_fee_per_gas,
+                            t.value,
+                            t.input.len()
+                        ),
+                        OwnedTx::Legacy(_) => "legacy (non-eip1559)".into(),
+                    };
+                    tracing::warn!(
+                        "Trezor payment signature attempt {} recovered to {got}, \
+                         expected {address} — sighash={hash} r={:#x} s={:#x} parity={} \
+                         tx: {tx_line}; retrying on a fresh device session",
+                        attempt + 1,
+                        sig.r(),
+                        sig.s(),
+                        sig.v(),
+                    );
+                    attempts.push(got);
+                }
+            }
+        }
+        // Both attempts failed. One more SILENT device read tells the
+        // user (and us) which failure class this is: a device that now
+        // reports a different wallet (passphrase/hidden-wallet drift)
+        // vs one that still reports the right wallet while its
+        // signatures recover elsewhere (device/transport fault).
+        let now_reports = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            with_signer(|s| async move { live_address(&s).await }),
+        )
+        .await
+        .ok()
+        .and_then(|r| r.ok());
+        let signed_as = if attempts.len() == 2 && attempts[0] == attempts[1] {
+            format!("consistently signed as {}", attempts[0])
+        } else {
+            format!("signed as {}", attempts.join(", then "))
+        };
+        let diagnosis = match &now_reports {
+            Some(z) if z.to_lowercase() != address.to_string().to_lowercase() => {
+                format!(
+                    " The device is on a different wallet right now (it \
+                     reports {z}): if it uses a passphrase, open the same \
+                     hidden wallet it was set up with, then try again."
+                )
+            }
+            Some(_) => {
+                " The device still reports the right wallet, so this looks \
+                 like a device or transport fault — unplug it, plug it \
+                 back in, and try again; if it keeps happening, copy this \
+                 message into a bug report."
+                    .to_string()
+            }
+            None => {
+                " If the device uses a passphrase, open the same hidden \
+                 wallet it was set up with; otherwise unplug it, plug it \
+                 back in, and try again."
+                    .to_string()
+            }
+        };
+        Err(format!(
+            "the Trezor's payment signature did not verify: the device \
+             {signed_as} but this wallet is {address}.{diagnosis} Nothing was \
+             sent to the network and nothing was spent."
+        ))
     }
 
     impl VerifiedTrezor {
-        /// One fresh-session signing round for the concrete EIP-1559
-        /// transaction evmlib always builds. Runs entirely on a blocking
-        /// thread; the address re-check is silent on the device.
-        async fn sign_eip1559_once(
-            &self,
-            tx: alloy::consensus::TxEip1559,
-        ) -> Result<alloy::primitives::Signature, String> {
-            let expected = self.address.to_string().to_lowercase();
-            with_signer(move |s| async move {
-                let found = signer_address(&s);
-                if found.to_lowercase() != expected {
-                    return Err(format!(
-                        "this Trezor holds a different wallet ({found}) than \
-                         the one configured — if the device uses a \
-                         passphrase, open the same hidden wallet it was set \
-                         up with, then try again"
-                    ));
-                }
-                let mut tx = tx;
-                alloy::network::TxSigner::sign_transaction(&s, &mut tx)
-                    .await
-                    .map_err(|e| friendly(format!("payment signing failed: {e}")))
-            })
-            .await
-        }
-
         async fn sign_verified(
             &self,
             tx: &mut dyn alloy::consensus::SignableTransaction<alloy::primitives::Signature>,
@@ -571,133 +944,33 @@ mod device {
             // transaction's — computed before anything is cloned, so no
             // clone drift could ever slip past the check.
             let hash = tx.signature_hash();
-            let _attention = super::attention::begin("sign-payment");
-            // ALWAYS unwrap to the concrete TxEip1559 (see concrete_eip1559's
-            // doc comment): handing the TypedTransaction enum down as a dyn
-            // makes alloy-signer-trezor fall back to a LEGACY device request,
-            // whose signature can never verify against the 1559 hash.
-            let eip1559 = super::concrete_eip1559(tx);
-            if eip1559.is_none() && tx.ty() != 0 {
-                // Not 1559 in any shape and not legacy either: the driver
-                // would mis-encode it as legacy and the device would sign
-                // bytes that can never verify — refuse before wasting a tap.
+            // ALWAYS unwrap to an OWNED concrete transaction (see
+            // concrete_eip1559's doc comment): handing the
+            // TypedTransaction enum down as a dyn makes
+            // alloy-signer-trezor fall back to a LEGACY device request
+            // whose signature can never verify against the 1559 hash —
+            // and the detached signing job needs an owned tx anyway.
+            let owned = if let Some(t) = super::concrete_eip1559(tx) {
+                OwnedTx::Eip1559(t)
+            } else if let Some(l) = super::concrete_legacy(tx) {
+                OwnedTx::Legacy(l)
+            } else {
+                // Neither 1559 nor legacy in any recognized shape: the
+                // driver would mis-encode it and the device would sign
+                // bytes that can never verify — refuse before wasting a
+                // tap.
                 return Err(format!(
-                    "this payment is a type-{} transaction, which the Trezor \
-                     driver cannot sign faithfully — nothing was sent and \
-                     nothing was spent; please copy this message into a bug \
-                     report",
+                    "this payment is a type-{} transaction in a shape the \
+                     Trezor driver cannot sign faithfully — nothing was \
+                     sent and nothing was spent; please copy this message \
+                     into a bug report",
                     tx.ty()
                 ));
-            }
-            let mut attempts: Vec<String> = Vec::new();
-            for attempt in 0..2u8 {
-                let sig = match &eip1559 {
-                    Some(t) => self.sign_eip1559_once(t.clone()).await?,
-                    None => {
-                        // A true legacy tx: the generic path is correct here
-                        // (the driver's legacy request matches the legacy
-                        // EIP-155 hash). Sign inline on a fresh session.
-                        let _guard = DEVICE_LOCK.lock().await;
-                        let s = TrezorSigner::new(HDPath::TrezorLive(0), Some(CHAIN_ID))
-                            .await
-                            .map_err(friendly)?;
-                        alloy::network::TxSigner::sign_transaction(&s, tx)
-                            .await
-                            .map_err(|e| friendly(format!("payment signing failed: {e}")))?
-                    }
-                };
-                match super::verify_or_repair_payment_signature(&hash, &sig, self.address) {
-                    Ok(good) => {
-                        if good != sig {
-                            tracing::warn!(
-                                "Trezor payment signature arrived in a non-canonical \
-                                 shape (parity/s) and was repaired — it recovers to \
-                                 the configured wallet {} and is used as repaired",
-                                self.address
-                            );
-                        }
-                        return Ok(good);
-                    }
-                    Err(got) => {
-                        // Everything a field report needs to pin where the
-                        // chain breaks: the tx the hash covers, the hash,
-                        // and the signature the device returned.
-                        let tx_line = eip1559
-                            .as_ref()
-                            .map(|t| {
-                                format!(
-                                    "chain_id={} nonce={} to={:?} gas_limit={} \
-                                     max_fee={} max_priority={} value={} data_len={}",
-                                    t.chain_id,
-                                    t.nonce,
-                                    t.to,
-                                    t.gas_limit,
-                                    t.max_fee_per_gas,
-                                    t.max_priority_fee_per_gas,
-                                    t.value,
-                                    t.input.len()
-                                )
-                            })
-                            .unwrap_or_else(|| "legacy (non-eip1559)".into());
-                        tracing::warn!(
-                            "Trezor payment signature attempt {} recovered to {got}, \
-                             expected {} — sighash={hash} r={:#x} s={:#x} parity={} \
-                             tx: {tx_line}; retrying on a fresh device session",
-                            attempt + 1,
-                            self.address,
-                            sig.r(),
-                            sig.s(),
-                            sig.v(),
-                        );
-                        attempts.push(got);
-                    }
-                }
-            }
-            // Both attempts failed. One more SILENT device read tells the
-            // user (and us) which failure class this is: a device that now
-            // reports a different wallet (passphrase/hidden-wallet drift)
-            // vs one that still reports the right wallet while its
-            // signatures recover elsewhere (device/transport fault).
-            let now_reports = tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                with_signer(|s| async move { Ok(signer_address(&s)) }),
-            )
-            .await
-            .ok()
-            .and_then(|r| r.ok());
-            let signed_as = if attempts.len() == 2 && attempts[0] == attempts[1] {
-                format!("consistently signed as {}", attempts[0])
-            } else {
-                format!("signed as {}", attempts.join(", then "))
             };
-            let diagnosis = match &now_reports {
-                Some(z) if z.to_lowercase() != self.address.to_string().to_lowercase() => {
-                    format!(
-                        " The device is on a different wallet right now (it \
-                         reports {z}): if it uses a passphrase, open the same \
-                         hidden wallet it was set up with, then try again."
-                    )
-                }
-                Some(_) => {
-                    " The device still reports the right wallet, so this looks \
-                     like a device or transport fault — unplug it, plug it \
-                     back in, and try again; if it keeps happening, copy this \
-                     message into a bug report."
-                        .to_string()
-                }
-                None => {
-                    " If the device uses a passphrase, open the same hidden \
-                     wallet it was set up with; otherwise unplug it, plug it \
-                     back in, and try again."
-                        .to_string()
-                }
-            };
-            Err(format!(
-                "the Trezor's payment signature did not verify: the device \
-                 {signed_as} but this wallet is {}.{diagnosis} Nothing was \
-                 sent to the network and nothing was spent.",
-                self.address
-            ))
+            let address = self.address;
+            self.cache
+                .get_or_sign(hash, move || sign_payment_job(address, owned, hash))
+                .await
         }
     }
 
@@ -734,6 +1007,13 @@ mod device_stub {
         Err(UNSUPPORTED.into())
     }
     pub async fn derive_write_keys(_expected_address: &str) -> Result<BackupKeys, String> {
+        Err(UNSUPPORTED.into())
+    }
+    /// Job-session guard stub — no device conversation exists here.
+    pub struct TrezorJobSession;
+    pub async fn begin_job_session(
+        _expected_address: &str,
+    ) -> Result<TrezorJobSession, String> {
         Err(UNSUPPORTED.into())
     }
 }
@@ -1018,6 +1298,154 @@ mod tests {
         assert_eq!(concrete_eip1559(dyn_legacy), None);
         use alloy::consensus::Transaction as _;
         assert_eq!(dyn_legacy.ty(), 0);
+    }
+
+    /// concrete_legacy mirrors concrete_eip1559 for the memoization
+    /// path: the TypedTransaction enum's legacy payload unwraps, a bare
+    /// TxLegacy unwraps, and a 1559 shape yields None (that side has its
+    /// own extractor).
+    #[test]
+    fn concrete_legacy_unwraps_enum_and_bare_shapes() {
+        use alloy::consensus::{SignableTransaction, TxEip1559, TxLegacy, TypedTransaction};
+        let legacy = TxLegacy {
+            chain_id: Some(42161),
+            nonce: 5,
+            gas_price: 30_000_000,
+            gas_limit: 80_000,
+            to: alloy::primitives::TxKind::Call(alloy::primitives::Address::repeat_byte(0x77)),
+            value: alloy::primitives::U256::ZERO,
+            input: alloy::primitives::Bytes::from_static(&[0x0c]),
+        };
+        let typed: TypedTransaction = legacy.clone().into();
+        let dyn_typed: &dyn SignableTransaction<alloy::primitives::Signature> = &typed;
+        assert_eq!(concrete_legacy(dyn_typed), Some(legacy.clone()));
+        let dyn_bare: &dyn SignableTransaction<alloy::primitives::Signature> = &legacy;
+        assert_eq!(concrete_legacy(dyn_bare), Some(legacy.clone()));
+        let t1559: TypedTransaction = TxEip1559 {
+            chain_id: 42161,
+            nonce: 5,
+            gas_limit: 80_000,
+            max_fee_per_gas: 30_000_000,
+            max_priority_fee_per_gas: 0,
+            to: alloy::primitives::TxKind::Call(alloy::primitives::Address::repeat_byte(0x77)),
+            value: alloy::primitives::U256::ZERO,
+            access_list: Default::default(),
+            input: alloy::primitives::Bytes::new(),
+        }
+        .into();
+        let dyn_1559: &dyn SignableTransaction<alloy::primitives::Signature> = &t1559;
+        assert_eq!(concrete_legacy(dyn_1559), None);
+    }
+
+    fn test_sig(byte: u8) -> alloy::primitives::Signature {
+        alloy::primitives::Signature::new(
+            alloy::primitives::U256::from(byte),
+            alloy::primitives::U256::from(byte),
+            false,
+        )
+    }
+
+    /// The memoization heart: a second request for the same sighash is
+    /// served from the first conversation's result — the signer closure
+    /// runs exactly once.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sigcache_signs_once_per_sighash() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let cache = sigcache::SigCache::new();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let hash = alloy::primitives::B256::repeat_byte(0x01);
+        for _ in 0..3 {
+            let runs = runs.clone();
+            let sig = cache
+                .get_or_sign(hash, move || async move {
+                    runs.fetch_add(1, Ordering::SeqCst);
+                    Ok(test_sig(7))
+                })
+                .await
+                .unwrap();
+            assert_eq!(sig, test_sig(7));
+        }
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "one device conversation only");
+        // A different sighash is its own conversation.
+        let other = alloy::primitives::B256::repeat_byte(0x02);
+        let runs2 = runs.clone();
+        cache
+            .get_or_sign(other, move || async move {
+                runs2.fetch_add(1, Ordering::SeqCst);
+                Ok(test_sig(9))
+            })
+            .await
+            .unwrap();
+        assert_eq!(runs.load(Ordering::SeqCst), 2);
+    }
+
+    /// The evmlib-timeout scenario this whole module exists for: the
+    /// first caller is DROPPED mid-wait (evmlib's 5s broadcast timeout),
+    /// the detached conversation finishes anyway, and the retry's
+    /// request for the same sighash gets the finished signature without
+    /// a second conversation.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sigcache_survives_a_dropped_caller() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let cache = sigcache::SigCache::new();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let hash = alloy::primitives::B256::repeat_byte(0x03);
+        {
+            let runs = runs.clone();
+            let first = cache.get_or_sign(hash, move || async move {
+                runs.fetch_add(1, Ordering::SeqCst);
+                // The "human at the device" delay — far past the
+                // caller's timeout below.
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                Ok(test_sig(5))
+            });
+            // Drop the caller at a tight timeout, like evmlib does.
+            let timed_out =
+                tokio::time::timeout(std::time::Duration::from_millis(30), first).await;
+            assert!(timed_out.is_err(), "the first caller must get cut off");
+        }
+        // The retry: joins the still-running conversation and gets the
+        // signature the moment the "tap" lands.
+        let sig = cache
+            .get_or_sign(hash, move || async move {
+                panic!("the retry must never start a second conversation")
+            })
+            .await
+            .unwrap();
+        assert_eq!(sig, test_sig(5));
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+    }
+
+    /// Failures are delivered but never cached: a cancelled tap must not
+    /// poison the next attempt, which gets a brand-new conversation.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sigcache_never_caches_a_failure() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let cache = sigcache::SigCache::new();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let hash = alloy::primitives::B256::repeat_byte(0x04);
+        let runs1 = runs.clone();
+        let err = cache
+            .get_or_sign(hash, move || async move {
+                runs1.fetch_add(1, Ordering::SeqCst);
+                Err("cancelled on the Trezor".to_string())
+            })
+            .await
+            .unwrap_err();
+        assert!(err.contains("cancelled"));
+        let runs2 = runs.clone();
+        let sig = cache
+            .get_or_sign(hash, move || async move {
+                runs2.fetch_add(1, Ordering::SeqCst);
+                Ok(test_sig(6))
+            })
+            .await
+            .unwrap();
+        assert_eq!(sig, test_sig(6));
+        assert_eq!(runs.load(Ordering::SeqCst), 2, "the failure re-ran the signer");
     }
 
     /// The sign-twice guard: differing signatures must refuse BEFORE any

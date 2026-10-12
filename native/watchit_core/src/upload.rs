@@ -202,6 +202,15 @@ async fn drive_upload(
     job: &Arc<Mutex<JobState>>,
     path: &std::path::Path,
 ) -> Result<Outcome, String> {
+    // For a hardware wallet, one device session covers the whole upload
+    // (the passphrase is entered once up front; each payment signature
+    // reuses the session instead of prompting again).
+    let _job_session = match engine.signer() {
+        Ok(s) if s.is_hardware() => {
+            Some(crate::trezor::begin_job_session(&s.address()?).await?)
+        }
+        _ => None,
+    };
     let client = wallet_client(engine).await?;
 
     let (tx, rx) = mpsc::channel::<UploadEvent>(64);

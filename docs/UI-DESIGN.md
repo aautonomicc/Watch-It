@@ -153,7 +153,10 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   Trezor" (identity signature — costs nothing, setup asks twice),
   "Check the address on your Trezor" (match the device's screen),
   "Confirm the payment on your Trezor" (check the amount; first
-  payment may ask twice — the one-time allowance). The card follows
+  payment may ask twice — the one-time allowance), and "Unlock the
+  wallet on your Trezor" (2026-10-12 — the per-job session open: a
+  passphrase-protected device asks for its passphrase once there,
+  covering every signature in the run). The card follows
   the action live, removes itself when the device stops waiting, and
   Hide silences only that tap — the next one announces again. It is
   a bottom-centred non-modal OVERLAY, not a dialog route: a dialog

@@ -35,7 +35,9 @@ class TrezorAttentionService extends ChangeNotifier {
   PublishApi get _api => _apiOverride ?? PublishApi();
 
   /// The action the device is waiting on right now, or null. Actions:
-  /// `sign-identity` | `confirm-address` | `sign-payment`.
+  /// `sign-identity` | `confirm-address` | `sign-payment` |
+  /// `unlock-wallet` (the per-job session open, where a
+  /// passphrase-protected device asks for its passphrase once).
   TrezorActivity? current;
 
   int _scopes = 0;

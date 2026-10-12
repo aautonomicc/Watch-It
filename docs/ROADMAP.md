@@ -1280,6 +1280,33 @@ decision (2026-10-10).
       batch uploads). Still open: the real-device re-test of the
       backup payment leg.
 
+- [x] One passphrase per job + signature memoization (2026-10-12,
+      unreleased — ships next release; the no-fork fix for the
+      alpha.118 live-test findings: evmlib 0.10.0's hardcoded 5 s
+      broadcast timeout wraps `send_transaction`, which with alloy's
+      wallet filler INCLUDES signing — a human passphrase + tap can
+      never fit, every retry re-prompted, ~15 passphrase entries per
+      backup run). (1) Every job (backup, batch upload, single
+      upload) opens ONE device session up front
+      (`trezor::begin_job_session`, attention action
+      `unlock-wallet`): the Trezor caches its passphrase per
+      session, so one entry covers the identity derive and every
+      payment signature; fresh-session-per-signature survives only
+      as the signing retry's fallback (its original motivation — the
+      journal mismatch — was really the legacy-enum bug fixed in
+      alpha.118). The LIVE pre-tap address re-check stays the guard
+      against a degraded/swapped session. (2) The payment
+      conversation runs DETACHED and the verified signature is
+      memoized by sighash (`trezor::sigcache`): evmlib's timeout
+      dropping the future no longer cancels the tap wait, and the
+      retry's identical sign request returns the finished signature
+      in milliseconds — one tap per payment transaction, inside the
+      5 s window by construction (fee drift between attempts changes
+      the sighash and just costs one more tap). Filed upstream as
+      WithAutonomi/evmlib#21 (make the broadcast timeout
+      configurable). Still open: the user's funded Trezor backup
+      re-run on the next release is the live proof.
+
 ## Network & data control (shipped 2026-09-03→06, v0.1.0-alpha.85–.92)
 
 A measured idle-traffic campaign turned into a full set of data

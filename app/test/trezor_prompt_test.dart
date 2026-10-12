@@ -249,9 +249,12 @@ void main() {
     expect(trezorPromptBody('sign-identity'), contains('costs '));
     expect(trezorPromptBody('confirm-address'), contains('matches'));
     expect(trezorPromptBody('sign-payment'), contains('amount'));
+    expect(trezorPromptBody('unlock-wallet'), contains('passphrase'));
     expect(trezorPromptBody('something-new'), contains('confirmation'));
     expect(trezorPromptTitle('sign-payment'),
         'Confirm the payment on your Trezor');
+    expect(trezorPromptTitle('unlock-wallet'),
+        'Unlock the wallet on your Trezor');
     expect(trezorPromptTitle('confirm-address'),
         'Check the address on your Trezor');
     expect(trezorPromptTitle('sign-identity'), 'Check your Trezor');

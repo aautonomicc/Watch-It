@@ -626,8 +626,15 @@ async fn drive_backup(
     // A hardware signer re-derives the write keys on-device (the settled
     // paranoid policy: never persisted) — one physical confirmation. The
     // dedicated phase keeps the UI honest about what it is waiting for.
+    // ONE device session is opened up front and held for the whole job:
+    // the Trezor caches its passphrase per session, so the identity
+    // derive and every payment signature below reuse this session — one
+    // passphrase entry per backup instead of one per signature (the
+    // 2026-10-12 passphrase-storm fix).
+    let mut _job_session = None;
     if signer.is_hardware() {
         set_phase(job, "trezor");
+        _job_session = Some(crate::trezor::begin_job_session(&signer.address()?).await?);
     }
     let keys = signer.backup_write_keys().await?;
     let now_ms = chrono::Utc::now().timestamp_millis();
