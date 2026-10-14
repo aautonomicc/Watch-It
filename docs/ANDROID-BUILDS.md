@@ -12,9 +12,9 @@ Google TV Streamer). The device picks its own ABI at install time.
 
 ## Toolchain
 
-Use Flutter 3.47.4 (Dart 3.13.3), JDK 17, Android platform 36, build-tools 36.0.0,
+Use Flutter 3.47.7 (Dart 3.13.4), JDK 17, Android platform 36, build-tools 36.0.0,
 NDK 28.2.13676358, cargo-ndk 4.1.2 and Python 3.11+. The Gradle wrapper and Cargo/
-pub lockfiles in the checkout define the other dependency inputs. Flutter 3.47.4
+pub lockfiles in the checkout define the other dependency inputs. Flutter 3.47.7
 sets minimum Android API 24; the native build uses the same minimum.
 
 Set `ANDROID_HOME` and `ANDROID_NDK_HOME` explicitly. Put Flutter, cargo/rustup,

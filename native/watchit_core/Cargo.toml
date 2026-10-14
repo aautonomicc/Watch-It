@@ -126,19 +126,24 @@ tracing-android = "0.2"
 # ant-quic, post-quantum, mDNS LAN discovery) syncs lists/viewpoints
 # through a self-keyed CRDT KV store on a secret invite topic. Android
 # included since the NDK cross-build of the x0x tree was proven.
-# 0.46.0 (2026-10-03, built from cea64f20): the measure-and-experiment
-# idle-bandwidth release under tracker #504 — ships the egress byte
-# budget as an observe_only METER by default, the opt-in experimental
-# `byte_policy = shed_normal` (Leaf-only: refuses normal-class RELAY
-# sends above a non-zero leaf_egress_hard_bytes_per_sec; never sheds
-# own publishes/targeted sends/Critical topics, so My W@tch sync docs
-# and the chunked art-transfer DMs are untouched by construction),
-# per-topic egress diagnostics (#1006), the #807 leaf eager-set
-# truncation fix, and the #1148 D39(A) not-member-rejoin fix. Deeper
-# ENFORCED shedding (S1 unicast caps → S3 consume-only Leaves → S4
-# enforced shed_normal) is explicitly post-0.46 upstream.
+# 0.46.x brought the egress byte budget as an observe_only METER plus
+# the opt-in experimental `byte_policy = shed_normal` (Leaf-only; never
+# sheds own publishes/targeted sends/Critical topics, so My W@tch sync
+# docs and the chunked art-transfer DMs are untouched by construction),
+# and 0.46.6's embedder shutdown wave (socket released on agent off).
+# 0.47.1 (2026-10-12) continues that embedder focus: detached group
+# tasks drained at shutdown so relaunch on the same dir works without
+# the history.db lock error (#1274/#1289), bootstrap outbox writes
+# shielded, REST/WS forwarders joined, ant-quic =0.27.57 (orphaned
+# hole-punch-winner connection fix), and ADR 0116 opt-in local history
+# retention rules (we set none — behavior identical to 0.46.6). Minor
+# WITH a library API change (HistoryConfig new pub fields,
+# HistoryHandle::store() no longer public) — we don't touch
+# HistoryHandle anywhere, clean compile verified at the bump.
+# NOTE: zero idle-egress change — enforced shedding (Track E: consume-
+# only Leaves, enforced shed_normal) still hasn't landed upstream.
 # Pin a release, never git main.
-x0x = "0.46.0"
+x0x = "0.47.1"
 # CancellationToken for the mywatch heartbeat/watch task (already in the
 # x0x tree, so free on desktop).
 tokio-util = "0.7"
