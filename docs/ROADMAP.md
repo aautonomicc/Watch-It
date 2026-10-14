@@ -6,13 +6,42 @@ private Upload and My W@tch stay. Channel mentions in the release
 history below are historical; the Channels section itself is collapsed
 to a dated note.
 
-**Status (2026-10-11):** latest release is **v0.1.0-alpha.115**
+**Status (2026-10-14):** latest release is **v0.1.0-alpha.121**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
 a release ships **four artifacts**: a signed APK (dual-ABI
 armeabi-v7a + arm64-v8a since alpha.98, so Fire TV Sticks and other
 32-bit-app devices install the normal APK), a Linux AppImage, a
 Windows portable zip (since alpha.55), and a macOS universal dmg
-(since alpha.92 — unsigned, right-click → Open). The newest wave is
+(since alpha.92 — unsigned, right-click → Open). The newest releases
+close the **Trezor payment saga and the two-device round trip**
+(alpha.116–.121): alpha.116 signs every payment in a fresh device
+session with local recovery verification and adds plain-language
+Trezor attention prompts with an audible chime; alpha.117 fixes the
+stuck setup dialog (the prompt moved to a non-modal overlay), adds
+key↔address recovery guards at the ceremony and every derive,
+payment-signature self-repair with a passphrase-drift-vs-device-fault
+diagnosis, a device-conversation lock and tap-to-copy error messages;
+alpha.118 root-causes the whole mismatch — alloy-signer-trezor
+silently signs a LEGACY transaction when handed alloy's
+`TypedTransaction` enum — and always hands the device the concrete
+EIP-1559 transaction; alpha.119 makes it **one passphrase per job and
+one tap per payment** (one device session per backup/batch, verified
+signatures memoized by sighash so evmlib's 5 s broadcast retry joins
+the finished conversation; upstream asks filed as WithAutonomi/evmlib
+#21/#22) and fixes the Android stale-update-bar (a pending offer
+refreshes past the 24 h throttle, a dead download re-checks). The
+user's live two-device test then PASSED end to end on alpha.119
+(funded Trezor backup → low-data follower restore → a watch point
+synced back to the master). Alpha.120 is the **follower-resilience
+pass** from that test: live recovery progress (follower card stage +
+x-of-N, a home info bar "Recovering your library from the backup —
+3 of 12"), a retry ladder (1 min doubling to 10 min while no backup
+was ever applied, plus a follower check after every low-data burst)
+and drawer live activity (pairing / burst / fetch / sync-cycle
+narration). Alpha.121 is a dependency pass: x0x 0.47.1 (embedded
+shutdown fixes — a same-directory relaunch no longer hits "database
+is locked"; opt-in history-retention rules), Flutter 3.47.7 and a pub
+patch wave. Before that came
 **wallet security & hardware wallets** (alpha.112–.115): alpha.112
 ships **Low-data mode** — a linked device syncs from the shared
 backup with the x0x mesh OFF (free pointer reads instead of tens of
@@ -616,7 +645,7 @@ decisions in [PLAN-alpha55.md](PLAN-alpha55.md), implementation notes in
       a cold start, so a startup-only check never ran there) and a
       found update persists, so the About row and snackbar survive
       the 24h throttle instead of vanishing for a day per launch.
-      Unreleased (2026-10-12): while an update is pending the check
+      Since alpha.119 (2026-10-12): while an update is pending the check
       refreshes on nearly every launch/resume (15-minute floor)
       instead of once a day — the per-release asset sweep deletes a
       superseded release's binaries, so a frozen announcement could
@@ -913,7 +942,7 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       (`backup_auto_nudge_dismissed_v1`); the default stays OFF
       (backups spend ANT).
 - [x] **Follower resilience + live sync activity** (implemented
-      2026-10-12, unreleased — ships next release; the 2026-10-12
+      2026-10-12, shipped in alpha.120; the 2026-10-12
       round-trip test's triage items (1)+(2) built together, which
       also makes (3) — auto-start after pairing, already built —
       visible; plus the drawer live-activity ask from the same
@@ -1290,7 +1319,7 @@ decision (2026-10-10).
       the hardware door to "Trezor detected — ready to set up."
 
 - [x] Verified payment signing + Trezor attention prompts
-      (2026-10-11, unreleased — ships next release; response to the
+      (2026-10-11, shipped in alpha.116; response to the
       first real-device Trezor backup failing at the payment tap
       with evmlib's "journaled transaction does not match this
       wallet, chain, or payment intent" — with an in-memory request
@@ -1312,11 +1341,37 @@ decision (2026-10-10).
       app pops a plain-language explanation WITH AN AUDIBLE CHIME
       the moment the Trezor lights up (TrezorAttentionService +
       TrezorPromptHost; armed during setup, backups/restores and
-      batch uploads). Still open: the real-device re-test of the
-      backup payment leg.
+      batch uploads). The real-device re-test on alpha.116 failed
+      the same way — root-caused and fixed in alpha.118 (next item).
+
+- [x] Trezor mismatch triage + the legacy-signing root cause
+      (2026-10-11, shipped in alpha.117 and alpha.118): alpha.117
+      moves the attention prompt to a non-modal bottom overlay (a
+      dialog's `pop` could land on the prompt and strand the setup
+      dialog on "Connecting…"), verifies at the ceremony and every
+      backup derive that the identity signature RECOVERS to the
+      address the device reports, self-repairs parity/low-s signature
+      variants with recovery as the arbiter and, on double failure,
+      names what the device signed as versus what it reports now
+      (passphrase drift vs device fault), serializes every device
+      conversation on one lock (the presence probe used to interleave
+      with a ceremony) and makes error messages tap-to-copy.
+      Alpha.118 then fixes the actual bug: alloy-signer-trezor 1.8.3
+      picks the device request by downcasting to the concrete
+      `TxEip1559`, but alloy's wallet filler hands it the
+      `TypedTransaction` ENUM, so the downcast misses and it silently
+      falls back to a LEGACY EIP-155 signing request — the device
+      signed the legacy hash while W@tch and evmlib verified the
+      EIP-1559 typed hash, and ecrecover of the mismatched pair gave
+      the pseudo-random "signed as" addresses. `concrete_eip1559`
+      (trezor.rs) now always extracts the concrete transaction before
+      the device signs (unsignable shapes refused before a tap).
+      Already fixed upstream in alloy ≥2.0.5; evmlib pins alloy 1.x,
+      hence WithAutonomi/evmlib#22. Live-validated 2026-10-12: no
+      more "signed as" mismatch — payments reach the chain.
 
 - [x] One passphrase per job + signature memoization (2026-10-12,
-      unreleased — ships next release; the no-fork fix for the
+      shipped in alpha.119; the no-fork fix for the
       alpha.118 live-test findings: evmlib 0.10.0's hardcoded 5 s
       broadcast timeout wraps `send_transaction`, which with alloy's
       wallet filler INCLUDES signing — a human passphrase + tap can
@@ -1339,8 +1394,10 @@ decision (2026-10-10).
       5 s window by construction (fee drift between attempts changes
       the sighash and just costs one more tap). Filed upstream as
       WithAutonomi/evmlib#21 (make the broadcast timeout
-      configurable). Still open: the user's funded Trezor backup
-      re-run on the next release is the live proof.
+      configurable). LIVE-PROVEN 2026-10-12 on alpha.119: the funded
+      Trezor backup completed inside the user's two-device round trip
+      (payments landed after a few attempts — the upstream 5 s
+      broadcast-timeout class; evmlib#21/#22 remain open).
 
 ## Network & data control (shipped 2026-09-03→06, v0.1.0-alpha.85–.92)
 

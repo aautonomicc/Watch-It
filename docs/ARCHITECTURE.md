@@ -31,7 +31,7 @@ APK covers it — no extra platform port. What it needs on top:
 - Hardware decode matters more here (TV boxes have weak CPUs) — libmpv uses
   MediaCodec on Android, same path as phones.
 
-Status (alpha.115): the manifest work (leanback entry, TV banner,
+Status (alpha.121): the manifest work (leanback entry, TV banner,
 leanback/touchscreen not-required) and card-level D-pad focus shipped
 in alpha.95; alpha.96 merged the full TV UX wave (the first external
 PR): UiModeManager TV detection over a method channel, an overscan
@@ -588,8 +588,8 @@ it instead of many doc-budget cycles — the own publish still runs,
 the gate needs keys in sight to activate, and it resolves when the
 first follow completes/fails or at a 5-minute deadline.
 
-Follower resilience + live activity (2026-10-12, unreleased — ships
-next release; the round-trip test's triage): a follow fetch publishes
+Follower resilience + live activity (2026-10-12, shipped in
+alpha.120; the round-trip test's triage): a follow fetch publishes
 its live stage/x-of-N into `BackupFollowStatus` — shown on the Backup
 screen's follower card, a bottom-of-home info bar
 (`widgets/backup_follow_bar.dart`, "Recovering your library from the

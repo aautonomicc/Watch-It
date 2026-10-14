@@ -89,7 +89,7 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   and on the home screen's bar before that) — Autonomi peers
   ("Connected · N peers") and My W@tch (sync state, tap opens the page,
   "not linked" when unlinked, "switched off" when disabled in the x0x
-  client page). Since 2026-10-12 (unreleased) the My W@tch row
+  client page). Since 2026-10-12 (alpha.120) the My W@tch row
   NARRATES live activity with a small spinner instead of resting
   labels: a running pairing ("pairing — waiting for a linked device to
   scan…"), a low-data burst's stage ("joining your devices…"), a
@@ -395,7 +395,7 @@ interaction spec in [ANDROID-TV.md](ANDROID-TV.md). The app still runs
 the *normal* layout inside the safe area; the 10-foot column above
 remains the target.
 
-## Built so far (alpha.115)
+## Built so far (alpha.121)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,
@@ -539,6 +539,11 @@ message, the linked screen's Low-data mode switch with its burst-cost
 dialog, the batch review page's "Paid together in N payment
 transaction(s)" line, the Trezor door with its three-confirmation
 setup ceremony and live device detection, and the wallet-file
-passphrase protect/locked-unlock flow.
+passphrase protect/locked-unlock flow. Alpha.116–.120 add the Trezor
+attention prompt card (a bottom overlay with a chime), tap-to-copy
+error messages across the wallet and backup surfaces, the follower
+card's live recovery stage, the home info bar during a first-time
+follow and the drawer's live My W@tch narration; alpha.121 is a
+dependency pass with no UI change.
 Still to come from this document: filter/sort + fast-scroller on
 the grid, mobile gestures, and the 10-foot TV layout.

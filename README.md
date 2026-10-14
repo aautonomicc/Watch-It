@@ -525,6 +525,40 @@ permissions bite, live "Trezor detected" feedback, a note that the
 first payment asks one extra confirmation, and a one-time heads-up
 before the first backup on the new line.
 
+Alpha.116–.119 close the **Trezor payment saga**: the first live
+backups failed at the payment tap because the Trezor driver, when
+handed a wrapped transaction, silently signed it as a *legacy*
+transaction while the app and network checked the modern (EIP-1559)
+hash — so the signature recovered to a stranger's address. Alpha.118
+always hands the device the concrete transaction, and the releases
+around it add the guards that pinned the bug down and stay as
+backstops: a fresh device session per signature with local recovery
+verification (.116), key↔address checks at setup and every derive,
+signature self-repair with a drift-vs-fault diagnosis, a serialized
+device lock and tap-to-copy error messages (.117), and plain-language
+Trezor prompts with an audible chime whenever the device wants a
+tap. Alpha.119 then makes it **one passphrase per job and one tap per
+payment** — one device session covers a whole backup or batch, and a
+verified signature is remembered so the network client's short
+broadcast retry no longer re-prompts — and fixes the Android update
+bar naming a version that could no longer be downloaded. A live
+two-device test on alpha.119 passed end to end: funded Trezor backup,
+low-data follower restore, and a watch point syncing back.
+
+Alpha.120 is the **follower-resilience pass** from that test: a
+first-time follow shows live progress (the Backup screen's follower
+card and a thin home-screen info bar, "Recovering your library from
+the backup — 3 of 12"), a follow that fails before any backup was
+ever applied retries in minutes instead of waiting six hours (and
+every low-data "Sync now" ends with a follower check), and the
+drawer's My W@tch row narrates what is happening — pairing, a sync
+burst, a recovery fetch — instead of a bare "syncing…".
+
+Alpha.121 is a dependency pass: x0x 0.47.1 (sync-agent shutdown fixes
+so relaunching on the same data directory no longer hits "database is
+locked"), Flutter 3.47.7 and a wave of pub patch updates. No feature
+changes.
+
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users
