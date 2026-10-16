@@ -6,7 +6,7 @@ private Upload and My W@tch stay. Channel mentions in the release
 history below are historical; the Channels section itself is collapsed
 to a dated note.
 
-**Status (2026-10-14):** latest release is **v0.1.0-alpha.121**
+**Status (2026-10-16):** latest release is **v0.1.0-alpha.122**
 ([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
 a release ships **four artifacts**: a signed APK (dual-ABI
 armeabi-v7a + arm64-v8a since alpha.98, so Fire TV Sticks and other
@@ -38,10 +38,17 @@ x-of-N, a home info bar "Recovering your library from the backup —
 3 of 12"), a retry ladder (1 min doubling to 10 min while no backup
 was ever applied, plus a follower check after every low-data burst)
 and drawer live activity (pairing / burst / fetch / sync-cycle
-narration). Alpha.121 is a dependency pass: x0x 0.47.1 (embedded
-shutdown fixes — a same-directory relaunch no longer hits "database
-is locked"; opt-in history-retention rules), Flutter 3.47.7 and a pub
-patch wave. Before that came
+narration). Alpha.121 and alpha.122 are dependency passes:
+alpha.121 brings x0x 0.47.1 (embedded shutdown fixes — a
+same-directory relaunch no longer hits "database is locked"; opt-in
+history-retention rules), Flutter 3.47.7 and a pub patch wave;
+alpha.122 brings x0x 0.48.0 (ant-quic's superseded-connection
+arbiter fix, dials no longer cut short at the direct stage — steadier
+pairing and sync bursts) and ant-core 0.13.0 (pointer ownership
+handover + majority fork reads on the backup's pointer path, shared
+in-flight chunk fetches, self_encryption 0.36.2), and slims the APK
+by ~14 MB: the Android build no longer ships stale cargo-ndk side
+dylibs (the APK verifier now refuses them). Before that came
 **wallet security & hardware wallets** (alpha.112–.115): alpha.112
 ships **Low-data mode** — a linked device syncs from the shared
 backup with the x0x mesh OFF (free pointer reads instead of tens of
@@ -1147,7 +1154,7 @@ canonical names automatically. CLI docs in [UPLOAD-CLI.md](UPLOAD-CLI.md).
       uploads without encode tiers; see "Upload on Android" in the
       Publish section above; iOS deferred)
 
-## Hardware-wallet plan (adopted 2026-10-10; ALL PHASES 0–4 implemented — 0 + 4-now shipped in alpha.113, 1–3 + key policy in alpha.114; hardening/UX wave + zeroize shipped in alpha.115; open: real-Trezor e2e on the user's desktop, Ledger)
+## Hardware-wallet plan (adopted 2026-10-10; ALL PHASES 0–4 implemented — 0 + 4-now shipped in alpha.113, 1–3 + key policy in alpha.114; hardening/UX wave + zeroize shipped in alpha.115; the real-Trezor e2e PASSED live 2026-10-12 on alpha.119 after the .116–.119 fix releases; open: Ledger)
 
 The 5-phase plan from the 2026-10-10 discussion series (CLAUDE.md has
 the full record): make the upload wallet — which is also the backup

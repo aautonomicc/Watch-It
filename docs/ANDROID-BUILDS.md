@@ -73,8 +73,12 @@ inputs and a repeatable command are not a claim of byte-for-byte reproducibility
 ## Checks and hardware acceptance
 
 The verifier rejects duplicate ZIP members, unexpected ABIs, missing client/
-Flutter/player libraries, and native files whose ELF architecture/type disagrees
-with their ABI directory. Android's `aapt2` checks the package, API 24 and TV
+Flutter/player libraries, native files whose ELF architecture/type disagrees
+with their ABI directory, and (since alpha.122) stale cargo-ndk side dylibs
+(`libant_core-*.so`, `libself_encryption-*.so` — dead weight that cargo-ndk
+copies from the target dir; `native/build-android.sh` now wipes each ABI's
+jniLibs dir before building and refuses to finish if anything but
+`libwatchit_core.so` remains, and Gradle excludes those patterns too). Android's `aapt2` checks the package, API 24 and TV
 launcher entry; `apksigner verify` checks the artifact signature. This does not
 attest who owns that certificate or prove runtime loader/playback compatibility.
 

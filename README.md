@@ -554,10 +554,15 @@ every low-data "Sync now" ends with a follower check), and the
 drawer's My W@tch row narrates what is happening — pairing, a sync
 burst, a recovery fetch — instead of a bare "syncing…".
 
-Alpha.121 is a dependency pass: x0x 0.47.1 (sync-agent shutdown fixes
-so relaunching on the same data directory no longer hits "database is
-locked"), Flutter 3.47.7 and a wave of pub patch updates. No feature
-changes.
+Alpha.121 and alpha.122 are dependency passes with no feature
+changes. Alpha.121: x0x 0.47.1 (sync-agent shutdown fixes so
+relaunching on the same data directory no longer hits "database is
+locked"), Flutter 3.47.7 and a wave of pub patch updates. Alpha.122:
+x0x 0.48.0 (a transport fix for connections both ends could drop at
+once, and dials that are no longer cut short — steadier My W@tch
+pairing and sync bursts) and ant-core 0.13.0 (safer pointer reads on
+the backup path, shared in-flight chunk fetches), plus a slimmer
+Android APK (~14 MB of stale build leftovers no longer ship).
 
 Docs:
 

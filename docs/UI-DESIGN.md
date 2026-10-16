@@ -395,7 +395,7 @@ interaction spec in [ANDROID-TV.md](ANDROID-TV.md). The app still runs
 the *normal* layout inside the safe area; the 10-foot column above
 remains the target.
 
-## Built so far (alpha.121)
+## Built so far (alpha.122)
 
 The home poster wall (with show-level grouping and Continue Watching /
 Recently Added rows), big-artwork Show → Season → Detail pages (TMDB ratings,
@@ -543,7 +543,7 @@ passphrase protect/locked-unlock flow. Alpha.116–.120 add the Trezor
 attention prompt card (a bottom overlay with a chime), tap-to-copy
 error messages across the wallet and backup surfaces, the follower
 card's live recovery stage, the home info bar during a first-time
-follow and the drawer's live My W@tch narration; alpha.121 is a
-dependency pass with no UI change.
+follow and the drawer's live My W@tch narration; alpha.121 and
+alpha.122 are dependency passes with no UI change.
 Still to come from this document: filter/sort + fast-scroller on
 the grid, mobile gestures, and the 10-foot TV layout.
