@@ -24,6 +24,7 @@ import '../services/update_check.dart';
 import '../theme/tokens.dart';
 import '../services/tv_settings.dart';
 import 'tv_display_screen.dart';
+import '../widgets/autonomi_credit.dart';
 import '../widgets/brand_mark.dart';
 import '../widgets/messenger.dart';
 import '../widgets/tv_dpad_focus.dart';
@@ -951,6 +952,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(color: t.ash, fontSize: 12),
                   ),
                 ),
+                // The network credit sits right under the app's own
+                // identity: the official Autonomi wordmark + a link to
+                // autonomi.com (2026-10-16, user ask for a prominent
+                // "powered by" credit).
+                const AutonomiCredit.tile(),
                 // TMDB terms require this attribution wherever their data
                 // or images appear (metadata matching + bundle exports).
                 Padding(

@@ -34,6 +34,17 @@ bone, drawn by `BrandMark` in the same file) followed by **`W@tch`**.
 
 Tagline slot in the family: *etch it. fetch it. **watch it.***
 
+### Third-party marks
+
+The Autonomi credit (library-drawer footer "Powered by …" and the Settings →
+About "Powered by the Autonomi network" row, both linking to autonomi.com)
+uses Autonomi's own wordmark as served on autonomi.com, with the wordmark
+text recoloured to `--bone` so it reads on ink — the red mark is untouched.
+Source: `branding/autonomi-wordmark-bone.svg`, rendered to
+`app/assets/autonomi_logo.png` (+ `2.0x`/`3.0x`). Nominative use only — it
+names the network the app runs on and is never restyled beyond that one
+colour swap. (TMDB's logo sits beside it under the same rule.)
+
 ## Theme tokens
 
 Three themes; **dark is default** (poster art provides the colour). Token names
@@ -125,7 +136,7 @@ new size is genuinely needed, add it to this table first.
 | Compact body (episode rows, descriptions)  | 13px |    400 | `line-height: 1.55`                                   |
 | Helper / meta (runtime, year, file size)   | 12px |    400 | `color: var(--ash)`                                   |
 | Micro chip (badge counts, quality tags)    | 11px |    500 | Tag pills, unwatched counts                           |
-| Wordmark                                   | 18px |    400 | Anton (bundled, wordmark-only); `@` in `--accent`     |
+| Wordmark (home app bar)                    | 36px |    400 | Anton (bundled, wordmark-only); `@` in `--accent`; 32px bucket mark beside it (doubled 2026-10-16; About tile 16px, picker heading 26px) |
 | Tab / nav label                            | 13px |    500 | `letter-spacing: 0.02em`                              |
 | Poster card title                          | 13px |    500 | Single line, ellipsized                               |
 | XOR address / hex                          | 13px |    400 | Mono                                                  |

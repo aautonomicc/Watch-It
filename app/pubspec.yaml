@@ -110,6 +110,9 @@ flutter:
     - assets/seed_metadata/
     - assets/seed_metadata/posters/
     - assets/tmdb_logo.png
+    - assets/autonomi_logo.png
+    - assets/2.0x/autonomi_logo.png
+    - assets/3.0x/autonomi_logo.png
     - assets/qr_logo.png
     - assets/sounds/trezor-chime.wav
     - assets/fonts/Anton-OFL.txt

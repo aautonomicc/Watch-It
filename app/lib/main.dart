@@ -668,14 +668,22 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
                 icon: Icon(Icons.search, color: t.boneDim),
                 onPressed: _openSearch,
               ),
-        // App-bar lockup: the launcher icon's bucket mark + wordmark.
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const BrandMark(height: 16),
-            const SizedBox(width: 8),
-            const BrandWordmark(fontSize: 18),
-          ],
+        // App-bar lockup: the launcher icon's bucket mark + wordmark,
+        // doubled from the original 16/18 (2026-10-16, user ask). The
+        // FittedBox only ever shrinks it — a narrow phone with every
+        // action icon showing keeps the lockup whole instead of
+        // overflowing the title slot.
+        title: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              BrandMark(height: 32),
+              SizedBox(width: 12),
+              BrandWordmark(fontSize: 36),
+            ],
+          ),
         ),
         actions: [
           if (tv) ...[

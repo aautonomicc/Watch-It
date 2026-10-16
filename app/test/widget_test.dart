@@ -34,6 +34,11 @@ void main() {
 
     expect(find.byType(BrandMark), findsOneWidget);
     expect(find.byType(BrandWordmark), findsOneWidget);
+    // The app-bar lockup is the doubled size (2026-10-16): 32px mark
+    // beside the 36px wordmark.
+    expect(tester.widget<BrandMark>(find.byType(BrandMark)).height, 32);
+    expect(
+        tester.widget<BrandWordmark>(find.byType(BrandWordmark)).fontSize, 36);
     expect(find.text('W@tch', findRichText: true), findsOneWidget);
     expect(find.text('Your library is empty'), findsOneWidget);
   });

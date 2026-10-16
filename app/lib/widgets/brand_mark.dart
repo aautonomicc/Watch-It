@@ -22,8 +22,9 @@ class BrandMark extends StatelessWidget {
 
 /// The "W@tch" wordmark: Anton (bundled, wordmark-only font — UI text stays
 /// on system fonts) in bone with the `@` in the accent blue, mirroring the
-/// bucket mark's centre stripe. [fontSize] fits the host chrome (app bar 18,
-/// Settings About tile 16).
+/// bucket mark's centre stripe. [fontSize] fits the host chrome (home app
+/// bar 36 beside a 32px mark — doubled 2026-10-16; profile picker heading
+/// 26; Settings About tile 16).
 class BrandWordmark extends StatelessWidget {
   const BrandWordmark({super.key, this.fontSize = 18});
 

@@ -35,8 +35,18 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   across launches), search moves to the right. Narrower windows and
   mobile keep the modal drawer with the old layout (search left, burger
   far right)
+- **App-bar lockup** (bucket mark + `W@tch` wordmark) is drawn at 32px/36px
+  since 2026-10-16 — double the original — inside a scale-down FittedBox so a
+  narrow phone with every action icon showing shrinks it rather than
+  overflowing. **Network credit**: the drawer ends with a tappable "Powered by
+  [autonomi]" footer (always visible on desktop, where the drawer is pinned),
+  and Settings → About carries the prominent "Powered by the Autonomi
+  network" row (logo, one-line explanation, open-in-new) directly under the
+  app's own identity row; both open https://autonomi.com/ in the system
+  browser (a platform with no browser gets a snackbar naming the address).
 
 ### 2. Library grid
+
 - Poster wall, infinite scroll, alphabet fast-scroller on the right
 - Filter/sort bar: category/genre, year, watched state, downloaded-only,
   A-Z / recently added / rating

@@ -12,6 +12,7 @@ import '../services/metadata_service.dart';
 import '../services/profiles.dart';
 import '../services/embedded_client.dart';
 import '../theme/tokens.dart';
+import 'autonomi_credit.dart';
 import 'drawer_status.dart';
 import 'playlist_picker.dart' show playlistContentIcon;
 
@@ -264,6 +265,11 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
                       style: TextStyle(color: t.bone, fontSize: 14)),
                   onTap: () => _openPage(const SettingsScreen()),
                 ),
+                // Network credit as the drawer's footer — on every home
+                // screen, and permanently on desktop where the drawer is
+                // pinned (2026-10-16). Tap opens autonomi.com.
+                Divider(color: t.line, height: 24),
+                const AutonomiCredit.compact(),
               ],
             );
           },
