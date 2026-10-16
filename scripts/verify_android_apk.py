@@ -13,6 +13,10 @@ import zipfile
 
 MACHINES = {"armeabi-v7a": (1, 40), "arm64-v8a": (2, 183)}
 REQUIRED = {"libapp.so", "libflutter.so", "libwatchit_core.so", "libmpv.so"}
+# cargo-ndk side outputs of dependencies that declare a cdylib (ant-core,
+# self_encryption for WASM). They are statically linked into libwatchit_core.so
+# already; one in the APK means native/build-android.sh's jniLibs sweep failed.
+STALE_SIDE_LIBS = re.compile(r"^lib(ant_core|self_encryption)-[0-9a-f]+\.so$")
 
 
 def inspect_native(apk, expected):
@@ -37,6 +41,8 @@ def inspect_native(apk, expected):
                     struct.unpack_from("<H", header, 18)[0] != machine or
                     struct.unpack_from("<H", header, 16)[0] != 3):
                 raise ValueError(f"Wrong ELF architecture/type: {item.filename}")
+            if STALE_SIDE_LIBS.match(parts[2]):
+                raise ValueError(f"Stale dependency side library: {item.filename}")
             found.setdefault(parts[1], {})[parts[2]] = item.file_size
     if set(found) != set(expected):
         raise ValueError("APK ABI set differs from the build selection")

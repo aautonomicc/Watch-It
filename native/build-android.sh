@@ -25,10 +25,24 @@ JNILIBS="../../app/android/app/src/main/jniLibs"
 
 # --platform 24 matches the app's minSdk (Flutter's default): the x0x
 # tree's if_addrs needs getifaddrs, which Android's libc gained in 24.
+# cargo-ndk copies EVERY cdylib artifact it finds in the target dir, and
+# ant-core + self_encryption both declare a cdylib crate-type (for their
+# WASM builds), so hash-suffixed libant_core-<hash>.so / libself_encryption-
+# <hash>.so pile up one set per dependency bump and ride into the APK as dead
+# weight (alpha.121 shipped 18 of them, 13.7 MB — libwatchit_core.so links
+# both statically, nothing dlopens them). Start each requested ABI dir clean.
+for abi in "${ABIS[@]}"; do
+    rm -rf "$JNILIBS/$abi"
+done
 targets=()
 for abi in "${ABIS[@]}"; do targets+=(-t "$abi"); done
 cargo ndk "${targets[@]}" --platform 24 -o "$JNILIBS" build --locked --release --lib
 for abi in "${ABIS[@]}"; do
     test -s "$JNILIBS/$abi/libwatchit_core.so"
+    # Only our own library may remain — any side dylib means cargo-ndk
+    # picked up a dependency artifact (see above) and the APK would bloat.
+    find "$JNILIBS/$abi" -name '*.so' ! -name libwatchit_core.so -delete
+    stray="$(find "$JNILIBS/$abi" -name '*.so' ! -name libwatchit_core.so | wc -l)"
+    [ "$stray" -eq 0 ] || { echo "stray native libraries left in $JNILIBS/$abi" >&2; exit 1; }
     echo "Built: $JNILIBS/$abi/libwatchit_core.so"
 done

@@ -64,6 +64,11 @@ android {
             // the actual native library set, including watchit_core.
             excludes += (supportedWatchAbis + listOf("x86", "x86_64"))
                 .filter { it !in watchAbis }.map { "lib/$it/**" }
+            // cargo-ndk copies every cdylib it finds; ant-core and
+            // self_encryption build one (for WASM) and are already linked
+            // statically into libwatchit_core.so. Belt-and-braces beside the
+            // jniLibs sweep in native/build-android.sh.
+            excludes += listOf("**/libant_core-*.so", "**/libself_encryption-*.so")
         }
     }
 

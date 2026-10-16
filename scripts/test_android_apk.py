@@ -59,6 +59,14 @@ class ApkNativeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unexpected native"):
             VERIFY.inspect_native(self.apk, ["armeabi-v7a"])
 
+    def test_stale_dependency_side_library_refused(self):
+        self.write(extra=("lib/armeabi-v7a/libant_core-25fc13b9e0a49d3a.so", elf(1, 40)))
+        with self.assertRaisesRegex(ValueError, "Stale dependency side library"):
+            VERIFY.inspect_native(self.apk, ["armeabi-v7a"])
+        self.write(extra=("lib/armeabi-v7a/libself_encryption-0b9b607b66423c3b.so", elf(1, 40)))
+        with self.assertRaisesRegex(ValueError, "Stale dependency side library"):
+            VERIFY.inspect_native(self.apk, ["armeabi-v7a"])
+
     def test_missing_entire_selected_abi_refused(self):
         self.write()
         with self.assertRaisesRegex(ValueError, "ABI set"):
