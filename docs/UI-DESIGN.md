@@ -42,9 +42,11 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   [autonomi]" footer anchored to the drawer's bottom edge, below the scrolling
   list section (always visible on desktop, where the drawer is pinned at the
   left of the home screen),
-  and Settings → About carries the prominent "Powered by the Autonomi
-  network" row (logo, one-line explanation, open-in-new) directly under the
-  app's own identity row; both open https://autonomi.com/ in the system
+  and Settings → About carries the Autonomi credit row directly under the
+  app's own identity row, styled exactly like it (accent-blue network icon
+  on the left, the Autonomi wordmark as the title, the "Powered by the
+  Autonomi network…" explanation below — no trailing icon; the whole row is
+  the link, 2026-10-17); both open https://autonomi.com/ in the system
   browser (a platform with no browser gets a snackbar naming the address).
 
 ### 2. Library grid

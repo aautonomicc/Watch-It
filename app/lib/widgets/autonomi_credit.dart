@@ -57,8 +57,9 @@ class AutonomiLogo extends StatelessWidget {
 /// The "Powered by the Autonomi network" credit.
 ///
 /// Two shapes share one tap target (the Autonomi home page):
-/// - [AutonomiCredit.tile] — the prominent Settings → About row: logo,
-///   title line and a one-sentence explanation, open-in-new trailing icon.
+/// - [AutonomiCredit.tile] — the Settings → About row, styled like the
+///   W@tch identity row above it: accent network icon, the wordmark as the
+///   title, the "Powered by…" explanation below.
 /// - [AutonomiCredit.compact] — the library drawer's footer: a single
 ///   "Powered by" + logo line, visible on every home screen (always on
 ///   desktop, where the drawer is pinned).
@@ -89,21 +90,21 @@ class AutonomiCredit extends StatelessWidget {
         ),
       );
     }
+    // Mirrors the W@tch identity row directly above it in Settings → About:
+    // an accent-blue icon on the left, the brand mark as the title, and the
+    // description below (2026-10-17, user ask). The whole row is the link.
     return ListTile(
-      leading: const Padding(
-        padding: EdgeInsets.only(top: 2),
-        child: AutonomiLogo(height: 22),
-      ),
-      title: Text(
-        'Powered by the Autonomi network',
-        style: TextStyle(color: t.bone, fontSize: 15),
+      leading: Icon(Icons.hub_outlined, color: t.accent),
+      title: const Align(
+        alignment: Alignment.centerLeft,
+        child: AutonomiLogo(height: 16),
       ),
       subtitle: Text(
-        'Your media is stored on and streamed from Autonomi\'s '
-        'decentralised network. Learn more at autonomi.com.',
+        'Powered by the Autonomi network. Your media is stored on and '
+        'streamed from Autonomi\'s decentralised network — tap to visit '
+        'autonomi.com.',
         style: TextStyle(color: t.ash, fontSize: 12),
       ),
-      trailing: Icon(Icons.open_in_new, color: t.ash, size: 18),
       onTap: () => openAutonomiHome(context),
     );
   }

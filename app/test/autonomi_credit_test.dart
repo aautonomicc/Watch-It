@@ -45,11 +45,29 @@ void main() {
     await tester.pumpWidget(app(const SettingsScreen()));
     await tester.pumpAndSettle();
 
-    final tile = find.widgetWithText(ListTile, 'Powered by the Autonomi network');
-    expect(tile, findsOneWidget);
-    expect(find.textContaining('autonomi.com'), findsOneWidget);
-    final logo = find.descendant(of: tile, matching: find.byType(AutonomiLogo));
+    final logo = find.byType(AutonomiLogo);
     expect(logo, findsOneWidget);
+    final tile = find.ancestor(of: logo, matching: find.byType(ListTile));
+    expect(tile, findsOneWidget);
+    // Same shape as the W@tch identity row: accent icon left, the mark as
+    // the title, the explanation as the subtitle.
+    final listTile = tester.widget<ListTile>(tile);
+    final leading = listTile.leading! as Icon;
+    expect(leading.icon, Icons.hub_outlined);
+    expect(leading.color, WiTokens.dark.accent);
+    expect(
+      find.descendant(
+        of: tile,
+        matching: find.textContaining('Powered by the Autonomi network'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('autonomi.com'), findsOneWidget);
+    expect(listTile.trailing, isNull);
+    expect(
+      tester.getTopLeft(find.textContaining('Powered by the Autonomi network')).dy,
+      greaterThan(tester.getTopLeft(logo).dy),
+    );
     expect(
       tester.widget<Image>(
         find.descendant(of: logo, matching: find.byType(Image)),
