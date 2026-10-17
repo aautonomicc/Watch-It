@@ -99,9 +99,46 @@ void main() {
       tester.getTopLeft(find.text('Powered by')).dy,
       greaterThan(tester.getTopLeft(find.text('Settings')).dy),
     );
+    // Anchored to the drawer's bottom edge, not the last scrolling row:
+    // with only a few lists the credit must not hang mid-panel.
+    final drawerBottom = tester.getBottomLeft(find.byType(Drawer)).dy;
+    final creditBottom =
+        tester.getBottomLeft(find.byType(AutonomiCredit)).dy;
+    expect(creditBottom, closeTo(drawerBottom, 0.5));
+    expect(
+      tester.getBottomLeft(find.text('Settings')).dy,
+      lessThan(drawerBottom - 60),
+    );
     await tester.tap(find.text('Powered by'));
     await tester.pump();
     expect(launched, [Uri.parse('https://autonomi.com/')]);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('the pinned desktop drawer keeps the credit at its bottom edge',
+      (tester) async {
+    MyWatchSync.status.value = const MyWatchSyncStatus(supported: false);
+    await tester.pumpWidget(app(Scaffold(
+      body: Row(children: [
+        WiLibraryDrawer(
+          pinned: true,
+          healthProvider: () async =>
+              const ClientHealth(state: 'ready', peers: 3),
+        ),
+        const Expanded(child: SizedBox()),
+      ]),
+    )));
+    await tester.pumpAndSettle();
+
+    final panelBottom = tester.getBottomLeft(find.byType(WiLibraryDrawer)).dy;
+    expect(
+      tester.getBottomLeft(find.byType(AutonomiCredit)).dy,
+      closeTo(panelBottom, 0.5),
+    );
+    expect(
+      tester.getBottomLeft(find.text('Settings')).dy,
+      lessThan(panelBottom - 60),
+    );
     await tester.pumpWidget(const SizedBox());
   });
 }

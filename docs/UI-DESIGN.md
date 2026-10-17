@@ -39,7 +39,9 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   since 2026-10-16 — double the original — inside a scale-down FittedBox so a
   narrow phone with every action icon showing shrinks it rather than
   overflowing. **Network credit**: the drawer ends with a tappable "Powered by
-  [autonomi]" footer (always visible on desktop, where the drawer is pinned),
+  [autonomi]" footer anchored to the drawer's bottom edge, below the scrolling
+  list section (always visible on desktop, where the drawer is pinned at the
+  left of the home screen),
   and Settings → About carries the prominent "Powered by the Autonomi
   network" row (logo, one-line explanation, open-in-new) directly under the
   app's own identity row; both open https://autonomi.com/ in the system

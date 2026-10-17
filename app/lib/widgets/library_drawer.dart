@@ -151,124 +151,136 @@ class _WiLibraryDrawerState extends State<WiLibraryDrawer> {
             // Same order and visibility as the home screen's rows.
             final browsable =
                 lists == null ? null : browsableLists(lists, _storedSections);
-            return ListView(
+            // The scrolling body sits above a bottom-anchored footer so
+            // the network credit stays at the drawer's bottom edge however
+            // short the list section is (2026-10-17 — it used to be the
+            // last scrolling row, which on a desktop with a few lists left
+            // it hanging mid-panel under Settings).
+            return Column(
               children: [
-                // Connection status leads the drawer (2026-08-30, moved
-                // up from below Settings): peers, My W@tch.
-                const SizedBox(height: 12),
-                WiDrawerStatus(
-                  pinned: widget.pinned,
-                  healthProvider: widget.healthProvider,
-                ),
-                Divider(color: t.line, height: 24),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                  child: Text(
-                    'Library',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.2,
-                      color: t.ash,
-                    ),
-                  ),
-                ),
-                if (browsable == null)
-                  const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                else if (browsable.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
-                    child: Text(
-                      'Nothing to browse yet — add media on the My Media '
-                      'page (Settings → My Media).',
-                      style: TextStyle(fontSize: 12, color: t.boneDim),
-                    ),
-                  )
-                else
-                  for (final list in browsable)
-                    ListTile(
-                      dense: true,
-                      selected: list.id == widget.currentListId,
-                      selectedTileColor: t.ink2,
-                      leading: _leadingFor(list, t),
-                      title: Text(
-                        list.title,
-                        style: TextStyle(color: t.bone, fontSize: 14),
-                      ),
-                      trailing: Text(
-                        '${list.entries.length}',
-                        style: TextStyle(color: t.ash, fontSize: 12),
-                      ),
-                      onTap: () => _openList(list),
-                    ),
-                // Playlists get their own section below Library: they
-                // are ordered track sets, not wall shelves, so they
-                // never appear on the home wall (2026-09-11 decision).
-                if (_lists != null) ...[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                    child: Text(
-                      'Playlists',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.2,
-                        color: t.ash,
-                      ),
-                    ),
-                  ),
-                  for (final list in _lists!)
-                    if (list.isPlaylist)
-                      ListTile(
-                        dense: true,
-                        selected: list.id == widget.currentListId,
-                        selectedTileColor: t.ink2,
-                        // Content-derived icon: queue-music for audio,
-                        // the movie symbol for all-video playlists,
-                        // playlist-play for mixed (2026-09-12).
-                        leading: Icon(playlistContentIcon(list),
-                            color: list.id == widget.currentListId
-                                ? t.accent
-                                : t.boneDim,
-                            size: 20),
-                        title: Text(
-                          list.title,
-                          style: TextStyle(color: t.bone, fontSize: 14),
+                Expanded(
+                  child: ListView(
+                    children: [
+                        // Connection status leads the drawer (2026-08-30, moved
+                        // up from below Settings): peers, My W@tch.
+                        const SizedBox(height: 12),
+                        WiDrawerStatus(
+                          pinned: widget.pinned,
+                          healthProvider: widget.healthProvider,
                         ),
-                        trailing: Text(
-                          '${list.entries.length}',
-                          style: TextStyle(color: t.ash, fontSize: 12),
+                        Divider(color: t.line, height: 24),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                          child: Text(
+                            'Library',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.2,
+                              color: t.ash,
+                            ),
+                          ),
                         ),
-                        onTap: () => _openPlaylist(list),
-                      ),
-                  ListTile(
-                    dense: true,
-                    leading: Icon(Icons.add, color: t.boneDim, size: 20),
-                    title: Text('New playlist',
-                        style: TextStyle(color: t.boneDim, fontSize: 14)),
-                    onTap: _newPlaylist,
+                        if (browsable == null)
+                          const Padding(
+                            padding: EdgeInsets.all(24),
+                            child: Center(child: CircularProgressIndicator()),
+                          )
+                        else if (browsable.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 8),
+                            child: Text(
+                              'Nothing to browse yet — add media on the My Media '
+                              'page (Settings → My Media).',
+                              style: TextStyle(fontSize: 12, color: t.boneDim),
+                            ),
+                          )
+                        else
+                          for (final list in browsable)
+                            ListTile(
+                              dense: true,
+                              selected: list.id == widget.currentListId,
+                              selectedTileColor: t.ink2,
+                              leading: _leadingFor(list, t),
+                              title: Text(
+                                list.title,
+                                style: TextStyle(color: t.bone, fontSize: 14),
+                              ),
+                              trailing: Text(
+                                '${list.entries.length}',
+                                style: TextStyle(color: t.ash, fontSize: 12),
+                              ),
+                              onTap: () => _openList(list),
+                            ),
+                        // Playlists get their own section below Library: they
+                        // are ordered track sets, not wall shelves, so they
+                        // never appear on the home wall (2026-09-11 decision).
+                        if (_lists != null) ...[
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                            child: Text(
+                              'Playlists',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1.2,
+                                color: t.ash,
+                              ),
+                            ),
+                          ),
+                          for (final list in _lists!)
+                            if (list.isPlaylist)
+                              ListTile(
+                                dense: true,
+                                selected: list.id == widget.currentListId,
+                                selectedTileColor: t.ink2,
+                                // Content-derived icon: queue-music for audio,
+                                // the movie symbol for all-video playlists,
+                                // playlist-play for mixed (2026-09-12).
+                                leading: Icon(playlistContentIcon(list),
+                                    color: list.id == widget.currentListId
+                                        ? t.accent
+                                        : t.boneDim,
+                                    size: 20),
+                                title: Text(
+                                  list.title,
+                                  style: TextStyle(color: t.bone, fontSize: 14),
+                                ),
+                                trailing: Text(
+                                  '${list.entries.length}',
+                                  style: TextStyle(color: t.ash, fontSize: 12),
+                                ),
+                                onTap: () => _openPlaylist(list),
+                              ),
+                          ListTile(
+                            dense: true,
+                            leading: Icon(Icons.add, color: t.boneDim, size: 20),
+                            title: Text('New playlist',
+                                style: TextStyle(color: t.boneDim, fontSize: 14)),
+                            onTap: _newPlaylist,
+                          ),
+                        ],
+                        Divider(color: t.line, height: 24),
+                        // My Media, My W@tch, Upload, and Downloads
+                        // live under Settings → CONTENT — the drawer is slimmed
+                        // down to status rows + list navigation + Settings.
+                        ListTile(
+                          dense: true,
+                          leading: Icon(Icons.settings_outlined,
+                              color: t.boneDim, size: 20),
+                          title: Text('Settings',
+                              style: TextStyle(color: t.bone, fontSize: 14)),
+                          onTap: () => _openPage(const SettingsScreen()),
+                        ),
+                    ],
                   ),
-                ],
-                Divider(color: t.line, height: 24),
-                // My Media, My W@tch, Upload, and Downloads
-                // live under Settings → CONTENT — the drawer is slimmed
-                // down to status rows + list navigation + Settings.
-                ListTile(
-                  dense: true,
-                  leading: Icon(Icons.settings_outlined,
-                      color: t.boneDim, size: 20),
-                  title: Text('Settings',
-                      style: TextStyle(color: t.bone, fontSize: 14)),
-                  onTap: () => _openPage(const SettingsScreen()),
                 ),
-                // Network credit as the drawer's footer — on every home
-                // screen, and permanently on desktop where the drawer is
-                // pinned (2026-10-16). Tap opens autonomi.com.
-                Divider(color: t.line, height: 24),
+                // Network credit as the drawer's footer, pinned to the
+                // bottom edge — on every home screen, and permanently on
+                // desktop where the drawer is pinned (2026-10-16). Tap
+                // opens autonomi.com.
+                Divider(color: t.line, height: 1),
                 const AutonomiCredit.compact(),
               ],
             );
