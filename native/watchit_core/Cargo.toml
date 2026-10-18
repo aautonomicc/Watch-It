@@ -26,10 +26,12 @@ cc = "1"
 # updates/transfers — all directly on the backup's pointer path — plus
 # ant-core-side single-flight chunk fetches across concurrent reads and
 # self_encryption 0.36.2. File manifests (ADR-0006) ride along, unused.
-# ⚠️ ant-core pins `zip = "^2"` and crates.io has YANKED every zip 2.x:
-# a plain `cargo update` fails to resolve. Cargo.lock holds zip 2.4.2
-# (cargo honours locked yanked versions) — NEVER delete the lockfile;
-# bump with targeted `cargo update -p <crate>` only.
+# NOTE: ant-core pins `zip = "^2"`; on 2026-10-16 every zip 2.x showed
+# as yanked and a plain `cargo update` refused to resolve, so the lock
+# was bumped with targeted `cargo update -p`. By 2026-10-18 the 2.x line
+# was un-yanked (lock now holds zip 2.6.1 beside x0x's zip 9) and a plain
+# `cargo update` resolves again — but keep the lockfile under version
+# control and check `cargo update` output before trusting it.
 ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "4b4bf518ba6af361e406b0cacb2cdf6dc271305e" }
 self_encryption = "0.36"
 # batch.rs implements ant-core's UploadAdapter trait (the pooled-payment
@@ -151,10 +153,15 @@ tracing-android = "0.2"
 # Breaking changes (x0x::bootstrap removed, files TransferState) do not
 # touch our code. Known partial: upstream #1419 — a MASQUE-relay
 # supersede can leave a link one-sided for minutes (ant-quic#332).
+# 0.48.1 (2026-10-17): fix(network) detect and re-dial a one-sided peer
+# link — closes the #1419 MASQUE-relay one-sided caveat above — plus the
+# plane legacy grace counted per connection generation, pubsub msg_id
+# carried on live frames (#869), ant-quic 0.27.61, saorsa-gossip 0.5.90;
+# the rest is groups/x0xd/GUI work off our path.
 # NOTE: zero idle-egress change — enforced shedding (Track E: consume-
 # only Leaves, enforced shed_normal) still hasn't landed upstream.
 # Pin a release, never git main.
-x0x = "0.48.0"
+x0x = "0.48.1"
 # CancellationToken for the mywatch heartbeat/watch task (already in the
 # x0x tree, so free on desktop).
 tokio-util = "0.7"
