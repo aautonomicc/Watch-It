@@ -17,6 +17,40 @@ REQUIRED = {"libapp.so", "libflutter.so", "libwatchit_core.so", "libmpv.so"}
 # self_encryption for WASM). They are statically linked into libwatchit_core.so
 # already; one in the APK means native/build-android.sh's jniLibs sweep failed.
 STALE_SIDE_LIBS = re.compile(r"^lib(ant_core|self_encryption)-[0-9a-f]+\.so$")
+# Kotlin classes that Pigeon "native interop" (JNI) plugins resolve by name
+# from Dart (shared_preferences_android 2.5.0+). app/proguard-rules.pro keeps
+# them; a release APK where R8 renamed one throws NoSuchMethodError at the
+# first SharedPreferences call — before runApp in this app, so the install
+# never gets past the Android splash (alpha.125, flutter/flutter#194649).
+KEPT_JNI_CLASSES = (
+    "Lkotlin/coroutines/Continuation;",
+    "Lkotlin/Unit;",
+    "Lkotlin/Result;",
+)
+
+
+def dex_string_entry(descriptor):
+    """The exact string_data_item of a short ASCII dex string: uleb128
+    utf16 length, MUTF-8 bytes, NUL. Matching the whole entry (not a bare
+    substring) tells a kept class descriptor apart from the same name embedded
+    in Kotlin metadata signatures, which survive renaming."""
+    data = descriptor.encode("ascii")
+    if not data or len(data) >= 128:
+        raise ValueError("descriptor must be 1..127 ASCII bytes")
+    return bytes([len(data)]) + data + b"\x00"
+
+
+def inspect_dex_keeps(apk, descriptors=KEPT_JNI_CLASSES):
+    with zipfile.ZipFile(apk) as archive:
+        blobs = [archive.read(name) for name in archive.namelist()
+                 if re.fullmatch(r"classes\d*\.dex", name)]
+    if not blobs:
+        raise ValueError("No classes.dex in the APK")
+    missing = [d for d in descriptors
+               if not any(dex_string_entry(d) in blob for blob in blobs)]
+    if missing:
+        raise ValueError(f"R8 renamed JNI-resolved Kotlin classes (keep rules missing): {missing}")
+    return list(descriptors)
 
 
 def inspect_native(apk, expected):
@@ -80,6 +114,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     native = inspect_native(args.apk, args.abis.split(","))
+    kept = inspect_dex_keeps(args.apk)
     badging = run(args.aapt2, "dump", "badging", str(args.apk))
     package, min_sdk = manifest_fields(badging, args.package)
     signature = run(args.apksigner, "verify", "--verbose", "--print-certs", str(args.apk))
@@ -91,7 +126,8 @@ def main():
     receipt = {
         "artifact": args.apk.name, "bytes": args.apk.stat().st_size,
         "sha256": digest, "package": package, "min_sdk": min_sdk,
-        "native_libraries": native, "signer_certificate_sha256": certs,
+        "native_libraries": native, "kept_jni_classes": kept,
+        "signer_certificate_sha256": certs,
         "signature_verification": signature, "manifest_badging": badging,
         "hardware_test": "NOT RUN", "signer_ownership": "NOT ATTESTED",
     }

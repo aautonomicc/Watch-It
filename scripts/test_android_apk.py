@@ -67,6 +67,37 @@ class ApkNativeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Stale dependency side library"):
             VERIFY.inspect_native(self.apk, ["armeabi-v7a"])
 
+    def dex(self, entries):
+        blob = bytearray(b"dex\n039\0" + bytes(104))
+        for entry in entries:
+            blob += entry
+        return bytes(blob)
+
+    def test_kept_jni_classes_found(self):
+        self.write()
+        kept = b"".join(VERIFY.dex_string_entry(d) for d in VERIFY.KEPT_JNI_CLASSES)
+        with zipfile.ZipFile(self.apk, "a") as archive:
+            archive.writestr("classes.dex", self.dex([b"\x05Lfoo;\x00"]))
+            archive.writestr("classes2.dex", self.dex([kept]))
+        self.assertEqual(VERIFY.inspect_dex_keeps(self.apk), list(VERIFY.KEPT_JNI_CLASSES))
+
+    def test_renamed_jni_class_refused(self):
+        # The alpha.125 shape: the descriptor survives only INSIDE Kotlin
+        # metadata signatures while the class itself was renamed to c6.d.
+        self.write()
+        embedded = VERIFY.dex_string_entry(
+            "emit(Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;")
+        others = b"".join(VERIFY.dex_string_entry(d) for d in VERIFY.KEPT_JNI_CLASSES[1:])
+        with zipfile.ZipFile(self.apk, "a") as archive:
+            archive.writestr("classes.dex", self.dex([embedded, others, b"\x05Lc6/d;\x00"]))
+        with self.assertRaisesRegex(ValueError, "Continuation"):
+            VERIFY.inspect_dex_keeps(self.apk)
+
+    def test_no_dex_refused(self):
+        self.write()
+        with self.assertRaisesRegex(ValueError, "classes.dex"):
+            VERIFY.inspect_dex_keeps(self.apk)
+
     def test_missing_entire_selected_abi_refused(self):
         self.write()
         with self.assertRaisesRegex(ValueError, "ABI set"):

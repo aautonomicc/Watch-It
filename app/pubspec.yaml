@@ -40,6 +40,15 @@ dependencies:
   url_launcher: ^6.3.0
   path_provider: ^2.1.5
   shared_preferences: ^2.5.5
+  # Held below 2.5.0: that release moved the Android implementation to
+  # Pigeon JNI, whose generated bindings look up `kotlin.coroutines.Continuation`
+  # by name — R8 renames it in release builds (the plugin ships no keep rules),
+  # so the first SharedPreferences.getInstance() throws NoSuchMethodError before
+  # runApp and the app sits on the Android splash forever (alpha.125 on-device;
+  # flutter/flutter#194649, fix pending in flutter/packages#13311). Lift the cap
+  # once a 2.5.x ships its own consumer ProGuard rules; android/app/
+  # proguard-rules.pro keeps the same six Kotlin classes as belt-and-braces.
+  shared_preferences_android: '>=2.4.28 <2.5.0'
   media_kit: ^1.2.6
   media_kit_video: ^2.0.1
   media_kit_libs_video: ^1.0.7
