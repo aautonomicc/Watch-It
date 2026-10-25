@@ -105,7 +105,20 @@ for you. (As above, the titles shown are invented for the screenshots.)*
    everyone who doesn't hold it — unlike a *public* upload, whose datamap
    is itself stored on the network where any node operator can find it and
    watch the file. That's why W@tch takes datamaps only, and has no
-   public-address entry type.
+   public-address entry type. One thing a private upload does **not**
+   hide is *who paid for it*: every upload is paid with a public
+   transaction on Arbitrum from your wallet, and that payment commits to
+   the addresses of the chunks it bought. The chunks themselves carry no
+   owner or payer, and nobody can work backwards from the chain to
+   unknown content — but anyone who already has a copy of a file (or its
+   datamap) can recompute its chunk addresses and confirm that a given
+   wallet paid to store it, and the handful of nodes storing each chunk
+   see the payer's address with the payment proof. Wallet → person is
+   then ordinary chain analysis (an exchange withdrawal that funded the
+   wallet, for instance). This is how the network's payments work, not
+   something W@tch can change: fund the upload wallet from a source you
+   are comfortable linking to your uploads, keep it for uploads only, and
+   use a fresh wallet when you want uploads kept apart from each other.
 2. **Lists of media.** Import `.datamap` files into one or more lists; export
    a library as a `.watch-list` bundle (datamaps + artwork) that imports
    anywhere W@tch runs. A datamap grants full access, so treat bundles as
@@ -140,7 +153,8 @@ for you. (As above, the titles shown are invented for the screenshots.)*
    only with your own devices.
 
 No server, no accounts, no telemetry. Everything in W@tch is private:
-uploads, lists, and sync are yours and your own devices' only — the app
+uploads, lists, and sync are yours and your own devices' only (the one
+public trace is the Arbitrum payment behind each upload — see step 1) — the app
 has no public publishing surface (a public "Channels" feature existed
 alpha.65–.107 and was removed 2026-09-27). There is deliberately **no Plex/Emby/Jellyfin
 server compatibility** — Autonomi *is* the backend.
