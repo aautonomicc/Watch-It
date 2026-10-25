@@ -1,0 +1,22 @@
+# cargo-audit configuration — read automatically when `cargo audit` runs from
+# native/watchit_core (scripts/release_build.sh runs it as a release gate).
+#
+# Every ID below is an ACCEPTED advisory: known, reviewed, and not fixable on
+# our side yet. Each entry says why and what would let it come off the list.
+# A vulnerability NOT listed here fails the release build on purpose —
+# re-run `cargo audit` by hand, decide, and either bump or add it here with
+# a reason. Unmaintained-crate warnings never fail the build (all transitive).
+[advisories]
+ignore = [
+  # crypto-bigint 0.5.5 timing variability — pulled by k256 0.13 via every
+  # alloy line (evmlib pins alloy 1.x; even alloy 2.5 needs k256 ^0.13).
+  # Clears when alloy moves to k256 0.14 AND evmlib#22 lands. Impact low:
+  # local software-wallet signing on a desktop; Trezor signs on-device.
+  "RUSTSEC-2026-0387",
+  # zip 2.x symlink/SUID handling in ZipArchive::extract — ant-core pins
+  # zip ^2 at the 0.14.0 tag; neither ant-core nor W@tch ever calls
+  # extract(). Clears at the next ant-core tag (zip 9 merged on main, PR #233).
+  "RUSTSEC-2026-0367",
+  "RUSTSEC-2026-0368",
+  "RUSTSEC-2026-0369",
+]

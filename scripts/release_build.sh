@@ -35,6 +35,15 @@ fi
 export PATH="$HOME/flutter/bin:$HOME/.cargo/bin:$PATH"
 source "$HOME/Android/env.sh"
 
+echo "=== cargo audit $(date) ==="
+# Security gate since 2026-10-25: a vulnerability advisory on the Rust lockfile
+# that is not accepted in native/watchit_core/.cargo/audit.toml fails the
+# release. Unmaintained-crate warnings are informational. cargo-audit lives in
+# ~/.cargo/bin (`cargo install cargo-audit`).
+command -v cargo-audit >/dev/null || { echo "FATAL: cargo-audit not installed (cargo install cargo-audit)" >&2; exit 1; }
+(cd "$REPO/native/watchit_core" && cargo audit)
+echo "=== cargo audit clean (accepted advisories per .cargo/audit.toml) ==="
+
 echo "=== APK build start $(date) ==="
 # Release APKs are dual-ABI (armeabi-v7a + arm64-v8a) since alpha.98: Fire TV
 # Sticks and the Google TV Streamer expose only 32-bit app ABIs, so the single

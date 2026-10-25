@@ -4926,10 +4926,11 @@ class $$MediaListsTableTableManager
               getPrefetchedDataCallback: (items) async {
                 return [
                   if (mediaEntriesRefs)
-                    await $_getPrefetchedData<
+                    await $_getPrefetchedDataByColumns<
                       MediaListRow,
                       $MediaListsTable,
-                      MediaEntryRow
+                      MediaEntryRow,
+                      $MediaEntriesTable
                     >(
                       currentTable: table,
                       referencedTable: $$MediaListsTableReferences
@@ -4940,8 +4941,8 @@ class $$MediaListsTableTableManager
                             table,
                             p0,
                           ).mediaEntriesRefs,
-                      referencedItemsForCurrentItem: (item, referencedItems) =>
-                          referencedItems.where((e) => e.listId == item.id),
+                      currentColumn: 'id',
+                      referencedColumn: 'list_id',
                       typedResults: items,
                     ),
                 ];

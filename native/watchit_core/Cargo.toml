@@ -17,22 +17,27 @@ path = "src/bin/devserver.rs"
 cc = "1"
 
 [dependencies]
-# Pinned to ant-core 0.13.0 (tag ant-core-v0.13.0, rc-2026.10.2). Still
+# Pinned to ant-core 0.14.0 (tag ant-core-v0.14.0, rc-2026.10.3). Still
 # exposes Client::file_download_to_sender + self_encryption 0.36
 # get_range seek; 0.11 reintroduced Pointers (ADR 0016 — the seed-phrase
 # backup's primitive), 0.12 added PR #208's pointer read-freshness +
-# pay-only-for-landable-writes, 0.13 adds PR #210's pointer ownership
+# pay-only-for-landable-writes, 0.13 added PR #210's pointer ownership
 # handover (ADR-0018) + majority fork reads + whole-group checks before
 # updates/transfers — all directly on the backup's pointer path — plus
-# ant-core-side single-flight chunk fetches across concurrent reads and
-# self_encryption 0.36.2. File manifests (ADR-0006) ride along, unused.
-# NOTE: ant-core pins `zip = "^2"`; on 2026-10-16 every zip 2.x showed
-# as yanked and a plain `cargo update` refused to resolve, so the lock
-# was bumped with targeted `cargo update -p`. By 2026-10-18 the 2.x line
-# was un-yanked (lock now holds zip 2.6.1 beside x0x's zip 9) and a plain
-# `cargo update` resolves again — but keep the lockfile under version
-# control and check `cargo update` output before trusting it.
-ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "4b4bf518ba6af361e406b0cacb2cdf6dc271305e" }
+# ant-core-side single-flight chunk fetches. 0.14 adds ADR-0023 hot-record
+# read spreading (first GETs spread uniformly across the close group, a
+# declined dial backs off 15s instead of 30 min, refusing holders are waited
+# out instead of answered "not found") — directly on the streaming path —
+# and FileUploadResult::sha256 (unused so far). File manifests (ADR-0006)
+# ride along, unused.
+# NOTE: ant-core still pins `zip = "^2"` at this tag (zip 9 landed on main
+# after it, PR #233), so the three RUSTSEC-2026-0367/0368/0369 advisories on
+# `ZipArchive::extract` stay audit-visible until the next ant-core tag —
+# neither ant-core nor W@tch ever calls extract(). On 2026-10-16 every zip
+# 2.x showed as yanked and a plain `cargo update` refused to resolve; the
+# line was un-yanked by 2026-10-18. Keep the lockfile under version control
+# and read `cargo update` output before trusting it.
+ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "6096b1c8caf6688d6825fcb9ff61fa1b590d984b" }
 self_encryption = "0.36"
 # batch.rs implements ant-core's UploadAdapter trait (the pooled-payment
 # upload driver), which is declared with async_trait — implementors need
