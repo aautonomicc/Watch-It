@@ -17,27 +17,31 @@ path = "src/bin/devserver.rs"
 cc = "1"
 
 [dependencies]
-# Pinned to ant-core 0.14.0 (tag ant-core-v0.14.0, rc-2026.10.3). Still
-# exposes Client::file_download_to_sender + self_encryption 0.36
-# get_range seek; 0.11 reintroduced Pointers (ADR 0016 — the seed-phrase
-# backup's primitive), 0.12 added PR #208's pointer read-freshness +
-# pay-only-for-landable-writes, 0.13 added PR #210's pointer ownership
-# handover (ADR-0018) + majority fork reads + whole-group checks before
-# updates/transfers — all directly on the backup's pointer path — plus
-# ant-core-side single-flight chunk fetches. 0.14 adds ADR-0023 hot-record
-# read spreading (first GETs spread uniformly across the close group, a
-# declined dial backs off 15s instead of 30 min, refusing holders are waited
-# out instead of answered "not found") — directly on the streaming path —
-# and FileUploadResult::sha256 (unused so far). File manifests (ADR-0006)
-# ride along, unused.
-# NOTE: ant-core still pins `zip = "^2"` at this tag (zip 9 landed on main
-# after it, PR #233), so the three RUSTSEC-2026-0367/0368/0369 advisories on
-# `ZipArchive::extract` stay audit-visible until the next ant-core tag —
-# neither ant-core nor W@tch ever calls extract(). On 2026-10-16 every zip
-# 2.x showed as yanked and a plain `cargo update` refused to resolve; the
-# line was un-yanked by 2026-10-18. Keep the lockfile under version control
-# and read `cargo update` output before trusting it.
-ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "6096b1c8caf6688d6825fcb9ff61fa1b590d984b" }
+# Pinned to ant-client main rev 458c7175 (2026-10-29, 39 commits past tag
+# ant-core-v0.14.0 / rc-2026.10.3 — all browser read tuning, release
+# scripts, docs and deps; Cargo.toml version still 0.14.0, zero API change
+# for us). Pinned past the tag ON PURPOSE: the tag still pins `zip = "^2"`,
+# whose zstd/zstd-safe transitives picked up RUSTSEC-2026-0391/0398/0403 on
+# 2026-11-01 and made the `cargo audit` release gate fail; main moved to
+# `zip = "9"` (PR #233, merged 2026-10-23) which drops zip 2 + zstd + bzip2 +
+# xz2 + lzma from the graph entirely. Move back to a plain tag at the next
+# ant-core release (0.15.0+). Still exposes Client::file_download_to_sender
+# + self_encryption 0.36 get_range seek; 0.11 reintroduced Pointers (ADR 0016
+# — the seed-phrase backup's primitive), 0.12 added PR #208's pointer
+# read-freshness + pay-only-for-landable-writes, 0.13 added PR #210's pointer
+# ownership handover (ADR-0018) + majority fork reads + whole-group checks
+# before updates/transfers — all directly on the backup's pointer path —
+# plus ant-core-side single-flight chunk fetches. 0.14 adds ADR-0023
+# hot-record read spreading (first GETs spread uniformly across the close
+# group, a declined dial backs off 15s instead of 30 min, refusing holders
+# are waited out instead of answered "not found") — directly on the
+# streaming path — and FileUploadResult::sha256 (unused so far). File
+# manifests (ADR-0006) ride along, unused.
+# LOCKFILE NOTE: on 2026-10-16 every zip 2.x showed as yanked and a plain
+# `cargo update` refused to resolve (un-yanked by 2026-10-18). Keep the
+# lockfile under version control and read `cargo update` output before
+# trusting it.
+ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "458c7175490e6934a5501e51ff1d80d784f27564" }
 self_encryption = "0.36"
 # batch.rs implements ant-core's UploadAdapter trait (the pooled-payment
 # upload driver), which is declared with async_trait — implementors need

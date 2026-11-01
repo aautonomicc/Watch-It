@@ -13,10 +13,6 @@ ignore = [
   # Clears when alloy moves to k256 0.14 AND evmlib#22 lands. Impact low:
   # local software-wallet signing on a desktop; Trezor signs on-device.
   "RUSTSEC-2026-0387",
-  # zip 2.x symlink/SUID handling in ZipArchive::extract — ant-core pins
-  # zip ^2 at the 0.14.0 tag; neither ant-core nor W@tch ever calls
-  # extract(). Clears at the next ant-core tag (zip 9 merged on main, PR #233).
-  "RUSTSEC-2026-0367",
-  "RUSTSEC-2026-0368",
-  "RUSTSEC-2026-0369",
+  # (RUSTSEC-2026-0367/0368/0369 on zip 2.x were accepted 2026-10-25 and
+  # cleared 2026-11-01 when the ant-core pin moved past zip 2 — see Cargo.toml.)
 ]
