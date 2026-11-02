@@ -226,6 +226,22 @@ class AppSettings {
     await prefs.setBool(_myWatchCellularKey, value);
   }
 
+  static const _trezorHostPassphraseKey = 'trezor_host_passphrase_v1';
+
+  /// Whether the Trezor passphrase may be entered in the W@tch app
+  /// instead of on the device (opt-in; device entry is the default and
+  /// more secure). Applied to the embedded client at startup and on
+  /// every flip; the device's own "always on device" setting still wins.
+  static Future<bool> trezorHostPassphrase() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_trezorHostPassphraseKey) ?? false;
+  }
+
+  static Future<void> setTrezorHostPassphrase(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_trezorHostPassphraseKey, value);
+  }
+
   static const _networkPausedKey = 'network_paused_v1';
 
   /// Whether the user has paused all of the app's network activity

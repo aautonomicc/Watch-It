@@ -1162,6 +1162,7 @@ identity since the seed-phrase backup — holdable on a Trezor/Ledger.
 The separate-backup-phrase alternative was explicitly rejected by
 decision (2026-10-10).
 
+- [x] Own Trezor signer + opt-in host-side passphrase entry (implemented 2026-11-02, UNRELEASED): `trezor.rs` drops alloy-signer-trezor for W@tch's own thin signer over trezor-client, owning the session + interaction loop. Buys a resumable session (one passphrase per job), the legacy-enum bug gone by construction, and the user ask — a Settings → Wallet switch (OFF by default) to type the Trezor passphrase in the app instead of on the device (firmware `always_on_device` still wins; passphrase memory-only + Zeroizing, never persisted). New protected routes `/trezor/passphrase-mode` + `/trezor/passphrase`; `enter-passphrase` attention action + prompt-card field. Device entry stays default. NOT device-verified (Ella headless) — the user's next real-Trezor run is the proof; the recovery-verify guards + 7 new Rust tests + Dart widget tests back it meanwhile.
 - [x] Phase 0 — upload-all batch payments (implemented 2026-10-10,
       shipped in alpha.113; benefits software wallets too): the batch
       uploader restructured encode-everything → ONE pooled

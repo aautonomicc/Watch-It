@@ -121,6 +121,117 @@ pub mod attention {
     }
 }
 
+/// Host-side Trezor passphrase entry (opt-in; device entry is the
+/// default and the more secure path).
+///
+/// A BIP-39 passphrase (the "25th word" / hidden-wallet secret) is
+/// normally typed on the Trezor's own screen, so it never touches this
+/// computer. On a Model One (no touchscreen) that is awkward, and some
+/// users simply prefer typing it in the app — so W@tch can, WHEN TURNED
+/// ON, answer the device's passphrase request with a string the app
+/// collects instead of telling the device to ask on-screen. This is
+/// strictly LESS secure (the passphrase lives in app memory and crosses
+/// USB), so it is OFF by default and the firmware's
+/// "always enter on device" setting overrides it.
+///
+/// The toggle is a process-global flag the app sets at startup from its
+/// stored preference (and whenever the user flips it); every device
+/// conversation reads it when the device asks for a passphrase.
+pub mod host_passphrase {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static ENABLED: AtomicBool = AtomicBool::new(false);
+
+    /// Turn host-side passphrase entry on or off (the app's preference).
+    pub fn set(on: bool) {
+        ENABLED.store(on, Ordering::Relaxed);
+    }
+
+    /// Is host-side passphrase entry currently enabled?
+    pub fn enabled() -> bool {
+        ENABLED.load(Ordering::Relaxed)
+    }
+}
+
+/// The channel a blocked device conversation waits on for the passphrase
+/// the app collects — and the routes the app POSTs it through.
+///
+/// When a device conversation (on its own blocking thread) receives a
+/// passphrase request and host entry is enabled, it publishes the
+/// `enter-passphrase` attention action and BLOCKS here until the app
+/// delivers a passphrase (or says "enter it on the device instead", or a
+/// 3-minute timeout lapses). Device conversations serialize on
+/// `DEVICE_LOCK`, so at most one request is ever pending.
+///
+/// Lives outside the desktop-only module so the delivery route compiles
+/// on every target; off-desktop nothing ever waits, so delivery is a
+/// no-op that reports "no one was waiting".
+pub mod passphrase {
+    use std::sync::mpsc;
+    use std::sync::Mutex;
+    use std::time::Duration;
+    use zeroize::Zeroizing;
+
+    /// How a waiting conversation is answered.
+    pub enum Reply {
+        /// The app collected this passphrase — send it to the device.
+        Host(Zeroizing<String>),
+        /// The user chose to enter it on the device instead.
+        OnDevice,
+        /// Cancelled or timed out — abort the conversation.
+        Cancelled,
+    }
+
+    static PENDING: Mutex<Option<mpsc::Sender<Reply>>> = Mutex::new(None);
+
+    /// Generous: a human finding and typing a passphrase, well past any
+    /// reasonable entry time; on timeout the conversation aborts cleanly.
+    const TIMEOUT: Duration = Duration::from_secs(180);
+
+    /// Called from the SYNC device thread: publish `enter-passphrase`,
+    /// block until the app answers (or the timeout lapses). The attention
+    /// guard is held for the whole wait so the app's card stays up.
+    pub fn request() -> Reply {
+        let (tx, rx) = mpsc::channel();
+        *PENDING.lock().unwrap_or_else(|p| p.into_inner()) = Some(tx);
+        let _attention = super::attention::begin("enter-passphrase");
+        let reply = rx.recv_timeout(TIMEOUT).unwrap_or(Reply::Cancelled);
+        // Clear the slot (idempotent — deliver() already took the sender
+        // on a real answer; a timeout leaves it to drop here).
+        *PENDING.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        reply
+    }
+
+    /// From the async route: hand the app's passphrase to the waiter.
+    /// Returns whether anyone was actually waiting.
+    pub fn deliver(pass: String) -> bool {
+        send(Reply::Host(Zeroizing::new(pass)))
+    }
+
+    /// From the async route: the user chose on-device entry.
+    pub fn use_device() -> bool {
+        send(Reply::OnDevice)
+    }
+
+    /// Whether a conversation is waiting for a passphrase right now
+    /// (test seam; the app reads the `enter-passphrase` attention action
+    /// instead).
+    pub fn pending() -> bool {
+        PENDING
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_some()
+    }
+
+    fn send(reply: Reply) -> bool {
+        let tx = PENDING.lock().unwrap_or_else(|p| p.into_inner()).take();
+        match tx {
+            Some(tx) => tx.send(reply).is_ok(),
+            None => false,
+        }
+    }
+}
+
 /// Did this signature really come from the expected wallet? Recover the
 /// signer over the transaction's own signature hash and compare — the
 /// local, tap-free version of the check evmlib's payment journal does
@@ -405,11 +516,21 @@ pub fn identity_recovers_to(
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 mod device {
     use super::*;
-    use alloy_signer_trezor::{HDPath, TrezorSigner};
+    use alloy::consensus::{TxEip1559, TxLegacy};
+    use alloy::primitives::{normalize_v, Address, Signature, TxKind, U256};
+    use trezor_client::{protos, TrezorResponse};
 
-    /// Arbitrum One — the chain every W@tch payment lives on; baked into
-    /// the signer so the device shows the right network at confirm time.
-    const CHAIN_ID: u64 = 42161;
+    /// Minimum firmware that signs EIP-1559 (what every W@tch payment is)
+    /// — the check alloy-signer-trezor used to run, kept now that we own
+    /// the signer. Older majors we don't know about are assumed capable.
+    fn firmware_ok(major: u64, minor: u64, patch: u64) -> bool {
+        let min = match major {
+            1 => (1, 11, 1),
+            2 => (2, 5, 1),
+            _ => return true,
+        };
+        (major, minor, patch) >= min
+    }
 
     /// Map transport/device errors to end-user language. The udev hint
     /// matters: on Linux a fresh machine without the Trezor rules sees a
@@ -450,21 +571,17 @@ mod device {
 
     /// The one device session a whole JOB (backup, batch upload, single
     /// upload) signs through. Trezor caches its passphrase PER SESSION,
-    /// and the old fresh-session-per-signature design (alpha.116's
-    /// journal-mismatch workaround, no longer load-bearing since the
-    /// alpha.118 legacy-enum fix) therefore re-prompted the passphrase at
-    /// every signature — ~15 entries per backup in the 2026-10-12 live
-    /// report. A job opens ONE session up front (one passphrase entry),
-    /// every conversation below reuses it while it is open, and the
-    /// silent pre-tap LIVE address re-check stays as the real guard.
-    static JOB_SESSION: std::sync::Mutex<Option<std::sync::Arc<TrezorSigner>>> =
+    /// so opening ONE session up front means one passphrase entry
+    /// (on-device, or in the app when host entry is enabled) covers the
+    /// identity derive and every payment signature of the job.
+    static JOB_SESSION: std::sync::Mutex<Option<std::sync::Arc<OwnTrezorSigner>>> =
         std::sync::Mutex::new(None);
 
     /// Guard handed to the job that opened the session; dropping it (job
     /// end, success or failure) closes the reuse window. A newer session
     /// is never clobbered by an older guard's drop.
     pub struct TrezorJobSession {
-        signer: std::sync::Arc<TrezorSigner>,
+        signer: std::sync::Arc<OwnTrezorSigner>,
     }
 
     impl Drop for TrezorJobSession {
@@ -479,13 +596,419 @@ mod device {
         }
     }
 
+    /// Our own Trezor Ethereum signer over trezor-client — direct USB, no
+    /// Trezor Bridge, and no alloy-signer-trezor.
+    ///
+    /// Owning the transport buys three things the alloy wrapper could
+    /// not give us:
+    ///   1. HOST-SIDE PASSPHRASE ENTRY (opt-in): alloy-signer-trezor's
+    ///      interaction loop hard-codes `ack(on_device)`, so the device
+    ///      always prompts on its own screen. Our [`drive`] loop answers
+    ///      a passphrase request with a string the app collects when
+    ///      [`super::host_passphrase::enabled`] is on and the firmware
+    ///      permits it (`passphrase_always_on_device` wins);
+    ///   2. a RESUMABLE SESSION: we read the device session id at connect
+    ///      and reopen with it, so one passphrase entry covers the whole
+    ///      job (alloy-signer-trezor's session id was private — the old
+    ///      fresh-session-per-signature workaround re-prompted);
+    ///   3. the LEGACY-ENUM BUG GONE BY CONSTRUCTION: we always build the
+    ///      concrete EIP-1559 (or legacy) device request from the owned
+    ///      transaction, so the alpha.118 downcast-miss-signs-legacy
+    ///      failure class cannot recur (the recovery-verify in
+    ///      [`VerifiedTrezor`] stays as the backstop regardless).
+    pub struct OwnTrezorSigner {
+        session_id: Vec<u8>,
+        path: Vec<u32>,
+        address: Address,
+        /// Host-side passphrase entry snapshotted at connect; the
+        /// firmware's "always on device" forces device entry regardless.
+        host_passphrase: bool,
+        always_on_device: bool,
+    }
+
+    /// Drive one device response to completion, handling the button /
+    /// PIN / passphrase interactions. This is trezor-client's own
+    /// `handle_interaction`, except the passphrase arm can answer with a
+    /// host-collected string.
+    fn drive<T, R: trezor_client::TrezorMessage>(
+        resp: TrezorResponse<'_, T, R>,
+        host: bool,
+        always_on_device: bool,
+    ) -> Result<T, String> {
+        match resp {
+            TrezorResponse::Ok(value) => Ok(value),
+            TrezorResponse::Failure(f) => Err(friendly(format!(
+                "the Trezor reported: {}",
+                f.message()
+            ))),
+            TrezorResponse::ButtonRequest(req) => {
+                drive(req.ack().map_err(friendly)?, host, always_on_device)
+            }
+            TrezorResponse::PinMatrixRequest(_) => Err(
+                "the Trezor is asking for its PIN to be typed on this computer, \
+                 which W@tch does not support — unlock the device itself, then \
+                 try again"
+                    .into(),
+            ),
+            TrezorResponse::PassphraseRequest(req) => {
+                // Host entry only when the user turned it on AND the
+                // firmware allows it; otherwise exactly the old
+                // behaviour (let the user enter it on the device).
+                if host && !always_on_device {
+                    match super::passphrase::request() {
+                        super::passphrase::Reply::Host(p) => drive(
+                            req.ack_passphrase((*p).clone()).map_err(friendly)?,
+                            host,
+                            always_on_device,
+                        ),
+                        super::passphrase::Reply::OnDevice => {
+                            let on_device = req.on_device();
+                            drive(req.ack(!on_device).map_err(friendly)?, host, always_on_device)
+                        }
+                        super::passphrase::Reply::Cancelled => Err(
+                            "passphrase entry was cancelled — nothing was changed"
+                                .into(),
+                        ),
+                    }
+                } else {
+                    let on_device = req.on_device();
+                    drive(req.ack(!on_device).map_err(friendly)?, host, always_on_device)
+                }
+            }
+        }
+    }
+
+    /// Open a fresh USB handle resumed onto this signer's session (so a
+    /// passphrase already entered this session is not re-prompted).
+    fn open_session(session_id: &[u8]) -> Result<trezor_client::Trezor, String> {
+        let mut client = trezor_client::unique(false).map_err(friendly)?;
+        client
+            .init_device(Some(session_id.to_vec()))
+            .map_err(friendly)?;
+        Ok(client)
+    }
+
+    /// EIP-55 address string → `Address`.
+    fn parse_address(s: &str) -> Result<Address, String> {
+        s.parse()
+            .map_err(|_| format!("the Trezor returned an unparseable address ({s})"))
+    }
+
+    fn eth_get_address(
+        client: &mut trezor_client::Trezor,
+        path: &[u32],
+        host: bool,
+        always: bool,
+    ) -> Result<String, String> {
+        let mut req = protos::EthereumGetAddress::new();
+        req.address_n = path.to_vec();
+        let resp = client
+            .call(
+                req,
+                Box::new(|_, m: protos::EthereumAddress| Ok(m.address().to_string())),
+            )
+            .map_err(friendly)?;
+        drive(resp, host, always)
+    }
+
+    fn eth_sign_message(
+        client: &mut trezor_client::Trezor,
+        path: &[u32],
+        message: &[u8],
+        host: bool,
+        always: bool,
+    ) -> Result<Signature, String> {
+        let mut req = protos::EthereumSignMessage::new();
+        req.address_n = path.to_vec();
+        req.set_message(message.to_vec());
+        let resp = client
+            .call(
+                req,
+                Box::new(|_, m: protos::EthereumMessageSignature| {
+                    let sig = m.signature();
+                    if sig.len() != 65 {
+                        return Err(trezor_client::Error::MalformedSignature);
+                    }
+                    Ok(TrezorSig {
+                        r: sig[0..32].try_into().unwrap(),
+                        s: sig[32..64].try_into().unwrap(),
+                        v: sig[64] as u64,
+                    })
+                }),
+            )
+            .map_err(friendly)?;
+        let ts = drive(resp, host, always)?;
+        to_alloy_sig(ts)
+    }
+
+    /// The raw (r, s, v) a Trezor returns — v in "Electrum" form for
+    /// transactions, raw 0/1/27/28 for messages. `normalize_v` lands
+    /// both on a parity.
+    struct TrezorSig {
+        r: [u8; 32],
+        s: [u8; 32],
+        v: u64,
+    }
+
+    fn to_alloy_sig(ts: TrezorSig) -> Result<Signature, String> {
+        let r = U256::from_be_bytes(ts.r);
+        let s = U256::from_be_bytes(ts.s);
+        let parity = normalize_v(ts.v)
+            .ok_or_else(|| format!("the Trezor returned an invalid signature parity ({})", ts.v))?;
+        Ok(Signature::new(r, s, parity))
+    }
+
+    // Big-endian, leading-zero-trimmed encodings the Trezor wire wants
+    // (mirrors alloy-signer-trezor's helpers exactly).
+    fn u64_to_trezor(x: u64) -> Vec<u8> {
+        x.to_be_bytes()[x.leading_zeros() as usize / 8..].to_vec()
+    }
+    fn u128_to_trezor(x: u128) -> Vec<u8> {
+        x.to_be_bytes()[x.leading_zeros() as usize / 8..].to_vec()
+    }
+    fn u256_to_trezor(x: U256) -> Vec<u8> {
+        x.to_be_bytes::<32>()[x.leading_zeros() / 8..].to_vec()
+    }
+    fn to_string_of(kind: &TxKind) -> String {
+        match kind {
+            TxKind::Call(to) => format!("{to:?}"),
+            TxKind::Create => String::new(),
+        }
+    }
+
+    /// trezor-client's `convert_signature`: a 1559/legacy response's
+    /// `signature_v` is wrapped to EIP-155 form when a chain id is set,
+    /// which `to_alloy_sig`'s `normalize_v` then un-wraps back to parity
+    /// (the round trip pinned by `trezor_electrum_v_transform_*`).
+    fn convert_tx_signature(
+        resp: &protos::EthereumTxRequest,
+        chain_id: Option<u64>,
+    ) -> Result<TrezorSig, String> {
+        let mut v = resp.signature_v() as u64;
+        if let Some(chain_id) = chain_id {
+            if v <= 1 {
+                v = v + 2 * chain_id + 35;
+            }
+        }
+        let r: [u8; 32] = resp
+            .signature_r()
+            .try_into()
+            .map_err(|_| "the Trezor returned a malformed signature".to_string())?;
+        let s: [u8; 32] = resp
+            .signature_s()
+            .try_into()
+            .map_err(|_| "the Trezor returned a malformed signature".to_string())?;
+        Ok(TrezorSig { r, s, v })
+    }
+
+    fn eth_sign_eip1559(
+        client: &mut trezor_client::Trezor,
+        path: &[u32],
+        tx: &TxEip1559,
+        host: bool,
+        always: bool,
+    ) -> Result<Signature, String> {
+        let mut data = tx.input.to_vec();
+        let mut req = protos::EthereumSignTxEIP1559::new();
+        req.address_n = path.to_vec();
+        req.set_nonce(u64_to_trezor(tx.nonce));
+        req.set_max_gas_fee(u128_to_trezor(tx.max_fee_per_gas));
+        req.set_max_priority_fee(u128_to_trezor(tx.max_priority_fee_per_gas));
+        req.set_gas_limit(u64_to_trezor(tx.gas_limit));
+        req.set_value(u256_to_trezor(tx.value));
+        req.set_chain_id(tx.chain_id);
+        req.set_to(to_string_of(&tx.to));
+        if !tx.access_list.0.is_empty() {
+            req.access_list = tx
+                .access_list
+                .0
+                .iter()
+                .map(|item| protos::ethereum_sign_tx_eip1559::EthereumAccessList {
+                    address: Some(format!("{:?}", item.address)),
+                    storage_keys: item.storage_keys.iter().map(|k| k.to_vec()).collect(),
+                    ..Default::default()
+                })
+                .collect();
+        }
+        req.set_data_length(data.len() as u32);
+        req.set_data_initial_chunk(
+            data.splice(..std::cmp::min(1024, data.len()), []).collect(),
+        );
+        let resp = client
+            .call(req, Box::new(|_, m: protos::EthereumTxRequest| Ok(m)))
+            .map_err(friendly)?;
+        let mut resp = drive(resp, host, always)?;
+        while resp.data_length() > 0 {
+            let mut ack = protos::EthereumTxAck::new();
+            ack.set_data_chunk(data.splice(..std::cmp::min(1024, data.len()), []).collect());
+            resp = client
+                .call(ack, Box::new(|_, m: protos::EthereumTxRequest| Ok(m)))
+                .map_err(friendly)?
+                .ok()
+                .map_err(friendly)?;
+        }
+        to_alloy_sig(convert_tx_signature(&resp, Some(tx.chain_id))?)
+    }
+
+    fn eth_sign_legacy(
+        client: &mut trezor_client::Trezor,
+        path: &[u32],
+        tx: &TxLegacy,
+        host: bool,
+        always: bool,
+    ) -> Result<Signature, String> {
+        let mut data = tx.input.to_vec();
+        let mut req = protos::EthereumSignTx::new();
+        req.address_n = path.to_vec();
+        req.set_nonce(u64_to_trezor(tx.nonce));
+        req.set_gas_price(u128_to_trezor(tx.gas_price));
+        req.set_gas_limit(u64_to_trezor(tx.gas_limit));
+        req.set_value(u256_to_trezor(tx.value));
+        if let Some(chain_id) = tx.chain_id {
+            req.set_chain_id(chain_id);
+        }
+        req.set_to(to_string_of(&tx.to));
+        req.set_data_length(data.len() as u32);
+        req.set_data_initial_chunk(
+            data.splice(..std::cmp::min(1024, data.len()), []).collect(),
+        );
+        let resp = client
+            .call(req, Box::new(|_, m: protos::EthereumTxRequest| Ok(m)))
+            .map_err(friendly)?;
+        let mut resp = drive(resp, host, always)?;
+        while resp.data_length() > 0 {
+            let mut ack = protos::EthereumTxAck::new();
+            ack.set_data_chunk(data.splice(..std::cmp::min(1024, data.len()), []).collect());
+            resp = client
+                .call(ack, Box::new(|_, m: protos::EthereumTxRequest| Ok(m)))
+                .map_err(friendly)?
+                .ok()
+                .map_err(friendly)?;
+        }
+        to_alloy_sig(convert_tx_signature(&resp, tx.chain_id)?)
+    }
+
+    /// Show the wallet address on the DEVICE's own screen (one tap) and
+    /// return what it displayed — the compromised-host wrong-account
+    /// defense at setup. Driven through our interaction loop so a
+    /// passphrase prompt here is handled the same way.
+    fn eth_show_address(
+        client: &mut trezor_client::Trezor,
+        path: &[u32],
+        host: bool,
+        always: bool,
+    ) -> Result<String, String> {
+        let mut req = protos::EthereumGetAddress::new();
+        req.address_n = path.to_vec();
+        req.set_show_display(true);
+        let resp = client
+            .call(
+                req,
+                Box::new(|_, m: protos::EthereumAddress| Ok(m.address().to_string())),
+            )
+            .map_err(friendly)?;
+        drive(resp, host, always)
+    }
+
+    impl OwnTrezorSigner {
+        /// Open a brand-new device session (reads the session id and
+        /// resolves the address — the first operation, where a
+        /// passphrase-protected device asks for its passphrase once). The
+        /// host-passphrase preference is snapshotted here for the whole
+        /// signer.
+        fn connect() -> Result<Self, String> {
+            let host = super::host_passphrase::enabled();
+            let path = super::derivation_path_vec();
+            let mut client = trezor_client::unique(false).map_err(friendly)?;
+            client.init_device(None).map_err(friendly)?;
+            let features = client
+                .features()
+                .ok_or_else(|| "could not read the Trezor's features".to_string())?;
+            if !firmware_ok(
+                features.major_version() as u64,
+                features.minor_version() as u64,
+                features.patch_version() as u64,
+            ) {
+                return Err(
+                    "this Trezor's firmware is too old to sign the network's \
+                     payment transactions — update it in Trezor Suite, then \
+                     try again"
+                        .into(),
+                );
+            }
+            let session_id = features.session_id().to_vec();
+            let always_on_device = features.passphrase_always_on_device();
+            let address_str = eth_get_address(&mut client, &path, host, always_on_device)?;
+            let address = parse_address(&address_str)?;
+            Ok(Self {
+                session_id,
+                path,
+                address,
+                host_passphrase: host,
+                always_on_device,
+            })
+        }
+
+        fn address(&self) -> Address {
+            self.address
+        }
+
+        /// A real USB round trip for the current address — never a cached
+        /// value, so a session that silently degraded (stale id after a
+        /// replug → the device minted a fresh session, maybe on a
+        /// different hidden wallet) is caught before any tap is wasted.
+        fn get_address(&self) -> Result<String, String> {
+            let mut client = open_session(&self.session_id)?;
+            eth_get_address(&mut client, &self.path, self.host_passphrase, self.always_on_device)
+        }
+
+        fn sign_message(&self, message: &[u8]) -> Result<Signature, String> {
+            let mut client = open_session(&self.session_id)?;
+            eth_sign_message(
+                &mut client,
+                &self.path,
+                message,
+                self.host_passphrase,
+                self.always_on_device,
+            )
+        }
+
+        fn sign_eip1559(&self, tx: &TxEip1559) -> Result<Signature, String> {
+            let mut client = open_session(&self.session_id)?;
+            eth_sign_eip1559(
+                &mut client,
+                &self.path,
+                tx,
+                self.host_passphrase,
+                self.always_on_device,
+            )
+        }
+
+        fn sign_legacy(&self, tx: &TxLegacy) -> Result<Signature, String> {
+            let mut client = open_session(&self.session_id)?;
+            eth_sign_legacy(
+                &mut client,
+                &self.path,
+                tx,
+                self.host_passphrase,
+                self.always_on_device,
+            )
+        }
+
+        fn show_address_on_device(&self) -> Result<String, String> {
+            let mut client = open_session(&self.session_id)?;
+            eth_show_address(&mut client, &self.path, self.host_passphrase, self.always_on_device)
+        }
+    }
+
     /// Open the job's one device session, BEFORE any ant-core work: the
-    /// address read inside `TrezorSigner::new` is where a
-    /// passphrase-protected device asks for its passphrase — once, on
-    /// the device, covering the identity derive and every payment
-    /// signature of the whole job. Refuses a device whose address is not
-    /// the configured one (and fails with the friendly "plug it in"
-    /// message before any encrypt/quote work when no device answers).
+    /// address read inside [`OwnTrezorSigner::connect`] is where a
+    /// passphrase-protected device asks for its passphrase — once (on the
+    /// device, or in the app when host entry is on), covering the
+    /// identity derive and every payment signature of the whole job.
+    /// Refuses a device whose address is not the configured one (and
+    /// fails with the friendly "plug it in" message before any
+    /// encrypt/quote work when no device answers).
     pub async fn begin_job_session(
         expected_address: &str,
     ) -> Result<TrezorJobSession, String> {
@@ -511,8 +1034,9 @@ mod device {
     /// already-acquired conversation lock for its whole duration. The
     /// closure gets the open job-session signer when `reuse_job_session`
     /// allows and one is open, else a freshly connected signer;
-    /// everything it awaits is synchronous USB underneath, plus however
-    /// long the user takes at the device's own confirm screen.
+    /// everything it does is synchronous USB underneath, plus however
+    /// long the user takes at the device's own confirm screen (or the
+    /// app's passphrase field).
     async fn with_signer_locked<T, F, Fut>(
         guard: tokio::sync::MutexGuard<'static, ()>,
         reuse_job_session: bool,
@@ -520,7 +1044,7 @@ mod device {
     ) -> Result<T, String>
     where
         T: Send + 'static,
-        F: FnOnce(std::sync::Arc<TrezorSigner>) -> Fut + Send + 'static,
+        F: FnOnce(std::sync::Arc<OwnTrezorSigner>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<T, String>>,
     {
         let session = if reuse_job_session {
@@ -531,17 +1055,11 @@ mod device {
         let handle = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
             let _guard = guard;
-            handle.block_on(async move {
-                let signer = match session {
-                    Some(s) => s,
-                    None => std::sync::Arc::new(
-                        TrezorSigner::new(HDPath::TrezorLive(0), Some(CHAIN_ID))
-                            .await
-                            .map_err(friendly)?,
-                    ),
-                };
-                f(signer).await
-            })
+            let signer = match session {
+                Some(s) => s,
+                None => std::sync::Arc::new(OwnTrezorSigner::connect()?),
+            };
+            handle.block_on(f(signer))
         })
         .await
         .map_err(|e| format!("Trezor task failed: {e}"))?
@@ -552,7 +1070,7 @@ mod device {
     async fn with_signer<T, F, Fut>(f: F) -> Result<T, String>
     where
         T: Send + 'static,
-        F: FnOnce(std::sync::Arc<TrezorSigner>) -> Fut + Send + 'static,
+        F: FnOnce(std::sync::Arc<OwnTrezorSigner>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<T, String>>,
     {
         with_signer_locked(DEVICE_LOCK.lock().await, true, f).await
@@ -564,39 +1082,29 @@ mod device {
     async fn with_fresh_signer<T, F, Fut>(f: F) -> Result<T, String>
     where
         T: Send + 'static,
-        F: FnOnce(std::sync::Arc<TrezorSigner>) -> Fut + Send + 'static,
+        F: FnOnce(std::sync::Arc<OwnTrezorSigner>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<T, String>>,
     {
         with_signer_locked(DEVICE_LOCK.lock().await, false, f).await
     }
 
     /// The device's CURRENT address at the signer's path — a real USB
-    /// round trip, never the construction-time cache. A reused session
-    /// that silently degraded (stale session id after a replug → the
-    /// device minted a fresh session, possibly on a different hidden
-    /// wallet) is caught by exactly this read before any tap is wasted.
-    async fn live_address(s: &TrezorSigner) -> Result<String, String> {
+    /// round trip, never the construction-time cache.
+    /// The device's CURRENT address at the signer's path — a real USB
+    /// round trip, never the construction-time cache.
+    async fn live_address(s: &OwnTrezorSigner) -> Result<String, String> {
         s.get_address()
-            .await
-            .map(|a| a.to_string())
-            .map_err(friendly)
     }
 
-    fn signer_address(s: &TrezorSigner) -> String {
-        // EIP-55 checksummed via alloy's Address Display. Fully qualified:
-        // TrezorSigner carries both Signer::address and TxSigner::address.
-        alloy::signers::Signer::address(s).to_string()
+    fn signer_address(s: &OwnTrezorSigner) -> String {
+        s.address().to_string()
     }
 
     /// The full signature (for recovery checks) plus the r‖s bytes the
     /// backup identity derives from.
-    async fn sign_identity(
-        s: &TrezorSigner,
-    ) -> Result<(alloy::primitives::Signature, [u8; 64]), String> {
-        use alloy::signers::Signer as _;
+    fn sign_identity(s: &OwnTrezorSigner) -> Result<(Signature, [u8; 64]), String> {
         let sig = s
             .sign_message(crate::backup::IDENTITY_MESSAGE_V1.as_bytes())
-            .await
             .map_err(|e| friendly(format!("identity signing failed: {e}")))?;
         let mut rs = [0u8; 64];
         rs[..32].copy_from_slice(&sig.r().to_be_bytes::<32>());
@@ -607,68 +1115,33 @@ mod device {
     /// Does a Trezor answer on USB? Returns its address at
     /// [DERIVATION_PATH] — silent on the device, nothing is signed.
     /// Never waits behind a running conversation: a ceremony or payment
-    /// in flight answers "busy" instead (the Dart presence poll treats
-    /// any error as "not found", which is the right door copy while the
-    /// device is mid-ceremony anyway).
+    /// in flight answers "busy" instead.
     pub async fn probe() -> Result<String, String> {
         let Ok(guard) = DEVICE_LOCK.try_lock() else {
-            return Err(
-                "the Trezor is busy with another W@tch request right now".into()
-            );
+            return Err("the Trezor is busy with another W@tch request right now".into());
         };
-        // Live read: with a job session open this must still touch USB
-        // (presence is the question), and reusing the session keeps a
-        // passphrase-protected device from prompting for the probe.
         with_signer_locked(guard, true, |s| async move { live_address(&s).await }).await
-    }
-
-    /// Show the wallet address on the DEVICE's own screen and return what
-    /// it displayed (one confirmation tap). This is the defense against a
-    /// compromised host binding the wrong account at setup: the address
-    /// the user verifies comes from the Trezor's screen, which no
-    /// software on this computer can draw. Synchronous USB — callers are
-    /// already on the blocking thread.
-    fn show_address_on_device() -> Result<String, String> {
-        let mut client = trezor_client::unique(false).map_err(friendly)?;
-        client.init_device(None).map_err(friendly)?;
-        let mut req = trezor_client::protos::EthereumGetAddress::new();
-        req.address_n = super::derivation_path_vec();
-        req.set_show_display(true);
-        let resp = client
-            .call(
-                req,
-                Box::new(|_, m: trezor_client::protos::EthereumAddress| {
-                    Ok(m.address().to_string())
-                }),
-            )
-            .map_err(friendly)?;
-        trezor_client::client::handle_interaction(resp).map_err(friendly)
     }
 
     /// The one-time setup ceremony: resolve the address, sign the frozen
     /// identity message twice (the determinism guard), derive the backup
     /// identity, then SHOW THE ADDRESS ON THE DEVICE for the user to
-    /// confirm against what the app displays (the compromised-host
-    /// wrong-account defense). Three confirmations on the device; nothing
-    /// is spent. Cancelling the address screen aborts the whole setup —
-    /// nothing has been persisted yet.
+    /// confirm against what the app displays. Three confirmations on the
+    /// device; nothing is spent. Cancelling the address screen aborts the
+    /// whole setup — nothing has been persisted yet.
     pub async fn setup_ceremony() -> Result<TrezorIdentity, String> {
-        // A fresh session by intent: the ceremony binds a wallet, so it
-        // must never silently ride another job's open session.
         with_fresh_signer(|s| async move {
             let address = signer_address(&s);
-            let ((first_sig, first), (_, second)) = {
-                // One attention span for both identity taps: the app's
-                // prompt explains the device asks twice (the determinism
-                // guard) instead of flashing two separate popups.
+            let (first_sig, first) = {
                 let _attention = super::attention::begin("sign-identity");
-                (sign_identity(&s).await?, sign_identity(&s).await?)
+                let a = sign_identity(&s)?;
+                let b = sign_identity(&s)?;
+                // The determinism guard: a signer that does not repeat the
+                // identity signature would mint a backup identity a fresh
+                // install could never re-derive — refuse before deriving.
+                ceremony_keys(&a.1, &b.1)?;
+                (a.0, a.1)
             };
-            // The signature must really come from the address the device
-            // reports — every later check (backup pointer, payment
-            // pre-tap address read) compares against this address, so a
-            // device whose signatures recover elsewhere must be refused
-            // BEFORE the marker is ever stored.
             if let Err(got) = identity_recovers_to(&first_sig, &address) {
                 return Err(format!(
                     "the Trezor reports address {address} but its signature \
@@ -678,10 +1151,10 @@ mod device {
                      plug it back in, and try again."
                 ));
             }
-            let keys = ceremony_keys(&first, &second)?;
+            let keys = derive_keys_from_signature(&first);
             let shown = {
                 let _attention = super::attention::begin("confirm-address");
-                show_address_on_device()?
+                s.show_address_on_device()?
             };
             if shown.to_lowercase() != address.to_lowercase() {
                 return Err(format!(
@@ -695,16 +1168,11 @@ mod device {
     }
 
     /// Re-derive the full backup identity — write keys included — with
-    /// ONE device confirmation: the per-backup tap of the settled
-    /// paranoid policy. Refuses a device whose address differs from the
-    /// configured one; the caller (signer.rs) additionally verifies the
-    /// derived pointer against the stored one.
+    /// ONE device confirmation. Refuses a device whose address differs
+    /// from the configured one.
     pub async fn derive_write_keys(expected_address: &str) -> Result<BackupKeys, String> {
         let expected = expected_address.to_lowercase();
         with_signer(move |s| async move {
-            // Live read, not the session's construction-time cache — a
-            // reused job session must still prove it is on the right
-            // wallet right now.
             let found = live_address(&s).await?;
             if found.to_lowercase() != expected {
                 return Err(format!(
@@ -715,12 +1183,8 @@ mod device {
             }
             let (sig, rs) = {
                 let _attention = super::attention::begin("sign-identity");
-                sign_identity(&s).await?
+                sign_identity(&s)?
             };
-            // Same guard as the ceremony: a signature that does not come
-            // from the configured address means the device key and the
-            // reported account disagree — name it instead of letting the
-            // pointer check (or a payment) fail with less to go on.
             if let Err(got) = identity_recovers_to(&sig, &found) {
                 return Err(format!(
                     "the Trezor reports address {found} but its signature \
@@ -735,48 +1199,29 @@ mod device {
     }
 
     /// The payment signer evmlib drives, bound to the configured address.
-    ///
-    /// Hardened across the alpha.115–.118 Trezor payment saga; the shape
-    /// that stands (2026-10-12):
-    ///   1. signs on the JOB SESSION when one is open (one passphrase
-    ///      entry per backup/batch, entered at [begin_job_session]),
-    ///      else on a fresh session; the retry attempt always forces a
-    ///      fresh session in case the reused one went bad;
-    ///   2. re-checks the device address with a LIVE read right before
-    ///      every tap (a swapped device, passphrase drift, or a
-    ///      silently-replaced session fails loudly with no wasted tap);
-    ///   3. VERIFIES each signature recovers to the configured address
-    ///      before evmlib journals it (parity/low-s self-repair; the
-    ///      double-failure error names what the device signed as);
-    ///   4. MEMOIZES the verified signature by sighash (see [sigcache]):
-    ///      the device conversation runs detached, so evmlib's 5-second
-    ///      broadcast timeout dropping the future never cancels the tap
-    ///      wait, and the retry's identical sign request returns the
-    ///      finished signature in milliseconds instead of prompting
-    ///      again;
-    ///   5. publishes `sign-payment` on the attention beacon while the
-    ///      device waits for the tap.
+    /// The hardening across alpha.115–.118 stands (job session, LIVE
+    /// pre-tap re-check, recovery-verify + repair, sighash memoization),
+    /// now over our own signer so the device request is always the
+    /// concrete EIP-1559/legacy transaction.
     pub struct VerifiedTrezor {
-        address: alloy::primitives::Address,
+        address: Address,
         cache: super::sigcache::SigCache,
     }
 
-    /// Build the payment signer: probes the device once (friendly
-    /// "plug it in" errors surface before any encrypt/quote work) and
-    /// refuses a device whose address is not the configured one.
     pub async fn verified_payment_signer(
         expected_address: &str,
     ) -> Result<VerifiedTrezor, String> {
         let expected = expected_address.to_lowercase();
         let address = with_signer(move |s| async move {
-            let found = s.get_address().await.map_err(friendly)?;
-            if found.to_string().to_lowercase() != expected {
+            let found = live_address(&s).await?;
+            let parsed = parse_address(&found)?;
+            if found.to_lowercase() != expected {
                 return Err(format!(
                     "this Trezor holds a different wallet ({found}) than the \
                      one configured"
                 ));
             }
-            Ok(found)
+            Ok(parsed)
         })
         .await?;
         Ok(VerifiedTrezor {
@@ -785,25 +1230,20 @@ mod device {
         })
     }
 
-    /// The owned transaction a detached signing job carries (the
-    /// caller's `dyn` borrow cannot cross into a task that outlives it).
+    /// The owned transaction a detached signing job carries.
     #[derive(Clone)]
     enum OwnedTx {
-        Eip1559(alloy::consensus::TxEip1559),
-        Legacy(alloy::consensus::TxLegacy),
+        Eip1559(TxEip1559),
+        Legacy(TxLegacy),
     }
 
-    /// One signing round on the device: job session unless `force_fresh`
-    /// (the second attempt's "assume the session went bad" lever), LIVE
-    /// address re-check, then the type-matched device request — the
-    /// concrete EIP-1559 path alloy-signer-trezor downcasts correctly,
-    /// or the generic legacy path (correct for true legacy by
-    /// construction).
+    /// One signing round on the device: job session unless `force_fresh`,
+    /// LIVE address re-check, then the type-matched device request.
     async fn sign_tx_once(
-        expected: alloy::primitives::Address,
+        expected: Address,
         tx: OwnedTx,
         force_fresh: bool,
-    ) -> Result<alloy::primitives::Signature, String> {
+    ) -> Result<Signature, String> {
         let expected_lower = expected.to_string().to_lowercase();
         with_signer_locked(DEVICE_LOCK.lock().await, !force_fresh, move |s| async move {
             let found = live_address(&s).await?;
@@ -816,18 +1256,8 @@ mod device {
                 ));
             }
             match tx {
-                OwnedTx::Eip1559(t) => {
-                    let mut t = t;
-                    alloy::network::TxSigner::sign_transaction(&*s, &mut t)
-                        .await
-                        .map_err(|e| friendly(format!("payment signing failed: {e}")))
-                }
-                OwnedTx::Legacy(l) => {
-                    let mut l = l;
-                    alloy::network::TxSigner::sign_transaction(&*s, &mut l)
-                        .await
-                        .map_err(|e| friendly(format!("payment signing failed: {e}")))
-                }
+                OwnedTx::Eip1559(t) => s.sign_eip1559(&t),
+                OwnedTx::Legacy(l) => s.sign_legacy(&l),
             }
         })
         .await
@@ -835,13 +1265,12 @@ mod device {
 
     /// The whole device conversation for one payment, run DETACHED under
     /// [sigcache]: both attempts, local verification/repair, and the
-    /// double-failure diagnosis. Returns the VERIFIED signature, so a
-    /// cache hit is a signature evmlib can journal as-is.
+    /// double-failure diagnosis.
     async fn sign_payment_job(
-        address: alloy::primitives::Address,
+        address: Address,
         tx: OwnedTx,
         hash: alloy::primitives::B256,
-    ) -> Result<alloy::primitives::Signature, String> {
+    ) -> Result<Signature, String> {
         let _attention = super::attention::begin("sign-payment");
         let mut attempts: Vec<String> = Vec::new();
         for attempt in 0..2u8 {
@@ -858,9 +1287,6 @@ mod device {
                     return Ok(good);
                 }
                 Err(got) => {
-                    // Everything a field report needs to pin where the
-                    // chain breaks: the tx the hash covers, the hash,
-                    // and the signature the device returned.
                     let tx_line = match &tx {
                         OwnedTx::Eip1559(t) => format!(
                             "chain_id={} nonce={} to={:?} gas_limit={} \
@@ -889,11 +1315,6 @@ mod device {
                 }
             }
         }
-        // Both attempts failed. One more SILENT device read tells the
-        // user (and us) which failure class this is: a device that now
-        // reports a different wallet (passphrase/hidden-wallet drift)
-        // vs one that still reports the right wallet while its
-        // signatures recover elsewhere (device/transport fault).
         let now_reports = tokio::time::timeout(
             std::time::Duration::from_secs(10),
             with_signer(|s| async move { live_address(&s).await }),
@@ -907,26 +1328,20 @@ mod device {
             format!("signed as {}", attempts.join(", then "))
         };
         let diagnosis = match &now_reports {
-            Some(z) if z.to_lowercase() != address.to_string().to_lowercase() => {
-                format!(
-                    " The device is on a different wallet right now (it \
-                     reports {z}): if it uses a passphrase, open the same \
-                     hidden wallet it was set up with, then try again."
-                )
-            }
-            Some(_) => {
-                " The device still reports the right wallet, so this looks \
-                 like a device or transport fault — unplug it, plug it \
+            Some(z) if z.to_lowercase() != address.to_string().to_lowercase() => format!(
+                " The device is on a different wallet right now (it reports \
+                 {z}): if it uses a passphrase, open the same hidden wallet \
+                 it was set up with, then try again."
+            ),
+            Some(_) => " The device still reports the right wallet, so this \
+                 looks like a device or transport fault — unplug it, plug it \
                  back in, and try again; if it keeps happening, copy this \
                  message into a bug report."
-                    .to_string()
-            }
-            None => {
-                " If the device uses a passphrase, open the same hidden \
-                 wallet it was set up with; otherwise unplug it, plug it \
-                 back in, and try again."
-                    .to_string()
-            }
+                .to_string(),
+            None => " If the device uses a passphrase, open the same hidden \
+                 wallet it was set up with; otherwise unplug it, plug it back \
+                 in, and try again."
+                .to_string(),
         };
         Err(format!(
             "the Trezor's payment signature did not verify: the device \
@@ -938,27 +1353,14 @@ mod device {
     impl VerifiedTrezor {
         async fn sign_verified(
             &self,
-            tx: &mut dyn alloy::consensus::SignableTransaction<alloy::primitives::Signature>,
-        ) -> Result<alloy::primitives::Signature, String> {
-            // The hash the signature must verify against is the ORIGINAL
-            // transaction's — computed before anything is cloned, so no
-            // clone drift could ever slip past the check.
+            tx: &mut dyn alloy::consensus::SignableTransaction<Signature>,
+        ) -> Result<Signature, String> {
             let hash = tx.signature_hash();
-            // ALWAYS unwrap to an OWNED concrete transaction (see
-            // concrete_eip1559's doc comment): handing the
-            // TypedTransaction enum down as a dyn makes
-            // alloy-signer-trezor fall back to a LEGACY device request
-            // whose signature can never verify against the 1559 hash —
-            // and the detached signing job needs an owned tx anyway.
             let owned = if let Some(t) = super::concrete_eip1559(tx) {
                 OwnedTx::Eip1559(t)
             } else if let Some(l) = super::concrete_legacy(tx) {
                 OwnedTx::Legacy(l)
             } else {
-                // Neither 1559 nor legacy in any recognized shape: the
-                // driver would mis-encode it and the device would sign
-                // bytes that can never verify — refuse before wasting a
-                // tap.
                 return Err(format!(
                     "this payment is a type-{} transaction in a shape the \
                      Trezor driver cannot sign faithfully — nothing was \
@@ -975,18 +1377,85 @@ mod device {
     }
 
     #[async_trait::async_trait]
-    impl alloy::network::TxSigner<alloy::primitives::Signature> for VerifiedTrezor {
-        fn address(&self) -> alloy::primitives::Address {
+    impl alloy::network::TxSigner<Signature> for VerifiedTrezor {
+        fn address(&self) -> Address {
             self.address
         }
 
         async fn sign_transaction(
             &self,
-            tx: &mut dyn alloy::consensus::SignableTransaction<alloy::primitives::Signature>,
-        ) -> alloy::signers::Result<alloy::primitives::Signature> {
-            self.sign_verified(tx).await.map_err(alloy::signers::Error::other)
+            tx: &mut dyn alloy::consensus::SignableTransaction<Signature>,
+        ) -> alloy::signers::Result<Signature> {
+            self.sign_verified(tx)
+                .await
+                .map_err(alloy::signers::Error::other)
         }
     }
+
+    #[cfg(test)]
+    mod device_tests {
+        use super::*;
+
+        #[test]
+        fn firmware_version_gate() {
+            assert!(!firmware_ok(1, 11, 0), "1.11.0 is below the 1.11.1 floor");
+            assert!(firmware_ok(1, 11, 1));
+            assert!(firmware_ok(1, 12, 0));
+            assert!(!firmware_ok(2, 5, 0));
+            assert!(firmware_ok(2, 5, 1));
+            assert!(firmware_ok(2, 9, 6));
+            // Unknown future majors are assumed capable.
+            assert!(firmware_ok(3, 0, 0));
+        }
+
+        #[test]
+        fn trezor_wire_encodings_trim_leading_zeros() {
+            assert_eq!(u64_to_trezor(0), Vec::<u8>::new(), "zero is the empty encoding");
+            assert_eq!(u64_to_trezor(1), vec![1]);
+            assert_eq!(u64_to_trezor(0x0102), vec![0x01, 0x02]);
+            assert_eq!(u128_to_trezor(0), Vec::<u8>::new());
+            assert_eq!(u128_to_trezor(255), vec![0xff]);
+            assert_eq!(u256_to_trezor(U256::ZERO), Vec::<u8>::new());
+            assert_eq!(u256_to_trezor(U256::from(256u64)), vec![0x01, 0x00]);
+        }
+
+        #[test]
+        fn tx_kind_to_string() {
+            let addr = Address::repeat_byte(0xab);
+            assert_eq!(to_string_of(&TxKind::Call(addr)), format!("{addr:?}"));
+            assert_eq!(to_string_of(&TxKind::Create), "");
+        }
+
+        /// convert_tx_signature wraps a 0/1 parity into EIP-155 electrum
+        /// form, which to_alloy_sig's normalize_v un-wraps — the exact
+        /// round trip the live device path rides, for BOTH parities on
+        /// Arbitrum One.
+        #[test]
+        fn convert_tx_signature_round_trips_parity() {
+            for parity in [0u32, 1u32] {
+                let mut resp = protos::EthereumTxRequest::new();
+                resp.set_signature_v(parity);
+                resp.set_signature_r(vec![0x11; 32]);
+                resp.set_signature_s(vec![0x22; 32]);
+                let ts = convert_tx_signature(&resp, Some(42161)).unwrap();
+                // electrum form for a set chain id
+                assert_eq!(ts.v, parity as u64 + 2 * 42161 + 35);
+                let sig = to_alloy_sig(ts).unwrap();
+                assert_eq!(sig.v(), parity == 1, "parity {parity} survives");
+            }
+        }
+
+        #[test]
+        fn to_alloy_sig_handles_raw_message_parities() {
+            // A message signature's v is raw 27/28 (or 0/1) — normalize_v
+            // must land it on a parity.
+            for (v, parity) in [(27u64, false), (28u64, true), (0u64, false), (1u64, true)] {
+                let ts = TrezorSig { r: [1u8; 32], s: [2u8; 32], v };
+                assert_eq!(to_alloy_sig(ts).unwrap().v(), parity, "v={v}");
+            }
+        }
+    }
+
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
@@ -1462,4 +1931,52 @@ mod tests {
         };
         assert!(err.contains("did not repeat"), "{err}");
     }
+
+    /// Host-passphrase toggle: off by default, flips with set().
+    #[test]
+    fn host_passphrase_toggle() {
+        host_passphrase::set(false);
+        assert!(!host_passphrase::enabled());
+        host_passphrase::set(true);
+        assert!(host_passphrase::enabled());
+        host_passphrase::set(false);
+        assert!(!host_passphrase::enabled());
+    }
+
+    /// The passphrase channel: delivering to nobody reports false; a
+    /// waiting conversation receives the app's passphrase; "enter on
+    /// device" and cancellation are their own replies; pending() tracks
+    /// whether a request is outstanding.
+    #[test]
+    fn passphrase_channel_delivers_to_a_waiter() {
+        use passphrase::Reply;
+        // Nobody waiting.
+        assert!(!passphrase::pending());
+        assert!(!passphrase::deliver("x".into()), "no waiter → not delivered");
+
+        // A host answer.
+        let h = std::thread::spawn(|| passphrase::request());
+        // Wait until the request registers.
+        for _ in 0..200 {
+            if passphrase::pending() { break; }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(passphrase::pending());
+        assert!(passphrase::deliver("hunter2".into()));
+        match h.join().unwrap() {
+            Reply::Host(p) => assert_eq!(&*p, "hunter2"),
+            _ => panic!("expected a host passphrase"),
+        }
+        assert!(!passphrase::pending(), "the slot clears after delivery");
+
+        // The on-device escape.
+        let h = std::thread::spawn(|| passphrase::request());
+        for _ in 0..200 {
+            if passphrase::pending() { break; }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(passphrase::use_device());
+        assert!(matches!(h.join().unwrap(), Reply::OnDevice));
+    }
 }
+

@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../services/app_settings.dart';
 import '../services/publish_api.dart';
 import '../services/trezor_attention.dart';
 import '../widgets/copyable_error.dart';
@@ -55,6 +56,11 @@ class _WalletScreenState extends State<WalletScreen> {
   Timer? _probeTimer;
   bool _trezorFound = false;
 
+  /// Opt-in: enter the Trezor passphrase in the app instead of on the
+  /// device. Loaded from the stored preference; the toggle posts the
+  /// mode to the embedded client AND persists it.
+  bool _hostPassphrase = false;
+
   /// Passphrase-locked wallet: the unlock field's state.
   final _unlockController = TextEditingController();
   String? _unlockError;
@@ -85,6 +91,10 @@ class _WalletScreenState extends State<WalletScreen> {
       if (!mounted) return;
       setState(() => _status = status);
       _syncProbeTimer(status);
+      if (status.isHardware) {
+        final host = await AppSettings.trezorHostPassphrase();
+        if (mounted) setState(() => _hostPassphrase = host);
+      }
       if (status.configured && !status.locked) await _loadBalances();
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -294,6 +304,16 @@ class _WalletScreenState extends State<WalletScreen> {
       _snack('$e');
     }
     await _reload();
+  }
+
+  Future<void> _setHostPassphrase(bool value) async {
+    setState(() => _hostPassphrase = value);
+    await AppSettings.setTrezorHostPassphrase(value);
+    try {
+      await _api.setTrezorPassphraseMode(host: value);
+    } catch (e) {
+      if (mounted) _errorSnack('$e');
+    }
   }
 
   void _snack(String message) {
@@ -552,6 +572,25 @@ class _WalletScreenState extends State<WalletScreen> {
                 style: TextStyle(color: t.boneDim, fontSize: 12, height: 1.4),
               ),
             ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 4, 16, 0),
+            child: SwitchListTile(
+              value: _hostPassphrase,
+              onChanged: _setHostPassphrase,
+              contentPadding: const EdgeInsets.only(left: 8),
+              title: Text(
+                'Enter the passphrase in W@tch',
+                style: TextStyle(color: t.bone, fontSize: 13.5),
+              ),
+              subtitle: Text(
+                'If your Trezor uses a passphrase (hidden wallet), type it '
+                'here instead of on the device. More convenient, but less '
+                'secure — the passphrase passes through this computer. Off '
+                'by default; some devices force on-device entry regardless.',
+                style: TextStyle(color: t.ash, fontSize: 11.5, height: 1.35),
+              ),
+            ),
+          ),
         ] else if (status.storage == 'file') ...[
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),

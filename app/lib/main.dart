@@ -17,6 +17,7 @@ import 'screens/settings_screen.dart';
 import 'screens/show_screen.dart';
 import 'screens/terms_screen.dart';
 import 'services/app_settings.dart';
+import 'services/publish_api.dart';
 import 'services/impeller.dart';
 import 'services/tv_settings.dart';
 import 'services/backup.dart';
@@ -86,6 +87,11 @@ Future<void> main() async {
   // Re-apply a persisted network pause before the first dial gets far:
   // a user who paused the app expects it to stay quiet across restarts.
   unawaited(NetworkPause.instance.start());
+  // Apply the stored Trezor host-passphrase preference to the embedded
+  // client (opt-in; device entry is the default). A job could start
+  // before the Wallet screen is ever opened, so set it here at launch.
+  unawaited(AppSettings.trezorHostPassphrase().then(
+      (host) => PublishApi().setTrezorPassphraseMode(host: host).catchError((_) {})));
   // Background online/offline tracking for Play gating and the Up-next
   // chain (browsing itself is never gated).
   ConnectivityMonitor.instance.start();

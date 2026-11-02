@@ -9,15 +9,16 @@
 //! `EthereumWallet` (any `TxSigner`) plus a network — `Wallet::new`
 //! accepts a signer-built `EthereumWallet`, so EVERY paid ant-core call
 //! (the client's attached wallet included) signs through whatever signer
-//! this type wraps. Phase 3's `Trezor` arm hands it an
-//! `alloy_signer_trezor::TrezorSigner`: each transaction then waits for
-//! a physical confirmation on the device.
+//! this type wraps. Phase 3's `Trezor` arm hands it a
+//! `trezor::VerifiedTrezor` (W@tch's own thin Trezor signer over
+//! trezor-client — no alloy-signer-trezor): each transaction then waits
+//! for a physical confirmation on the device.
 //!
 //! Two alloy trees meet here, deliberately:
 //! - PAYMENTS ride evmlib's tree (the `alloy` 1.x facade, already in the
 //!   lockfile via evmlib): `evmlib::Wallet::new` takes THAT tree's
-//!   `EthereumWallet`, and alloy-signer-trezor is pinned to the same 1.8
-//!   line so its `TxSigner` impl unifies.
+//!   `EthereumWallet`, and `VerifiedTrezor` implements THIS tree's
+//!   `TxSigner`, so it unifies.
 //! - The IDENTITY signature keeps phase 1's alloy 2.x `SignerSync` path
 //!   in backup.rs for software keys — frozen by test vectors, and r‖s
 //!   bytes are identical across trees for the same key by RFC-6979, so

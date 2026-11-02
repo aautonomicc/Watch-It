@@ -86,6 +86,18 @@ fn protected_router(engine: &'static Engine) -> Router {
         // right now? The app polls this during hardware-wallet flows to
         // pop an explanation + chime the moment the device wants a tap.
         .route("/trezor/activity", get(trezor_activity))
+        // Host-side Trezor passphrase entry (opt-in). The app sets the
+        // mode from its stored preference, and delivers a collected
+        // passphrase (or "enter it on the device instead") to a device
+        // conversation waiting on it. Protected like every wallet route.
+        .route(
+            "/trezor/passphrase-mode",
+            post(move |body: Bytes| trezor_passphrase_mode(body)),
+        )
+        .route(
+            "/trezor/passphrase",
+            post(move |body: Bytes| trezor_passphrase(body)),
+        )
         // Pause/resume all network use. Protected: only the app should
         // be able to silence (or wake) the user's network client.
         .route(
@@ -775,6 +787,43 @@ async fn trezor_activity() -> Response {
         "seq": seq,
         "action": action,
     }))
+}
+
+/// `POST /trezor/passphrase-mode` `{"host": bool}` — turn host-side
+/// Trezor passphrase entry on or off (the app's preference; device entry
+/// is the default). The firmware's "always enter on device" setting
+/// still wins at the device.
+async fn trezor_passphrase_mode(body: Bytes) -> Response {
+    let json: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("bad JSON: {e}")).into_response(),
+    };
+    let host = json.get("host").and_then(|v| v.as_bool()).unwrap_or(false);
+    crate::trezor::host_passphrase::set(host);
+    json_ok(serde_json::json!({ "host": host }))
+}
+
+/// `POST /trezor/passphrase` — answer a device conversation that is
+/// waiting for a passphrase: `{"passphrase": "…"}` hands it over,
+/// `{"on_device": true}` tells the device to ask on its own screen
+/// instead. `{delivered}` reports whether anyone was actually waiting.
+async fn trezor_passphrase(body: Bytes) -> Response {
+    let json: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("bad JSON: {e}")).into_response(),
+    };
+    let delivered = if json.get("on_device").and_then(|v| v.as_bool()).unwrap_or(false) {
+        crate::trezor::passphrase::use_device()
+    } else if let Some(p) = json.get("passphrase").and_then(|v| v.as_str()) {
+        crate::trezor::passphrase::deliver(p.to_string())
+    } else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "body must have \"passphrase\" or \"on_device\"",
+        )
+            .into_response();
+    };
+    json_ok(serde_json::json!({ "delivered": delivered }))
 }
 
 /// `GET /wallet/trezor` — is a Trezor answering on USB? `{found, address?,
@@ -2123,6 +2172,8 @@ mod wallet_api_tests {
             ("GET", "/wallet/trezor"),
             ("POST", "/wallet/trezor"),
             ("GET", "/trezor/activity"),
+            ("POST", "/trezor/passphrase-mode"),
+            ("POST", "/trezor/passphrase"),
             ("POST", "/wallet/unlock"),
             ("POST", "/wallet/passphrase"),
             ("DELETE", "/wallet/passphrase"),

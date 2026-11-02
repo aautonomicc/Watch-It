@@ -352,7 +352,8 @@ wallet-less client with a plug-it-in hint at the paid call. Every
 step that waits for a human at the
 device publishes on the attention beacon (`trezor::attention` —
 actions `sign-identity` / `confirm-address` / `sign-payment` /
-`unlock-wallet` for the job-session open, served
+`unlock-wallet` for the job-session open / `enter-passphrase` for
+host-side passphrase entry, served
 by protected `GET /trezor/activity`); the app polls it only while a
 hardware flow is in flight (TrezorAttentionService.during around
 setup, backup/restore and batch uploads) and shows an explanation
@@ -360,7 +361,7 @@ card + plays a chime per tap (TrezorPromptHost, mounted above the
 first route; the card is an OverlayEntry, never a dialog route — a
 route would absorb other dialogs' `Navigator.pop`; chime = bundled
 `assets/sounds/trezor-chime.wav` staged to a temp file and played
-through media_kit, desktop-only, fail-soft). Device conversations
+through media_kit, desktop-only, fail-soft). OWN SIGNER (2026-11-02): `trezor.rs` no longer uses alloy-signer-trezor — `OwnTrezorSigner` is W@tch's own thin signer over trezor-client (direct USB), owning the session and the button/PIN/passphrase interaction loop (`drive`). This buys three things: a RESUMABLE session (one passphrase entry covers a whole job — the id was private in the alloy wrapper), the legacy-enum signing bug GONE BY CONSTRUCTION (every device request is the concrete `TxEip1559`/legacy transaction, never a `dyn` downcast), and OPT-IN HOST-SIDE PASSPHRASE ENTRY: when the user turns on "Enter the passphrase in W@tch" (Settings → Wallet, OFF by default; process-global flag set via `POST /trezor/passphrase-mode`, applied at startup from the `trezor_host_passphrase_v1` pref) and the firmware permits it (`passphrase_always_on_device` wins), a passphrase request publishes the `enter-passphrase` attention action and the device conversation blocks on a channel until the app POSTs the passphrase (or "on device") via `POST /trezor/passphrase`; the passphrase is held only in memory for the run (Zeroizing), never persisted, and the device still confirms the hidden wallet with one tap. Device entry stays the default and the more secure path. Device conversations
 serialize on a process-wide lock (`trezor.rs::DEVICE_LOCK`) and the
 presence probe only try-locks (answers "busy"), so a probe can never
 interleave USB messages with a ceremony or payment; the Dart

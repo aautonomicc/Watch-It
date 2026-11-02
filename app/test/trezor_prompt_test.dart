@@ -245,16 +245,76 @@ void main() {
     });
   });
 
+  group('host-side passphrase entry', () {
+    testWidgets('the enter-passphrase card takes a passphrase and sends it',
+        (tester) async {
+      final fake = FakeEmbeddedHttp();
+      HttpOverrides.global = fake;
+      fake.trezorPassphraseWaiting = true;
+      final service = _FakeAttention();
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: TrezorPromptHost(
+          service: service,
+          api: PublishApi(base: FakeEmbeddedHttp.base, token: 't'),
+          child: const Scaffold(body: Text('home')),
+        ),
+      ));
+      service.emit(const TrezorActivity(
+          active: true, seq: 1, action: 'enter-passphrase'));
+      await tester.pumpAndSettle();
+      expect(find.text('Enter your Trezor passphrase'), findsOneWidget);
+      expect(find.byType(TextField), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), 'hunter2');
+      await tester.tap(find.text('Unlock'));
+      await tester.pumpAndSettle();
+      expect(fake.trezorPassphrasesDelivered, ['hunter2']);
+
+      service.emit(null);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('"Enter on device instead" sends the on-device request',
+        (tester) async {
+      final fake = FakeEmbeddedHttp();
+      HttpOverrides.global = fake;
+      fake.trezorPassphraseWaiting = true;
+      final service = _FakeAttention();
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: TrezorPromptHost(
+          service: service,
+          api: PublishApi(base: FakeEmbeddedHttp.base, token: 't'),
+          child: const Scaffold(body: Text('home')),
+        ),
+      ));
+      service.emit(const TrezorActivity(
+          active: true, seq: 1, action: 'enter-passphrase'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Enter on device instead'));
+      await tester.pumpAndSettle();
+      expect(fake.trezorOnDeviceRequests, 1);
+      expect(fake.trezorPassphrasesDelivered, isEmpty);
+
+      service.emit(null);
+      await tester.pumpAndSettle();
+    });
+  });
+
   test('every beacon action has its own explanation', () {
     expect(trezorPromptBody('sign-identity'), contains('costs '));
     expect(trezorPromptBody('confirm-address'), contains('matches'));
     expect(trezorPromptBody('sign-payment'), contains('amount'));
     expect(trezorPromptBody('unlock-wallet'), contains('passphrase'));
+    expect(trezorPromptBody('enter-passphrase'), contains('passphrase'));
     expect(trezorPromptBody('something-new'), contains('confirmation'));
     expect(trezorPromptTitle('sign-payment'),
         'Confirm the payment on your Trezor');
     expect(trezorPromptTitle('unlock-wallet'),
         'Unlock the wallet on your Trezor');
+    expect(trezorPromptTitle('enter-passphrase'),
+        'Enter your Trezor passphrase');
     expect(trezorPromptTitle('confirm-address'),
         'Check the address on your Trezor');
     expect(trezorPromptTitle('sign-identity'), 'Check your Trezor');

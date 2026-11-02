@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../services/publish_api.dart';
 import '../services/trezor_attention.dart';
 import '../theme/tokens.dart';
 
@@ -31,6 +32,10 @@ String trezorPromptBody(String? action) {
       return 'W@tch is opening a wallet session on your Trezor for this '
           'job. If the device asks for its PIN or passphrase, enter it on '
           'the device — one entry covers every signature in this run.';
+    case 'enter-passphrase':
+      return 'Your Trezor is asking for its passphrase (the hidden-wallet '
+          'secret). Type it below to open that wallet for this run, or '
+          'choose to enter it on the device instead. It is never saved.';
     default:
       return 'The Trezor needs a confirmation on its own screen — pick it '
           'up and follow what the device shows.';
@@ -46,6 +51,8 @@ String trezorPromptTitle(String? action) {
       return 'Confirm the payment on your Trezor';
     case 'unlock-wallet':
       return 'Unlock the wallet on your Trezor';
+    case 'enter-passphrase':
+      return 'Enter your Trezor passphrase';
     default:
       return 'Check your Trezor';
   }
@@ -65,9 +72,13 @@ String trezorPromptTitle(String? action) {
 /// removes the TOP-MOST route. An overlay entry sits outside the route
 /// stack, so other dialogs open and close as if it weren't there.
 class TrezorPromptHost extends StatefulWidget {
-  const TrezorPromptHost({super.key, required this.child, this.service});
+  const TrezorPromptHost(
+      {super.key, required this.child, this.service, this.api});
 
   final Widget child;
+
+  /// Test seam for the passphrase-entry card; defaults to [PublishApi].
+  final PublishApi? api;
 
   /// Test seam; defaults to [TrezorAttentionService.instance].
   final TrezorAttentionService? service;
@@ -114,7 +125,8 @@ class _TrezorPromptHostState extends State<TrezorPromptHost> {
   void _showCard() {
     if (!mounted || _entry != null) return;
     final entry = OverlayEntry(
-      builder: (_) => TrezorPromptCard(service: _service, onHide: _removeCard),
+      builder: (_) => TrezorPromptCard(
+          service: _service, onHide: _removeCard, api: widget.api),
     );
     _entry = entry;
     Overlay.of(context, rootOverlay: true).insert(entry);
@@ -137,10 +149,14 @@ class TrezorPromptCard extends StatelessWidget {
     super.key,
     required this.service,
     required this.onHide,
+    this.api,
   });
 
   final TrezorAttentionService service;
   final VoidCallback onHide;
+
+  /// Test seam for the passphrase-entry POST; defaults to [PublishApi].
+  final PublishApi? api;
 
   @override
   Widget build(BuildContext context) {
@@ -186,14 +202,18 @@ class TrezorPromptCard extends StatelessWidget {
                             height: 1.45,
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton(
-                            onPressed: onHide,
-                            child: const Text('Hide'),
+                        if (activity.action == 'enter-passphrase')
+                          _PassphraseField(api: api ?? PublishApi())
+                        else ...[
+                          const SizedBox(height: 4),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: onHide,
+                              child: const Text('Hide'),
+                            ),
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ),
@@ -203,6 +223,97 @@ class TrezorPromptCard extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// The passphrase-entry variant of the prompt: an obscured field that
+/// POSTs the typed passphrase to the waiting device conversation, plus
+/// an "Enter on device instead" escape. Shown only for the
+/// `enter-passphrase` action; the device caches the passphrase for the
+/// session, so this appears at most once per job.
+class _PassphraseField extends StatefulWidget {
+  const _PassphraseField({required this.api});
+  final PublishApi api;
+
+  @override
+  State<_PassphraseField> createState() => _PassphraseFieldState();
+}
+
+class _PassphraseFieldState extends State<_PassphraseField> {
+  final _controller = TextEditingController();
+  bool _busy = false;
+  bool _obscure = true;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.api.sendTrezorPassphrase(passphrase: _controller.text);
+    } catch (_) {
+      // The conversation times out on its own if delivery fails.
+    }
+    // The device takes over from here; the host removes the card when the
+    // beacon clears. Leave _busy true so a second tap can't double-send.
+  }
+
+  Future<void> _onDevice() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.api.sendTrezorPassphrase(onDevice: true);
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = WiTokens.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(height: 12),
+        TextField(
+          controller: _controller,
+          autofocus: true,
+          obscureText: _obscure,
+          enabled: !_busy,
+          onSubmitted: (_) => _submit(),
+          style: TextStyle(color: t.bone, fontSize: 14),
+          decoration: InputDecoration(
+            labelText: 'Passphrase',
+            labelStyle: TextStyle(color: t.ash),
+            border: const OutlineInputBorder(),
+            suffixIcon: IconButton(
+              icon: Icon(_obscure ? Icons.visibility : Icons.visibility_off,
+                  color: t.ash, size: 20),
+              onPressed: _busy ? null : () => setState(() => _obscure = !_obscure),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 8,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            TextButton(
+              onPressed: _busy ? null : _onDevice,
+              child: const Text('Enter on device instead'),
+            ),
+            FilledButton(
+              onPressed: _busy ? null : _submit,
+              child: Text(_busy ? 'Sending…' : 'Unlock'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

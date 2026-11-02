@@ -859,23 +859,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "alloy-signer-trezor"
-version = "1.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c7c2d81b46b0f93b8fcc9513a8a97f1720f3f53c63d5317cdc8756cc4124ad2"
-dependencies = [
- "alloy-consensus 1.8.3",
- "alloy-network 1.8.3",
- "alloy-primitives",
- "alloy-signer 1.8.3",
- "async-trait",
- "semver 1.0.28",
- "thiserror 2.0.21",
- "tracing",
- "trezor-client",
-]
-
-[[package]]
 name = "alloy-sol-macro"
 version = "1.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8381,7 +8364,6 @@ dependencies = [
  "alloy",
  "alloy-signer 2.5.0",
  "alloy-signer-local 2.5.0",
- "alloy-signer-trezor",
  "ant-core",
  "argon2",
  "async-trait",

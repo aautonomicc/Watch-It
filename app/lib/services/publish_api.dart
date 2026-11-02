@@ -150,6 +150,21 @@ class PublishApi {
     );
   }
 
+  /// Turn host-side Trezor passphrase entry on or off (opt-in; device
+  /// entry is the default). Applied from the stored preference at
+  /// startup and whenever the user flips the Settings → Wallet switch.
+  Future<void> setTrezorPassphraseMode({required bool host}) =>
+      _request('POST', '/trezor/passphrase-mode', body: {'host': host});
+
+  /// Answer a device conversation waiting for its passphrase: hand over
+  /// the string the app collected, or (onDevice) tell the device to ask
+  /// on its own screen instead.
+  Future<bool> sendTrezorPassphrase({String? passphrase, bool onDevice = false}) async {
+    final json = await _request('POST', '/trezor/passphrase',
+        body: onDevice ? {'on_device': true} : {'passphrase': passphrase ?? ''});
+    return json['delivered'] as bool? ?? false;
+  }
+
   /// A fresh 12-word mnemonic + its address. Nothing is stored until the
   /// phrase is imported after the backup ceremony.
   Future<GeneratedWallet> generateWallet() async {

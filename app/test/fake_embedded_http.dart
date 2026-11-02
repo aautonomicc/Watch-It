@@ -106,6 +106,15 @@ class FakeEmbeddedHttp extends HttpOverrides {
   bool trezorActivityActive = false;
   int trezorActivitySeq = 0;
   String? trezorActivityAction;
+
+  /// Host-passphrase: the last mode posted, and delivered passphrases /
+  /// on-device requests, for the `/trezor/passphrase*` routes.
+  bool? trezorHostPassphraseMode;
+  final List<String> trezorPassphrasesDelivered = [];
+  int trezorOnDeviceRequests = 0;
+  /// Whether a conversation is "waiting" for a passphrase (tests flip it
+  /// so `delivered` comes back true).
+  bool trezorPassphraseWaiting = false;
   String trezorPointer =
       '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff';
 
@@ -377,6 +386,20 @@ class FakeEmbeddedHttp extends HttpOverrides {
           'action': ?trezorActivityAction,
         }))
       );
+    }
+    if (method == 'POST' && path == '/trezor/passphrase-mode') {
+      final json = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
+      trezorHostPassphraseMode = json['host'] as bool? ?? false;
+      return (200, utf8.encode(jsonEncode({'host': trezorHostPassphraseMode})));
+    }
+    if (method == 'POST' && path == '/trezor/passphrase') {
+      final json = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
+      if (json['on_device'] == true) {
+        trezorOnDeviceRequests++;
+      } else {
+        trezorPassphrasesDelivered.add(json['passphrase'] as String? ?? '');
+      }
+      return (200, utf8.encode(jsonEncode({'delivered': trezorPassphraseWaiting})));
     }
     if (path == '/mywatch' || path.startsWith('/mywatch/')) {
       return _handleMyWatch(method, path, body);

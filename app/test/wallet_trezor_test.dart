@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:watchit/screens/publish_screen.dart'
     show debugDesktopPlatformOverride;
 import 'package:watchit/screens/wallet_screen.dart';
@@ -17,6 +18,7 @@ void main() {
   late FakeEmbeddedHttp fake;
 
   setUp(() {
+    SharedPreferences.setMockInitialValues({});
     fake = FakeEmbeddedHttp();
     HttpOverrides.global = fake;
     debugDesktopPlatformOverride = true;
@@ -95,6 +97,30 @@ void main() {
       // The fake derives keys_held from the posted share_keys, so this
       // line proves share_keys=false went over the wire end to end.
       expect(find.textContaining('read keys are not kept'), findsOneWidget);
+    });
+
+    testWidgets('the configured hardware view offers the host-passphrase '
+        'toggle, which posts the mode and persists the preference',
+        (tester) async {
+      fake.trezorError = null;
+      await openWallet(tester);
+      await tester.tap(find.text('Connect a hardware wallet (Trezor)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Connect'));
+      await tester.pumpAndSettle();
+
+      // Default OFF; the embedded client was told so at load.
+      final sw = find.widgetWithText(SwitchListTile, 'Enter the passphrase in W@tch');
+      await tester.scrollUntilVisible(sw, 200,
+          scrollable: find.byType(Scrollable).first);
+      expect(tester.widget<SwitchListTile>(sw).value, isFalse);
+
+      await tester.tap(sw);
+      await tester.pumpAndSettle();
+      expect(fake.trezorHostPassphraseMode, isTrue,
+          reason: 'flipping it posts /trezor/passphrase-mode host=true');
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('trezor_host_passphrase_v1'), isTrue);
     });
 
     testWidgets('a missing device surfaces the error inside the dialog',

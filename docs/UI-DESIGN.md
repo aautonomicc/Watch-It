@@ -170,6 +170,11 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   line "Confirm each payment on your Trezor" + the one-time
   first-payment allowance note; the backup job's
   `trezor` phase reads "Confirm on your Trezor…"
+- A configured hardware wallet's Settings → Wallet view has an
+  "Enter the passphrase in W@tch" switch (2026-11-02, OFF by default):
+  on, the Trezor passphrase (hidden wallet) is typed in the app instead
+  of on the device — more convenient, less secure (it passes through
+  this computer); some devices force on-device entry regardless.
 - Every Trezor wait shows an app-wide explanation card WITH A CHIME
   the moment the device asks for a tap (2026-10-11): "Check your
   Trezor" (identity signature — costs nothing, setup asks twice),
@@ -178,7 +183,10 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   payment may ask twice — the one-time allowance), and "Unlock the
   wallet on your Trezor" (2026-10-12 — the per-job session open: a
   passphrase-protected device asks for its passphrase once there,
-  covering every signature in the run). The card follows
+  covering every signature in the run), and "Enter your Trezor
+  passphrase" (2026-11-02 — opt-in host-side entry: the card grows an
+  obscured passphrase field + Unlock + "Enter on device instead"). The
+  card follows
   the action live, removes itself when the device stops waiting, and
   Hide silences only that tap — the next one announces again. It is
   a bottom-centred non-modal OVERLAY, not a dialog route: a dialog
