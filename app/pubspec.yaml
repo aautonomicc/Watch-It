@@ -62,7 +62,7 @@ dependencies:
   archive: ^4.3.0
   connectivity_plus: ^7.3.2
   qr_flutter: ^4.1.0
-  mobile_scanner: ^7.4.0
+  mobile_scanner: ^7.5.0
   # sha256 manifests for My W@tch artwork sync
   crypto: ^3.0.6
   path: ^1.9.0

@@ -17,31 +17,32 @@ path = "src/bin/devserver.rs"
 cc = "1"
 
 [dependencies]
-# Pinned to ant-client main rev 458c7175 (2026-10-29, 39 commits past tag
-# ant-core-v0.14.0 / rc-2026.10.3 — all browser read tuning, release
-# scripts, docs and deps; Cargo.toml version still 0.14.0, zero API change
-# for us). Pinned past the tag ON PURPOSE: the tag still pins `zip = "^2"`,
-# whose zstd/zstd-safe transitives picked up RUSTSEC-2026-0391/0398/0403 on
-# 2026-11-01 and made the `cargo audit` release gate fail; main moved to
-# `zip = "9"` (PR #233, merged 2026-10-23) which drops zip 2 + zstd + bzip2 +
-# xz2 + lzma from the graph entirely. Move back to a plain tag at the next
-# ant-core release (0.15.0+). Still exposes Client::file_download_to_sender
-# + self_encryption 0.36 get_range seek; 0.11 reintroduced Pointers (ADR 0016
-# — the seed-phrase backup's primitive), 0.12 added PR #208's pointer
-# read-freshness + pay-only-for-landable-writes, 0.13 added PR #210's pointer
-# ownership handover (ADR-0018) + majority fork reads + whole-group checks
-# before updates/transfers — all directly on the backup's pointer path —
-# plus ant-core-side single-flight chunk fetches. 0.14 adds ADR-0023
-# hot-record read spreading (first GETs spread uniformly across the close
-# group, a declined dial backs off 15s instead of 30 min, refusing holders
-# are waited out instead of answered "not found") — directly on the
-# streaming path — and FileUploadResult::sha256 (unused so far). File
+# Pinned to the ant-core-v0.15.0 tag (rc-2026.11.1, tagged 2026-11-05; a
+# plain tag again now that upstream's `zip = "9"` move is in a release —
+# the 0.14.0-era main-rev pin was only ever there to clear the zip 2 /
+# zstd cargo-audit advisories). 0.15.0 ships ADR-0020 get-or-closer chunk
+# reads: native reads run their own iterative lookup and ask likely
+# holders for the chunk in the SAME round trip as FIND_NODE (500 ms hedge,
+# <=2 GETs in flight, bad-content peers dropped instead of ending the
+# read), which lands squarely on the /xor streaming path (upstream:
+# sequential read p50 ~6s -> ~1s) and works against today's nodes. It
+# nests the read futures deeper, hence `#![recursion_limit = "256"]` at
+# the top of lib.rs (rustc's own suggestion for backup::run_restore's
+# async body). Still exposes Client::file_download_to_sender +
+# self_encryption 0.36 get_range seek; 0.11 reintroduced Pointers (ADR
+# 0016 — the seed-phrase backup's primitive), 0.12 added PR #208's pointer
+# read-freshness + pay-only-for-landable-writes, 0.13 added PR #210's
+# pointer ownership handover (ADR-0018) + majority fork reads + whole-group
+# checks before updates/transfers — all directly on the backup's pointer
+# path — plus ant-core-side single-flight chunk fetches. 0.14 added
+# ADR-0023 hot-record read spreading (first GETs spread uniformly across
+# the close group) and FileUploadResult::sha256 (unused so far). File
 # manifests (ADR-0006) ride along, unused.
 # LOCKFILE NOTE: on 2026-10-16 every zip 2.x showed as yanked and a plain
 # `cargo update` refused to resolve (un-yanked by 2026-10-18). Keep the
 # lockfile under version control and read `cargo update` output before
 # trusting it.
-ant-core = { git = "https://github.com/WithAutonomi/ant-client", rev = "458c7175490e6934a5501e51ff1d80d784f27564" }
+ant-core = { git = "https://github.com/WithAutonomi/ant-client", tag = "ant-core-v0.15.0" }
 self_encryption = "0.36"
 # batch.rs implements ant-core's UploadAdapter trait (the pooled-payment
 # upload driver), which is declared with async_trait — implementors need
@@ -190,9 +191,10 @@ keyring = "4"
 # can (opt-in) answer the device's passphrase request with a string the
 # app collects, reuse one session across a job, and always sign the
 # concrete EIP-1559 tx (the alpha.118 legacy-enum bug is gone by
-# construction). Pinned =0.1.5; the `ethereum` protos carry the eth
-# message/tx requests. Desktop only (USB).
-trezor-client = { version = "=0.1.5", default-features = false, features = ["ethereum"] }
+# construction). Pinned =0.1.6 (a deps-only republish of 0.1.5, same
+# protobuf/rusb pins); the `ethereum` protos carry the eth message/tx
+# requests. Desktop only (USB).
+trezor-client = { version = "=0.1.6", default-features = false, features = ["ethereum"] }
 # Feature-unification only: this box (and CI) may have no system
 # libusb-1.0 dev files, so force rusb's libusb1-sys to build its vendored
 # libusb from source (cc). Version matches rusb 0.9's own pin.

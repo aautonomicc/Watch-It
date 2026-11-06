@@ -5,6 +5,14 @@
 //! localhost HTTP server, and returns the bound port. The player then
 //! streams `http://127.0.0.1:{port}/xor/{address}` like any HTTP source.
 
+// ant-core 0.15.0's get-or-closer chunk reads (ADR-0020) nest their
+// futures deeper than 0.14.0 did; computing the layout of
+// `backup::run_restore`'s async body then overflows rustc's default
+// query depth limit ("queries overflow the depth limit"). This is
+// rustc's own suggested fix; the alternative is Box::pin-ing the chunk
+// reads inside run_restore.
+#![recursion_limit = "256"]
+
 pub mod backup;
 pub mod batch;
 pub mod cache;
