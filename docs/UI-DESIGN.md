@@ -83,8 +83,12 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   seek thumbnails for downloaded files and remembered window geometry;
   `I` or the top-bar stats button toggles a playback-statistics card —
   codec, decoder (software / hardware), fps, decoder/output dropped-frame
-  counts, buffered seconds, bitrate — top-left in windowed mode, in the
-  controls' top bar in fullscreen; video only, 2026-11-08)
+  counts, A/V sync, buffered seconds, bitrate, Flutter frame health —
+  top-left in windowed mode, in the controls' top bar in fullscreen; the
+  card ends in a "tap to copy for a report" line and a tap copies the
+  whole report (rows + environment + raw mpv properties) to the clipboard,
+  confirming inline with "Copied to clipboard" and a snackbar; video only,
+  2026-11-08)
 - Mobile: gestures — swipe left edge = brightness, right edge = volume, horizontal =
   seek, double-tap sides = ±10s
 - TV (Android TV remote): select = play/pause, ←/→ = seek (hold to accelerate),
@@ -546,7 +550,7 @@ decoding toggle; alpha.103 points the update snackbar at the in-app
 updater and makes TV audio seeking work from any focus with the seek
 bar autofocused in the full-screen audio player. Alpha.104/.105 are
 TV compatibility and polish (Impeller off by default on Tegra plus
-the Graphics compatibility toggle; persistent update prompts, visible
+the Graphics compatibility toggle (also offered on Linux desktop since 2026-11-08 — there it swaps Flutter's Impeller renderer for Skia via a marker file the runner reads at launch, for judder / jagged-edge reports); persistent update prompts, visible
 entry focus on TV screens, D-pad-escapable text fields, QR dialogs
 that fit small TV viewports). Alpha.106 ships the desktop polish trio
 — the mpv-style keyboard map with a `?` help sheet, window

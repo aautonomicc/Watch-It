@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:drift/drift.dart' show Value;
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+
+import '../services/impeller.dart';
 
 import '../models/media_list.dart';
 import '../services/app_settings.dart';
@@ -189,6 +193,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// The `I`-key playback-statistics overlay (mpv counters; see
   /// PlaybackStatsOverlay). Diagnostic only, never persisted.
   bool _showStats = false;
+
+  /// Host facts for the stats card's copied report, resolved once when the
+  /// card first opens: app version, the media_kit render path (H/W EGL
+  /// texture vs S/W pixel buffer — the Linux plugin answers), renderer.
+  String? _appVersion;
+  bool? _videoOutputHardware;
 
   /// The episode offered by the "Up next" overlay, when one exists.
   MediaEntry? _upNext;
@@ -541,7 +551,71 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  void _toggleStats() => setState(() => _showStats = !_showStats);
+  void _toggleStats() {
+    setState(() => _showStats = !_showStats);
+    if (_showStats) unawaited(_resolveStatsEnvironment());
+  }
+
+  Future<void> _resolveStatsEnvironment() async {
+    if (_appVersion == null) {
+      try {
+        final info = await PackageInfo.fromPlatform();
+        _appVersion = 'v${info.version}-alpha.${info.buildNumber}';
+      } catch (_) {
+        _appVersion = 'unknown';
+      }
+    }
+    try {
+      _videoOutputHardware =
+          await nativeVideoOutputIsHardware(await _player.handle);
+    } catch (_) {
+      _videoOutputHardware = null;
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// The environment section of the copied stats report (ordered).
+  Map<String, String> _statsEnvironment(BuildContext context) {
+    final view = View.of(context);
+    final size = MediaQuery.sizeOf(context);
+    final env = Platform.environment;
+    String knob(String name, String fallback) =>
+        (env[name] ?? '').isEmpty ? '$fallback (default)' : env[name]!;
+    final refresh = view.display.refreshRate;
+    return {
+      'App': _appVersion ?? 'unknown',
+      'OS': '${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
+      'Flutter renderer': ImpellerSettings.currentRenderer ?? 'default',
+      'Video output': switch (_videoOutputHardware) {
+        true => 'hardware (mpv → GL texture, isolated EGL context)',
+        false => 'software (mpv → pixel buffer upload)',
+        null => 'unknown',
+      },
+      'Display':
+          '${refresh > 0 ? '${refresh.toStringAsFixed(0)} Hz' : 'refresh unknown'}'
+          ' · window ${size.width.round()}×${size.height.round()}'
+          ' @${view.devicePixelRatio.toStringAsFixed(2)}x',
+      'Source': _isLocal ? 'local file' : 'network stream',
+      'Software decoding setting': widget.softwareDecode ? 'on' : 'off',
+      'Pacing: video-sync': knob('WATCHIT_MPV_VIDEO_SYNC', 'audio'),
+      'Pacing: video-timing-offset':
+          knob('WATCHIT_MPV_TIMING_OFFSET', '0.025'),
+      'Pacing: block-for-target-time':
+          knob('WATCHIT_MPV_BLOCK_FOR_TARGET_TIME', '0'),
+    };
+  }
+
+  /// One display refresh in ms (60 Hz when the platform reports none).
+  double _frameBudgetMs(BuildContext context) {
+    final r = View.of(context).display.refreshRate;
+    return r > 0 ? 1000 / r : 1000 / 60;
+  }
+
+  Widget _statsOverlay(BuildContext context) => PlaybackStatsOverlay(
+        read: _readMpvProperty,
+        environment: _statsEnvironment(context),
+        frameBudgetMs: _frameBudgetMs(context),
+      );
 
   /// One mpv property for the stats overlay — null whenever the native
   /// player can't answer (web/fake backends, disposed, unknown property).
@@ -566,7 +640,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           minHeight: 0,
           maxHeight: double.infinity,
           maxWidth: 460,
-          child: PlaybackStatsOverlay(read: _readMpvProperty),
+          child: Builder(builder: _statsOverlay),
         ),
       );
 
@@ -950,7 +1024,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   padding: overlayInset,
                   child: Align(
                     alignment: Alignment.topLeft,
-                    child: PlaybackStatsOverlay(read: _readMpvProperty),
+                    child: Builder(builder: _statsOverlay),
                   ),
                 ),
             ],

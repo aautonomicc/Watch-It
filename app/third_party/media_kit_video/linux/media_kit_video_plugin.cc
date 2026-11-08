@@ -134,6 +134,19 @@ static void media_kit_video_plugin_handle_method_call(
     FlValue* result = fl_value_new_null();
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
 
+  } else if (g_strcmp0(method, "VideoOutputManager.GetRenderInfo") == 0) {
+    // W@tch: H/W-vs-S/W render path for the playback-stats report.
+    FlValue* arguments = fl_method_call_get_args(method_call);
+    FlValue* handle = fl_value_lookup_string(arguments, "handle");
+    gint64 handle_value =
+        g_ascii_strtoll(fl_value_get_string(handle), NULL, 10);
+    gboolean hardware = FALSE;
+    FlValue* result = fl_value_new_map();
+    if (video_output_manager_get_render_info(self->video_output_manager,
+                                             handle_value, &hardware)) {
+      fl_value_set_string_take(result, "hardware", fl_value_new_bool(hardware));
+    }
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
   } else if (g_strcmp0(method, "Utils.EnterNativeFullscreen") == 0) {
     utils_enter_native_fullscreen(
         gtk_widget_get_toplevel(GTK_WIDGET(self->view)));

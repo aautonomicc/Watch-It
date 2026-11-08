@@ -77,6 +77,22 @@ void video_output_set_texture_update_callback(
     gpointer texture_update_callback_context);
 
 /**
+ * @brief W@tch: whether this output renders through the H/W path (mpv draws
+ * into an OpenGL texture in an isolated EGL context) or fell back to S/W
+ * rendering (mpv writes a pixel buffer that is uploaded every frame). Read
+ * by the playback-stats report so a field report names the path.
+ */
+gboolean video_output_get_hardware_acceleration(VideoOutput* self);
+
+/**
+ * @brief W@tch: the MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME value the render
+ * calls pass (0 = non-blocking, the default; 1 = stock mpv behaviour), from
+ * the WATCHIT_MPV_BLOCK_FOR_TARGET_TIME environment variable — an A/B knob
+ * for frame-pacing field tests.
+ */
+int video_output_get_block_for_target_time(VideoOutput* self);
+
+/**
  * @brief Sets the required video output size. This forces |VideoOutput| to
  * resize the internal OpenGL surface / texture.
  *

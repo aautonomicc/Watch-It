@@ -33,6 +33,7 @@ struct _VideoOutput {
   gpointer texture_update_callback_context;
   FlTextureRegistrar* texture_registrar;
   gboolean destroyed;
+  int block_for_target_time; /* W@tch pacing knob, see header. */
 };
 
 G_DEFINE_TYPE(VideoOutput, video_output, G_TYPE_OBJECT)
@@ -342,7 +343,17 @@ VideoOutput* video_output_new(FlTextureRegistrar* texture_registrar,
   }
   self->configuration.enable_hardware_acceleration = TRUE;
 #endif
-  mpv_set_option_string(self->handle, "video-sync", "audio");
+  // W@tch frame-pacing knobs (2026-11-08). Defaults are the shipped
+  // behaviour; the WATCHIT_MPV_* environment variables let a tester A/B
+  // the pacing on their own machine without a new build:
+  //   WATCHIT_MPV_VIDEO_SYNC            mpv `video-sync` (default "audio")
+  //   WATCHIT_MPV_TIMING_OFFSET         mpv `video-timing-offset` seconds
+  //                                     (default "0.025", stock mpv 0.05)
+  //   WATCHIT_MPV_BLOCK_FOR_TARGET_TIME 1 = stock blocking render call
+  //                                     (default 0 = non-blocking)
+  const gchar* video_sync = g_getenv("WATCHIT_MPV_VIDEO_SYNC");
+  mpv_set_option_string(self->handle, "video-sync",
+                        (video_sync && *video_sync) ? video_sync : "audio");
   // Causes frame drops with `pulse` audio output. (SlotSun/dart_simple_live#42)
   // mpv_set_option_string(self->handle, "video-timing-offset", "0");
   //
@@ -354,7 +365,17 @@ VideoOutput* video_output_new(FlTextureRegistrar* texture_registrar,
   // and one more to scan it out (≈17–33 ms on a 60 Hz display), so an offset
   // of ~25 ms lands the frame centred on its target (±8 ms) with zero
   // blocking. The stock 50 ms would show video ~25 ms early.
-  mpv_set_option_string(self->handle, "video-timing-offset", "0.025");
+  const gchar* timing_offset = g_getenv("WATCHIT_MPV_TIMING_OFFSET");
+  mpv_set_option_string(
+      self->handle, "video-timing-offset",
+      (timing_offset && *timing_offset) ? timing_offset : "0.025");
+  const gchar* block = g_getenv("WATCHIT_MPV_BLOCK_FOR_TARGET_TIME");
+  self->block_for_target_time = (block && g_strcmp0(block, "1") == 0) ? 1 : 0;
+  g_print("media_kit: VideoOutput: pacing video-sync=%s timing-offset=%s "
+          "block-for-target-time=%d\n",
+          (video_sync && *video_sync) ? video_sync : "audio",
+          (timing_offset && *timing_offset) ? timing_offset : "0.025",
+          self->block_for_target_time);
   gboolean hardware_acceleration_supported = FALSE;
   if (self->configuration.enable_hardware_acceleration) {
     self->texture_gl = texture_gl_new(self);
@@ -407,7 +428,7 @@ VideoOutput* video_output_new(FlTextureRegistrar* texture_registrar,
                       // Same non-blocking render as the H/W path — this
                       // one runs on the GTK MAIN thread, where a 50 ms
                       // block per frame would also stall the UI.
-                      int block_for_target_time = 0;
+                      int block_for_target_time = self->block_for_target_time;
                       mpv_render_param params[]{
                           {MPV_RENDER_PARAM_SW_SIZE, size},
                           {MPV_RENDER_PARAM_SW_FORMAT, (void*)"rgb0"},
@@ -433,6 +454,14 @@ VideoOutput* video_output_new(FlTextureRegistrar* texture_registrar,
   }
 #endif
   return self;
+}
+
+gboolean video_output_get_hardware_acceleration(VideoOutput* self) {
+  return self->texture_gl != NULL;
+}
+
+int video_output_get_block_for_target_time(VideoOutput* self) {
+  return self->block_for_target_time;
 }
 
 void video_output_set_texture_update_callback(

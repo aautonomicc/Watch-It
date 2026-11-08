@@ -26,3 +26,6 @@ class NativeVideoController extends PlatformVideoController {
   @override
   Future<void> setSize({int? width, int? height}) => throw UnimplementedError();
 }
+
+/// W@tch: see the real implementation — never answers on web.
+Future<bool?> nativeVideoOutputIsHardware(int handle) async => null;

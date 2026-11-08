@@ -297,3 +297,25 @@ class NativeVideoController extends PlatformVideoController {
           },
         );
 }
+
+/// W@tch: whether the native video output for the player [handle] renders
+/// through the H/W path (mpv draws into a GL texture in an isolated EGL
+/// context — the Linux patch's fast path) or the S/W pixel-buffer fallback.
+/// Null when the platform plugin has no answer (not Linux, no output yet).
+/// Read by the playback-stats report so a pasted report names the path.
+Future<bool?> nativeVideoOutputIsHardware(int handle) async {
+  try {
+    final result = await NativeVideoController._channel.invokeMethod(
+      'VideoOutputManager.GetRenderInfo',
+      {'handle': handle.toString()},
+    );
+    if (result is Map && result['hardware'] is bool) {
+      return result['hardware'] as bool;
+    }
+    return null;
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  }
+}

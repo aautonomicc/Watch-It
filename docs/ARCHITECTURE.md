@@ -633,11 +633,34 @@ v17 dropped the channel columns and lists. History in
   `video-timing-offset=0.025` so the one-vsync-pickup + one-vsync-scanout
   pipeline lands frames centred on their target (±8 ms on 60 Hz). Display
   sync / interpolation (`video-sync=display-resample`) would need a
-  dedicated render thread reporting swaps at vsync — not built.
+  dedicated render thread reporting swaps at vsync — not built. Field A/B
+  knobs (environment variables read by the plugin at output creation, no
+  rebuild needed): `WATCHIT_MPV_VIDEO_SYNC` (default `audio`),
+  `WATCHIT_MPV_TIMING_OFFSET` (seconds, default `0.025`),
+  `WATCHIT_MPV_BLOCK_FOR_TARGET_TIME` (`1` = stock blocking render).
+- Linux renderer choice (2026-11-08): Flutter's Impeller renderer is the
+  engine's Linux default; its OpenGL backend fills paths without
+  anti-aliasing on GPUs lacking MSAA (the "jagged bucket, smooth text"
+  report) and is the newer desktop renderer. The runner
+  (`linux/runner/my_application.cc`) falls back to Skia via
+  `fl_dart_project_set_enable_impeller(FALSE)` when `WATCHIT_IMPELLER` is
+  `0`/`false`/`off`/`skia`, or when Settings → Graphics compatibility mode
+  wrote the marker file `impeller.off` into the app data dir
+  (`$XDG_DATA_HOME/io.github.aautonomicc.watchit`, the exact directory
+  path_provider resolves — `services/impeller.dart`). The decision is
+  exported as `WATCHIT_RENDERER` for the stats report. Independently, the
+  bucket mark (`widgets/brand_mark.dart`) feathers its slanted edges with a
+  one-device-pixel gradient band so it reads smooth on either renderer.
 - Playback statistics overlay (`I` on desktop, or the top-bar stats button):
-  polls mpv's `video-codec`, `hwdec-current`, fps, `frame-drop-count`
-  (decoder too slow), `vo-drop-frame-count` (output/GPU too slow), demuxer
-  cache and bitrate once a second — diagnostic only (`widgets/playback_stats.dart`).
+  polls mpv's `video-codec`, `hwdec-current`, fps, `decoder-frame-drop-count`
+  (decoder too slow), `frame-drop-count` (output/GPU too slow), `avsync`,
+  demuxer cache and bitrate once a second, plus Flutter's own frame health
+  from `SchedulerBinding` timings (fps, raster avg/max, frames over one
+  refresh); tapping the card copies a full plain-text report (rows + app
+  version, renderer, media_kit H/W-vs-S/W render path via the plugin's
+  `VideoOutputManager.GetRenderInfo`, display refresh/DPR, pacing knobs,
+  every raw mpv property) to the clipboard — diagnostic only
+  (`widgets/playback_stats.dart`).
 
 ### Data & state
 

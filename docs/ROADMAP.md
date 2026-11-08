@@ -1541,8 +1541,16 @@ files stay install-global — a profile scopes only viewing state.
       (BLOCK_FOR_TARGET_TIME=0 + `video-timing-offset` 25 ms), and `I` /
       the top-bar stats button shows mpv's decoder/output drop counters,
       codec, hwdec, fps, cache and bitrate so a jerky desktop can be
-      diagnosed in-app. Open: true display-sync / interpolation needs a
-      dedicated render thread reporting swaps at vsync.
+      diagnosed in-app. Follow-up the same day after the alpha.129-test1
+      field test (still jerky, bucket mark aliased): tapping the card
+      copies a full report (rows + app version, Flutter renderer,
+      media_kit H/W-vs-S/W path, display refresh, pacing knobs, raw mpv
+      properties, Flutter frame timings); `WATCHIT_MPV_*` env knobs A/B
+      the pacing without a rebuild; Settings → Graphics compatibility
+      mode on Linux swaps Impeller for Skia (runner marker file, or
+      `WATCHIT_IMPELLER=0`); the bucket mark feathers its own edges.
+      Open: true display-sync / interpolation needs a dedicated render
+      thread reporting swaps at vsync.
 - [x] Keyboard map, window polish, hover thumbnails on seek bar
       (2026-09-23, alpha.106): app-owned mpv-style
       desktop keyboard map (space/K, ←→ & J/L ±10s, 0–9 percent-seek,

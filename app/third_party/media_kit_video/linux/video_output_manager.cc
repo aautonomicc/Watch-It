@@ -73,3 +73,15 @@ void video_output_manager_dispose(VideoOutputManager* self, gint64 handle) {
     g_hash_table_remove(self->video_outputs, GINT_TO_POINTER(handle));
   }
 }
+
+gboolean video_output_manager_get_render_info(VideoOutputManager* self,
+                                              gint64 handle,
+                                              gboolean* hardware) {
+  if (!g_hash_table_contains(self->video_outputs, GINT_TO_POINTER(handle))) {
+    return FALSE;
+  }
+  VideoOutput* video_output = VIDEO_OUTPUT(
+      g_hash_table_lookup(self->video_outputs, GINT_TO_POINTER(handle)));
+  *hardware = video_output_get_hardware_acceleration(video_output);
+  return TRUE;
+}

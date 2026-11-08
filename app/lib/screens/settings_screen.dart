@@ -63,8 +63,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// default (Tegra) rather than an explicit choice — Android only.
   bool _disableImpeller = false;
   bool _impellerAutoOff = false;
-  bool get _showImpellerTile =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  bool get _showImpellerTile => ImpellerSettings.supported;
+  bool get _linuxDesktop =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.linux;
   TmdbKeySource _tmdbKeySource = TmdbKeySource.none;
   int? _dataSizeBytes;
   bool _dataSizeKnown = false;
@@ -777,10 +778,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     if (mounted) setState(() => _softwareVideoDecode = v);
                   },
                 ),
-                // Second compatibility escape hatch, Android only:
+                // Second compatibility escape hatch, Android + Linux:
                 // Flutter's Impeller renderer itself blacks out video on
                 // Tegra GPUs (Nvidia Shield) — those devices default ON
-                // here and MainActivity reads the pref at launch.
+                // here and MainActivity reads the pref at launch — and on
+                // Linux it is the newer renderer (aliased path edges on
+                // GPUs without MSAA, the first suspect for judder), so the
+                // runner reads a marker file at launch (ImpellerSettings).
                 if (_showImpellerTile)
                   SwitchListTile(
                     secondary: Icon(Icons.brush_outlined, color: t.accent),
@@ -789,11 +793,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: TextStyle(color: t.bone, fontSize: 15),
                     ),
                     subtitle: Text(
-                      'Draws the app with Flutter\'s older renderer. Fixes '
-                      'video that plays sound with a black picture on the '
-                      'Nvidia Shield and other Tegra devices'
-                      '${_impellerAutoOff ? ' — turned on automatically for this device' : ''}. '
-                      'Takes effect the next time W@tch starts.',
+                      _linuxDesktop
+                          ? 'Draws the app with Flutter\'s older renderer '
+                              '(Skia) instead of Impeller. Try it if video '
+                              'judders or shapes look jagged on this '
+                              'computer. Takes effect the next time W@tch '
+                              'starts'
+                              '${ImpellerSettings.currentRenderer == null ? '' : ' — running on ${ImpellerSettings.currentRenderer} now'}.'
+                          : 'Draws the app with Flutter\'s older renderer. Fixes '
+                              'video that plays sound with a black picture on the '
+                              'Nvidia Shield and other Tegra devices'
+                              '${_impellerAutoOff ? ' — turned on automatically for this device' : ''}. '
+                              'Takes effect the next time W@tch starts.',
                       style: TextStyle(color: t.ash, fontSize: 12),
                     ),
                     value: _disableImpeller,

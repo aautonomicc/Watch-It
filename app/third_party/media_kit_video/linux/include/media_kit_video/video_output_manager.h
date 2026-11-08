@@ -72,4 +72,13 @@ void video_output_manager_set_size(VideoOutputManager* self,
  */
 void video_output_manager_dispose(VideoOutputManager* self, gint64 handle);
 
+/**
+ * @brief W@tch: reports the render path of the |VideoOutput| for |handle|.
+ * Returns FALSE when no output exists for the handle; otherwise *hardware is
+ * set to whether it renders through the H/W (EGL texture) path.
+ */
+gboolean video_output_manager_get_render_info(VideoOutputManager* self,
+                                              gint64 handle,
+                                              gboolean* hardware);
+
 #endif

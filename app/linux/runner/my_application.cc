@@ -80,6 +80,34 @@ static void my_application_activate(GApplication* application) {
   fl_dart_project_set_dart_entrypoint_arguments(
       project, self->dart_entrypoint_arguments);
 
+  // Renderer choice (Settings → Graphics compatibility mode on Linux).
+  // Flutter's Impeller renderer is this engine's Linux default; its OpenGL
+  // backend fills paths without anti-aliasing on GPUs lacking MSAA and is
+  // the newer of the two desktop renderers, so a per-install opt-out back
+  // to Skia exists for judder/jagged-edge reports. Precedence: the
+  // WATCHIT_IMPELLER environment variable (0/false/off/skia → Skia,
+  // anything else → Impeller; an A/B knob for a terminal launch), else the
+  // marker file Settings writes into the app's data dir — the same
+  // directory path_provider resolves ($XDG_DATA_HOME/<application id>).
+  // The decision is exported as WATCHIT_RENDERER so Dart can report it.
+  gboolean enable_impeller = TRUE;
+  const gchar* impeller_env = g_getenv("WATCHIT_IMPELLER");
+  if (impeller_env != nullptr && *impeller_env != '\0') {
+    enable_impeller = !(g_strcmp0(impeller_env, "0") == 0 ||
+                        g_ascii_strcasecmp(impeller_env, "false") == 0 ||
+                        g_ascii_strcasecmp(impeller_env, "off") == 0 ||
+                        g_ascii_strcasecmp(impeller_env, "skia") == 0);
+  } else {
+    g_autofree gchar* marker = g_build_filename(
+        g_get_user_data_dir(), APPLICATION_ID, "impeller.off", nullptr);
+    if (g_file_test(marker, G_FILE_TEST_EXISTS)) {
+      enable_impeller = FALSE;
+    }
+  }
+  fl_dart_project_set_enable_impeller(project, enable_impeller);
+  g_setenv("WATCHIT_RENDERER", enable_impeller ? "impeller" : "skia", TRUE);
+  g_print("watchit: renderer %s\n", enable_impeller ? "impeller" : "skia");
+
   FlView* view = fl_view_new(project);
   GdkRGBA background_color;
   // Background defaults to black, override it here if necessary, e.g. #00000000
