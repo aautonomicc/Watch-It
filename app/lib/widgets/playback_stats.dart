@@ -343,10 +343,12 @@ class NativeRenderSnapshot {
 /// mpv signalled a new frame, M how often Flutter actually rendered the
 /// texture on its raster thread. M far below N with a short render time
 /// means Flutter is not scheduling frames (the engine side), not that the
-/// GPU is slow. `GTK` reads the GTK frame-clock tick rate and paint rate of
-/// the Flutter window: under a compositor GDK freezes the clock until the
-/// compositor acknowledges the previous frame, so a low tick rate names the
-/// compositor as the pacer. Empty without a previous snapshot (rates need
+/// GPU is slow. `GTK` reads the GTK frame-clock tick rate, paint rate and
+/// paint duration of the Flutter window: under a compositor GDK freezes the
+/// clock until the compositor acknowledges the previous frame, so a low
+/// tick rate names the compositor as the pacer; a long paint (the FlView
+/// blit plus GDK's GL swap) names a blocking swap on the GTK thread. Empty
+/// without a previous snapshot (rates need
 /// an interval) or when the plugin returned no counters.
 List<PlaybackStatsRow> renderPipelineRows(
   NativeRenderSnapshot? prev,
@@ -377,6 +379,17 @@ List<PlaybackStatsRow> renderPipelineRows(
   final renderMax = cur.count('render_us_max') / 1000;
   final ticks = rate('gtk_tick_count');
   final draws = rate('gtk_draw_count');
+  // Paint phase = before-paint → after-paint on the view's frame clock: the
+  // FlView blit plus GDK's GL swap, i.e. how long the GTK thread is blocked
+  // per painted frame. Old plugins without the counter read as zeros.
+  final dPaint = cur.count('gtk_paint_count') - prev.count('gtk_paint_count');
+  final paintAvg = dPaint > 0
+      ? (cur.count('gtk_paint_us_total') - prev.count('gtk_paint_us_total')) /
+          dPaint /
+          1000
+      : 0.0;
+  final paintMax = cur.count('gtk_paint_us_max') / 1000;
+  final hasPaint = cur.raw.containsKey('gtk_paint_count');
   String r(double v) => v.toStringAsFixed(1);
   return [
     (
@@ -388,6 +401,7 @@ List<PlaybackStatsRow> renderPipelineRows(
     (
       label: 'GTK',
       value: '${r(ticks)} ticks/s · ${r(draws)} paints/s'
+          '${hasPaint ? ' · paint ${r(paintAvg)} avg / ${r(paintMax)} max ms' : ''}'
           '${cur.gdkRefreshMs != null ? ' · refresh ${cur.gdkRefreshMs!.toStringAsFixed(2)} ms' : ''}'
           ' · ${cur.flag('composited') ? 'composited' : 'no compositor'}',
     ),

@@ -220,6 +220,9 @@ void main() {
       required int ticks,
       required int draws,
       int refreshUs = 16667,
+      int? paints,
+      int paintUs = 0,
+      int paintUsMax = 0,
     }) =>
         NativeRenderSnapshot({
           ...facts,
@@ -231,6 +234,9 @@ void main() {
           'populate_us_max': 22000,
           'gtk_tick_count': ticks,
           'gtk_draw_count': draws,
+          'gtk_paint_count': ?paints,
+          if (paints != null) 'gtk_paint_us_total': paintUs,
+          if (paints != null) 'gtk_paint_us_max': paintUsMax,
           'gdk_refresh_us': refreshUs,
         }, t0.add(Duration(seconds: secs)));
 
@@ -288,6 +294,19 @@ void main() {
       expect(byLabel['GTK'], '60.0 ticks/s · 0.0 paints/s · composited');
       expect(b.gdkRefreshMs, isNull);
       expect(b.environment()['GDK'], 'x11 · composited · scale 2');
+    });
+
+    test('a plugin that times paint phases adds the paint duration', () {
+      // 14 paints in two seconds taking 392 ms together = 28 ms each, the
+      // worst one 41 ms: a GTK thread blocked for most of each refresh.
+      final a = snap(0, updates: 0, populates: 0, renderUs: 0, populateUs: 0,
+          ticks: 0, draws: 0, paints: 100, paintUs: 1000000, paintUsMax: 30000);
+      final b = snap(2, updates: 48, populates: 40, renderUs: 40000,
+          populateUs: 50000, ticks: 120, draws: 14, paints: 114,
+          paintUs: 1392000, paintUsMax: 41000);
+      final byLabel = {for (final r in renderPipelineRows(a, b)) r.label: r.value};
+      expect(byLabel['GTK'],
+          '60.0 ticks/s · 7.0 paints/s · paint 28.0 avg / 41.0 max ms · refresh 16.67 ms · composited');
     });
   });
 

@@ -109,6 +109,10 @@ int video_output_get_block_for_target_time(VideoOutput* self);
  *                     acknowledged the previous frame)
  *  - gtk_draw_count:  FlView "draw" signals (GTK actually painting the
  *                     window, i.e. blitting Flutter's framebuffer)
+ *  - gtk_paint_*:     GdkFrameClock paint phases ("before-paint" to
+ *                     "after-paint": the FlView draw/blit plus GDK's GL
+ *                     swap) — count and time; a long paint is the GTK
+ *                     thread blocked per frame by the driver/compositor
  *  - gdk_refresh_us:  the frame clock's refresh interval, 0 when unknown
  */
 typedef struct _VideoOutputRenderStats {
@@ -120,6 +124,9 @@ typedef struct _VideoOutputRenderStats {
   gint64 populate_us_max;
   gint64 gtk_tick_count;
   gint64 gtk_draw_count;
+  gint64 gtk_paint_count;
+  gint64 gtk_paint_us_total;
+  gint64 gtk_paint_us_max;
   gint64 gdk_refresh_us;
   gboolean composited;
   gint scale_factor;

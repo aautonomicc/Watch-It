@@ -45,6 +45,9 @@ struct _VideoOutput {
   gint64 stat_populate_us_max;
   gint64 stat_gtk_tick_count;
   gint64 stat_gtk_draw_count;
+  gint64 stat_gtk_paint_count;
+  gint64 stat_gtk_paint_us_total;
+  gint64 stat_gtk_paint_us_max;
   gint64 stat_gdk_refresh_us;
   gchar* gl_vendor;
   gchar* gl_renderer;
@@ -54,6 +57,10 @@ struct _VideoOutput {
   FlView* view;            /* observed for GTK ticks/draws; not owned */
   guint tick_callback_id;  /* gtk_widget_add_tick_callback, 0 = none */
   gulong draw_handler_id;  /* "draw" signal on the view, 0 = none */
+  GdkFrameClock* clock;    /* the view's frame clock, ref held; NULL = none */
+  gulong before_paint_id;  /* "before-paint" on |clock|, 0 = none */
+  gulong after_paint_id;   /* "after-paint" on |clock|, 0 = none */
+  gint64 paint_start_us;   /* monotonic stamp of the running paint phase */
   gboolean update_via_main; /* WATCHIT_MPV_UPDATE_VIA_MAIN=1 */
   gint update_pending;      /* coalesces main-thread update posts */
   gboolean sw_forced;       /* WATCHIT_MPV_SW_RENDER=1 */
@@ -83,6 +90,60 @@ void video_output_note_populate(VideoOutput* self,
   stat_max(&self->stat_populate_us_max, populate_us);
 }
 
+// GdkFrameClock paint phase on the FlView's clock: "before-paint" opens it,
+// "after-paint" closes it, and everything the GTK thread does to put a frame
+// on screen sits between the two — the FlView draw (the embedder's blit of
+// Flutter's framebuffer under its frame mutex) and GDK's end-of-frame GL
+// swap. A long paint here is the platform thread BLOCKED per frame (a
+// driver swap waiting on vblank or the compositor), which starves every
+// main-loop client: Flutter's vsync timer, mpv's update posts, input.
+static void video_output_before_paint_cb(GdkFrameClock* clock, gpointer data) {
+  VideoOutput* self = (VideoOutput*)data;
+  self->paint_start_us = g_get_monotonic_time();
+}
+
+static void video_output_after_paint_cb(GdkFrameClock* clock, gpointer data) {
+  VideoOutput* self = (VideoOutput*)data;
+  if (self->destroyed || self->paint_start_us == 0) {
+    return;
+  }
+  gint64 us = g_get_monotonic_time() - self->paint_start_us;
+  self->paint_start_us = 0;
+  stat_add(&self->stat_gtk_paint_count, 1);
+  stat_add(&self->stat_gtk_paint_us_total, us);
+  stat_max(&self->stat_gtk_paint_us_max, us);
+}
+
+static void video_output_unobserve_clock(VideoOutput* self) {
+  if (self->clock != NULL) {
+    if (self->before_paint_id != 0) {
+      g_signal_handler_disconnect(self->clock, self->before_paint_id);
+    }
+    if (self->after_paint_id != 0) {
+      g_signal_handler_disconnect(self->clock, self->after_paint_id);
+    }
+    g_object_unref(self->clock);
+  }
+  self->clock = NULL;
+  self->before_paint_id = 0;
+  self->after_paint_id = 0;
+  self->paint_start_us = 0;
+}
+
+// The frame clock belongs to the view's GdkWindow and can change across a
+// re-realize, so it is (re)hooked from the tick callback, which hands it in.
+static void video_output_observe_clock(VideoOutput* self, GdkFrameClock* clock) {
+  if (clock == NULL || self->clock == clock) {
+    return;
+  }
+  video_output_unobserve_clock(self);
+  self->clock = GDK_FRAME_CLOCK(g_object_ref(clock));
+  self->before_paint_id = g_signal_connect(
+      clock, "before-paint", G_CALLBACK(video_output_before_paint_cb), self);
+  self->after_paint_id = g_signal_connect(
+      clock, "after-paint", G_CALLBACK(video_output_after_paint_cb), self);
+}
+
 // GdkFrameClock tick on the FlView: GTK's own frame cadence. Under a
 // compositor GDK freezes this clock until _NET_WM_FRAME_DRAWN comes back,
 // so a low tick rate here means the compositor is pacing the window.
@@ -94,6 +155,7 @@ static gboolean video_output_tick_cb(GtkWidget* widget,
     return G_SOURCE_REMOVE;
   }
   stat_add(&self->stat_gtk_tick_count, 1);
+  video_output_observe_clock(self, clock);
   gint64 refresh = 0;
   gdk_frame_clock_get_refresh_info(clock, gdk_frame_clock_get_frame_time(clock),
                                    &refresh, NULL);
@@ -139,6 +201,7 @@ static void video_output_unobserve_view(VideoOutput* self) {
   self->tick_callback_id = 0;
   self->draw_handler_id = 0;
   self->view = NULL;
+  video_output_unobserve_clock(self);
 }
 
 void video_output_get_render_stats(VideoOutput* self,
@@ -151,6 +214,9 @@ void video_output_get_render_stats(VideoOutput* self,
   out->populate_us_max = stat_get(&self->stat_populate_us_max);
   out->gtk_tick_count = stat_get(&self->stat_gtk_tick_count);
   out->gtk_draw_count = stat_get(&self->stat_gtk_draw_count);
+  out->gtk_paint_count = stat_get(&self->stat_gtk_paint_count);
+  out->gtk_paint_us_total = stat_get(&self->stat_gtk_paint_us_total);
+  out->gtk_paint_us_max = stat_get(&self->stat_gtk_paint_us_max);
   out->gdk_refresh_us = stat_get(&self->stat_gdk_refresh_us);
   GdkDisplay* display = gdk_display_get_default();
   GdkScreen* screen = gdk_screen_get_default();
@@ -273,6 +339,9 @@ static void video_output_init(VideoOutput* self) {
   self->stat_populate_us_max = 0;
   self->stat_gtk_tick_count = 0;
   self->stat_gtk_draw_count = 0;
+  self->stat_gtk_paint_count = 0;
+  self->stat_gtk_paint_us_total = 0;
+  self->stat_gtk_paint_us_max = 0;
   self->stat_gdk_refresh_us = 0;
   self->gl_vendor = NULL;
   self->gl_renderer = NULL;
@@ -282,6 +351,10 @@ static void video_output_init(VideoOutput* self) {
   self->view = NULL;
   self->tick_callback_id = 0;
   self->draw_handler_id = 0;
+  self->clock = NULL;
+  self->before_paint_id = 0;
+  self->after_paint_id = 0;
+  self->paint_start_us = 0;
   self->update_via_main = FALSE;
   self->update_pending = 0;
   self->sw_forced = FALSE;

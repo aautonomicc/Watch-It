@@ -164,6 +164,12 @@ static void media_kit_video_plugin_handle_method_call(
                                fl_value_new_int(st.gtk_tick_count));
       fl_value_set_string_take(result, "gtk_draw_count",
                                fl_value_new_int(st.gtk_draw_count));
+      fl_value_set_string_take(result, "gtk_paint_count",
+                               fl_value_new_int(st.gtk_paint_count));
+      fl_value_set_string_take(result, "gtk_paint_us_total",
+                               fl_value_new_int(st.gtk_paint_us_total));
+      fl_value_set_string_take(result, "gtk_paint_us_max",
+                               fl_value_new_int(st.gtk_paint_us_max));
       fl_value_set_string_take(result, "gdk_refresh_us",
                                fl_value_new_int(st.gdk_refresh_us));
       fl_value_set_string_take(result, "composited",
