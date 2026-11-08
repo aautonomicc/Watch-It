@@ -658,13 +658,22 @@ v17 dropped the channel columns and lists. History in
   `GetRenderInfo`): the Linux plugin keeps monotonic counters per video
   output — mpv update callbacks, FlTextureGL populate calls with the time
   inside `mpv_render_context_render` and the whole populate, GdkFrameClock
-  ticks on the FlView (`gtk_widget_add_tick_callback`) and FlView `draw`
-  signals (GTK paints), plus the frame clock's refresh interval, compositor
+  ticks on the FlView (`gtk_widget_add_tick_callback`), FlView `draw`
+  signals (GTK paints) and — since the test5 build — the duration of every
+  paint phase (`before-paint` → `after-paint` on the view's frame clock,
+  which brackets the FlView blit AND GDK's end-of-frame GL swap in
+  `gdk_x11_gl_context_end_frame`, i.e. how long the GTK thread is blocked
+  per painted frame; the Mint run with `WATCHIT_MPV_UPDATE_VIA_MAIN=1`
+  ticked at a full 59/s yet still waited 57 ms per UI frame, so the
+  compositor freeze is not the only pacer — a swap blocking on
+  vblank/compositor is the next suspect), plus the frame clock's refresh
+  interval, compositor
   state, GDK backend/scale and the GL/EGL vendor strings read in the
   isolated EGL context (same EGLDisplay as Flutter's, so they name the
   driver Flutter composites with). The Dart stats card differences two
   snapshots into the `Pipeline` (mpv frames/s → Flutter renders/s) and
-  `GTK` (ticks/s · paints/s) rows and folds the host facts into the
+  `GTK` (ticks/s · paints/s · paint avg/max ms) rows and folds the host
+  facts into the
   copied report's environment. How the embedder presents on Linux (read
   from the engine sources at this Flutter's pin): the raster thread
   composites into ONE shared framebuffer under a mutex
