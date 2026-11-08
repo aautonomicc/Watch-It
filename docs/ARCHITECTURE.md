@@ -644,7 +644,16 @@ v17 dropped the channel columns and lists. History in
   platform-thread call; stock media_kit ignores that) and
   `WATCHIT_MPV_SW_RENDER` (`1` = skip the EGL-texture path, mpv renders a
   pixel buffer on the GTK thread — the S/W fallback — to isolate the
-  texture handoff in an A/B).
+  texture handoff in an A/B). Runner-side knob (my_application.cc, X11
+  only): `WATCHIT_GDK_FRAME_SYNC=0` calls
+  `gdk_x11_window_set_frame_sync_enabled(FALSE)` on the toplevel so GDK
+  stops freezing the window's frame clock until the compositor's
+  `_NET_WM_FRAME_DRAWN` reply — the Mint/Cinnamon/NVIDIA reports showed that
+  reply arriving at roughly half the 60 Hz refresh (32–36 GTK ticks/s,
+  15–19 paints/s), which capped video presentation at the paint rate
+  regardless of renderer or mpv pacing; with frame sync off the clock
+  free-runs on GDK's refresh timer (compositor still composites, no
+  tearing risk).
 - Playback-stats pipeline counters (2026-11-08, vendored plugin
   `GetRenderInfo`): the Linux plugin keeps monotonic counters per video
   output — mpv update callbacks, FlTextureGL populate calls with the time

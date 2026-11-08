@@ -602,6 +602,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           knob('WATCHIT_MPV_TIMING_OFFSET', '0.025'),
       'Pacing: block-for-target-time':
           knob('WATCHIT_MPV_BLOCK_FOR_TARGET_TIME', '0'),
+      // The runner's GDK frame-sync knob (Linux X11): `0` takes the window
+      // out of the compositor's _NET_WM_FRAME_DRAWN pacing.
+      'Pacing: gdk-frame-sync': knob('WATCHIT_GDK_FRAME_SYNC', '1'),
       // Desktop-session facts for the judder triage: the session type and
       // desktop name the compositor, the GDK_* variables and the NVIDIA /
       // Mesa vblank overrides are the knobs a tester may have set. Only

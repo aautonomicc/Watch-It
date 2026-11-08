@@ -123,6 +123,35 @@ static void my_application_activate(GApplication* application) {
                            self);
   gtk_widget_realize(GTK_WIDGET(view));
 
+  // Judder A/B knob (2026-11-08): WATCHIT_GDK_FRAME_SYNC=0 takes the
+  // window out of the _NET_WM_FRAME_DRAWN protocol. Under an X11
+  // compositor GDK freezes the window's frame clock after every paint
+  // until the compositor acknowledges that frame, so a compositor that
+  // acknowledges late (Muffin/Mutter on the NVIDIA driver is the known
+  // case) halves the GTK tick rate — the Mint reports showed 32–36 ticks/s
+  // and 15–19 paints/s on a 60 Hz display, which is exactly the rate the
+  // video textures were being presented at. With frame sync off the clock
+  // free-runs on GDK's refresh timer and paints are no longer gated on the
+  // compositor's reply. Default stays stock (on); GDK's setter only ever
+  // disables, so this is a one-way flip for the process.
+#ifdef GDK_WINDOWING_X11
+  const gchar* frame_sync_env = g_getenv("WATCHIT_GDK_FRAME_SYNC");
+  if (frame_sync_env != nullptr &&
+      (g_strcmp0(frame_sync_env, "0") == 0 ||
+       g_ascii_strcasecmp(frame_sync_env, "false") == 0 ||
+       g_ascii_strcasecmp(frame_sync_env, "off") == 0)) {
+    GdkWindow* gdk_window = gtk_widget_get_window(GTK_WIDGET(window));
+    if (gdk_window != nullptr && GDK_IS_X11_WINDOW(gdk_window)) {
+      gdk_x11_window_set_frame_sync_enabled(gdk_window, FALSE);
+      g_print("watchit: GDK frame sync disabled (_NET_WM_FRAME_DRAWN "
+              "pacing bypassed)\n");
+    } else {
+      g_print("watchit: WATCHIT_GDK_FRAME_SYNC=0 ignored (not an X11 "
+              "window)\n");
+    }
+  }
+#endif
+
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
