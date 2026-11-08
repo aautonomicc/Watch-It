@@ -80,7 +80,11 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
 - Buffering indicator distinguishes network fetch from decode stalls
 - Desktop: full keyboard map (space, ←/→, f, m, s, numbers = percent-seek —
   mpv-style; `?` shows the shortcut sheet — shipped 2026-09-23, with hover
-  seek thumbnails for downloaded files and remembered window geometry)
+  seek thumbnails for downloaded files and remembered window geometry;
+  `I` or the top-bar stats button toggles a playback-statistics card —
+  codec, decoder (software / hardware), fps, decoder/output dropped-frame
+  counts, buffered seconds, bitrate — top-left in windowed mode, in the
+  controls' top bar in fullscreen; video only, 2026-11-08)
 - Mobile: gestures — swipe left edge = brightness, right edge = volume, horizontal =
   seek, double-tap sides = ±10s
 - TV (Android TV remote): select = play/pause, ←/→ = seek (hold to accelerate),

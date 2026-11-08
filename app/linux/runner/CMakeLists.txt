@@ -7,8 +7,11 @@ project(runner LANGUAGES C CXX)
 # work.
 #
 # Window/taskbar icon embedded as a GResource — taskbars read _NET_WM_ICON
-# from the running window, not the AppImage's .DirIcon.
+# from the running window, not the AppImage's .DirIcon. Every size under
+# resources/icons/ ships (16…512 px, rendered from branding/icon.svg) so
+# the window manager picks a native size instead of rescaling one bitmap.
 find_program(GLIB_COMPILE_RESOURCES glib-compile-resources REQUIRED)
+file(GLOB WATCHIT_ICON_FILES "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/*.png")
 add_custom_command(
   OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/watchit_resources.c"
   COMMAND ${GLIB_COMPILE_RESOURCES}
@@ -18,7 +21,7 @@ add_custom_command(
     "${CMAKE_CURRENT_SOURCE_DIR}/watchit.gresource.xml"
   DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/watchit.gresource.xml"
-    "${CMAKE_CURRENT_SOURCE_DIR}/resources/watchit.png"
+    ${WATCHIT_ICON_FILES}
 )
 
 # Any new source files that you add to the application should be added here.

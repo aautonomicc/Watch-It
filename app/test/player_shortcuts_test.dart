@@ -27,6 +27,7 @@ void main() {
       exitFullscreen: () => log.add('exitFullscreen'),
       showHelp: () => log.add('help'),
       screenshot: () => log.add('screenshot'),
+      toggleStats: () => log.add('stats'),
     );
   });
 
@@ -56,6 +57,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyI);
     await tester.sendKeyEvent(LogicalKeyboardKey.digit0);
     await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
     await tester.sendKeyEvent(LogicalKeyboardKey.numpad9);
@@ -73,6 +75,7 @@ void main() {
       'fullscreen',
       'exitFullscreen',
       'screenshot',
+      'stats',
       'seekTo:0.0',
       'seekTo:0.3',
       'seekTo:0.9',
@@ -118,6 +121,16 @@ void main() {
           .containsKey(const SingleActivator(LogicalKeyboardKey.keyS)),
       isTrue,
     );
+    // Same shape for the stats toggle (audio playback hides it).
+    expect(
+      without.containsKey(const SingleActivator(LogicalKeyboardKey.keyI)),
+      isFalse,
+    );
+    expect(
+      playerKeyboardShortcuts(actions)
+          .containsKey(const SingleActivator(LogicalKeyboardKey.keyI)),
+      isTrue,
+    );
   });
 
   testWidgets('help sheet lists the map; S row follows the flag', (
@@ -140,6 +153,7 @@ void main() {
     expect(find.text('Mute / unmute'), findsOneWidget);
     expect(find.text('Jump to 0%–90% of the file'), findsOneWidget);
     expect(find.text('Use this frame as artwork'), findsOneWidget);
+    expect(find.text('Show / hide playback statistics'), findsOneWidget);
     await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
     expect(find.text('Keyboard shortcuts'), findsNothing);
@@ -150,8 +164,11 @@ void main() {
         theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
         home: Builder(
           builder: (context) => TextButton(
-            onPressed: () =>
-                showPlayerShortcutHelp(context, showScreenshotRow: false),
+            onPressed: () => showPlayerShortcutHelp(
+              context,
+              showScreenshotRow: false,
+              showStatsRow: false,
+            ),
             child: const Text('open'),
           ),
         ),
@@ -161,5 +178,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Keyboard shortcuts'), findsOneWidget);
     expect(find.text('Use this frame as artwork'), findsNothing);
+    expect(find.text('Show / hide playback statistics'), findsNothing);
   });
 }

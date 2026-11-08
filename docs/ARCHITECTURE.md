@@ -624,6 +624,20 @@ v17 dropped the channel columns and lists. History in
   attached to a media entry (open question 3).
 - Watch state: position saved to SQLite every few seconds during playback and on
   player exit; ≥95% watched marks the title as watched (shipped in alpha.29).
+- Linux frame pacing (2026-11-08, vendored `media_kit_video`): the mpv
+  render call runs inside Flutter's raster-thread texture populate, and
+  stock libmpv BLOCKS that call until the frame's display time (up to
+  `video-timing-offset`, 50 ms). W@tch passes
+  `MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME=0` (H/W and S/W paths) so a frame
+  is composited at Flutter's next vsync instead, and sets
+  `video-timing-offset=0.025` so the one-vsync-pickup + one-vsync-scanout
+  pipeline lands frames centred on their target (±8 ms on 60 Hz). Display
+  sync / interpolation (`video-sync=display-resample`) would need a
+  dedicated render thread reporting swaps at vsync — not built.
+- Playback statistics overlay (`I` on desktop, or the top-bar stats button):
+  polls mpv's `video-codec`, `hwdec-current`, fps, `frame-drop-count`
+  (decoder too slow), `vo-drop-frame-count` (output/GPU too slow), demuxer
+  cache and bitrate once a second — diagnostic only (`widgets/playback_stats.dart`).
 
 ### Data & state
 
@@ -671,7 +685,7 @@ v17 dropped the channel columns and lists. History in
 | Android | APK / AAB | targetSdk 34; dual-ABI (armeabi-v7a + arm64-v8a) since alpha.98; Play Store optional, sideload-friendly |
 | Android TV | same APK / AAB | leanback launcher entry + TV banner since alpha.95, full TV UX since alpha.96; the dual-ABI APK installs directly on 32-bit-app devices (Fire TV Stick, Google TV Streamer); Play Store TV listing optional |
 | iOS | IPA | needs Apple dev account; TestFlight first |
-| Linux | AppImage + Flatpak | AppImage matches existing workflow |
+| Linux | AppImage + Flatpak | AppImage matches existing workflow; window/taskbar icon = a 16…512 px set rendered from `branding/icon.svg` (`app/linux/runner/resources/icons/`, embedded as a GResource and set via `gtk_window_set_icon_list`), the 512 px render doubles as the AppImage/.desktop icon |
 | Windows | portable zip | CI-built, ships with every release since alpha.55; unsigned (SmartScreen "More info → Run anyway"), installer/signing deferred to beta |
 | macOS | .dmg | CI-built universal (Apple Silicon + Intel) dmg with bundled ffmpeg, ships with every release since alpha.92; unsigned (right-click → Open), notarization deferred to beta |
 

@@ -55,12 +55,25 @@ static void my_application_activate(GApplication* application) {
   gtk_window_set_default_size(window, 1280, 720);
 
   // Taskbar/window icon (_NET_WM_ICON) from the embedded GResource; without
-  // this an uninstalled AppImage shows the generic executable icon.
-  g_autoptr(GdkPixbuf) icon = gdk_pixbuf_new_from_resource(
-      "/io/github/aautonomicc/watchit/resources/watchit.png", nullptr);
-  if (icon != nullptr) {
-    gtk_window_set_icon(window, icon);
-    gtk_window_set_default_icon(icon);
+  // this an uninstalled AppImage shows the generic executable icon. Every
+  // size is offered (16…512 px, all rendered from branding/icon.svg) so the
+  // window manager, panel and alt-tab switcher each pick a native size —
+  // a single 192 px bitmap left the title-bar/panel icon rescaled by the WM,
+  // which looked pixelated on large screens (user report, 2026-11-08).
+  static const int kIconSizes[] = {16, 22, 24, 32, 48, 64, 128, 256, 512};
+  GList* icons = nullptr;
+  for (int size : kIconSizes) {
+    g_autofree gchar* path = g_strdup_printf(
+        "/io/github/aautonomicc/watchit/resources/icons/watchit-%d.png", size);
+    GdkPixbuf* icon = gdk_pixbuf_new_from_resource(path, nullptr);
+    if (icon != nullptr) {
+      icons = g_list_append(icons, icon);
+    }
+  }
+  if (icons != nullptr) {
+    gtk_window_set_icon_list(window, icons);
+    gtk_window_set_default_icon_list(icons);
+    g_list_free_full(icons, g_object_unref);
   }
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();

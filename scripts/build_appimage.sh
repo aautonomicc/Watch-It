@@ -51,8 +51,10 @@ SQLITE_LIB="$BUNDLE/lib/libsqlite3.so"
 [ -f "$SQLITE_LIB" ] || { echo "libsqlite3.so missing from Flutter bundle"; exit 1; }
 cp "$SQLITE_LIB" "$APPDIR/usr/lib/"
 
-# 192px launcher icon doubles as the AppImage icon.
-cp "$APP_DIR/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" "$STAGE/watchit.png"
+# AppImage/.desktop icon: the 512px render of branding/icon.svg (same set
+# the window embeds as _NET_WM_ICON) — linuxdeploy files it under the
+# matching hicolor size, so menus/docks get a sharp icon at any scale.
+cp "$APP_DIR/linux/runner/resources/icons/watchit-512.png" "$STAGE/watchit.png"
 
 LIBMPV="$(/sbin/ldconfig -p | awk '/libmpv\.so\.2 .*x86-64/{print $NF; exit}')"
 [ -n "$LIBMPV" ] || { echo "libmpv.so.2 not found (apt install libmpv-dev)"; exit 1; }

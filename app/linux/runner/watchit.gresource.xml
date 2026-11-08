@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
   <gresource prefix="/io/github/aautonomicc/watchit">
-    <file>resources/watchit.png</file>
+    <!-- Window/taskbar icon in every size a window manager asks for
+         (rendered from branding/icon.svg — see my_application.cc). -->
+    <file>resources/icons/watchit-16.png</file>
+    <file>resources/icons/watchit-22.png</file>
+    <file>resources/icons/watchit-24.png</file>
+    <file>resources/icons/watchit-32.png</file>
+    <file>resources/icons/watchit-48.png</file>
+    <file>resources/icons/watchit-64.png</file>
+    <file>resources/icons/watchit-128.png</file>
+    <file>resources/icons/watchit-256.png</file>
+    <file>resources/icons/watchit-512.png</file>
   </gresource>
 </gresources>

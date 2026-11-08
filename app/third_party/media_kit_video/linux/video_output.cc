@@ -345,6 +345,16 @@ VideoOutput* video_output_new(FlTextureRegistrar* texture_registrar,
   mpv_set_option_string(self->handle, "video-sync", "audio");
   // Causes frame drops with `pulse` audio output. (SlotSun/dart_simple_live#42)
   // mpv_set_option_string(self->handle, "video-timing-offset", "0");
+  //
+  // W@tch (2026-11-08): the render calls below pass
+  // MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME=0, so a frame is composited at
+  // Flutter's next vsync after mpv signals it instead of mpv blocking the
+  // raster thread until the target time. mpv signals a frame
+  // `video-timing-offset` early; Flutter then needs one vsync to pick it up
+  // and one more to scan it out (≈17–33 ms on a 60 Hz display), so an offset
+  // of ~25 ms lands the frame centred on its target (±8 ms) with zero
+  // blocking. The stock 50 ms would show video ~25 ms early.
+  mpv_set_option_string(self->handle, "video-timing-offset", "0.025");
   gboolean hardware_acceleration_supported = FALSE;
   if (self->configuration.enable_hardware_acceleration) {
     self->texture_gl = texture_gl_new(self);
@@ -394,11 +404,17 @@ VideoOutput* video_output_new(FlTextureRegistrar* texture_registrar,
                     if (width > 0 && height > 0) {
                       gint32 size[]{(gint32)width, (gint32)height};
                       gint32 pitch = 4 * (gint32)width;
+                      // Same non-blocking render as the H/W path — this
+                      // one runs on the GTK MAIN thread, where a 50 ms
+                      // block per frame would also stall the UI.
+                      int block_for_target_time = 0;
                       mpv_render_param params[]{
                           {MPV_RENDER_PARAM_SW_SIZE, size},
                           {MPV_RENDER_PARAM_SW_FORMAT, (void*)"rgb0"},
                           {MPV_RENDER_PARAM_SW_STRIDE, &pitch},
                           {MPV_RENDER_PARAM_SW_POINTER, self->pixel_buffer},
+                          {MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME,
+                           &block_for_target_time},
                           {MPV_RENDER_PARAM_INVALID, (void*)0},
                       };
                       mpv_render_context_render(self->render_context, params);

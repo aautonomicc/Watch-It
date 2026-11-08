@@ -1535,6 +1535,14 @@ files stay install-global — a profile scopes only viewing state.
       panel beside the wall — the burger (far left) hides/shows it,
       remembered across launches; narrow windows and mobile keep the
       modal drawer
+- [x] Linux playback smoothness + stats overlay (2026-11-08, unreleased):
+      the vendored media_kit_video no longer lets mpv block Flutter's
+      raster thread until each frame's display time
+      (BLOCK_FOR_TARGET_TIME=0 + `video-timing-offset` 25 ms), and `I` /
+      the top-bar stats button shows mpv's decoder/output drop counters,
+      codec, hwdec, fps, cache and bitrate so a jerky desktop can be
+      diagnosed in-app. Open: true display-sync / interpolation needs a
+      dedicated render thread reporting swaps at vsync.
 - [x] Keyboard map, window polish, hover thumbnails on seek bar
       (2026-09-23, alpha.106): app-owned mpv-style
       desktop keyboard map (space/K, ←→ & J/L ±10s, 0–9 percent-seek,

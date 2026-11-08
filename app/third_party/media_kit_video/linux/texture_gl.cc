@@ -237,12 +237,25 @@ gboolean texture_gl_populate_texture(FlTextureGL* texture,
     // Bind mpv's FBO
     glBindFramebuffer(GL_FRAMEBUFFER, self->fbo);
     
-    // Render mpv frame to mpv's texture
+    // Render mpv frame to mpv's texture.
+    //
+    // This runs on Flutter's RASTER thread (FlTextureGL populate). By default
+    // mpv_render_context_render() renders ahead and then BLOCKS until the
+    // frame's display time — up to `video-timing-offset` (50 ms stock) —
+    // which was designed for embedders that swap right after rendering.
+    // Inside Flutter it parked the raster thread for most of every frame
+    // interval, so UI frames and the video's own present slipped past vsyncs
+    // (jerky playback on real desktops, 2026-11-08). BLOCK_FOR_TARGET_TIME=0
+    // returns immediately; the frame is composited at Flutter's next vsync.
+    // video_output.cc shrinks `video-timing-offset` to match that pipeline
+    // so A/V sync stays centred on the target instead of running early.
     mpv_opengl_fbo fbo{(gint32)self->fbo, required_width, required_height, 0};
     int flip_y = 0;
+    int block_for_target_time = 0;
     mpv_render_param params[] = {
         {MPV_RENDER_PARAM_OPENGL_FBO, &fbo},
         {MPV_RENDER_PARAM_FLIP_Y, &flip_y},
+        {MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block_for_target_time},
         {MPV_RENDER_PARAM_INVALID, NULL},
     };
     mpv_render_context_render(render_context, params);

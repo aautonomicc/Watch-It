@@ -24,6 +24,7 @@ import '../services/watch_state.dart';
 import '../theme/tokens.dart';
 import '../services/tv_settings.dart';
 import 'publish_screen.dart' show isDesktopPlatform;
+import '../widgets/playback_stats.dart';
 import '../widgets/player_shortcuts.dart';
 import '../widgets/seek_preview_card.dart';
 import '../widgets/seek_slider.dart';
@@ -184,6 +185,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// video, controls inset — issue #2); audio keeps the framed layout.
   bool get _tvVideo => TvSettings.instance.enabled && !_isAudio;
   bool _fullBleedHeld = false;
+
+  /// The `I`-key playback-statistics overlay (mpv counters; see
+  /// PlaybackStatsOverlay). Diagnostic only, never persisted.
+  bool _showStats = false;
 
   /// The episode offered by the "Up next" overlay, when one exists.
   MediaEntry? _upNext;
@@ -524,12 +529,58 @@ class _PlayerScreenState extends State<PlayerScreen> {
         exitFullscreen: () =>
             unawaited(_videoKey.currentState?.exitFullscreen()),
         showHelp: () => unawaited(
-          showPlayerShortcutHelp(context, showScreenshotRow: !isKid),
+          showPlayerShortcutHelp(
+            context,
+            showScreenshotRow: !isKid,
+            showStatsRow: !_isAudio,
+          ),
         ),
         screenshot: isKid ? null : () => unawaited(_useFrameAsPoster()),
+        toggleStats: _isAudio ? null : _toggleStats,
       ),
     );
   }
+
+  void _toggleStats() => setState(() => _showStats = !_showStats);
+
+  /// One mpv property for the stats overlay — null whenever the native
+  /// player can't answer (web/fake backends, disposed, unknown property).
+  Future<String?> _readMpvProperty(String property) async {
+    final platform = _player.platform;
+    if (platform is! NativePlayer) return null;
+    try {
+      return await platform.getProperty(property);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The stats card as a top-button-bar member (fullscreen themes): the bar
+  /// is a fixed-height Row, so the card hangs below it through an
+  /// OverflowBox instead of overflowing the Row.
+  Widget _statsCardInBar(double barHeight) => SizedBox(
+        width: 460,
+        height: barHeight,
+        child: OverflowBox(
+          alignment: Alignment.topLeft,
+          minHeight: 0,
+          maxHeight: double.infinity,
+          maxWidth: 460,
+          child: PlaybackStatsOverlay(read: _readMpvProperty),
+        ),
+      );
+
+  /// The desktop controls' top-right stats toggle (beside the frame-capture
+  /// button); the same action the `I` key runs.
+  Widget _statsButton({required bool desktop}) => desktop
+      ? MaterialDesktopCustomButton(
+          onPressed: _toggleStats,
+          icon: const Icon(Icons.query_stats),
+        )
+      : MaterialCustomButton(
+          onPressed: _toggleStats,
+          icon: const Icon(Icons.query_stats),
+        );
 
   void _dismissUpNext() {
     _countdownTimer?.cancel();
@@ -801,6 +852,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     seekBarHeight: 4.8,
                     topButtonBar: [
                       const Spacer(),
+                      _statsButton(desktop: false),
                       if (!ProfileStore.instance.isKid)
                         MaterialCustomButton(
                           onPressed: () => unawaited(_useFrameAsPoster()),
@@ -824,7 +876,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         ),
                         seekBarHeight: 4.8,
                         topButtonBar: [
+                          // Fullscreen is its own route above this Stack,
+                          // so the stats card rides the top bar there.
+                          if (_showStats)
+                            _statsCardInBar(
+                              kDefaultMaterialVideoControlsThemeDataFullscreen
+                                  .buttonBarHeight,
+                            ),
                           const Spacer(),
+                          _statsButton(desktop: false),
                           if (!ProfileStore.instance.isKid)
                             MaterialCustomButton(
                               onPressed: () => unawaited(_useFrameAsPoster()),
@@ -839,6 +899,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       seekBarHoverPreviewBuilder: _buildSeekPreview,
                       topButtonBar: [
                         const Spacer(),
+                        _statsButton(desktop: true),
                         if (!ProfileStore.instance.isKid)
                           MaterialDesktopCustomButton(
                             onPressed: () => unawaited(_useFrameAsPoster()),
@@ -851,7 +912,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       keyboardShortcuts: _desktopShortcuts(),
                       seekBarHoverPreviewBuilder: _buildSeekPreview,
                       topButtonBar: [
+                        // Fullscreen is its own route above this Stack,
+                        // so the stats card rides the top bar there.
+                        if (_showStats)
+                          _statsCardInBar(
+                            kDefaultMaterialDesktopVideoControlsThemeDataFullscreen
+                                .buttonBarHeight,
+                          ),
                         const Spacer(),
+                        _statsButton(desktop: true),
                         if (!ProfileStore.instance.isKid)
                           MaterialDesktopCustomButton(
                             onPressed: () => unawaited(_useFrameAsPoster()),
@@ -872,6 +941,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 Padding(
                   padding: overlayInset,
                   child: _upNextOverlay(context, _upNext!),
+                ),
+              // `I` — playback statistics, top-left (windowed mode; the
+              // fullscreen route carries its own copy in the top button
+              // bar, see the desktop fullscreen theme below).
+              if (_showStats && !_isAudio)
+                Padding(
+                  padding: overlayInset,
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: PlaybackStatsOverlay(read: _readMpvProperty),
+                  ),
                 ),
             ],
           ),

@@ -22,6 +22,7 @@ class PlayerShortcutActions {
     required this.exitFullscreen,
     required this.showHelp,
     this.screenshot,
+    this.toggleStats,
   });
 
   final VoidCallback playOrPause;
@@ -47,6 +48,10 @@ class PlayerShortcutActions {
   /// "Use this frame as artwork" — null hides the binding (kid profiles,
   /// audio playback).
   final VoidCallback? screenshot;
+
+  /// Toggles the playback-statistics overlay (`I`) — null hides the
+  /// binding (audio playback has no video counters to show).
+  final VoidCallback? toggleStats;
 }
 
 /// Seek step for ←/→ and J/L — matches the app's on-screen ±10s skips.
@@ -92,6 +97,10 @@ Map<ShortcutActivator, VoidCallback> playerKeyboardShortcuts(
   if (screenshot != null) {
     map[const SingleActivator(LogicalKeyboardKey.keyS)] = screenshot;
   }
+  final toggleStats = actions.toggleStats;
+  if (toggleStats != null) {
+    map[const SingleActivator(LogicalKeyboardKey.keyI)] = toggleStats;
+  }
   // 0–9 (top row and numpad) seek to 0%…90%.
   const digits = [
     (LogicalKeyboardKey.digit0, LogicalKeyboardKey.numpad0),
@@ -130,14 +139,17 @@ const kPlayerShortcutHelp = <PlayerShortcutHelpRow>[
   (keys: 'F', action: 'Toggle fullscreen'),
   (keys: 'Esc', action: 'Leave fullscreen'),
   (keys: 'S', action: 'Use this frame as artwork'),
+  (keys: 'I', action: 'Show / hide playback statistics'),
   (keys: '?', action: 'Show this list'),
 ];
 
 /// The `?` sheet: a compact list of the keyboard map. [showScreenshotRow]
-/// mirrors whether the S binding exists (kid profiles hide it).
+/// mirrors whether the S binding exists (kid profiles hide it);
+/// [showStatsRow] whether the I binding does (video only).
 Future<void> showPlayerShortcutHelp(
   BuildContext context, {
   bool showScreenshotRow = true,
+  bool showStatsRow = true,
 }) {
   return showDialog<void>(
     context: context,
@@ -145,6 +157,7 @@ Future<void> showPlayerShortcutHelp(
       final t = WiTokens.of(context);
       final rows = kPlayerShortcutHelp
           .where((r) => showScreenshotRow || r.keys != 'S')
+          .where((r) => showStatsRow || r.keys != 'I')
           .toList();
       return AlertDialog(
         title: const Text('Keyboard shortcuts'),
