@@ -35,7 +35,7 @@ void main() {
       expect(byLabel['Buffered'], '42.3 s ahead · 5.2 Mb/s');
       expect(byLabel['Audio'], 'aac');
       // No frame summary passed → no Flutter row.
-      expect(byLabel.containsKey('Flutter'), isFalse);
+      expect(byLabel.containsKey('UI frames'), isFalse);
     });
 
     test('names the hardware decoder and tolerates missing properties', () {
@@ -154,6 +154,17 @@ void main() {
       expect(s.overBudget, 1);
       expect(s.describe(), contains('fps · raster'));
       expect(s.describe(), endsWith('1 over 16.7 ms'));
+      // The detail line: build / vsync wait / whole span, and the frame
+      // count inside the window.
+      expect(s.buildAvgMs, closeTo(2.0, 0.01));
+      expect(s.buildMaxMs, closeTo(2.0, 0.01));
+      expect(s.vsyncWaitAvgMs, closeTo(0.1, 0.01));
+      expect(s.spanMaxMs, closeTo(42.2, 0.01));
+      expect(s.spanAvgMs, closeTo(6.8, 0.1));
+      expect(s.describeDetail(), startsWith('${s.frames} in 2 s · build 2.0 avg / 2.0 max · wait 0.1 avg · span'));
+      final rows = playbackStatsRows(const {}, frames: s);
+      expect(rows.last.label, 'UI detail');
+      expect(rows.last.value, s.describeDetail());
     });
 
     test('empty input reads as a dash', () {
@@ -183,6 +194,176 @@ void main() {
     expect(text, contains('-- environment --\nApp: v0.1.0-alpha.129\nDisplay: 60 Hz'));
     expect(text, contains('-- mpv --\navsync=0.01\ndisplay-fps=(unavailable)'));
     expect(text, isNot(endsWith('\n')));
+  });
+
+  group('renderPipelineRows', () {
+    final t0 = DateTime.utc(2026, 11, 8, 17);
+    const facts = {
+      'hardware': true,
+      'composited': true,
+      'backend': 'x11',
+      'scale_factor': 2,
+      'gl_vendor': 'NVIDIA Corporation',
+      'gl_renderer': 'NVIDIA GeForce RTX 3080/PCIe/SSE2',
+      'gl_version': 'OpenGL ES 3.2 NVIDIA 550.120',
+      'egl_vendor': 'NVIDIA',
+      'egl_version': '1.5',
+      'update_via_main': false,
+      'sw_forced': false,
+    };
+    NativeRenderSnapshot snap(
+      int secs, {
+      required int updates,
+      required int populates,
+      required int renderUs,
+      required int populateUs,
+      required int ticks,
+      required int draws,
+      int refreshUs = 16667,
+    }) =>
+        NativeRenderSnapshot({
+          ...facts,
+          'update_count': updates,
+          'populate_count': populates,
+          'render_us_total': renderUs,
+          'render_us_max': 18000,
+          'populate_us_total': populateUs,
+          'populate_us_max': 22000,
+          'gtk_tick_count': ticks,
+          'gtk_draw_count': draws,
+          'gdk_refresh_us': refreshUs,
+        }, t0.add(Duration(seconds: secs)));
+
+    test('no snapshot or a counter-less map yields no rows', () {
+      expect(renderPipelineRows(null, null), isEmpty);
+      expect(
+        renderPipelineRows(
+          null,
+          NativeRenderSnapshot(const {'hardware': true}, t0),
+        ),
+        isEmpty,
+      );
+    });
+
+    test('the first snapshot only says measuring', () {
+      final rows = renderPipelineRows(
+        null,
+        snap(0, updates: 10, populates: 2, renderUs: 0, populateUs: 0, ticks: 0, draws: 0),
+      );
+      expect(rows.single.label, 'Pipeline');
+      expect(rows.single.value, 'measuring…');
+    });
+
+    test('two snapshots become per-second rates and average times', () {
+      // Two seconds apart: mpv signalled 48 frames, Flutter rendered 12 of
+      // them (3.2 ms each inside mpv, 5.0 ms whole populate); GTK ticked
+      // 120 times but painted only 14.
+      final a = snap(0, updates: 100, populates: 50, renderUs: 160000,
+          populateUs: 250000, ticks: 600, draws: 70);
+      final b = snap(2, updates: 148, populates: 62, renderUs: 198400,
+          populateUs: 310000, ticks: 720, draws: 84);
+      final rows = renderPipelineRows(a, b);
+      final byLabel = {for (final r in rows) r.label: r.value};
+      expect(byLabel['Pipeline'],
+          'mpv 24.0 frames/s → Flutter 6.0 renders/s · render 3.2 avg / 18.0 max ms · populate 5.0 ms');
+      expect(byLabel['GTK'],
+          '60.0 ticks/s · 7.0 paints/s · refresh 16.67 ms · composited');
+      expect(b.gdkRefreshMs, closeTo(16.667, 0.001));
+      final env = b.environment();
+      expect(env['GL driver'],
+          'NVIDIA Corporation | NVIDIA GeForce RTX 3080/PCIe/SSE2 | OpenGL ES 3.2 NVIDIA 550.120');
+      expect(env['EGL'], 'NVIDIA 1.5');
+      expect(env['GDK'], 'x11 · composited · scale 2 · refresh 16.67 ms');
+      expect(env['Pacing: update-via-main'], '0 (default)');
+      expect(env['Pacing: sw-render'], '0 (default)');
+    });
+
+    test('an unknown refresh and no populates read as zeros, not NaN', () {
+      final a = snap(0, updates: 0, populates: 0, renderUs: 0, populateUs: 0,
+          ticks: 0, draws: 0, refreshUs: 0);
+      final b = snap(1, updates: 24, populates: 0, renderUs: 0, populateUs: 0,
+          ticks: 60, draws: 0, refreshUs: 0);
+      final byLabel = {for (final r in renderPipelineRows(a, b)) r.label: r.value};
+      expect(byLabel['Pipeline'], startsWith('mpv 24.0 frames/s → Flutter 0.0 renders/s · render 0.0 avg'));
+      expect(byLabel['GTK'], '60.0 ticks/s · 0.0 paints/s · composited');
+      expect(b.gdkRefreshMs, isNull);
+      expect(b.environment()['GDK'], 'x11 · composited · scale 2');
+    });
+  });
+
+  testWidgets('the overlay polls the render reader and reports its facts', (
+    tester,
+  ) async {
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String;
+        }
+        return null;
+      },
+    );
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null));
+    var reads = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: Scaffold(
+          body: PlaybackStatsOverlay(
+            read: (p) async => null,
+            // One second of clock per render read — the fake-async zone's
+            // wall clock does not advance across pumps.
+            now: () => DateTime.utc(2026, 11, 8, 17).add(Duration(seconds: reads)),
+            readRender: () async {
+              reads++;
+              return {
+                'hardware': true,
+                'update_count': reads * 24,
+                'populate_count': reads * 6,
+                'render_us_total': reads * 6 * 3000,
+                'render_us_max': 9000,
+                'populate_us_total': reads * 6 * 4000,
+                'populate_us_max': 12000,
+                'gtk_tick_count': reads * 60,
+                'gtk_draw_count': reads * 7,
+                'gdk_refresh_us': 16667,
+                'composited': true,
+                'backend': 'x11',
+                'scale_factor': 2,
+                'gl_vendor': 'Mesa',
+                'gl_renderer': 'llvmpipe (LLVM 17.0.6, 256 bits)',
+                'gl_version': 'OpenGL ES 3.2 Mesa 24.0.9',
+                'egl_vendor': 'Mesa Project',
+                'egl_version': '1.5',
+                'update_via_main': true,
+                'sw_forced': false,
+              };
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('measuring…'), findsOneWidget);
+    expect(find.textContaining('ticks/s'), findsNothing);
+
+    // The overlay's own tick timer fires at the default 1 s interval; the
+    // second snapshot turns the counters into rates.
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    expect(reads, 2);
+    expect(find.textContaining('frames/s → Flutter'), findsOneWidget);
+    expect(find.textContaining('ticks/s'), findsOneWidget);
+
+    await tester.tap(find.text('PLAYBACK STATS'));
+    await tester.pump();
+    expect(copied, contains('GL driver: Mesa | llvmpipe (LLVM 17.0.6, 256 bits) | OpenGL ES 3.2 Mesa 24.0.9'));
+    expect(copied, contains('GDK: x11 · composited · scale 2 · refresh 16.67 ms'));
+    expect(copied, contains('Pacing: update-via-main: 1'));
+    expect(copied, contains('Pipeline: mpv 24.0 frames/s → Flutter 6.0 renders/s'));
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('tapping the card copies the full report and confirms', (
@@ -224,7 +405,7 @@ void main() {
     expect(copied, contains('Decoder: hardware (vaapi)'));
     expect(copied, contains('Flutter renderer: skia'));
     expect(copied, contains('hwdec-current=vaapi'));
-    expect(copied, contains('Flutter: '));
+    expect(copied, contains('UI frames: '));
     expect(find.text('Copied to clipboard'), findsOneWidget);
     expect(find.text('Playback stats copied to the clipboard'), findsOneWidget);
 

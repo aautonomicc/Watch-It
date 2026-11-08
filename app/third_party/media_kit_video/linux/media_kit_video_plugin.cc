@@ -141,10 +141,56 @@ static void media_kit_video_plugin_handle_method_call(
     gint64 handle_value =
         g_ascii_strtoll(fl_value_get_string(handle), NULL, 10);
     gboolean hardware = FALSE;
+    VideoOutputRenderStats st = {};
     FlValue* result = fl_value_new_map();
     if (video_output_manager_get_render_info(self->video_output_manager,
-                                             handle_value, &hardware)) {
+                                             handle_value, &hardware, &st)) {
       fl_value_set_string_take(result, "hardware", fl_value_new_bool(hardware));
+      // Monotonic counters + host facts; the Dart side turns two snapshots
+      // into rates for the playback-stats report.
+      fl_value_set_string_take(result, "update_count",
+                               fl_value_new_int(st.update_count));
+      fl_value_set_string_take(result, "populate_count",
+                               fl_value_new_int(st.populate_count));
+      fl_value_set_string_take(result, "render_us_total",
+                               fl_value_new_int(st.render_us_total));
+      fl_value_set_string_take(result, "render_us_max",
+                               fl_value_new_int(st.render_us_max));
+      fl_value_set_string_take(result, "populate_us_total",
+                               fl_value_new_int(st.populate_us_total));
+      fl_value_set_string_take(result, "populate_us_max",
+                               fl_value_new_int(st.populate_us_max));
+      fl_value_set_string_take(result, "gtk_tick_count",
+                               fl_value_new_int(st.gtk_tick_count));
+      fl_value_set_string_take(result, "gtk_draw_count",
+                               fl_value_new_int(st.gtk_draw_count));
+      fl_value_set_string_take(result, "gdk_refresh_us",
+                               fl_value_new_int(st.gdk_refresh_us));
+      fl_value_set_string_take(result, "composited",
+                               fl_value_new_bool(st.composited));
+      fl_value_set_string_take(result, "scale_factor",
+                               fl_value_new_int(st.scale_factor));
+      fl_value_set_string_take(result, "backend",
+                               fl_value_new_string(st.backend ? st.backend : ""));
+      fl_value_set_string_take(
+          result, "gl_vendor",
+          fl_value_new_string(st.gl_vendor ? st.gl_vendor : ""));
+      fl_value_set_string_take(
+          result, "gl_renderer",
+          fl_value_new_string(st.gl_renderer ? st.gl_renderer : ""));
+      fl_value_set_string_take(
+          result, "gl_version",
+          fl_value_new_string(st.gl_version ? st.gl_version : ""));
+      fl_value_set_string_take(
+          result, "egl_vendor",
+          fl_value_new_string(st.egl_vendor ? st.egl_vendor : ""));
+      fl_value_set_string_take(
+          result, "egl_version",
+          fl_value_new_string(st.egl_version ? st.egl_version : ""));
+      fl_value_set_string_take(result, "update_via_main",
+                               fl_value_new_bool(st.update_via_main));
+      fl_value_set_string_take(result, "sw_forced",
+                               fl_value_new_bool(st.sw_forced));
     }
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
   } else if (g_strcmp0(method, "Utils.EnterNativeFullscreen") == 0) {

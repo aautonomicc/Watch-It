@@ -602,6 +602,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
           knob('WATCHIT_MPV_TIMING_OFFSET', '0.025'),
       'Pacing: block-for-target-time':
           knob('WATCHIT_MPV_BLOCK_FOR_TARGET_TIME', '0'),
+      // Desktop-session facts for the judder triage: the session type and
+      // desktop name the compositor, the GDK_* variables and the NVIDIA /
+      // Mesa vblank overrides are the knobs a tester may have set. Only
+      // the set ones print (plus the always-useful session pair).
+      'Session': '${env['XDG_SESSION_TYPE'] ?? 'unknown'} · '
+          '${env['XDG_CURRENT_DESKTOP'] ?? env['DESKTOP_SESSION'] ?? 'unknown desktop'}',
+      for (final name in const [
+        'GDK_SCALE',
+        'GDK_DPI_SCALE',
+        'GDK_BACKEND',
+        'GDK_GL',
+        '__GL_SYNC_TO_VBLANK',
+        '__GL_THREADED_OPTIMIZATIONS',
+        'vblank_mode',
+        'LIBGL_ALWAYS_SOFTWARE',
+        'GDK_DEBUG',
+      ])
+        if ((env[name] ?? '').isNotEmpty) 'Env: $name': env[name]!,
     };
   }
 
@@ -613,9 +631,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Widget _statsOverlay(BuildContext context) => PlaybackStatsOverlay(
         read: _readMpvProperty,
+        readRender: _readRenderInfo,
         environment: _statsEnvironment(context),
         frameBudgetMs: _frameBudgetMs(context),
       );
+
+  /// The native output's render counters for the stats card — null when
+  /// the platform plugin has none (not Linux, fake backends, disposed).
+  Future<Map<String, Object?>?> _readRenderInfo() async {
+    if (_player.platform is! NativePlayer) return null;
+    try {
+      return await nativeVideoOutputRenderInfo(await _player.handle);
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// One mpv property for the stats overlay — null whenever the native
   /// player can't answer (web/fake backends, disposed, unknown property).

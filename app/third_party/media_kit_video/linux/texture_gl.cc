@@ -222,6 +222,7 @@ gboolean texture_gl_populate_texture(FlTextureGL* texture,
     }
     
     // Save Flutter's current context
+    gint64 populate_t0 = g_get_monotonic_time();
     EGLDisplay flutter_display = eglGetCurrentDisplay();
     EGLContext flutter_context = eglGetCurrentContext();
     EGLSurface flutter_draw = eglGetCurrentSurface(EGL_DRAW);
@@ -259,7 +260,9 @@ gboolean texture_gl_populate_texture(FlTextureGL* texture,
         {MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, &block_for_target_time},
         {MPV_RENDER_PARAM_INVALID, NULL},
     };
+    gint64 render_t0 = g_get_monotonic_time();
     mpv_render_context_render(render_context, params);
+    gint64 render_t1 = g_get_monotonic_time();
     
     // Unbind FBO
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -269,6 +272,10 @@ gboolean texture_gl_populate_texture(FlTextureGL* texture,
     
     // Restore Flutter's context
     eglMakeCurrent(flutter_display, flutter_draw, flutter_read, flutter_context);
+    // W@tch: feed the playback-stats counters (render time vs the whole
+    // populate incl. both context switches and the flush).
+    video_output_note_populate(video_output, render_t1 - render_t0,
+                               g_get_monotonic_time() - populate_t0);
   }
   
   *target = GL_TEXTURE_2D;

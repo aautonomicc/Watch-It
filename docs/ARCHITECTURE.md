@@ -637,7 +637,37 @@ v17 dropped the channel columns and lists. History in
   knobs (environment variables read by the plugin at output creation, no
   rebuild needed): `WATCHIT_MPV_VIDEO_SYNC` (default `audio`),
   `WATCHIT_MPV_TIMING_OFFSET` (seconds, default `0.025`),
-  `WATCHIT_MPV_BLOCK_FOR_TARGET_TIME` (`1` = stock blocking render).
+  `WATCHIT_MPV_BLOCK_FOR_TARGET_TIME` (`1` = stock blocking render),
+  `WATCHIT_MPV_UPDATE_VIA_MAIN` (`1` = hand mpv's new-frame signal to the
+  engine from the GTK main thread, coalesced, instead of mpv's thread — the
+  embedder API documents MarkExternalTextureFrameAvailable as a
+  platform-thread call; stock media_kit ignores that) and
+  `WATCHIT_MPV_SW_RENDER` (`1` = skip the EGL-texture path, mpv renders a
+  pixel buffer on the GTK thread — the S/W fallback — to isolate the
+  texture handoff in an A/B).
+- Playback-stats pipeline counters (2026-11-08, vendored plugin
+  `GetRenderInfo`): the Linux plugin keeps monotonic counters per video
+  output — mpv update callbacks, FlTextureGL populate calls with the time
+  inside `mpv_render_context_render` and the whole populate, GdkFrameClock
+  ticks on the FlView (`gtk_widget_add_tick_callback`) and FlView `draw`
+  signals (GTK paints), plus the frame clock's refresh interval, compositor
+  state, GDK backend/scale and the GL/EGL vendor strings read in the
+  isolated EGL context (same EGLDisplay as Flutter's, so they name the
+  driver Flutter composites with). The Dart stats card differences two
+  snapshots into the `Pipeline` (mpv frames/s → Flutter renders/s) and
+  `GTK` (ticks/s · paints/s) rows and folds the host facts into the
+  copied report's environment. How the embedder presents on Linux (read
+  from the engine sources at this Flutter's pin): the raster thread
+  composites into ONE shared framebuffer under a mutex
+  (`fl_compositor_opengl_present_layers`) and queues a GTK redraw; the GTK
+  draw takes the same mutex and blits via `gdk_cairo_draw_from_gl`; under
+  a compositor GDK sets swap interval 0 and freezes its frame clock until
+  the compositor's `_NET_WM_FRAME_DRAWN` arrives; the engine has no
+  platform vsync on Linux (fallback 60 Hz timer). GOTCHA: Flutter's
+  `FrameTiming`s cover only frames Dart BUILT — a texture update
+  re-rasters the last layer tree without a Dart build and reports nothing,
+  so the stats card's `UI frames` row is the widget-rebuild rate, never the
+  video rate (the test2 report's "Flutter 6 fps" was this artefact).
 - Linux renderer choice (2026-11-08): Flutter's Impeller renderer is the
   engine's Linux default; its OpenGL backend fills paths without
   anti-aliasing on GPUs lacking MSAA (the "jagged bucket, smooth text"

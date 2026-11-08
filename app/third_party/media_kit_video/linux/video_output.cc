@@ -34,7 +34,142 @@ struct _VideoOutput {
   FlTextureRegistrar* texture_registrar;
   gboolean destroyed;
   int block_for_target_time; /* W@tch pacing knob, see header. */
+  /* W@tch render-pipeline counters (see video_output.h). Updated from the
+   * mpv thread (update_count), Flutter's raster thread (populate/render)
+   * and the GTK thread (ticks/draws) — plain 64-bit atomics. */
+  gint64 stat_update_count;
+  gint64 stat_populate_count;
+  gint64 stat_render_us_total;
+  gint64 stat_render_us_max;
+  gint64 stat_populate_us_total;
+  gint64 stat_populate_us_max;
+  gint64 stat_gtk_tick_count;
+  gint64 stat_gtk_draw_count;
+  gint64 stat_gdk_refresh_us;
+  gchar* gl_vendor;
+  gchar* gl_renderer;
+  gchar* gl_version;
+  gchar* egl_vendor;
+  gchar* egl_version;
+  FlView* view;            /* observed for GTK ticks/draws; not owned */
+  guint tick_callback_id;  /* gtk_widget_add_tick_callback, 0 = none */
+  gulong draw_handler_id;  /* "draw" signal on the view, 0 = none */
+  gboolean update_via_main; /* WATCHIT_MPV_UPDATE_VIA_MAIN=1 */
+  gint update_pending;      /* coalesces main-thread update posts */
+  gboolean sw_forced;       /* WATCHIT_MPV_SW_RENDER=1 */
 };
+
+static inline void stat_add(gint64* slot, gint64 v) {
+  __atomic_fetch_add(slot, v, __ATOMIC_RELAXED);
+}
+static inline void stat_max(gint64* slot, gint64 v) {
+  gint64 cur = __atomic_load_n(slot, __ATOMIC_RELAXED);
+  while (v > cur &&
+         !__atomic_compare_exchange_n(slot, &cur, v, TRUE, __ATOMIC_RELAXED,
+                                      __ATOMIC_RELAXED)) {
+  }
+}
+static inline gint64 stat_get(gint64* slot) {
+  return __atomic_load_n(slot, __ATOMIC_RELAXED);
+}
+
+void video_output_note_populate(VideoOutput* self,
+                                gint64 render_us,
+                                gint64 populate_us) {
+  stat_add(&self->stat_populate_count, 1);
+  stat_add(&self->stat_render_us_total, render_us);
+  stat_max(&self->stat_render_us_max, render_us);
+  stat_add(&self->stat_populate_us_total, populate_us);
+  stat_max(&self->stat_populate_us_max, populate_us);
+}
+
+// GdkFrameClock tick on the FlView: GTK's own frame cadence. Under a
+// compositor GDK freezes this clock until _NET_WM_FRAME_DRAWN comes back,
+// so a low tick rate here means the compositor is pacing the window.
+static gboolean video_output_tick_cb(GtkWidget* widget,
+                                     GdkFrameClock* clock,
+                                     gpointer data) {
+  VideoOutput* self = (VideoOutput*)data;
+  if (self->destroyed) {
+    return G_SOURCE_REMOVE;
+  }
+  stat_add(&self->stat_gtk_tick_count, 1);
+  gint64 refresh = 0;
+  gdk_frame_clock_get_refresh_info(clock, gdk_frame_clock_get_frame_time(clock),
+                                   &refresh, NULL);
+  if (refresh > 0) {
+    __atomic_store_n(&self->stat_gdk_refresh_us, refresh, __ATOMIC_RELAXED);
+  }
+  return G_SOURCE_CONTINUE;
+}
+
+// FlView "draw": GTK painting the window (the embedder blits Flutter's
+// framebuffer inside this). Counts paints; never consumes the signal.
+static gboolean video_output_draw_cb(GtkWidget* widget,
+                                     cairo_t* cr,
+                                     gpointer data) {
+  VideoOutput* self = (VideoOutput*)data;
+  if (!self->destroyed) {
+    stat_add(&self->stat_gtk_draw_count, 1);
+  }
+  return FALSE;
+}
+
+static void video_output_observe_view(VideoOutput* self, FlView* view) {
+  if (view == NULL || !GTK_IS_WIDGET(view)) {
+    return;
+  }
+  self->view = view;
+  self->tick_callback_id = gtk_widget_add_tick_callback(
+      GTK_WIDGET(view), video_output_tick_cb, self, NULL);
+  self->draw_handler_id = g_signal_connect(
+      view, "draw", G_CALLBACK(video_output_draw_cb), self);
+}
+
+static void video_output_unobserve_view(VideoOutput* self) {
+  if (self->view != NULL && GTK_IS_WIDGET(self->view)) {
+    if (self->tick_callback_id != 0) {
+      gtk_widget_remove_tick_callback(GTK_WIDGET(self->view),
+                                      self->tick_callback_id);
+    }
+    if (self->draw_handler_id != 0) {
+      g_signal_handler_disconnect(self->view, self->draw_handler_id);
+    }
+  }
+  self->tick_callback_id = 0;
+  self->draw_handler_id = 0;
+  self->view = NULL;
+}
+
+void video_output_get_render_stats(VideoOutput* self,
+                                   VideoOutputRenderStats* out) {
+  out->update_count = stat_get(&self->stat_update_count);
+  out->populate_count = stat_get(&self->stat_populate_count);
+  out->render_us_total = stat_get(&self->stat_render_us_total);
+  out->render_us_max = stat_get(&self->stat_render_us_max);
+  out->populate_us_total = stat_get(&self->stat_populate_us_total);
+  out->populate_us_max = stat_get(&self->stat_populate_us_max);
+  out->gtk_tick_count = stat_get(&self->stat_gtk_tick_count);
+  out->gtk_draw_count = stat_get(&self->stat_gtk_draw_count);
+  out->gdk_refresh_us = stat_get(&self->stat_gdk_refresh_us);
+  GdkDisplay* display = gdk_display_get_default();
+  GdkScreen* screen = gdk_screen_get_default();
+  out->composited = screen != NULL && gdk_screen_is_composited(screen);
+  out->scale_factor =
+      (self->view != NULL && GTK_IS_WIDGET(self->view))
+          ? gtk_widget_get_scale_factor(GTK_WIDGET(self->view))
+          : 0;
+  out->backend = GDK_IS_WAYLAND_DISPLAY(display) ? "wayland"
+                 : GDK_IS_X11_DISPLAY(display)   ? "x11"
+                                                 : "other";
+  out->gl_vendor = self->gl_vendor;
+  out->gl_renderer = self->gl_renderer;
+  out->gl_version = self->gl_version;
+  out->egl_vendor = self->egl_vendor;
+  out->egl_version = self->egl_version;
+  out->update_via_main = self->update_via_main;
+  out->sw_forced = self->sw_forced;
+}
 
 G_DEFINE_TYPE(VideoOutput, video_output, G_TYPE_OBJECT)
 
@@ -48,6 +183,12 @@ static void video_output_dispose(GObject* object) {
   if (self->render_context) {
     mpv_render_context_set_update_callback(self->render_context, NULL, NULL);
   }
+  video_output_unobserve_view(self);
+  g_clear_pointer(&self->gl_vendor, g_free);
+  g_clear_pointer(&self->gl_renderer, g_free);
+  g_clear_pointer(&self->gl_version, g_free);
+  g_clear_pointer(&self->egl_vendor, g_free);
+  g_clear_pointer(&self->egl_version, g_free);
 
   // H/W
   if (self->texture_gl) {
@@ -124,6 +265,26 @@ static void video_output_init(VideoOutput* self) {
   self->texture_update_callback_context = NULL;
   self->texture_registrar = NULL;
   self->destroyed = FALSE;
+  self->stat_update_count = 0;
+  self->stat_populate_count = 0;
+  self->stat_render_us_total = 0;
+  self->stat_render_us_max = 0;
+  self->stat_populate_us_total = 0;
+  self->stat_populate_us_max = 0;
+  self->stat_gtk_tick_count = 0;
+  self->stat_gtk_draw_count = 0;
+  self->stat_gdk_refresh_us = 0;
+  self->gl_vendor = NULL;
+  self->gl_renderer = NULL;
+  self->gl_version = NULL;
+  self->egl_vendor = NULL;
+  self->egl_version = NULL;
+  self->view = NULL;
+  self->tick_callback_id = 0;
+  self->draw_handler_id = 0;
+  self->update_via_main = FALSE;
+  self->update_pending = 0;
+  self->sw_forced = FALSE;
   g_mutex_init(&self->mutex);
 }
 
@@ -244,6 +405,24 @@ static gboolean video_output_init_hw(VideoOutput* self) {
       // Make our isolated context current for initialization (surfaceless)
       if (eglMakeCurrent(self->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE,
                          self->egl_context)) {
+        // W@tch: record which driver this display really runs on. The
+        // isolated context shares Flutter's EGLDisplay, so these name the
+        // GL stack Flutter composites with too (NVIDIA / Mesa / llvmpipe).
+        const char* gl_vendor = (const char*)glGetString(GL_VENDOR);
+        const char* gl_renderer = (const char*)glGetString(GL_RENDERER);
+        const char* gl_version = (const char*)glGetString(GL_VERSION);
+        self->gl_vendor = gl_vendor ? g_strdup(gl_vendor) : NULL;
+        self->gl_renderer = gl_renderer ? g_strdup(gl_renderer) : NULL;
+        self->gl_version = gl_version ? g_strdup(gl_version) : NULL;
+        const char* egl_vendor = eglQueryString(self->egl_display, EGL_VENDOR);
+        const char* egl_version =
+            eglQueryString(self->egl_display, EGL_VERSION);
+        self->egl_vendor = egl_vendor ? g_strdup(egl_vendor) : NULL;
+        self->egl_version = egl_version ? g_strdup(egl_version) : NULL;
+        g_print("media_kit: VideoOutput: GL %s | %s | %s; EGL %s %s\n",
+                gl_vendor ? gl_vendor : "?", gl_renderer ? gl_renderer : "?",
+                gl_version ? gl_version : "?", egl_vendor ? egl_vendor : "?",
+                egl_version ? egl_version : "?");
         // Initialize mpv with our isolated EGL context
         mpv_opengl_init_params gl_init_params{
             [](auto, auto name) { return (void*)eglGetProcAddress(name); },
@@ -274,6 +453,30 @@ static gboolean video_output_init_hw(VideoOutput* self) {
               [](void* data) {
                 VideoOutput* self = (VideoOutput*)data;
                 if (self->destroyed) {
+                  return;
+                }
+                stat_add(&self->stat_update_count, 1);
+                if (self->update_via_main) {
+                  // A/B knob: the embedder API documents
+                  // MarkExternalTextureFrameAvailable as a platform-thread
+                  // call; upstream media_kit calls it straight from mpv's
+                  // thread. Route through the GTK main loop (coalesced).
+                  if (g_atomic_int_compare_and_exchange(&self->update_pending,
+                                                        0, 1)) {
+                    gdk_threads_add_idle_full(
+                        G_PRIORITY_HIGH,
+                        [](gpointer data) -> gboolean {
+                          VideoOutput* self = (VideoOutput*)data;
+                          g_atomic_int_set(&self->update_pending, 0);
+                          if (!self->destroyed && self->texture_gl != NULL) {
+                            fl_texture_registrar_mark_texture_frame_available(
+                                self->texture_registrar,
+                                FL_TEXTURE(self->texture_gl));
+                          }
+                          return G_SOURCE_REMOVE;
+                        },
+                        self, NULL);
+                  }
                   return;
                 }
                 fl_texture_registrar_mark_texture_frame_available(
@@ -371,11 +574,27 @@ VideoOutput* video_output_new(FlTextureRegistrar* texture_registrar,
       (timing_offset && *timing_offset) ? timing_offset : "0.025");
   const gchar* block = g_getenv("WATCHIT_MPV_BLOCK_FOR_TARGET_TIME");
   self->block_for_target_time = (block && g_strcmp0(block, "1") == 0) ? 1 : 0;
+  //   WATCHIT_MPV_UPDATE_VIA_MAIN=1  deliver mpv's new-frame signal to
+  //                                  Flutter from the GTK main thread
+  //                                  (coalesced) instead of mpv's thread
+  //   WATCHIT_MPV_SW_RENDER=1        skip the GL texture path: mpv renders
+  //                                  to a pixel buffer on the GTK thread
+  //                                  (the S/W fallback) — isolates the
+  //                                  EGL-texture path in an A/B
+  const gchar* via_main = g_getenv("WATCHIT_MPV_UPDATE_VIA_MAIN");
+  self->update_via_main = via_main && g_strcmp0(via_main, "1") == 0;
+  const gchar* sw_render = g_getenv("WATCHIT_MPV_SW_RENDER");
+  self->sw_forced = sw_render && g_strcmp0(sw_render, "1") == 0;
+  if (self->sw_forced) {
+    self->configuration.enable_hardware_acceleration = FALSE;
+  }
   g_print("media_kit: VideoOutput: pacing video-sync=%s timing-offset=%s "
-          "block-for-target-time=%d\n",
+          "block-for-target-time=%d update-via-main=%d sw-render=%d\n",
           (video_sync && *video_sync) ? video_sync : "audio",
           (timing_offset && *timing_offset) ? timing_offset : "0.025",
-          self->block_for_target_time);
+          self->block_for_target_time, self->update_via_main,
+          self->sw_forced);
+  video_output_observe_view(self, view);
   gboolean hardware_acceleration_supported = FALSE;
   if (self->configuration.enable_hardware_acceleration) {
     self->texture_gl = texture_gl_new(self);
@@ -413,6 +632,7 @@ VideoOutput* video_output_new(FlTextureRegistrar* texture_registrar,
         mpv_render_context_set_update_callback(
             self->render_context,
             [](void* data) {
+              stat_add(&((VideoOutput*)data)->stat_update_count, 1);
               gdk_threads_add_idle(
                   [](gpointer data) -> gboolean {
                     VideoOutput* self = (VideoOutput*)data;
@@ -438,10 +658,13 @@ VideoOutput* video_output_new(FlTextureRegistrar* texture_registrar,
                            &block_for_target_time},
                           {MPV_RENDER_PARAM_INVALID, (void*)0},
                       };
+                      gint64 t0 = g_get_monotonic_time();
                       mpv_render_context_render(self->render_context, params);
+                      gint64 t1 = g_get_monotonic_time();
                       fl_texture_registrar_mark_texture_frame_available(
                           self->texture_registrar,
                           FL_TEXTURE(self->texture_sw));
+                      video_output_note_populate(self, t1 - t0, t1 - t0);
                     }
                     g_mutex_unlock(&self->mutex);
                     return FALSE;

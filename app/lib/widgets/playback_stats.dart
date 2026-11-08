@@ -111,7 +111,16 @@ List<PlaybackStatsRow> playbackStatsRows(
     // `audio-codec-name` is the short tag; `audio-codec` the long form —
     // whichever this mpv answers (both blank with no audio device).
     (label: 'Audio', value: or('audio-codec-name', or('audio-codec', '—'))),
-    if (frames != null) (label: 'Flutter', value: frames.describe()),
+    // "UI frames" on purpose, not "Flutter fps": FrameTimings only cover
+    // frames Dart BUILT. A video texture update re-rasters the last layer
+    // tree without a Dart build and never reaches the timings callback, so
+    // this row is the widget-rebuild rate (controls, this card's 1 Hz
+    // refresh), NOT the video composite rate — that is the Pipeline row's
+    // "renders/s". Caught live 2026-11-08: a 30 fps stream rendered 30
+    // textures/s while this row read 1.0 fps.
+    if (frames != null) (label: 'UI frames', value: frames.describe()),
+    if (frames != null && frames.frames > 0)
+      (label: 'UI detail', value: frames.describeDetail()),
   ];
 }
 
@@ -133,13 +142,14 @@ Future<Map<String, String?>> readPlaybackStats(MpvPropertyReader read) async {
   };
 }
 
-/// Flutter's own frame health over a recent window — the half of "jerky"
-/// mpv can't see. mpv renders into a texture; Flutter composites that
-/// texture on its raster thread once per scheduled frame, so a raster
-/// thread that is slow (software rendering, a heavy compositor) or frames
-/// that overrun the vsync budget stutter the video even with every mpv
-/// counter at zero. Built from [FrameTiming]s (SchedulerBinding's
-/// timings callback) by [summarizeFrameTimings].
+/// Flutter's UI-frame health over a recent window, built from
+/// [FrameTiming]s (SchedulerBinding's timings callback) by
+/// [summarizeFrameTimings]. These are the frames Dart BUILT (widget
+/// rebuilds: controls, position ticks, this card's own refresh); the
+/// engine re-rasters a video-texture update without a Dart build and
+/// reports no timing for it, so [fps] here is not the video composite rate
+/// (see [renderPipelineRows]). Raster time still matters: a slow raster
+/// thread (software rendering, a heavy compositor) delays video frames.
 class FlutterFrameSummary {
   const FlutterFrameSummary({
     required this.frames,
@@ -148,6 +158,12 @@ class FlutterFrameSummary {
     required this.rasterMaxMs,
     required this.overBudget,
     required this.budgetMs,
+    this.buildAvgMs = 0,
+    this.buildMaxMs = 0,
+    this.vsyncWaitAvgMs = 0,
+    this.spanAvgMs = 0,
+    this.spanMaxMs = 0,
+    this.windowSecs = 2,
   });
 
   /// Frames composited inside the window.
@@ -162,12 +178,38 @@ class FlutterFrameSummary {
   final int overBudget;
   final double budgetMs;
 
+  /// UI-thread build time (Dart widget build + layout + paint recording).
+  final double buildAvgMs;
+  final double buildMaxMs;
+
+  /// Time between the vsync signal and the build starting — a UI thread
+  /// that is busy with other Dart work shows up here.
+  final double vsyncWaitAvgMs;
+
+  /// Whole vsync-to-raster-finish span.
+  final double spanAvgMs;
+  final double spanMaxMs;
+  final double windowSecs;
+
   String describe() {
     if (frames == 0) return '—';
     return '${fps.toStringAsFixed(1)} fps · raster '
         '${rasterAvgMs.toStringAsFixed(1)} avg / '
         '${rasterMaxMs.toStringAsFixed(1)} max ms · '
         '$overBudget over ${budgetMs.toStringAsFixed(1)} ms';
+  }
+
+  /// The second line: where each frame's time went. A low [fps] with a
+  /// short span means frames were SCHEDULED rarely (the texture signalled
+  /// rarely, or the engine's pipeline stalled), not that they were slow.
+  String describeDetail() {
+    if (frames == 0) return '—';
+    return '$frames in ${windowSecs.toStringAsFixed(0)} s · build '
+        '${buildAvgMs.toStringAsFixed(1)} avg / '
+        '${buildMaxMs.toStringAsFixed(1)} max · wait '
+        '${vsyncWaitAvgMs.toStringAsFixed(1)} avg · span '
+        '${spanAvgMs.toStringAsFixed(1)} avg / '
+        '${spanMaxMs.toStringAsFixed(1)} max ms';
   }
 }
 
@@ -201,13 +243,25 @@ FlutterFrameSummary summarizeFrameTimings(
   }
   var rasterSum = 0.0;
   var rasterMax = 0.0;
+  var buildSum = 0.0;
+  var buildMax = 0.0;
+  var waitSum = 0.0;
+  var spanSum = 0.0;
+  var spanMax = 0.0;
   var over = 0;
   var first = newest;
   for (final t in recent) {
     final raster = t.rasterDuration.inMicroseconds / 1000;
     rasterSum += raster;
     if (raster > rasterMax) rasterMax = raster;
-    if (t.totalSpan.inMicroseconds / 1000 > budgetMs) over++;
+    final build = t.buildDuration.inMicroseconds / 1000;
+    buildSum += build;
+    if (build > buildMax) buildMax = build;
+    waitSum += t.vsyncOverhead.inMicroseconds / 1000;
+    final span = t.totalSpan.inMicroseconds / 1000;
+    spanSum += span;
+    if (span > spanMax) spanMax = span;
+    if (span > budgetMs) over++;
     final start = t.timestampInMicroseconds(FramePhase.vsyncStart);
     if (start < first) first = start;
   }
@@ -222,7 +276,122 @@ FlutterFrameSummary summarizeFrameTimings(
     rasterMaxMs: rasterMax,
     overBudget: over,
     budgetMs: budgetMs,
+    buildAvgMs: buildSum / recent.length,
+    buildMaxMs: buildMax,
+    vsyncWaitAvgMs: waitSum / recent.length,
+    spanAvgMs: spanSum / recent.length,
+    spanMaxMs: spanMax,
+    windowSecs: window.inMilliseconds / 1000,
   );
+}
+
+/// One reading of the native video output's render counters (the Linux
+/// plugin's `GetRenderInfo` map) stamped with when it was taken. Counters
+/// are monotonic since the output was created; [renderPipelineRows]
+/// differences two snapshots into per-second rates.
+class NativeRenderSnapshot {
+  const NativeRenderSnapshot(this.raw, this.at);
+
+  final Map<String, Object?> raw;
+  final DateTime at;
+
+  int count(String key) {
+    final v = raw[key];
+    return v is num ? v.toInt() : 0;
+  }
+
+  String text(String key) => (raw[key] ?? '').toString().trim();
+  bool flag(String key) => raw[key] == true;
+
+  /// GDK's frame-clock refresh interval in ms, null when unknown.
+  double? get gdkRefreshMs {
+    final us = count('gdk_refresh_us');
+    return us > 0 ? us / 1000 : null;
+  }
+
+  /// Host facts for the report's environment section (static per output).
+  Map<String, String> environment() {
+    String or(String v, String fallback) => v.isEmpty ? fallback : v;
+    final backend = text('backend');
+    final scale = count('scale_factor');
+    return {
+      'GL driver': or(
+        [text('gl_vendor'), text('gl_renderer'), text('gl_version')]
+            .where((p) => p.isNotEmpty)
+            .join(' | '),
+        'unknown',
+      ),
+      'EGL': or(
+        [text('egl_vendor'), text('egl_version')]
+            .where((p) => p.isNotEmpty)
+            .join(' '),
+        'unknown',
+      ),
+      'GDK': '${or(backend, 'unknown backend')} · '
+          '${flag('composited') ? 'composited' : 'not composited'}'
+          '${scale > 0 ? ' · scale $scale' : ''}'
+          '${gdkRefreshMs != null ? ' · refresh ${gdkRefreshMs!.toStringAsFixed(2)} ms' : ''}',
+      'Pacing: update-via-main': flag('update_via_main') ? '1' : '0 (default)',
+      'Pacing: sw-render': flag('sw_forced') ? '1' : '0 (default)',
+    };
+  }
+}
+
+/// The two pipeline rows of the stats card — pure over two snapshots.
+///
+/// `Pipeline` reads "mpv N frames/s → Flutter M renders/s": N is how often
+/// mpv signalled a new frame, M how often Flutter actually rendered the
+/// texture on its raster thread. M far below N with a short render time
+/// means Flutter is not scheduling frames (the engine side), not that the
+/// GPU is slow. `GTK` reads the GTK frame-clock tick rate and paint rate of
+/// the Flutter window: under a compositor GDK freezes the clock until the
+/// compositor acknowledges the previous frame, so a low tick rate names the
+/// compositor as the pacer. Empty without a previous snapshot (rates need
+/// an interval) or when the plugin returned no counters.
+List<PlaybackStatsRow> renderPipelineRows(
+  NativeRenderSnapshot? prev,
+  NativeRenderSnapshot? cur,
+) {
+  if (cur == null || !cur.raw.containsKey('update_count')) return const [];
+  if (prev == null) {
+    return const [
+      (label: 'Pipeline', value: 'measuring…'),
+    ];
+  }
+  final dt = cur.at.difference(prev.at).inMicroseconds / 1e6;
+  if (dt <= 0) return const [(label: 'Pipeline', value: 'measuring…')];
+  double rate(String key) => (cur.count(key) - prev.count(key)) / dt;
+  final updates = rate('update_count');
+  final populates = rate('populate_count');
+  final dPop = cur.count('populate_count') - prev.count('populate_count');
+  final renderAvg = dPop > 0
+      ? (cur.count('render_us_total') - prev.count('render_us_total')) /
+          dPop /
+          1000
+      : 0.0;
+  final populateAvg = dPop > 0
+      ? (cur.count('populate_us_total') - prev.count('populate_us_total')) /
+          dPop /
+          1000
+      : 0.0;
+  final renderMax = cur.count('render_us_max') / 1000;
+  final ticks = rate('gtk_tick_count');
+  final draws = rate('gtk_draw_count');
+  String r(double v) => v.toStringAsFixed(1);
+  return [
+    (
+      label: 'Pipeline',
+      value: 'mpv ${r(updates)} frames/s → Flutter ${r(populates)} renders/s'
+          ' · render ${r(renderAvg)} avg / ${r(renderMax)} max ms'
+          ' · populate ${r(populateAvg)} ms',
+    ),
+    (
+      label: 'GTK',
+      value: '${r(ticks)} ticks/s · ${r(draws)} paints/s'
+          '${cur.gdkRefreshMs != null ? ' · refresh ${cur.gdkRefreshMs!.toStringAsFixed(2)} ms' : ''}'
+          ' · ${cur.flag('composited') ? 'composited' : 'no compositor'}',
+    ),
+  ];
 }
 
 /// Collects [FrameTiming]s from the scheduler while started; the overlay
@@ -297,13 +466,24 @@ class PlaybackStatsOverlay extends StatefulWidget {
   const PlaybackStatsOverlay({
     super.key,
     required this.read,
+    this.readRender,
     this.interval = const Duration(seconds: 1),
     this.environment = const {},
     this.frameSampler,
     this.frameBudgetMs = 1000 / 60,
+    this.now,
   });
 
   final MpvPropertyReader read;
+
+  /// Clock for stamping render snapshots (rates = counter delta / elapsed);
+  /// null = wall time. Test seam — fake-async zones freeze DateTime.now().
+  final DateTime Function()? now;
+
+  /// Reads the native video output's render counters (the Linux plugin's
+  /// GetRenderInfo map); null = no pipeline rows. Polled every [interval]
+  /// alongside the mpv properties.
+  final Future<Map<String, Object?>?> Function()? readRender;
   final Duration interval;
 
   /// Host facts for the copied report (app version, renderer, display…),
@@ -326,6 +506,8 @@ class _PlaybackStatsOverlayState extends State<PlaybackStatsOverlay> {
   Timer? _timer;
   Timer? _copiedTimer;
   Map<String, String?> _props = const {};
+  NativeRenderSnapshot? _renderPrev;
+  NativeRenderSnapshot? _renderCur;
   bool _reading = false;
   bool _copied = false;
   late final FlutterFrameSampler _sampler;
@@ -354,24 +536,55 @@ class _PlaybackStatsOverlayState extends State<PlaybackStatsOverlay> {
     _reading = true;
     try {
       final props = await readPlaybackStats(widget.read);
-      if (mounted) setState(() => _props = props);
+      Map<String, Object?>? render;
+      if (widget.readRender != null) {
+        try {
+          render = await widget.readRender!();
+        } catch (_) {
+          render = null;
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _props = props;
+          if (render != null) {
+            _renderPrev = _renderCur;
+            _renderCur = NativeRenderSnapshot(
+              render,
+              (widget.now ?? DateTime.now)(),
+            );
+          }
+        });
+      }
     } finally {
       _reading = false;
     }
   }
 
-  List<PlaybackStatsRow> _rows() => playbackStatsRows(
-        _props,
-        frames: summarizeFrameTimings(
-          _sampler.timings,
-          budgetMs: widget.frameBudgetMs,
+  /// GDK's real refresh interval beats the caller's budget when known
+  /// (Flutter reports no refresh rate on Linux).
+  double get _budgetMs => _renderCur?.gdkRefreshMs ?? widget.frameBudgetMs;
+
+  List<PlaybackStatsRow> _rows() => [
+        ...playbackStatsRows(
+          _props,
+          frames: summarizeFrameTimings(
+            _sampler.timings,
+            budgetMs: _budgetMs,
+          ),
         ),
-      );
+        ...renderPipelineRows(_renderPrev, _renderCur),
+      ];
+
+  Map<String, String> _environment() => {
+        ...widget.environment,
+        ...?_renderCur?.environment(),
+      };
 
   Future<void> _copy() async {
     final text = playbackStatsReport(
       rows: _rows(),
-      environment: widget.environment,
+      environment: _environment(),
       raw: _props,
     );
     await Clipboard.setData(ClipboardData(text: text));
@@ -406,6 +619,7 @@ class _PlaybackStatsOverlayState extends State<PlaybackStatsOverlay> {
       child: Container(
         margin: const EdgeInsets.all(12),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        constraints: const BoxConstraints(maxWidth: 520),
         decoration: BoxDecoration(
           color: Colors.black.withValues(alpha: 0.72),
           borderRadius: BorderRadius.circular(6),
@@ -434,7 +648,7 @@ class _PlaybackStatsOverlayState extends State<PlaybackStatsOverlay> {
                       style: style.copyWith(color: t.boneDim),
                     ),
                   ),
-                  Text(row.value, style: style),
+                  Flexible(child: Text(row.value, style: style)),
                 ],
               ),
             Padding(

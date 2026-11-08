@@ -6,7 +6,7 @@
 
 export 'package:media_kit_video/src/video_controller/platform_video_controller.dart';
 export 'package:media_kit_video/src/video_controller/video_controller.dart';
-export 'package:media_kit_video/src/video_controller/native_video_controller/native_video_controller.dart' show nativeVideoOutputIsHardware;
+export 'package:media_kit_video/src/video_controller/native_video_controller/native_video_controller.dart' show nativeVideoOutputIsHardware, nativeVideoOutputRenderInfo;
 export 'package:media_kit_video/src/video_view_parameters.dart';
 export 'package:media_kit_video/src/video/video.dart';
 

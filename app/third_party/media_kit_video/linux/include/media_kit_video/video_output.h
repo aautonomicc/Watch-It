@@ -93,6 +93,56 @@ gboolean video_output_get_hardware_acceleration(VideoOutput* self);
 int video_output_get_block_for_target_time(VideoOutput* self);
 
 /**
+ * @brief W@tch: render-pipeline counters and host facts for the playback-
+ * stats report (2026-11-08 judder triage). Every count is monotonic since
+ * the output was created; the Dart side differences two snapshots to get
+ * rates. Strings are owned by the |VideoOutput| (valid until it is
+ * disposed) and may be NULL when unknown.
+ *
+ *  - update_count:    mpv render-update callbacks (mpv asking for a frame)
+ *  - populate_count:  FlTextureGL populate calls (Flutter actually rendering
+ *                     the texture on its raster thread)
+ *  - render_us_*:     time inside mpv_render_context_render()
+ *  - populate_us_*:   whole populate incl. the two eglMakeCurrent switches
+ *  - gtk_tick_count:  GdkFrameClock ticks seen by the FlView (GTK's own
+ *                     frame cadence — frozen while a compositor has not yet
+ *                     acknowledged the previous frame)
+ *  - gtk_draw_count:  FlView "draw" signals (GTK actually painting the
+ *                     window, i.e. blitting Flutter's framebuffer)
+ *  - gdk_refresh_us:  the frame clock's refresh interval, 0 when unknown
+ */
+typedef struct _VideoOutputRenderStats {
+  gint64 update_count;
+  gint64 populate_count;
+  gint64 render_us_total;
+  gint64 render_us_max;
+  gint64 populate_us_total;
+  gint64 populate_us_max;
+  gint64 gtk_tick_count;
+  gint64 gtk_draw_count;
+  gint64 gdk_refresh_us;
+  gboolean composited;
+  gint scale_factor;
+  const gchar* backend;
+  const gchar* gl_vendor;
+  const gchar* gl_renderer;
+  const gchar* gl_version;
+  const gchar* egl_vendor;
+  const gchar* egl_version;
+  gboolean update_via_main;
+  gboolean sw_forced;
+} VideoOutputRenderStats;
+
+void video_output_get_render_stats(VideoOutput* self,
+                                   VideoOutputRenderStats* out);
+
+/* W@tch: called by the texture populate paths with the time spent inside
+ * mpv_render_context_render() and in the whole populate (microseconds). */
+void video_output_note_populate(VideoOutput* self,
+                                gint64 render_us,
+                                gint64 populate_us);
+
+/**
  * @brief Sets the required video output size. This forces |VideoOutput| to
  * resize the internal OpenGL surface / texture.
  *

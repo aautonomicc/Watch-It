@@ -76,12 +76,16 @@ void video_output_manager_dispose(VideoOutputManager* self, gint64 handle) {
 
 gboolean video_output_manager_get_render_info(VideoOutputManager* self,
                                               gint64 handle,
-                                              gboolean* hardware) {
+                                              gboolean* hardware,
+                                              VideoOutputRenderStats* stats) {
   if (!g_hash_table_contains(self->video_outputs, GINT_TO_POINTER(handle))) {
     return FALSE;
   }
   VideoOutput* video_output = VIDEO_OUTPUT(
       g_hash_table_lookup(self->video_outputs, GINT_TO_POINTER(handle)));
   *hardware = video_output_get_hardware_acceleration(video_output);
+  if (stats != NULL) {
+    video_output_get_render_stats(video_output, stats);
+  }
   return TRUE;
 }

@@ -79,6 +79,7 @@ void video_output_manager_dispose(VideoOutputManager* self, gint64 handle);
  */
 gboolean video_output_manager_get_render_info(VideoOutputManager* self,
                                               gint64 handle,
-                                              gboolean* hardware);
+                                              gboolean* hardware,
+                                              VideoOutputRenderStats* stats);
 
 #endif

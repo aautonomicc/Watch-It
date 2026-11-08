@@ -298,19 +298,24 @@ class NativeVideoController extends PlatformVideoController {
         );
 }
 
-/// W@tch: whether the native video output for the player [handle] renders
-/// through the H/W path (mpv draws into a GL texture in an isolated EGL
-/// context — the Linux patch's fast path) or the S/W pixel-buffer fallback.
-/// Null when the platform plugin has no answer (not Linux, no output yet).
-/// Read by the playback-stats report so a pasted report names the path.
-Future<bool?> nativeVideoOutputIsHardware(int handle) async {
+/// W@tch: the native video output's render facts for the player [handle]:
+/// `hardware` (H/W EGL-texture path vs the S/W pixel-buffer fallback) plus
+/// the monotonic render-pipeline counters and host facts the Linux plugin
+/// exposes (mpv update callbacks, Flutter texture populates, render/populate
+/// time, GTK frame-clock ticks and paints, GDK refresh interval, compositor
+/// state, GL/EGL driver strings, A/B knobs). Null when the platform plugin
+/// has no answer (not Linux, no output yet). Read by the playback-stats
+/// report; the caller differences two snapshots for rates.
+Future<Map<String, Object?>?> nativeVideoOutputRenderInfo(int handle) async {
   try {
     final result = await NativeVideoController._channel.invokeMethod(
       'VideoOutputManager.GetRenderInfo',
       {'handle': handle.toString()},
     );
     if (result is Map && result['hardware'] is bool) {
-      return result['hardware'] as bool;
+      return {
+        for (final e in result.entries) e.key.toString(): e.value as Object?,
+      };
     }
     return null;
   } on MissingPluginException {
@@ -318,4 +323,13 @@ Future<bool?> nativeVideoOutputIsHardware(int handle) async {
   } on PlatformException {
     return null;
   }
+}
+
+/// W@tch: whether the native video output for the player [handle] renders
+/// through the H/W path (mpv draws into a GL texture in an isolated EGL
+/// context — the Linux patch's fast path) or the S/W pixel-buffer fallback.
+/// Null when the platform plugin has no answer (not Linux, no output yet).
+Future<bool?> nativeVideoOutputIsHardware(int handle) async {
+  final info = await nativeVideoOutputRenderInfo(handle);
+  return info == null ? null : info['hardware'] as bool?;
 }

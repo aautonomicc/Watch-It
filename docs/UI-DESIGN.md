@@ -83,7 +83,10 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   seek thumbnails for downloaded files and remembered window geometry;
   `I` or the top-bar stats button toggles a playback-statistics card —
   codec, decoder (software / hardware), fps, decoder/output dropped-frame
-  counts, A/V sync, buffered seconds, bitrate, Flutter frame health —
+  counts, A/V sync, buffered seconds, bitrate, UI-frame health (Dart-built
+  frames only), and since 2026-11-08 the `Pipeline` row (mpv frames/s →
+  Flutter texture renders/s with mpv's render time) and the `GTK` row (GTK
+  frame-clock ticks/s · window paints/s · refresh · compositor) —
   top-left in windowed mode, in the controls' top bar in fullscreen; the
   card ends in a "tap to copy for a report" line and a tap copies the
   whole report (rows + environment + raw mpv properties) to the clipboard,
