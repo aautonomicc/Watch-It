@@ -578,6 +578,24 @@ pairing and sync bursts) and ant-core 0.13.0 (safer pointer reads on
 the backup path, shared in-flight chunk fetches), plus a slimmer
 Android APK (~14 MB of stale build leftovers no longer ship).
 
+Alpha.123 to alpha.129 in brief. Alpha.123 and .124 are visual: a
+larger W@tch lockup in the app bar and a "Powered by the Autonomi
+network" credit in the drawer and Settings → About. Alpha.125 to .127
+are dependency and fix releases (alpha.126 fixes an Android start-up
+hang; alpha.127 adds a security audit to every release build).
+Alpha.128 brings **faster streaming** (ant-core 0.15.0 asks likely
+holders for a chunk in the same round trip as the lookup) and W@tch's
+own Trezor signer with optional passphrase entry in the app.
+Alpha.129 is the **Linux playback and Trezor uploads** release:
+smooth video in large windows on X11 (GTK no longer redraws the whole
+window under every frame), a playback stats card on `I` that copies a
+full report, a Graphics compatibility switch on Linux, sharp window
+and panel icons, and Trezor batch uploads that sign each payment once
+and wait — with an unlock or reconnect prompt — when the device is
+asleep, locked or unplugged. The upload review page now waits for the
+storage quote before Upload unlocks, and an interrupted upload can be
+cancelled from the launch prompt.
+
 Docs:
 
 - [docs/VISION.md](docs/VISION.md) — goals, non-goals, target users

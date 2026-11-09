@@ -6,8 +6,10 @@ private Upload and My W@tch stay. Channel mentions in the release
 history below are historical; the Channels section itself is collapsed
 to a dated note.
 
-**Status (2026-10-16):** latest release is **v0.1.0-alpha.122**
-([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases)) —
+**Status (2026-11-09):** latest release is **v0.1.0-alpha.129**
+([GitHub Releases](https://github.com/aautonomicc/Watch-It/releases);
+alpha.123–.129 are summarised in the README's Status section, and the
+paragraph below covers the releases up to alpha.122) —
 a release ships **four artifacts**: a signed APK (dual-ABI
 armeabi-v7a + arm64-v8a since alpha.98, so Fire TV Sticks and other
 32-bit-app devices install the normal APK), a Linux AppImage, a
@@ -1162,7 +1164,7 @@ identity since the seed-phrase backup — holdable on a Trezor/Ledger.
 The separate-backup-phrase alternative was explicitly rejected by
 decision (2026-10-10).
 
-- [x] Own Trezor signer + opt-in host-side passphrase entry (implemented 2026-11-02, UNRELEASED): `trezor.rs` drops alloy-signer-trezor for W@tch's own thin signer over trezor-client, owning the session + interaction loop. Buys a resumable session (one passphrase per job), the legacy-enum bug gone by construction, and the user ask — a Settings → Wallet switch (OFF by default) to type the Trezor passphrase in the app instead of on the device (firmware `always_on_device` still wins; passphrase memory-only + Zeroizing, never persisted). New protected routes `/trezor/passphrase-mode` + `/trezor/passphrase`; `enter-passphrase` attention action + prompt-card field. Device entry stays default. NOT device-verified (Ella headless) — the user's next real-Trezor run is the proof; the recovery-verify guards + 7 new Rust tests + Dart widget tests back it meanwhile.
+- [x] Own Trezor signer + opt-in host-side passphrase entry (alpha.128): `trezor.rs` drops alloy-signer-trezor for W@tch's own thin signer over trezor-client, owning the session + interaction loop. Buys a resumable session (one passphrase per job), the legacy-enum bug gone by construction, and the user ask — a Settings → Wallet switch (OFF by default) to type the Trezor passphrase in the app instead of on the device (firmware `always_on_device` still wins; passphrase memory-only + Zeroizing, never persisted). New protected routes `/trezor/passphrase-mode` + `/trezor/passphrase`; `enter-passphrase` attention action + prompt-card field. Device entry stays default. NOT device-verified (Ella headless) — the user's next real-Trezor run is the proof; the recovery-verify guards + 7 new Rust tests + Dart widget tests back it meanwhile.
 - [x] Phase 0 — upload-all batch payments (implemented 2026-10-10,
       shipped in alpha.113; benefits software wallets too): the batch
       uploader restructured encode-everything → ONE pooled
@@ -1406,7 +1408,7 @@ decision (2026-10-10).
       Trezor backup completed inside the user's two-device round trip
       (payments landed after a few attempts — the upstream 5 s
       broadcast-timeout class; evmlib#21/#22 remain open).
-- [x] Sign-once batch payments (2026-11-09, ships alpha.129): the
+- [x] Sign-once batch payments (alpha.129): the
       first live Trezor BATCH payment looped — confirm on the device,
       then asked to confirm again, without end. evmlib's legacy
       `pay_for_merkle_tree` re-estimates gas on every retry of its 5 s
@@ -1424,7 +1426,7 @@ decision (2026-10-10).
       stored with no repeated confirmation — which also proves the
       mid-calldata confirmation fix and the own signer on a device).
 - [x] A locked, sleeping or unplugged Trezor no longer fails the job
-      (2026-11-09, ships alpha.129; from the user's further testing).
+      (alpha.129; from the user's further testing).
       Reproduced on Trezor's firmware emulator: when the device
       auto-locks while a confirmation is on its screen, the firmware
       closes the screen and answers "cancelled" — the upload failed on
@@ -1581,7 +1583,7 @@ files stay install-global — a profile scopes only viewing state.
       panel beside the wall — the burger (far left) hides/shows it,
       remembered across launches; narrow windows and mobile keep the
       modal drawer
-- [x] Linux playback smoothness + stats overlay (2026-11-08, unreleased):
+- [x] Linux playback smoothness + stats overlay (alpha.129):
       the vendored media_kit_video no longer lets mpv block Flutter's
       raster thread until each frame's display time
       (BLOCK_FOR_TARGET_TIME=0 + `video-timing-offset` 25 ms), and `I` /
@@ -1595,7 +1597,7 @@ files stay install-global — a profile scopes only viewing state.
       the pacing without a rebuild; Settings → Graphics compatibility
       mode on Linux swaps Impeller for Skia (runner marker file, or
       `WATCHIT_IMPELLER=0`); the bucket mark feathers its own edges.
-      Root cause found and fixed 2026-11-09 (unreleased): on X11 GTK
+      Root cause found and fixed 2026-11-09 (alpha.129): on X11 GTK
       composited its own window surface under every Flutter frame because
       the embedder uploads the frame with an alpha channel — ~80 ms of
       GTK-thread time per painted frame in a maximized 4K HiDPI window
