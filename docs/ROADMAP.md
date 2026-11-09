@@ -1556,7 +1556,10 @@ files stay install-global — a profile scopes only viewing state.
       (9 of 30 video frames/s shown). The vendored plugin now uploads the
       frame opaque (`GL_RGB`), which skips that composite with an
       identical picture: 30 of 30 on the test box.
-      `WATCHIT_PRESENT_OPAQUE=0` restores the old path.
+      `WATCHIT_PRESENT_OPAQUE=0` restores the old path. Confirmed by the
+      tester on the default build (test7, nothing set): home screen and
+      playback smooth, 23.8 of 23.98 frames/s shown on a film, one
+      output drop.
       Open: true display-sync / interpolation needs a dedicated render
       thread reporting swaps at vsync; a zero-copy X11 present (the frame
       still crosses the CPU once each way, ~13 ms at 8 MP) for 60 fps
