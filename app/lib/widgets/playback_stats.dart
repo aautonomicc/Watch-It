@@ -338,7 +338,7 @@ class NativeRenderSnapshot {
         'Present: downscale': count('present_downscale') > 1
             ? '${count('present_downscale')}'
             : '1 (default)',
-        'Present: opaque': flag('present_opaque') ? '1' : '0 (default)',
+        'Present: opaque': flag('present_opaque') ? '1 (default)' : '0',
       },
     };
   }

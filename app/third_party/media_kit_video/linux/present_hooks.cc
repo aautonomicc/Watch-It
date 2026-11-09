@@ -26,7 +26,7 @@ GMutex g_resolve_mutex;
 
 gboolean g_installed = FALSE;
 gint g_downscale = 1;
-gboolean g_opaque = FALSE;
+gboolean g_opaque = TRUE;
 
 // The compositor's CPU copy of the current frame. Written by the raster
 // thread's readback, read by the GTK thread's upload; the embedder holds
@@ -352,11 +352,6 @@ gboolean env_off(const gchar* name) {
                           g_ascii_strcasecmp(v, "off") == 0);
 }
 
-gboolean env_on(const gchar* name) {
-  const gchar* v = g_getenv(name);
-  return v != nullptr && v[0] != '\0' && !env_off(name);
-}
-
 }  // namespace
 
 void present_hooks_install(void) {
@@ -379,7 +374,10 @@ void present_hooks_install(void) {
   if (scale != nullptr) {
     g_downscale = CLAMP(atoi(scale), 1, 4);
   }
-  g_opaque = env_on("WATCHIT_PRESENT_OPAQUE");
+  // On by default: measured on the Mint box at 3840×2016 it is the whole
+  // judder (GTK thread ~80 ms per painted frame with GDK's alpha branch,
+  // ~9 ms without), and the picture is identical.
+  g_opaque = !env_off("WATCHIT_PRESENT_OPAQUE");
 
   g_mutex_lock(&g_resolve_mutex);
   g_orig_read = epoxy_glReadPixels;

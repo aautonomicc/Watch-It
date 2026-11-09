@@ -369,7 +369,7 @@ void main() {
       final env = b.environment();
       expect(env['Present: hooks'], 'on');
       expect(env['Present: downscale'], '1 (default)');
-      expect(env['Present: opaque'], '0 (default)');
+      expect(env['Present: opaque'], '0');
     });
 
     test('the knobs show in the Present row and the environment', () {
@@ -420,7 +420,7 @@ void main() {
         ' · upload 2.0 ms · opaque · GTK pre 1.0 / draw 4.0 / swap 3.0 ms',
       );
       expect(b.environment()['Present: downscale'], '2');
-      expect(b.environment()['Present: opaque'], '1');
+      expect(b.environment()['Present: opaque'], '1 (default)');
       // An idle interval (no readbacks, no paints) stays finite and honest.
       final idle = {for (final r in renderPipelineRows(b, withPresent(
         snap(2, updates: 30, populates: 30, renderUs: 30000,

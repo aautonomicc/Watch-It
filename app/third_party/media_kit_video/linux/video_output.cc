@@ -103,6 +103,8 @@ void video_output_note_populate(VideoOutput* self,
 // swap. A long paint here is the platform thread BLOCKED per frame (a
 // driver swap waiting on vblank or the compositor), which starves every
 // main-loop client: Flutter's vsync timer, mpv's update posts, input.
+// Only cycles in which the view drew are counted (see the after-paint
+// callback), so the averages are per painted frame.
 static void video_output_before_paint_cb(GdkFrameClock* clock, gpointer data) {
   VideoOutput* self = (VideoOutput*)data;
   self->paint_start_us = g_get_monotonic_time();
@@ -116,15 +118,20 @@ static void video_output_after_paint_cb(GdkFrameClock* clock, gpointer data) {
     return;
   }
   gint64 now = g_get_monotonic_time();
-  gint64 us = now - self->paint_start_us;
-  if (self->draw_start_us != 0 && self->draw_end_us != 0) {
-    stat_add(&self->stat_gtk_pre_us_total,
-             self->draw_start_us - self->paint_start_us);
-    stat_add(&self->stat_gtk_draw_us_total,
-             self->draw_end_us - self->draw_start_us);
-    stat_add(&self->stat_gtk_post_us_total, now - self->draw_end_us);
-  }
+  gint64 start = self->paint_start_us;
+  gint64 us = now - start;
   self->paint_start_us = 0;
+  if (self->draw_start_us == 0 || self->draw_end_us == 0) {
+    // The clock emits both signals on EVERY cycle, and the tick callback
+    // keeps it cycling at the refresh rate; a cycle in which the view did
+    // not draw puts nothing on screen and takes no time. Counting those
+    // halved every average on a 30 fps video (the test5/test6 cards).
+    return;
+  }
+  stat_add(&self->stat_gtk_pre_us_total, self->draw_start_us - start);
+  stat_add(&self->stat_gtk_draw_us_total,
+           self->draw_end_us - self->draw_start_us);
+  stat_add(&self->stat_gtk_post_us_total, now - self->draw_end_us);
   stat_add(&self->stat_gtk_paint_count, 1);
   stat_add(&self->stat_gtk_paint_us_total, us);
   stat_max(&self->stat_gtk_paint_us_max, us);

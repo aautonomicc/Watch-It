@@ -1549,8 +1549,18 @@ files stay install-global — a profile scopes only viewing state.
       the pacing without a rebuild; Settings → Graphics compatibility
       mode on Linux swaps Impeller for Skia (runner marker file, or
       `WATCHIT_IMPELLER=0`); the bucket mark feathers its own edges.
+      Root cause found and fixed 2026-11-09 (unreleased): on X11 GTK
+      composited its own window surface under every Flutter frame because
+      the embedder uploads the frame with an alpha channel — ~80 ms of
+      GTK-thread time per painted frame in a maximized 4K HiDPI window
+      (9 of 30 video frames/s shown). The vendored plugin now uploads the
+      frame opaque (`GL_RGB`), which skips that composite with an
+      identical picture: 30 of 30 on the test box.
+      `WATCHIT_PRESENT_OPAQUE=0` restores the old path.
       Open: true display-sync / interpolation needs a dedicated render
-      thread reporting swaps at vsync.
+      thread reporting swaps at vsync; a zero-copy X11 present (the frame
+      still crosses the CPU once each way, ~13 ms at 8 MP) for 60 fps
+      video on 4K HiDPI.
 - [x] Keyboard map, window polish, hover thumbnails on seek bar
       (2026-09-23, alpha.106): app-owned mpv-style
       desktop keyboard map (space/K, ←→ & J/L ±10s, 0–9 percent-seek,

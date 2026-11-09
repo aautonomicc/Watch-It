@@ -660,7 +660,10 @@ v17 dropped the channel columns and lists. History in
   inside `mpv_render_context_render` and the whole populate, GdkFrameClock
   ticks on the FlView (`gtk_widget_add_tick_callback`), FlView `draw`
   signals (GTK paints) and — since the test5 build — the duration of every
-  paint phase (`before-paint` → `after-paint` on the view's frame clock,
+  paint phase in which the view drew (the clock emits both signals on every
+  cycle, drawn or not; builds before test7 counted the empty cycles too, so
+  their averages read low by the ticks ÷ paints ratio — about half on a
+  30 fps video) (`before-paint` → `after-paint` on the view's frame clock,
   which brackets the FlView blit AND GDK's end-of-frame GL swap in
   `gdk_x11_gl_context_end_frame`, i.e. how long the GTK thread is blocked
   per painted frame; the Mint run with `WATCHIT_MPV_UPDATE_VIA_MAIN=1`
@@ -693,27 +696,43 @@ v17 dropped the channel columns and lists. History in
   `shareable = GDK_IS_WAYLAND_DISPLAY(...)` and on X11 the raster thread
   `glReadPixels` the WHOLE window into CPU memory after compositing, and
   the GTK draw `glTexImage2D`s it into a brand-new texture on every paint
-  before `gdk_cairo_draw_from_gl` (which, the texture having alpha, also
-  uploads GDK's own window surface underneath). 4 bytes × window pixels
-  each way per frame: 8 MB at 1080p, 31 MB at a maximized 4K HiDPI window —
-  the Mint judder (paint 31 ms at 3840×2016, 4 ms in a tiny window).
-  Flutter master still does this on X11 (it since dropped sharing on the
-  GDK path altogether and gave Wayland a subsurface renderer), so no
+  before `gdk_cairo_draw_from_gl`. 4 bytes × window pixels each way per
+  frame: 8 MB at 1080p, 31 MB at a maximized 4K HiDPI window (6–8 ms each
+  on the Mint test box). The larger cost sits right behind the upload:
+  the texture is `GL_RGBA`, so GDK takes its alpha branch and, before
+  drawing Flutter's quad, textures its OWN window paint surface underneath
+  (a fresh window-sized X pixmap per paint → `glXCreatePixmap` →
+  `glXWaitX` → `glXBindTexImageEXT`) and blends. Measured on the Mint box
+  at 3840×2016 (RTX 2070, Cinnamon): the GTK thread sat ~80 ms in each
+  painted frame with the alpha branch and ~9 ms without it — that was the
+  video judder (9 of 30 frames/s shown; 30 of 30 without).
+  Flutter master still does all of this on X11 (it since dropped sharing
+  on the GDK path altogether and gave Wayland a subsurface renderer), so no
   upstream fix is coming. `linux/present_hooks.cc` in the vendored plugin
   swaps libepoxy's public dispatch pointers `epoxy_glReadPixels` /
   `epoxy_glTexImage2D` (the embedder calls GL through them; Impeller/Skia
-  do not) for wrappers that time both copies and carry two knobs:
-  `WATCHIT_PRESENT_DOWNSCALE=N` (blit the frame N× smaller on the GPU,
-  read back and upload the small copy, stretch it back into the frame-size
-  texture on the GPU — GDK addresses the texture in frame pixels, a small
-  texture tiles) and `WATCHIT_PRESENT_OPAQUE=1` (upload as `GL_RGB`, so GDK
-  takes its non-alpha branch and skips its window-surface upload);
-  `WATCHIT_PRESENT_HOOKS=0` leaves the embedder untouched. Gotcha: epoxy's
+  do not) for wrappers that time both copies and
+  **upload the frame as `GL_RGB`** (desktop GL only — GLES requires the
+  internal format to match): GDK reads alpha size 0, takes its non-alpha
+  texture branch and skips the window-surface composite. Flutter's frame is
+  opaque, so the picture is identical. ON by default on X11 since
+  2026-11-09; `WATCHIT_PRESENT_OPAQUE=0` restores the RGBA upload. One
+  optional knob remains: `WATCHIT_PRESENT_DOWNSCALE=N` (blit the frame N×
+  smaller on the GPU, read back and upload the small copy, stretch it back
+  into the frame-size texture on the GPU — GDK addresses the texture in
+  frame pixels, a small texture tiles). It cuts the two CPU copies N² but
+  pixel-doubles the picture ("grainy" on the test box) and on its own does
+  NOT cure the judder, so it stays off. `WATCHIT_PRESENT_HOOKS=0` leaves
+  the embedder untouched. Gotcha: epoxy's
   lazy resolver thunk calls back through the dispatch pointer, so the
   first real call runs with epoxy's own pointer restored and the wrapper
   goes back in afterwards. The stats card's `Present` row shows frame size
   → copied size, GPU wait / readback / upload ms and the paint phase split
-  around the FlView draw (pre / draw / swap).
+  around the FlView draw (pre / draw / swap). What remains per frame is
+  the CPU round trip itself (~13 ms at 8 MP across two threads) — enough
+  for 30 fps, tight for 60 fps video in a maximized 4K HiDPI window; a
+  zero-copy X11 present (pixmap sharing, or an engine-side child-window
+  renderer) is the real fix if that ever matters.
 - Linux renderer choice (2026-11-08): Flutter's Impeller renderer is the
   engine's Linux default; its OpenGL backend fills paths without
   anti-aliasing on GPUs lacking MSAA (the "jagged bucket, smooth text"
