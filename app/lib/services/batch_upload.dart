@@ -95,6 +95,15 @@ class BatchUploadSession extends MatchReviewSession {
   // ── cost / wallet ────────────────────────────────────────────────────
   Map<String, Object?>? costEstimate; // per manifest.cost shape
   String? estimateError;
+
+  /// A storage quote is in flight. The review page keeps Upload locked
+  /// until it lands: the estimate is the only place the cost is shown
+  /// before money moves (a software wallet pays with no further prompt,
+  /// and a hardware wallet's screen shows a contract call, not the ANT
+  /// amount), and a quality-tier change makes the shown figure stale
+  /// until the re-quote finishes.
+  bool estimating = false;
+  int _estimateGen = 0;
   String? prepareError;
   WalletBalances? balances;
 
@@ -190,6 +199,8 @@ class BatchUploadSession extends MatchReviewSession {
     videoInfoByName.clear();
     _tasks = [];
     costEstimate = null;
+    estimating = false;
+    _estimateGen++;
     estimateError = null;
     prepareError = null;
     balances = null;
@@ -267,6 +278,8 @@ class BatchUploadSession extends MatchReviewSession {
     videoInfoByName.clear();
     _tasks = [];
     costEstimate = null;
+    estimating = false;
+    _estimateGen++;
     estimateError = null;
     prepareError = null;
     balances = null;
@@ -796,10 +809,15 @@ class BatchUploadSession extends MatchReviewSession {
   Future<void> _estimate() async {
     final ready = _byStatus('ready');
     if (ready.isEmpty || _api == null) return;
+    // Only the newest request may publish: a tier toggled twice in a
+    // row, or a session cleared mid-quote, must not land a stale figure.
+    final gen = ++_estimateGen;
+    estimating = true;
     estimateError = null;
     notifyListeners();
     try {
       final quote = await _api!.estimate(ready.first.source);
+      if (gen != _estimateGen) return;
       final perChunkAtto = quote.costAtto ~/
           BigInt.from(quote.chunkCount == 0 ? 1 : quote.chunkCount);
       var totalChunks = 0;
@@ -828,13 +846,19 @@ class BatchUploadSession extends MatchReviewSession {
         }
         ..save();
     } catch (e) {
+      if (gen != _estimateGen) return;
+      costEstimate = null;
       estimateError = '$e';
     }
     try {
-      balances = await _api!.balances();
+      final fresh = await _api?.balances();
+      if (gen != _estimateGen) return;
+      balances = fresh;
     } catch (_) {
       // No wallet / unreachable — the screen gates on wallet status.
+      if (gen != _estimateGen) return;
     }
+    estimating = false;
     notifyListeners();
   }
 
@@ -844,6 +868,10 @@ class BatchUploadSession extends MatchReviewSession {
     final raw = costEstimate?['total_atto'];
     return raw == null ? null : BigInt.tryParse('$raw');
   }
+
+  /// The cost on screen is current — a quote landed and none is being
+  /// redone. What the review page's Upload button waits for.
+  bool get costKnown => !estimating && estimatedTotalAtto != null;
 
   /// Payment transactions the pooled batch is expected to need: one per
   /// 256-chunk merkle sub-batch (an upper bound — chunks already on the
@@ -1228,6 +1256,45 @@ class BatchUploadSession extends MatchReviewSession {
     unawaited(TrezorAttentionService.instance.during(() => _upload(retry)));
   }
 
+  /// The body of [cancelInterruptedBatch], run on a throwaway session:
+  /// everything still waiting is dropped, everything that already made
+  /// it up is finished exactly like a normal batch end (bundle, local
+  /// metadata seed, add to the batch's list), then the records go.
+  Future<({int kept, String? list})> _cancelInterrupted(
+      Directory dir) async {
+    final Manifest m;
+    try {
+      m = Manifest.load(File(p.join(dir.path, 'watchit-manifest.yaml')));
+    } catch (_) {
+      return (kept: 0, list: null);
+    }
+    // Marked before anything else: if a later step (or the delete) dies
+    // the batch already reads as finished, so it is never offered again
+    // and the next sweep removes it.
+    for (final e in m.entries) {
+      if (e.status == 'ready' ||
+          e.status == 'failed' ||
+          e.status == 'needs-attention') {
+        e.status = 'skipped';
+        e.error = 'upload cancelled';
+      }
+    }
+    m.save();
+    manifest = m;
+    workDir = dir;
+    try {
+      _writeBundle();
+    } catch (_) {
+      // No bundle — the library add below does not depend on it.
+    }
+    await _seedBundleLocally();
+    await _autoAddToLibrary();
+    try {
+      dir.deleteSync(recursive: true);
+    } catch (_) {}
+    return (kept: autoAddedCount, list: autoAddedList);
+  }
+
   /// Abort whatever is running and forget the session (any uploads
   /// already paid for stay in the ledger and on the network).
   void clear() {
@@ -1268,6 +1335,8 @@ class BatchUploadSession extends MatchReviewSession {
     videoInfoByName.clear();
     _tasks = [];
     costEstimate = null;
+    estimating = false;
+    _estimateGen++;
     estimateError = null;
     prepareError = null;
     balances = null;
@@ -1506,6 +1575,19 @@ void deleteBatch(PreviousBatch batch) {
     batch.workDir.deleteSync(recursive: true);
   } catch (_) {}
 }
+
+/// Cancel an interrupted batch for good — the startup resume prompt's
+/// "Cancel upload". The files still waiting are dropped (never
+/// uploaded, never paid for) and the batch's records are deleted so it
+/// is not offered again. Files that DID make it up before the
+/// interruption are not thrown away with it: they are added to the
+/// batch's list first, the way a finished batch adds them, because an
+/// interrupted batch never reached that step and they are already paid
+/// for. Their ledger rows stay, so they are never paid for twice.
+/// Returns how many uploaded files were kept and the list they joined.
+Future<({int kept, String? list})> cancelInterruptedBatch(
+        PreviousBatch batch) =>
+    BatchUploadSession._()._cancelInterrupted(batch.workDir);
 
 /// The explicit "forget these uploads" opt-in on the Delete dialog:
 /// drop [batch]'s content hashes from the shared upload ledger, so

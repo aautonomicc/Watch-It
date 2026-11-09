@@ -882,7 +882,9 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       ..._entryTiles(t),
       ..._qualitySection(t),
       const SizedBox(height: 12),
-      if (total != null)
+      if (ready > 0 && _session.estimating)
+        _quotePendingRow(t)
+      else if (total != null)
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
@@ -933,8 +935,19 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
         Row(
           children: [
             Expanded(
-              child: Text('Estimate failed: ${_session.estimateError}',
-                  style: TextStyle(color: t.rust, fontSize: 13)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Estimate failed: ${_session.estimateError}',
+                      style: TextStyle(color: t.rust, fontSize: 13)),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Upload stays locked until the cost is known — '
+                    'retry the quote.',
+                    style: TextStyle(color: t.ash, fontSize: 12),
+                  ),
+                ],
+              ),
             ),
             TextButton(
               onPressed: _session.refreshEstimate,
@@ -943,17 +956,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
           ],
         )
       else if (ready > 0)
-        Row(
-          children: [
-            const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2)),
-            const SizedBox(width: 10),
-            Text('Getting a storage quote…',
-                style: TextStyle(color: t.ash, fontSize: 13)),
-          ],
-        ),
+        _quotePendingRow(t),
       const SizedBox(height: 12),
       if (wallet != null && !wallet.configured)
         Row(
@@ -1008,8 +1011,12 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       ],
       const SizedBox(height: 8),
       FilledButton.icon(
+        // A paid upload waits for the quote: the estimate is the only
+        // place the cost shows before money moves.
         onPressed: ready > 0
-            ? (_rights && (wallet?.configured ?? false)
+            ? (_rights &&
+                    (wallet?.configured ?? false) &&
+                    _session.costKnown
                 ? _session.startUpload
                 : null)
             : _session.dedupCount > 0
@@ -1031,6 +1038,25 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       ),
     ];
   }
+
+  /// The quote is still on its way (first quote, a retry, or a re-quote
+  /// after a quality change) — says so, and why Upload is locked.
+  Widget _quotePendingRow(WiTokens t) => Row(
+        children: [
+          const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Getting a storage quote… Upload unlocks once the cost '
+              'is known.',
+              style: TextStyle(color: t.ash, fontSize: 13),
+            ),
+          ),
+        ],
+      );
 
   /// QUALITY tiers for the batch's video entries (the old Upload tier
   /// flow relocated to where the batch is reviewed): each ticked tier
@@ -1511,12 +1537,19 @@ Future<Directory> Function()? batchResumeRootOverride;
 /// sweeps fully finished batch records left behind by a crash on the
 /// done page or by older versions. Only where the uploader exists
 /// (desktop + Android); a silent no-op when nothing is interrupted.
+///
+/// "Cancel upload" is the third answer, for a batch that is no longer
+/// wanted: after a confirm it drops what was still waiting and removes
+/// the batch for good (see [cancelInterruptedBatch] — anything already
+/// uploaded is kept in the library). [onLibraryChanged] fires when that
+/// added entries, so the caller can refresh what it shows.
 Future<void> offerBatchResume(
   BuildContext context, {
   String? apiBase,
   String? apiToken,
   Directory? configDir,
   FfmpegService? ffmpegOverride,
+  VoidCallback? onLibraryChanged,
 }) async {
   if (_batchResumeOffered || !isUploadPlatform) return;
   _batchResumeOffered = true;
@@ -1536,7 +1569,7 @@ Future<void> offerBatchResume(
   final newest = interrupted.first;
   final waiting = newest.resumableSources.length;
   final t = WiTokens.of(context);
-  final resume = await showDialog<bool>(
+  final choice = await showDialog<_ResumeChoice>(
     context: context,
     builder: (context) => AlertDialog(
       backgroundColor: t.ink2,
@@ -1559,17 +1592,28 @@ Future<void> offerBatchResume(
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
+          onPressed: () => Navigator.of(context).pop(_ResumeChoice.cancel),
+          child: Text(
+              interrupted.length == 1 ? 'Cancel upload' : 'Cancel uploads',
+              style: TextStyle(color: t.rust)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(_ResumeChoice.later),
           child: Text('Not now', style: TextStyle(color: t.ash)),
         ),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
+          onPressed: () => Navigator.of(context).pop(_ResumeChoice.resume),
           child: const Text('Continue upload'),
         ),
       ],
     ),
   );
-  if (resume != true || !context.mounted) return;
+  if (!context.mounted) return;
+  if (choice == _ResumeChoice.cancel) {
+    await _cancelInterruptedFlow(context, interrupted, onLibraryChanged);
+    return;
+  }
+  if (choice != _ResumeChoice.resume) return;
   await Navigator.of(context).push(MaterialPageRoute(
     builder: (_) => BatchUploadScreen(
       apiBase: apiBase,
@@ -1579,6 +1623,80 @@ Future<void> offerBatchResume(
       resumeDir: interrupted.length == 1 ? newest.workDir : null,
       ffmpegOverride: ffmpegOverride,
     ),
+  ));
+}
+
+enum _ResumeChoice { later, resume, cancel }
+
+/// The resume prompt's "Cancel upload": confirm (it cannot be undone),
+/// cancel every interrupted batch, report what was kept.
+Future<void> _cancelInterruptedFlow(
+  BuildContext context,
+  List<PreviousBatch> interrupted,
+  VoidCallback? onLibraryChanged,
+) async {
+  final t = WiTokens.of(context);
+  final one = interrupted.length == 1;
+  final waiting = interrupted.fold<int>(
+      0, (n, b) => n + b.resumableSources.length);
+  final uploaded = interrupted.fold<int>(
+      0,
+      (n, b) =>
+          n +
+          (b.counts['uploaded'] ?? 0) +
+          (b.counts['already-uploaded'] ?? 0));
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: t.ink2,
+      title: Text(one ? 'Cancel this upload?' : 'Cancel these uploads?',
+          style: TextStyle(color: t.bone, fontSize: 16)),
+      content: Text(
+        '${one ? 'The' : 'In all, the'} $waiting '
+        '${waiting == 1 ? 'file' : 'files'} still waiting '
+        '${one ? 'in "${interrupted.first.listName}" ' : ''}'
+        'will not be uploaded, and W@tch stops asking about '
+        '${one ? 'this batch' : 'these batches'}. '
+        '${uploaded > 0 ? '${uploaded == 1 ? 'The 1 file' : 'The $uploaded files'} '
+            'that already made it up '
+            '${uploaded == 1 ? 'stays' : 'stay'} on the network and '
+            '${uploaded == 1 ? 'is' : 'are'} kept in your library — '
+            'nothing paid for is lost. ' : ''}'
+        'This cannot be undone, but the files themselves are untouched: '
+        'start a new upload from the Upload page whenever you want them '
+        'up after all.',
+        style: TextStyle(color: t.boneDim, fontSize: 13, height: 1.4),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text('Keep it', style: TextStyle(color: t.ash)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(one ? 'Cancel upload' : 'Cancel uploads',
+              style: TextStyle(color: t.rust)),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return;
+  var kept = 0;
+  final lists = <String>{};
+  for (final batch in interrupted) {
+    final result = await cancelInterruptedBatch(batch);
+    kept += result.kept;
+    if (result.kept > 0 && result.list != null) lists.add(result.list!);
+  }
+  if (kept > 0) onLibraryChanged?.call();
+  if (!context.mounted) return;
+  ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+    content: Text(kept == 0
+        ? (one ? 'Upload cancelled.' : 'Uploads cancelled.')
+        : '${one ? 'Upload' : 'Uploads'} cancelled — $kept '
+            '${kept == 1 ? 'file' : 'files'} already uploaded '
+            '${kept == 1 ? 'is' : 'are'} in '
+            '${lists.map((l) => '"$l"').join(', ')}.'),
   ));
 }
 

@@ -2030,4 +2030,225 @@ entries:
     expect(find.text('Continue'), findsNWidgets(2));
     expect(BatchUploadSession.instance.idle, isTrue);
   });
+
+  test('cancelInterruptedBatch: drops what was waiting, keeps what '
+      'already uploaded in the batch\'s list, removes the records',
+      () async {
+    final waiting = mediaFile('cancel-waiting.mp4', 51);
+    final done = mediaFile('cancel-done.mp4', 52);
+    final root = dirIn('root-cancel');
+    final cut = Directory('${root.path}/cut')..createSync();
+    final maps = Directory('${cut.path}/datamaps')..createSync();
+    final map = File('${maps.path}/Done (2000).mp4.datamap')
+      ..writeAsBytesSync([1, 2, 3]);
+    File('${cut.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "Road Trip"
+created: "2026-09-02T12:00:00"
+entries:
+  - source: "${done.path}"
+    status: "uploaded"
+    name: "Done (2000).mp4"
+    address: "${'ee' * 32}"
+    datamap: "${map.path}"
+    size_bytes: 64
+  - source: "${waiting.path}"
+    status: "ready"
+    name: "Waiting (2001).mp4"
+  - source: "${waiting.path}"
+    status: "failed"
+    name: "Broke (2002).mp4"
+''');
+    final batch = (await scanInterruptedBatches(root)).single;
+    expect(batch.resumableSources, hasLength(2));
+
+    final result = await cancelInterruptedBatch(batch);
+    expect(result.kept, 1);
+    expect(result.list, 'Road Trip');
+    expect(cut.existsSync(), isFalse, reason: 'records are gone');
+    expect(await scanInterruptedBatches(root), isEmpty);
+    // The paid-for upload is in the library; the waiting files are not.
+    final lists = await LibraryStore.load();
+    final trip = lists.singleWhere((l) => l.title == 'Road Trip');
+    expect([for (final e in trip.entries) e.name], ['Done (2000).mp4']);
+    expect(trip.entries.single.address, 'ee' * 32);
+    // The live session was never touched.
+    expect(BatchUploadSession.instance.idle, isTrue);
+    // Source files are the user's — untouched.
+    expect(waiting.existsSync(), isTrue);
+  });
+
+  testWidgets('startup resume prompt: Cancel upload asks first, Keep it '
+      'leaves the batch, confirming removes it for good',
+      (tester) async {
+    resetBatchResumeOffer();
+    final lost = mediaFile('resume-cancel.mp4', 93);
+    final root = dirIn('root-prompt-cancel');
+    final cut = Directory('${root.path}/cut')..createSync();
+    File('${cut.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "Road Trip"
+created: "2026-09-02T12:00:00"
+entries:
+  - source: "${lost.path}"
+    status: "ready"
+    name: "Waiting (2001).mp4"
+''');
+    batchResumeRootOverride = () async => root;
+    addTearDown(() => batchResumeRootOverride = null);
+    final config = dirIn('config-prompt-cancel');
+
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: _ResumeHost(key: const ValueKey('c1'), configDir: config),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Finish an interrupted upload?'), findsOneWidget);
+    expect(find.text('Not now'), findsOneWidget);
+    expect(find.text('Continue upload'), findsOneWidget);
+
+    await tester.tap(find.text('Cancel upload'));
+    await tester.pumpAndSettle();
+    expect(find.text('Cancel this upload?'), findsOneWidget);
+    expect(
+        find.textContaining(
+            'The 1 file still waiting in "Road Trip" will not be uploaded'),
+        findsOneWidget);
+    expect(find.textContaining('cannot be undone'), findsOneWidget);
+    await tester.tap(find.text('Keep it'));
+    await tester.pumpAndSettle();
+    expect(cut.existsSync(), isTrue, reason: 'Keep it changes nothing');
+    expect(find.byType(BatchUploadScreen), findsNothing);
+
+    // Next launch: still offered — and this time cancelled for real.
+    resetBatchResumeOffer();
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: _ResumeHost(key: const ValueKey('c2'), configDir: config),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel upload'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel upload'));
+    await tester.pumpAndSettle();
+    expect(cut.existsSync(), isFalse);
+    expect(find.text('Upload cancelled.'), findsOneWidget);
+    expect(find.byType(BatchUploadScreen), findsNothing);
+    expect(lost.existsSync(), isTrue, reason: 'the file itself stays');
+
+    // And the launch after that has nothing to ask about.
+    resetBatchResumeOffer();
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: _ResumeHost(key: const ValueKey('c3'), configDir: config),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Finish an interrupted upload?'), findsNothing);
+  });
+
+  test('the quote: estimating while in flight, costKnown only once it '
+      'lands, a failed quote never leaves an old figure standing',
+      () async {
+    fake.wallet = {'configured': true, 'address': '0xabc', 'storage': 'file'};
+    final src = mediaFile('quote-src.mp4', 61);
+    final work = dirIn('work-quote');
+    File('${work.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "Quotes"
+entries:
+  - source: "${src.path}"
+    status: "ready"
+    name: "Quoted (2001).mp4"
+    size_bytes: 64
+''');
+    final session = BatchUploadSession.instance;
+    await session.resumeBatch(
+        api: api(), workDir: work, configDir: dirIn('config-quote'));
+    expect(session.estimating, isFalse);
+    expect(session.costKnown, isTrue);
+    final first = session.estimatedTotalAtto;
+    expect(first, isNotNull);
+
+    // A re-quote (what a quality-tier change triggers): in flight the
+    // cost is not "known", even though the old figure is still there.
+    final seen = <bool>[];
+    void watch() => seen.add(session.costKnown);
+    session.addListener(watch);
+    final requote = session.refreshEstimate();
+    expect(session.estimating, isTrue);
+    expect(session.costKnown, isFalse);
+    await requote;
+    session.removeListener(watch);
+    expect(seen.first, isFalse);
+    expect(seen.last, isTrue);
+    expect(session.estimating, isFalse);
+
+    // A failed quote clears the figure instead of leaving it to pass
+    // for the current cost.
+    fake.estimateFailure = (502, 'no quotes right now');
+    await session.refreshEstimate();
+    expect(session.estimating, isFalse);
+    expect(session.estimateError, contains('no quotes right now'));
+    expect(session.estimatedTotalAtto, isNull);
+    expect(session.costKnown, isFalse);
+
+    fake.estimateFailure = null;
+    await session.refreshEstimate();
+    expect(session.costKnown, isTrue);
+    expect(session.estimatedTotalAtto, first);
+  });
+
+  testWidgets('review page: Upload stays locked until the quote lands '
+      '— a failed quote keeps it locked, Retry unlocks it',
+      (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    resetBatchResumeOffer();
+    final lost = mediaFile('gate-src.mp4', 94);
+    final root = dirIn('root-gate');
+    final cut = Directory('${root.path}/cut')..createSync();
+    File('${cut.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "Gate"
+created: "2026-09-02T12:00:00"
+entries:
+  - source: "${lost.path}"
+    status: "ready"
+    name: "Waiting (2001).mp4"
+    size_bytes: 64
+''');
+    batchResumeRootOverride = () async => root;
+    addTearDown(() => batchResumeRootOverride = null);
+    fake.wallet = {'configured': true, 'address': '0xabc', 'storage': 'file'};
+    fake.estimateFailure = (502, 'no quotes right now');
+    BatchUploadSession.instance.probeOverride = (path) async => null;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: _ResumeHost(configDir: dirIn('config-gate')),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue upload'));
+    await tester.pumpAndSettle();
+    expect(BatchUploadSession.instance.stage, BatchStage.review);
+
+    FilledButton uploadButton() => tester.widget<FilledButton>(find.ancestor(
+        of: find.text('Upload'),
+        matching: find.byWidgetPredicate((w) => w is FilledButton)));
+
+    expect(find.textContaining('Estimate failed'), findsOneWidget);
+    expect(find.textContaining('Upload stays locked until the cost is known'),
+        findsOneWidget);
+    // Rights ticked and wallet ready — still locked without a cost.
+    await tester.tap(find.byType(CheckboxListTile));
+    await tester.pumpAndSettle();
+    expect(uploadButton().onPressed, isNull);
+
+    fake.estimateFailure = null;
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('estimated cost'), findsOneWidget);
+    expect(uploadButton().onPressed, isNotNull);
+  });
 }

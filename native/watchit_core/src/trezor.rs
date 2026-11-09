@@ -801,6 +801,48 @@ mod device {
         Ok(TrezorSig { r, s, v })
     }
 
+    /// Feed the device the rest of a transaction's calldata, answering
+    /// whatever it asks in between, until it returns the signature.
+    ///
+    /// trezor-client's own loop (which this replaces) treats every reply
+    /// to a data chunk as a plain data request. That held for firmware
+    /// that confirmed the transaction BEFORE streaming its data; current
+    /// firmware loads the first ~6 KB silently and only then starts
+    /// showing confirmation screens, so a `ButtonRequest` arrives as the
+    /// reply to a data chunk (and again between later chunks, and before
+    /// the signature). Left unanswered, the device shows "Communication
+    /// with your connected device failed" two seconds after the user's
+    /// tap — the live failure on the first pooled batch payment, whose
+    /// calldata is several KB. So every reply goes through [`drive`].
+    ///
+    /// The chunk size is whatever the device asked for (it rejects more),
+    /// not a fixed 1024.
+    fn stream_tx_data(
+        client: &mut trezor_client::Trezor,
+        mut resp: protos::EthereumTxRequest,
+        mut data: Vec<u8>,
+        host: bool,
+        always: bool,
+    ) -> Result<protos::EthereumTxRequest, String> {
+        while resp.data_length() > 0 {
+            if data.is_empty() {
+                return Err(
+                    "the Trezor asked for more transaction data than the \
+                     payment contains — nothing was signed"
+                        .into(),
+                );
+            }
+            let take = std::cmp::min(resp.data_length() as usize, data.len());
+            let mut ack = protos::EthereumTxAck::new();
+            ack.set_data_chunk(data.drain(..take).collect());
+            let next = client
+                .call(ack, Box::new(|_, m: protos::EthereumTxRequest| Ok(m)))
+                .map_err(friendly)?;
+            resp = drive(next, host, always)?;
+        }
+        Ok(resp)
+    }
+
     fn eth_sign_eip1559(
         client: &mut trezor_client::Trezor,
         path: &[u32],
@@ -837,16 +879,8 @@ mod device {
         let resp = client
             .call(req, Box::new(|_, m: protos::EthereumTxRequest| Ok(m)))
             .map_err(friendly)?;
-        let mut resp = drive(resp, host, always)?;
-        while resp.data_length() > 0 {
-            let mut ack = protos::EthereumTxAck::new();
-            ack.set_data_chunk(data.splice(..std::cmp::min(1024, data.len()), []).collect());
-            resp = client
-                .call(ack, Box::new(|_, m: protos::EthereumTxRequest| Ok(m)))
-                .map_err(friendly)?
-                .ok()
-                .map_err(friendly)?;
-        }
+        let resp = drive(resp, host, always)?;
+        let resp = stream_tx_data(client, resp, data, host, always)?;
         to_alloy_sig(convert_tx_signature(&resp, Some(tx.chain_id))?)
     }
 
@@ -875,16 +909,8 @@ mod device {
         let resp = client
             .call(req, Box::new(|_, m: protos::EthereumTxRequest| Ok(m)))
             .map_err(friendly)?;
-        let mut resp = drive(resp, host, always)?;
-        while resp.data_length() > 0 {
-            let mut ack = protos::EthereumTxAck::new();
-            ack.set_data_chunk(data.splice(..std::cmp::min(1024, data.len()), []).collect());
-            resp = client
-                .call(ack, Box::new(|_, m: protos::EthereumTxRequest| Ok(m)))
-                .map_err(friendly)?
-                .ok()
-                .map_err(friendly)?;
-        }
+        let resp = drive(resp, host, always)?;
+        let resp = stream_tx_data(client, resp, data, host, always)?;
         to_alloy_sig(convert_tx_signature(&resp, tx.chain_id)?)
     }
 
@@ -1395,6 +1421,239 @@ mod device {
     #[cfg(test)]
     mod device_tests {
         use super::*;
+
+        // ── scripted fake device ──────────────────────────────────────
+        //
+        // A transport that replays a fixed list of device replies and
+        // records everything the host wrote, so the data-streaming loop
+        // can be run against the exact message order a firmware uses.
+
+        use std::collections::VecDeque;
+        use std::sync::{Arc, Mutex};
+        use trezor_client::protos::MessageType as Mt;
+        use trezor_client::transport::{error::Error as TransportError, ProtoMessage, Transport};
+
+        #[derive(Default)]
+        struct Script {
+            replies: VecDeque<(Mt, Vec<u8>)>,
+            written: Vec<(Mt, Vec<u8>)>,
+        }
+
+        struct FakeDevice(Arc<Mutex<Script>>);
+
+        impl Transport for FakeDevice {
+            fn session_begin(&mut self) -> Result<(), TransportError> {
+                Ok(())
+            }
+            fn session_end(&mut self) -> Result<(), TransportError> {
+                Ok(())
+            }
+            fn write_message(&mut self, m: ProtoMessage) -> Result<(), TransportError> {
+                let kind = m.message_type();
+                self.0.lock().unwrap().written.push((kind, m.into_payload()));
+                Ok(())
+            }
+            fn read_message(&mut self) -> Result<ProtoMessage, TransportError> {
+                let (kind, payload) = self
+                    .0
+                    .lock()
+                    .unwrap()
+                    .replies
+                    .pop_front()
+                    .expect("the host kept talking after the script ended");
+                Ok(ProtoMessage::new(kind, payload))
+            }
+        }
+
+        /// `EthereumTxRequest { data_length }` on the wire.
+        fn wants(n: u32) -> (Mt, Vec<u8>) {
+            let mut bytes = vec![0x08];
+            let mut v = n;
+            loop {
+                let b = (v & 0x7f) as u8;
+                v >>= 7;
+                if v == 0 {
+                    bytes.push(b);
+                    break;
+                }
+                bytes.push(b | 0x80);
+            }
+            (Mt::MessageType_EthereumTxRequest, bytes)
+        }
+
+        /// `EthereumTxRequest { signature_v: 1, r: 0x11.., s: 0x22.. }`.
+        fn signed() -> (Mt, Vec<u8>) {
+            let mut bytes = vec![0x10, 0x01, 0x1a, 32];
+            bytes.extend([0x11u8; 32]);
+            bytes.extend([0x22, 32]);
+            bytes.extend([0x22u8; 32]);
+            (Mt::MessageType_EthereumTxRequest, bytes)
+        }
+
+        fn button() -> (Mt, Vec<u8>) {
+            (Mt::MessageType_ButtonRequest, Vec::new())
+        }
+
+        fn payment_tx(data_len: usize) -> TxEip1559 {
+            TxEip1559 {
+                chain_id: 42161,
+                nonce: 7,
+                gas_limit: 900_000,
+                max_fee_per_gas: 20_000_000,
+                max_priority_fee_per_gas: 1,
+                to: TxKind::Call(Address::repeat_byte(0xAB)),
+                value: U256::ZERO,
+                access_list: Default::default(),
+                input: (0..data_len).map(|i| (i % 251) as u8).collect::<Vec<u8>>().into(),
+            }
+        }
+
+        /// Run one signing conversation against a script; returns the
+        /// result and everything the host wrote.
+        fn sign_against(
+            replies: Vec<(Mt, Vec<u8>)>,
+            tx: &TxEip1559,
+        ) -> (Result<Signature, String>, Vec<(Mt, Vec<u8>)>) {
+            let script = Arc::new(Mutex::new(Script {
+                replies: replies.into(),
+                written: Vec::new(),
+            }));
+            let mut client = trezor_client::client::trezor_with_transport(
+                trezor_client::Model::Trezor,
+                Box::new(FakeDevice(script.clone())),
+            );
+            let out = eth_sign_eip1559(&mut client, &[0x8000_002c], tx, false, false);
+            let written = std::mem::take(&mut script.lock().unwrap().written);
+            (out, written)
+        }
+
+        /// The calldata the host actually streamed: the initial chunk in
+        /// the sign request plus every later `EthereumTxAck`.
+        fn streamed(written: &[(Mt, Vec<u8>)]) -> Vec<u8> {
+            let mut all = Vec::new();
+            for (kind, payload) in written {
+                match kind {
+                    Mt::MessageType_EthereumSignTxEIP1559 => {
+                        let m: protos::EthereumSignTxEIP1559 =
+                            ProtoMessage::new(*kind, payload.clone()).into_message().unwrap();
+                        all.extend_from_slice(m.data_initial_chunk());
+                    }
+                    Mt::MessageType_EthereumTxAck => {
+                        let m: protos::EthereumTxAck =
+                            ProtoMessage::new(*kind, payload.clone()).into_message().unwrap();
+                        all.extend_from_slice(m.data_chunk());
+                    }
+                    _ => {}
+                }
+            }
+            all
+        }
+
+        fn kinds(written: &[(Mt, Vec<u8>)]) -> Vec<Mt> {
+            written.iter().map(|(k, _)| *k).collect()
+        }
+
+        /// CURRENT firmware (the live "Communication with your connected
+        /// device failed" case): it loads the first 6144 bytes silently,
+        /// THEN starts confirming — so button requests arrive as replies
+        /// to data chunks, between later chunks, and before the
+        /// signature. Every one must be acked and the stream must carry
+        /// on; the old loop gave up at the first.
+        #[test]
+        fn data_stream_answers_confirmations_that_arrive_mid_stream() {
+            let tx = payment_tx(7000);
+            let (out, written) = sign_against(
+                vec![
+                    // request_initial_data: fill the 6144-byte buffer.
+                    wants(1024),
+                    wants(1024),
+                    wants(1024),
+                    wants(1024),
+                    wants(1024),
+                    // "Input data" intro — the reply to the fifth chunk.
+                    button(),
+                    // The rest of the calldata, then the summary screens.
+                    wants(856),
+                    button(),
+                    button(),
+                    signed(),
+                ],
+                &tx,
+            );
+            let sig = out.expect("the conversation completes");
+            assert_eq!(sig.r(), U256::from_be_bytes([0x11u8; 32]));
+            assert_eq!(sig.s(), U256::from_be_bytes([0x22u8; 32]));
+            assert!(sig.v(), "signature_v 1 is odd parity");
+            assert_eq!(streamed(&written), tx.input.to_vec(), "all calldata, in order");
+            assert_eq!(
+                kinds(&written),
+                vec![
+                    Mt::MessageType_EthereumSignTxEIP1559,
+                    Mt::MessageType_EthereumTxAck,
+                    Mt::MessageType_EthereumTxAck,
+                    Mt::MessageType_EthereumTxAck,
+                    Mt::MessageType_EthereumTxAck,
+                    Mt::MessageType_EthereumTxAck,
+                    Mt::MessageType_ButtonAck,
+                    Mt::MessageType_EthereumTxAck,
+                    Mt::MessageType_ButtonAck,
+                    Mt::MessageType_ButtonAck,
+                ],
+            );
+        }
+
+        /// Mid-size calldata on current firmware: everything fits the
+        /// device buffer, so the FIRST confirmation is the reply to the
+        /// last data chunk.
+        #[test]
+        fn data_stream_answers_a_confirmation_after_the_last_chunk() {
+            let tx = payment_tx(2500);
+            let (out, written) = sign_against(
+                vec![wants(1024), wants(452), button(), button(), signed()],
+                &tx,
+            );
+            out.expect("the conversation completes");
+            assert_eq!(streamed(&written), tx.input.to_vec());
+        }
+
+        /// OLDER firmware confirms first and streams afterwards — the
+        /// order trezor-client's own loop was written for. Still works.
+        #[test]
+        fn data_stream_still_handles_confirm_first_firmware() {
+            let tx = payment_tx(2500);
+            let (out, written) = sign_against(
+                vec![button(), button(), wants(1024), wants(452), signed()],
+                &tx,
+            );
+            out.expect("the conversation completes");
+            assert_eq!(streamed(&written), tx.input.to_vec());
+        }
+
+        /// The device sets the chunk size (it rejects more than it asked
+        /// for), and a device asking past the end is refused instead of
+        /// being fed empty chunks forever.
+        #[test]
+        fn data_stream_honours_the_requested_chunk_size() {
+            let tx = payment_tx(1500);
+            let (out, written) =
+                sign_against(vec![wants(200), wants(276), signed()], &tx);
+            out.expect("the conversation completes");
+            assert_eq!(streamed(&written), tx.input.to_vec());
+            let acks: Vec<usize> = written
+                .iter()
+                .filter(|(k, _)| *k == Mt::MessageType_EthereumTxAck)
+                .map(|(k, p)| {
+                    let m: protos::EthereumTxAck =
+                        ProtoMessage::new(*k, p.clone()).into_message().unwrap();
+                    m.data_chunk().len()
+                })
+                .collect();
+            assert_eq!(acks, vec![200, 276]);
+
+            let (out, _) = sign_against(vec![wants(476), wants(64)], &tx);
+            let err = out.expect_err("asking past the end is refused");
+            assert!(err.contains("more transaction data"), "{err}");
+        }
 
         #[test]
         fn firmware_version_gate() {

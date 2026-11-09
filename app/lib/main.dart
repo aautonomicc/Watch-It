@@ -464,7 +464,7 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     // uploads are an admin concern, and the dialog would leak titles a
     // kid profile shouldn't see.
     if (ProfileStore.instance.isAdmin) {
-      unawaited(offerBatchResume(context));
+      unawaited(offerBatchResume(context, onLibraryChanged: _reload));
     }
     _reload();
   }
