@@ -20,6 +20,7 @@ if(MEDIA_KIT_LIBS_AVAILABLE)
     "texture_sw.cc"
     "video_output_manager.cc"
     "video_output.cc"
+    "present_hooks.cc"
     "utils.cc"
   )
 

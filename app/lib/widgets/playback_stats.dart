@@ -333,6 +333,13 @@ class NativeRenderSnapshot {
           '${gdkRefreshMs != null ? ' · refresh ${gdkRefreshMs!.toStringAsFixed(2)} ms' : ''}',
       'Pacing: update-via-main': flag('update_via_main') ? '1' : '0 (default)',
       'Pacing: sw-render': flag('sw_forced') ? '1' : '0 (default)',
+      if (raw.containsKey('present_hooks')) ...{
+        'Present: hooks': flag('present_hooks') ? 'on' : 'off',
+        'Present: downscale': count('present_downscale') > 1
+            ? '${count('present_downscale')}'
+            : '1 (default)',
+        'Present: opaque': flag('present_opaque') ? '1' : '0 (default)',
+      },
     };
   }
 }
@@ -347,8 +354,18 @@ class NativeRenderSnapshot {
 /// paint duration of the Flutter window: under a compositor GDK freezes the
 /// clock until the compositor acknowledges the previous frame, so a low
 /// tick rate names the compositor as the pacer; a long paint (the FlView
-/// blit plus GDK's GL swap) names a blocking swap on the GTK thread. Empty
-/// without a previous snapshot (rates need
+/// blit plus GDK's GL swap) names a blocking swap on the GTK thread.
+///
+/// `Present` breaks one presented frame down on X11, where the embedder
+/// cannot share Flutter's framebuffer with GDK and copies every frame
+/// through the CPU: the size Flutter rendered and the size that crossed the
+/// CPU (smaller under `WATCHIT_PRESENT_DOWNSCALE`), the raster thread's wait
+/// for the GPU and its readback, the GTK thread's upload, and the paint
+/// phase split around the FlView draw (`pre` = GDK's paint surface + window
+/// background, `draw` = upload + blit, `swap` = end-of-frame compositing +
+/// GL swap). Omitted when the plugin has no such counters.
+///
+/// Empty without a previous snapshot (rates need
 /// an interval) or when the plugin returned no counters.
 List<PlaybackStatsRow> renderPipelineRows(
   NativeRenderSnapshot? prev,
@@ -391,6 +408,47 @@ List<PlaybackStatsRow> renderPipelineRows(
   final paintMax = cur.count('gtk_paint_us_max') / 1000;
   final hasPaint = cur.raw.containsKey('gtk_paint_count');
   String r(double v) => v.toStringAsFixed(1);
+  double avgMs(String totalKey, int n) => n > 0
+      ? (cur.count(totalKey) - prev.count(totalKey)) / n / 1000
+      : 0.0;
+  // The embedder's X11 frame copies and the paint phase split three ways.
+  String? present;
+  final hasSplit = cur.raw.containsKey('gtk_pre_us_total');
+  final hasCopies = cur.flag('present_hooks');
+  if (hasSplit || hasCopies) {
+    final parts = <String>[];
+    if (hasCopies) {
+      final dRead = cur.count('present_readback_count') -
+          prev.count('present_readback_count');
+      final dUp = cur.count('present_upload_count') -
+          prev.count('present_upload_count');
+      final fw = cur.count('present_frame_width');
+      final fh = cur.count('present_frame_height');
+      final cw = cur.count('present_copy_width');
+      final ch = cur.count('present_copy_height');
+      if (fw > 0 && fh > 0) {
+        parts.add(cw == fw && ch == fh
+            ? 'frame $fw×$fh'
+            : 'frame $fw×$fh → copied $cw×$ch');
+      }
+      parts.add(dRead > 0
+          ? 'gpu wait ${r(avgMs('present_wait_us_total', dRead))}'
+              ' · readback ${r(avgMs('present_copy_us_total', dRead))}'
+              ' · upload ${r(avgMs('present_upload_us_total', dUp))} ms'
+          : 'no CPU copies');
+      if (cur.flag('present_opaque')) {
+        final dOpaque = cur.count('present_opaque_count') -
+            prev.count('present_opaque_count');
+        parts.add(dOpaque > 0 ? 'opaque' : 'opaque not applied');
+      }
+    }
+    if (hasSplit && dPaint > 0) {
+      parts.add('GTK pre ${r(avgMs('gtk_pre_us_total', dPaint))}'
+          ' / draw ${r(avgMs('gtk_draw_us_total', dPaint))}'
+          ' / swap ${r(avgMs('gtk_post_us_total', dPaint))} ms');
+    }
+    if (parts.isNotEmpty) present = parts.join(' · ');
+  }
   return [
     (
       label: 'Pipeline',
@@ -405,6 +463,7 @@ List<PlaybackStatsRow> renderPipelineRows(
           '${cur.gdkRefreshMs != null ? ' · refresh ${cur.gdkRefreshMs!.toStringAsFixed(2)} ms' : ''}'
           ' · ${cur.flag('composited') ? 'composited' : 'no compositor'}',
     ),
+    if (present != null) (label: 'Present', value: present),
   ];
 }
 

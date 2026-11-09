@@ -686,6 +686,34 @@ v17 dropped the channel columns and lists. History in
   re-rasters the last layer tree without a Dart build and reports nothing,
   so the stats card's `UI frames` row is the widget-rebuild rate, never the
   video rate (the test2 report's "Flutter 6 fps" was this artefact).
+- **X11 present = a CPU round trip of every frame** (found 2026-11-09,
+  corrects "shared framebuffer" above for X11): the engine renders with
+  EGL, GDK presents with GLX, and the two cannot share a texture, so
+  `fl_view_renderer.cc` creates the compositor with
+  `shareable = GDK_IS_WAYLAND_DISPLAY(...)` and on X11 the raster thread
+  `glReadPixels` the WHOLE window into CPU memory after compositing, and
+  the GTK draw `glTexImage2D`s it into a brand-new texture on every paint
+  before `gdk_cairo_draw_from_gl` (which, the texture having alpha, also
+  uploads GDK's own window surface underneath). 4 bytes × window pixels
+  each way per frame: 8 MB at 1080p, 31 MB at a maximized 4K HiDPI window —
+  the Mint judder (paint 31 ms at 3840×2016, 4 ms in a tiny window).
+  Flutter master still does this on X11 (it since dropped sharing on the
+  GDK path altogether and gave Wayland a subsurface renderer), so no
+  upstream fix is coming. `linux/present_hooks.cc` in the vendored plugin
+  swaps libepoxy's public dispatch pointers `epoxy_glReadPixels` /
+  `epoxy_glTexImage2D` (the embedder calls GL through them; Impeller/Skia
+  do not) for wrappers that time both copies and carry two knobs:
+  `WATCHIT_PRESENT_DOWNSCALE=N` (blit the frame N× smaller on the GPU,
+  read back and upload the small copy, stretch it back into the frame-size
+  texture on the GPU — GDK addresses the texture in frame pixels, a small
+  texture tiles) and `WATCHIT_PRESENT_OPAQUE=1` (upload as `GL_RGB`, so GDK
+  takes its non-alpha branch and skips its window-surface upload);
+  `WATCHIT_PRESENT_HOOKS=0` leaves the embedder untouched. Gotcha: epoxy's
+  lazy resolver thunk calls back through the dispatch pointer, so the
+  first real call runs with epoxy's own pointer restored and the wrapper
+  goes back in afterwards. The stats card's `Present` row shows frame size
+  → copied size, GPU wait / readback / upload ms and the paint phase split
+  around the FlView draw (pre / draw / swap).
 - Linux renderer choice (2026-11-08): Flutter's Impeller renderer is the
   engine's Linux default; its OpenGL backend fills paths without
   anti-aliasing on GPUs lacking MSAA (the "jagged bucket, smooth text"

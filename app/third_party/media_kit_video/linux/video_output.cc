@@ -48,6 +48,9 @@ struct _VideoOutput {
   gint64 stat_gtk_paint_count;
   gint64 stat_gtk_paint_us_total;
   gint64 stat_gtk_paint_us_max;
+  gint64 stat_gtk_pre_us_total;
+  gint64 stat_gtk_draw_us_total;
+  gint64 stat_gtk_post_us_total;
   gint64 stat_gdk_refresh_us;
   gchar* gl_vendor;
   gchar* gl_renderer;
@@ -57,6 +60,9 @@ struct _VideoOutput {
   FlView* view;            /* observed for GTK ticks/draws; not owned */
   guint tick_callback_id;  /* gtk_widget_add_tick_callback, 0 = none */
   gulong draw_handler_id;  /* "draw" signal on the view, 0 = none */
+  gulong draw_after_id;    /* the same signal, connected after, 0 = none */
+  gint64 draw_start_us;    /* stamps of the FlView draw inside this paint */
+  gint64 draw_end_us;
   GdkFrameClock* clock;    /* the view's frame clock, ref held; NULL = none */
   gulong before_paint_id;  /* "before-paint" on |clock|, 0 = none */
   gulong after_paint_id;   /* "after-paint" on |clock|, 0 = none */
@@ -100,6 +106,8 @@ void video_output_note_populate(VideoOutput* self,
 static void video_output_before_paint_cb(GdkFrameClock* clock, gpointer data) {
   VideoOutput* self = (VideoOutput*)data;
   self->paint_start_us = g_get_monotonic_time();
+  self->draw_start_us = 0;
+  self->draw_end_us = 0;
 }
 
 static void video_output_after_paint_cb(GdkFrameClock* clock, gpointer data) {
@@ -107,7 +115,15 @@ static void video_output_after_paint_cb(GdkFrameClock* clock, gpointer data) {
   if (self->destroyed || self->paint_start_us == 0) {
     return;
   }
-  gint64 us = g_get_monotonic_time() - self->paint_start_us;
+  gint64 now = g_get_monotonic_time();
+  gint64 us = now - self->paint_start_us;
+  if (self->draw_start_us != 0 && self->draw_end_us != 0) {
+    stat_add(&self->stat_gtk_pre_us_total,
+             self->draw_start_us - self->paint_start_us);
+    stat_add(&self->stat_gtk_draw_us_total,
+             self->draw_end_us - self->draw_start_us);
+    stat_add(&self->stat_gtk_post_us_total, now - self->draw_end_us);
+  }
   self->paint_start_us = 0;
   stat_add(&self->stat_gtk_paint_count, 1);
   stat_add(&self->stat_gtk_paint_us_total, us);
@@ -173,6 +189,22 @@ static gboolean video_output_draw_cb(GtkWidget* widget,
   VideoOutput* self = (VideoOutput*)data;
   if (!self->destroyed) {
     stat_add(&self->stat_gtk_draw_count, 1);
+    if (self->draw_start_us == 0) {
+      self->draw_start_us = g_get_monotonic_time();
+    }
+  }
+  return FALSE;
+}
+
+// The same signal connected AFTER the class handler: FlView is a GtkBox, so
+// by now its children — the embedder's renderer widget, which uploads and
+// blits Flutter's frame — have drawn.
+static gboolean video_output_draw_after_cb(GtkWidget* widget,
+                                           cairo_t* cr,
+                                           gpointer data) {
+  VideoOutput* self = (VideoOutput*)data;
+  if (!self->destroyed) {
+    self->draw_end_us = g_get_monotonic_time();
   }
   return FALSE;
 }
@@ -186,6 +218,8 @@ static void video_output_observe_view(VideoOutput* self, FlView* view) {
       GTK_WIDGET(view), video_output_tick_cb, self, NULL);
   self->draw_handler_id = g_signal_connect(
       view, "draw", G_CALLBACK(video_output_draw_cb), self);
+  self->draw_after_id = g_signal_connect_after(
+      view, "draw", G_CALLBACK(video_output_draw_after_cb), self);
 }
 
 static void video_output_unobserve_view(VideoOutput* self) {
@@ -197,9 +231,13 @@ static void video_output_unobserve_view(VideoOutput* self) {
     if (self->draw_handler_id != 0) {
       g_signal_handler_disconnect(self->view, self->draw_handler_id);
     }
+    if (self->draw_after_id != 0) {
+      g_signal_handler_disconnect(self->view, self->draw_after_id);
+    }
   }
   self->tick_callback_id = 0;
   self->draw_handler_id = 0;
+  self->draw_after_id = 0;
   self->view = NULL;
   video_output_unobserve_clock(self);
 }
@@ -217,6 +255,9 @@ void video_output_get_render_stats(VideoOutput* self,
   out->gtk_paint_count = stat_get(&self->stat_gtk_paint_count);
   out->gtk_paint_us_total = stat_get(&self->stat_gtk_paint_us_total);
   out->gtk_paint_us_max = stat_get(&self->stat_gtk_paint_us_max);
+  out->gtk_pre_us_total = stat_get(&self->stat_gtk_pre_us_total);
+  out->gtk_draw_us_total = stat_get(&self->stat_gtk_draw_us_total);
+  out->gtk_post_us_total = stat_get(&self->stat_gtk_post_us_total);
   out->gdk_refresh_us = stat_get(&self->stat_gdk_refresh_us);
   GdkDisplay* display = gdk_display_get_default();
   GdkScreen* screen = gdk_screen_get_default();
@@ -342,6 +383,12 @@ static void video_output_init(VideoOutput* self) {
   self->stat_gtk_paint_count = 0;
   self->stat_gtk_paint_us_total = 0;
   self->stat_gtk_paint_us_max = 0;
+  self->stat_gtk_pre_us_total = 0;
+  self->stat_gtk_draw_us_total = 0;
+  self->stat_gtk_post_us_total = 0;
+  self->draw_after_id = 0;
+  self->draw_start_us = 0;
+  self->draw_end_us = 0;
   self->stat_gdk_refresh_us = 0;
   self->gl_vendor = NULL;
   self->gl_renderer = NULL;

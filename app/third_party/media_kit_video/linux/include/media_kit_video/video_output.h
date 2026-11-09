@@ -127,6 +127,13 @@ typedef struct _VideoOutputRenderStats {
   gint64 gtk_paint_count;
   gint64 gtk_paint_us_total;
   gint64 gtk_paint_us_max;
+  /* The paint phase split three ways around the FlView draw: before it
+   * (GDK allocating the paint surface, GTK drawing the window background),
+   * the draw itself (the embedder's frame upload + GDK's blit), and after
+   * it (GDK's end-of-frame compositing + GL swap). */
+  gint64 gtk_pre_us_total;
+  gint64 gtk_draw_us_total;
+  gint64 gtk_post_us_total;
   gint64 gdk_refresh_us;
   gboolean composited;
   gint scale_factor;

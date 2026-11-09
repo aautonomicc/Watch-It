@@ -307,6 +307,129 @@ void main() {
       final byLabel = {for (final r in renderPipelineRows(a, b)) r.label: r.value};
       expect(byLabel['GTK'],
           '60.0 ticks/s · 7.0 paints/s · paint 28.0 avg / 41.0 max ms · refresh 16.67 ms · composited');
+      // No present counters from this plugin → no Present row, no env lines.
+      expect(byLabel.containsKey('Present'), isFalse);
+      expect(b.environment().containsKey('Present: hooks'), isFalse);
+    });
+
+    NativeRenderSnapshot withPresent(
+      NativeRenderSnapshot base,
+      Map<String, Object?> extra,
+    ) =>
+        NativeRenderSnapshot({...base.raw, ...extra}, base.at);
+
+    test('the X11 frame copies and the paint split get a Present row', () {
+      // Two seconds, 20 paints/readbacks/uploads of a 3840×2016 frame:
+      // 2 ms waiting for the GPU, 12 ms reading back, 9 ms uploading; the
+      // paint phase is 1 ms before the draw, 14 ms in it, 5 ms after.
+      final a = withPresent(
+        snap(0, updates: 0, populates: 0, renderUs: 0, populateUs: 0,
+            ticks: 0, draws: 0, paints: 100, paintUs: 1000000),
+        {
+          'gtk_pre_us_total': 100000,
+          'gtk_draw_us_total': 1000000,
+          'gtk_post_us_total': 400000,
+          'present_hooks': true,
+          'present_downscale': 1,
+          'present_opaque': false,
+          'present_readback_count': 100,
+          'present_wait_us_total': 200000,
+          'present_copy_us_total': 1000000,
+          'present_upload_count': 100,
+          'present_upload_us_total': 800000,
+          'present_frame_width': 3840,
+          'present_frame_height': 2016,
+          'present_copy_width': 3840,
+          'present_copy_height': 2016,
+        },
+      );
+      final b = withPresent(
+        snap(2, updates: 60, populates: 40, renderUs: 40000,
+            populateUs: 50000, ticks: 120, draws: 20, paints: 120,
+            paintUs: 1400000),
+        {
+          ...a.raw,
+          'gtk_paint_count': 120,
+          'gtk_pre_us_total': 120000,
+          'gtk_draw_us_total': 1280000,
+          'gtk_post_us_total': 500000,
+          'present_readback_count': 120,
+          'present_wait_us_total': 240000,
+          'present_copy_us_total': 1240000,
+          'present_upload_count': 120,
+          'present_upload_us_total': 980000,
+        },
+      );
+      final byLabel = {for (final r in renderPipelineRows(a, b)) r.label: r.value};
+      expect(
+        byLabel['Present'],
+        'frame 3840×2016 · gpu wait 2.0 · readback 12.0 · upload 9.0 ms'
+        ' · GTK pre 1.0 / draw 14.0 / swap 5.0 ms',
+      );
+      final env = b.environment();
+      expect(env['Present: hooks'], 'on');
+      expect(env['Present: downscale'], '1 (default)');
+      expect(env['Present: opaque'], '0 (default)');
+    });
+
+    test('the knobs show in the Present row and the environment', () {
+      const knobs = {
+        'gtk_pre_us_total': 0,
+        'gtk_draw_us_total': 0,
+        'gtk_post_us_total': 0,
+        'present_hooks': true,
+        'present_downscale': 2,
+        'present_opaque': true,
+        'present_readback_count': 0,
+        'present_wait_us_total': 0,
+        'present_copy_us_total': 0,
+        'present_upload_count': 0,
+        'present_upload_us_total': 0,
+        'present_opaque_count': 0,
+        'present_frame_width': 3840,
+        'present_frame_height': 2016,
+        'present_copy_width': 1920,
+        'present_copy_height': 1008,
+      };
+      final a = withPresent(
+        snap(0, updates: 0, populates: 0, renderUs: 0, populateUs: 0,
+            ticks: 0, draws: 0, paints: 0),
+        knobs,
+      );
+      final b = withPresent(
+        snap(1, updates: 30, populates: 30, renderUs: 30000,
+            populateUs: 30000, ticks: 60, draws: 30, paints: 30,
+            paintUs: 240000),
+        {
+          ...knobs,
+          'gtk_pre_us_total': 30000,
+          'gtk_draw_us_total': 120000,
+          'gtk_post_us_total': 90000,
+          'present_readback_count': 30,
+          'present_wait_us_total': 30000,
+          'present_copy_us_total': 90000,
+          'present_upload_count': 30,
+          'present_upload_us_total': 60000,
+          'present_opaque_count': 30,
+        },
+      );
+      final byLabel = {for (final r in renderPipelineRows(a, b)) r.label: r.value};
+      expect(
+        byLabel['Present'],
+        'frame 3840×2016 → copied 1920×1008 · gpu wait 1.0 · readback 3.0'
+        ' · upload 2.0 ms · opaque · GTK pre 1.0 / draw 4.0 / swap 3.0 ms',
+      );
+      expect(b.environment()['Present: downscale'], '2');
+      expect(b.environment()['Present: opaque'], '1');
+      // An idle interval (no readbacks, no paints) stays finite and honest.
+      final idle = {for (final r in renderPipelineRows(b, withPresent(
+        snap(2, updates: 30, populates: 30, renderUs: 30000,
+            populateUs: 30000, ticks: 120, draws: 30, paints: 30,
+            paintUs: 240000),
+        b.raw,
+      ))) r.label: r.value};
+      expect(idle['Present'],
+          'frame 3840×2016 → copied 1920×1008 · no CPU copies · opaque not applied');
     });
   });
 

@@ -12,6 +12,7 @@
 
 #include <gtk/gtk.h>
 
+#include "include/media_kit_video/present_hooks.h"
 #include "include/media_kit_video/utils.h"
 #include "include/media_kit_video/video_output_manager.h"
 
@@ -170,6 +171,43 @@ static void media_kit_video_plugin_handle_method_call(
                                fl_value_new_int(st.gtk_paint_us_total));
       fl_value_set_string_take(result, "gtk_paint_us_max",
                                fl_value_new_int(st.gtk_paint_us_max));
+      fl_value_set_string_take(result, "gtk_pre_us_total",
+                               fl_value_new_int(st.gtk_pre_us_total));
+      fl_value_set_string_take(result, "gtk_draw_us_total",
+                               fl_value_new_int(st.gtk_draw_us_total));
+      fl_value_set_string_take(result, "gtk_post_us_total",
+                               fl_value_new_int(st.gtk_post_us_total));
+      // The embedder's X11 present copies (see present_hooks.h).
+      PresentHookStats ph = {};
+      present_hooks_get_stats(&ph);
+      fl_value_set_string_take(result, "present_hooks",
+                               fl_value_new_bool(ph.installed));
+      fl_value_set_string_take(result, "present_downscale",
+                               fl_value_new_int(ph.downscale));
+      fl_value_set_string_take(result, "present_opaque",
+                               fl_value_new_bool(ph.opaque));
+      fl_value_set_string_take(result, "present_readback_count",
+                               fl_value_new_int(ph.readback_count));
+      fl_value_set_string_take(result, "present_wait_us_total",
+                               fl_value_new_int(ph.wait_us_total));
+      fl_value_set_string_take(result, "present_copy_us_total",
+                               fl_value_new_int(ph.copy_us_total));
+      fl_value_set_string_take(result, "present_upload_count",
+                               fl_value_new_int(ph.upload_count));
+      fl_value_set_string_take(result, "present_upload_us_total",
+                               fl_value_new_int(ph.upload_us_total));
+      fl_value_set_string_take(result, "present_scaled_count",
+                               fl_value_new_int(ph.scaled_count));
+      fl_value_set_string_take(result, "present_opaque_count",
+                               fl_value_new_int(ph.opaque_count));
+      fl_value_set_string_take(result, "present_frame_width",
+                               fl_value_new_int(ph.frame_width));
+      fl_value_set_string_take(result, "present_frame_height",
+                               fl_value_new_int(ph.frame_height));
+      fl_value_set_string_take(result, "present_copy_width",
+                               fl_value_new_int(ph.copy_width));
+      fl_value_set_string_take(result, "present_copy_height",
+                               fl_value_new_int(ph.copy_height));
       fl_value_set_string_take(result, "gdk_refresh_us",
                                fl_value_new_int(st.gdk_refresh_us));
       fl_value_set_string_take(result, "composited",
@@ -257,6 +295,8 @@ static MediaKitVideoPlugin* media_kit_video_plugin_new(
 
 void media_kit_video_plugin_register_with_registrar(
     FlPluginRegistrar* registrar) {
+  // W@tch: time (and optionally shrink) the embedder's X11 frame copies.
+  present_hooks_install();
   media_kit_video_plugin_new(registrar);
 }
 
