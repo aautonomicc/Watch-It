@@ -1419,8 +1419,10 @@ decision (2026-10-10).
       reconciled by the next run instead of paid twice. The one-time
       token allowance is granted the same way (also up front for
       Trezor single uploads and backups). Proven on a local chain
-      (Anvil) with a signer that takes 7 s per signature; not yet on a
-      real device.
+      (Anvil) with a signer that takes 7 s per signature, and CONFIRMED
+      on a real Trezor 2026-11-09 (test9 build: a batch upload paid and
+      stored with no repeated confirmation — which also proves the
+      mid-calldata confirmation fix and the own signer on a device).
 
 ## Network & data control (shipped 2026-09-03→06, v0.1.0-alpha.85–.92)
 
