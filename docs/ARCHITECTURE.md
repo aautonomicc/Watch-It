@@ -249,8 +249,20 @@ phase 2 its wallet is signer-built (see "The signer seam" below), so a
 hardware signer (Trezor/Ledger, phase 3) plugs in without touching it. Payment proofs
 checkpoint to `<data>/batch-upload/` (keyed by the batch's chunk
 fingerprint; merkle payments stay valid 7 days), so failed stores — and
-app restarts — retry free; a checkpoint that died inside the seconds-
-wide payment window is discarded rather than reconciled by guesswork.
+app restarts — retry free. Payments go through the **sign-once
+journal** (`payjournal.rs`, on evmlib's `prepare_payment` /
+`broadcast_payment` / `observe_payment` — the path ant-core's own
+uploads use, whose driver it keeps private): the transaction is signed
+ONCE with no deadline, saved in the checkpoint before its first
+broadcast, then broadcast and watched; an ambiguous outcome re-sends
+those exact bytes and never signs or pays again, and a run that died or
+timed out before the confirmation is reconciled by the next run. The
+token allowance is granted the same way, ahead of the payment. (evmlib's
+legacy `pay_for_merkle_tree` signs inside a 5 s broadcast timeout and
+re-estimates gas on every retry, so each retry is a NEW transaction —
+on a hardware wallet that was an endless confirm loop, the 2026-11-09
+live failure.) Only a pre-journal checkpoint with a pending attempt is
+still discarded.
 Routes: `POST /upload/batch` + `GET /upload/batch/{id}` (protected,
 same single active slot as `/upload`). The Dart session
 (`batch_upload.dart`) encodes all tier outputs first (payment needs
@@ -345,9 +357,14 @@ MEMOIZED by sighash (`trezor::sigcache`): evmlib 0.10.0 hardcodes a
 wallet filler INCLUDES signing — impossible for a human tap — so the
 dropped future no longer cancels the conversation, and evmlib's
 retry of the same transaction returns the finished signature in
-milliseconds instead of prompting again (fee drift between attempts
-changes the sighash and simply costs one more tap; filed upstream as
-WithAutonomi/evmlib#21). An unplugged device degrades to a
+milliseconds instead of prompting again (filed upstream as
+WithAutonomi/evmlib#21). That memoization is only a backstop: on
+Arbitrum the retry is usually NOT the same transaction (the gas
+estimate moves with the L1 data price), so nothing a hardware wallet
+signs goes through the deadline-bound send any more — batch payments
+and every allowance grant sign through `payjournal.rs`, and single
+uploads and backups sign through evmlib's journal inside ant-core
+(with the allowance granted up front at job start). An unplugged device degrades to a
 wallet-less client with a plug-it-in hint at the paid call. Every
 step that waits for a human at the
 device publishes on the attention beacon (`trezor::attention` —

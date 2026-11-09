@@ -24,11 +24,13 @@
 //! checkpoints to disk after every payment and store wave, keyed by the
 //! batch's chunk fingerprint. A re-run of the same batch restores it and
 //! never re-pays what a previous run already paid — failed stores retry
-//! FREE inside the proof window. The one unrecoverable sliver: a crash in
-//! the seconds between broadcasting a payment and confirming it leaves a
-//! pending attempt we cannot reconcile without a tx journal; that
-//! checkpoint is discarded (one sub-batch may be paid again) rather than
-//! guessed at.
+//! FREE inside the proof window. Payments go through the sign-once
+//! journal (payjournal.rs): the signed transaction is saved in the
+//! checkpoint before its first broadcast, so a run that died (or timed
+//! out) between broadcast and confirmation is picked up by the next run
+//! and watched to its outcome instead of being paid again. Only a
+//! checkpoint from before the journal existed still has an unknowable
+//! pending attempt; that one is discarded.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
@@ -40,12 +42,15 @@ use ant_core::data::client::batch::ChunkPaymentPlan;
 use ant_core::data::client::upload::{
     MerkleUploadPayment, UploadAdapter, UploadPayment, UploadRecord,
 };
-use ant_core::data::client::upload_state::UploadState;
+use ant_core::data::client::upload_state::{PaymentAttempt, UploadState};
 use ant_core::data::error::Error as AntError;
 use ant_core::data::{DataMap, PaymentMode, PreparedMerkleBatch, Wallet};
 use bytes::Bytes;
 
+use evmlib::wallet::journal::PaymentRequest;
+
 use crate::engine::Engine;
+use crate::payjournal;
 
 /// Merkle tree capacity (`ant_protocol::evm::MAX_LEAVES`): one wallet
 /// transaction pays for up to this many chunks. Mirrored here for the
@@ -425,10 +430,13 @@ fn batch_fingerprint(records: &[UploadRecord]) -> String {
     hex::encode(hasher.finalize().as_bytes())
 }
 
-/// Restore a previous run's payment state when it is clean. A checkpoint
-/// holding a PENDING payment attempt died inside the payment window; with
-/// no tx journal its outcome is unknowable, so it is discarded (and that
-/// one sub-batch may be paid again) rather than reconciled by guesswork.
+/// Restore a previous run's payment state. A checkpoint holding a
+/// PENDING payment attempt died (or timed out) inside the payment window:
+/// with a journal (payjournal.rs) the driver reconciles it — watching the
+/// signed transaction, never signing or paying again. Without one (a
+/// checkpoint from before the journal existed) its outcome is unknowable,
+/// so it is discarded (and that one sub-batch may be paid again) rather
+/// than reconciled by guesswork.
 fn load_checkpoint(path: Option<&Path>) -> UploadState {
     let Some(path) = path else {
         return UploadState::default();
@@ -437,18 +445,27 @@ fn load_checkpoint(path: Option<&Path>) -> UploadState {
         return UploadState::default();
     };
     match UploadState::restore(&bytes) {
-        Ok(state) if state.pending_payment.is_none() => {
-            tracing::info!("batch upload: resuming from payment checkpoint");
-            state
-        }
-        Ok(_) => {
-            tracing::warn!(
-                "batch upload: checkpoint died mid-payment — discarding it \
-                 (its outcome is unknowable without a tx journal)"
-            );
-            let _ = std::fs::remove_file(path);
-            UploadState::default()
-        }
+        Ok(state) => match &state.pending_payment {
+            None => {
+                tracing::info!("batch upload: resuming from payment checkpoint");
+                state
+            }
+            Some(attempt) if payjournal::is_reconcilable(attempt) => {
+                tracing::info!(
+                    "batch upload: resuming from a checkpoint with a payment in \
+                     flight — its journaled transaction is reconciled first"
+                );
+                state
+            }
+            Some(_) => {
+                tracing::warn!(
+                    "batch upload: checkpoint died mid-payment — discarding it \
+                     (its outcome is unknowable without a tx journal)"
+                );
+                let _ = std::fs::remove_file(path);
+                UploadState::default()
+            }
+        },
         Err(e) => {
             tracing::warn!("batch upload: unreadable checkpoint discarded: {e}");
             let _ = std::fs::remove_file(path);
@@ -527,8 +544,11 @@ fn encrypt_file_to_spill(spill: &Path, path: &Path) -> Result<EncryptedFile, Str
 /// The money seam: byte staging + wallet submission for the pooled batch.
 /// Since phase 2 the `Wallet` here is signer-built (signer.rs wraps the
 /// configured signer in the `EthereumWallet` evmlib signs through), so a
-/// hardware signer (phase 3) plugs in without touching this adapter —
-/// `pay`/`pay_merkle` stay the only two places a batch spends.
+/// hardware signer (phase 3) plugs in without touching this adapter.
+/// Every payment goes through [`payjournal::execute`] — signed ONCE with
+/// no deadline, then broadcast and watched — which is what keeps a
+/// hardware wallet to one confirmation per payment; `journaled_quotes`/
+/// `journaled_merkle` are the only two places a batch spends.
 struct BatchAdapter {
     spill: PathBuf,
     wallet: Wallet,
@@ -544,6 +564,98 @@ impl BatchAdapter {
             s.done = 0;
         }
     }
+
+    fn payment_done(&self) {
+        self.job.lock().unwrap().payments_done += 1;
+    }
+
+    /// Single-node fallback payments (only when fewer than 2 chunks need
+    /// paying — everything else rides the merkle path): one vault
+    /// transaction for all the plans' quotes. Also the reconcile path —
+    /// a journal that already holds a signed transaction is watched, not
+    /// signed again.
+    async fn journaled_quotes(
+        &self,
+        plans: &[ChunkPaymentPlan],
+        state: &mut UploadState,
+    ) -> ant_core::data::Result<UploadPayment> {
+        let quotes = plans
+            .iter()
+            .flat_map(|p| p.payment.quotes.iter())
+            .filter(|q| q.amount != ant_core::data::U256::ZERO)
+            .map(|q| (q.quote_hash, q.rewards_address, q.amount))
+            .collect::<Vec<_>>();
+        let hashes = quotes.iter().map(|q| q.0).collect::<Vec<_>>();
+        let fresh = |state: &UploadState| {
+            plans.iter().all(|p| {
+                state
+                    .retained_plan(&p.address, p.data_size, std::time::SystemTime::now())
+                    .is_some()
+            })
+        };
+        let receipt = payjournal::execute(
+            &self.wallet,
+            self,
+            &PaymentRequest::Quotes(quotes),
+            state,
+            fresh,
+            || self.set_phase("paying"),
+        )
+        .await?;
+        self.payment_done();
+        Ok(UploadPayment {
+            transactions: hashes
+                .into_iter()
+                .map(|h| (h, receipt.transaction_hash))
+                .collect(),
+            amount: receipt.amount,
+            gas: receipt.gas_cost_wei,
+        })
+    }
+
+    /// One merkle sub-batch = one on-chain `payForMerkleTree` call, and
+    /// (once the one-time token allowance exists) one wallet signature.
+    async fn journaled_merkle(
+        &self,
+        batch: &PreparedMerkleBatch,
+        state: &mut UploadState,
+    ) -> ant_core::data::Result<MerkleUploadPayment> {
+        let request = PaymentRequest::Merkle {
+            depth: batch.depth,
+            pools: batch.pool_commitments.clone(),
+            timestamp: batch.merkle_payment_timestamp,
+        };
+        let timestamp = batch.merkle_payment_timestamp;
+        let receipt = payjournal::execute(
+            &self.wallet,
+            self,
+            &request,
+            state,
+            move |_| merkle_fresh(timestamp, std::time::SystemTime::now()),
+            || self.set_phase("paying"),
+        )
+        .await?;
+        self.payment_done();
+        Ok(MerkleUploadPayment {
+            winner_pool: receipt.winner_pool.ok_or_else(|| {
+                AntError::Payment("missing confirmed Merkle winner".into())
+            })?,
+            amount: receipt.amount,
+            gas: receipt.gas_cost_wei,
+        })
+    }
+}
+
+/// Is a merkle payment timestamp still inside the window nodes accept
+/// (ant-core's own `merkle_fresh`, which it keeps private)?
+fn merkle_fresh(timestamp: u64, now: std::time::SystemTime) -> bool {
+    now.duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .is_some_and(|now| {
+            timestamp <= now.as_secs()
+                && now.as_secs() - timestamp
+                    < evmlib::merkle_payments::MERKLE_PAYMENT_EXPIRATION
+        })
 }
 
 #[async_trait::async_trait]
@@ -555,67 +667,49 @@ impl UploadAdapter for BatchAdapter {
         })
     }
 
-    /// Single-node fallback payments (only when fewer than 2 chunks need
-    /// paying — everything else rides the merkle path). One batched
-    /// `pay_for_quotes` call; the driver validates the reported total.
-    async fn pay(&self, plans: &[ChunkPaymentPlan]) -> ant_core::data::Result<UploadPayment> {
-        self.set_phase("paying");
-        let mut quote_payments = Vec::new();
-        let mut amount = ant_core::data::U256::ZERO;
-        for plan in plans {
-            for q in &plan.payment.quotes {
-                quote_payments.push((q.quote_hash, q.rewards_address, q.amount));
-            }
-            amount += plan.payment.total_amount();
-        }
-        let (txs, gas) = self
-            .wallet
-            .pay_for_quotes(quote_payments)
-            .await
-            .map_err(|e| AntError::Payment(format!("payment failed: {e:?}")))?;
-        {
-            let mut s = self.job.lock().unwrap();
-            s.payments_done += 1;
-        }
-        // Upper-bound wei (limit × max fee) — evmlib reports the submitted
-        // transaction's gas config, not the settled receipt; UI shows "≈".
-        let gas_wei = u128::from(gas.gas_with_buffer)
-            .saturating_mul(gas.max_fee_per_gas.unwrap_or(0));
-        Ok(UploadPayment {
-            transactions: txs.into_iter().collect(),
-            amount,
-            gas: gas_wei,
-        })
+    /// Never reached: the driver calls `submit_payment`, overridden below
+    /// onto the journal. Refuses rather than paying through evmlib's
+    /// deadline-bound legacy send.
+    async fn pay(&self, _plans: &[ChunkPaymentPlan]) -> ant_core::data::Result<UploadPayment> {
+        Err(AntError::Payment(
+            "batch payments go through the payment journal".into(),
+        ))
     }
 
-    /// One merkle sub-batch = one on-chain `payForMerkleTree` call. The
-    /// wallet checks balance and token allowance itself (approving when
-    /// needed) and returns the confirmed winner pool.
-    async fn pay_merkle(
+    fn initialize_payment_attempt(&self, attempt: &mut PaymentAttempt) {
+        payjournal::initialize(attempt);
+    }
+
+    async fn submit_payment(
+        &self,
+        plans: &[ChunkPaymentPlan],
+        state: &mut UploadState,
+    ) -> ant_core::data::Result<UploadPayment> {
+        self.journaled_quotes(plans, state).await
+    }
+
+    async fn reconcile_payment(
+        &self,
+        plans: &[ChunkPaymentPlan],
+        state: &mut UploadState,
+    ) -> ant_core::data::Result<UploadPayment> {
+        self.journaled_quotes(plans, state).await
+    }
+
+    async fn submit_merkle_payment(
         &self,
         batch: &PreparedMerkleBatch,
+        state: &mut UploadState,
     ) -> ant_core::data::Result<MerkleUploadPayment> {
-        self.set_phase("paying");
-        let (winner_pool, amount, gas) = self
-            .wallet
-            .pay_for_merkle_tree(
-                batch.depth,
-                batch.pool_commitments.clone(),
-                batch.merkle_payment_timestamp,
-            )
-            .await
-            .map_err(|e| AntError::Payment(format!("payment failed: {e}")))?;
-        {
-            let mut s = self.job.lock().unwrap();
-            s.payments_done += 1;
-        }
-        let gas_wei = u128::from(gas.gas_with_buffer)
-            .saturating_mul(gas.max_fee_per_gas.unwrap_or(0));
-        Ok(MerkleUploadPayment {
-            winner_pool,
-            amount,
-            gas: gas_wei,
-        })
+        self.journaled_merkle(batch, state).await
+    }
+
+    async fn reconcile_merkle_payment(
+        &self,
+        batch: &PreparedMerkleBatch,
+        state: &mut UploadState,
+    ) -> ant_core::data::Result<MerkleUploadPayment> {
+        self.journaled_merkle(batch, state).await
     }
 
     /// Persist the driver's recovery state (paid proofs) so a crashed or
@@ -745,7 +839,7 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_with_pending_payment_is_discarded() {
+    fn checkpoint_keeps_a_journaled_pending_payment_and_discards_others() {
         let dir = temp_dir("ckpt");
         let path = dir.join("batch.ckpt");
         // Clean state round-trips.
@@ -754,25 +848,49 @@ mod tests {
         let restored = load_checkpoint(Some(&path));
         assert!(restored.pending_payment.is_none());
         assert!(path.exists());
-        // A pending payment attempt poisons the checkpoint: discarded and
-        // deleted rather than reconciled by guesswork.
+        // A pending attempt WITHOUT a journal (a checkpoint from before
+        // payjournal.rs) is unknowable: discarded and deleted rather than
+        // reconciled by guesswork.
+        // (A quote attempt: a merkle attempt only restores beside its
+        // prepared batch, which cannot be built outside the driver.)
+        let mut attempt = PaymentAttempt {
+            merkle: false,
+            addresses: Vec::new(),
+            submissions: Vec::new(),
+            receipt: None,
+        };
         let mut dirty = UploadState::default();
-        dirty.pending_payment =
-            Some(ant_core::data::client::upload_state::PaymentAttempt {
-                merkle: true,
-                addresses: Vec::new(),
-                submissions: Vec::new(),
-                receipt: None,
-            });
+        dirty.pending_payment = Some(attempt.clone());
         std::fs::write(&path, dirty.checkpoint().unwrap()).unwrap();
         let restored = load_checkpoint(Some(&path));
         assert!(restored.pending_payment.is_none());
         assert!(!path.exists(), "poisoned checkpoint must be deleted");
-        // Garbage is discarded the same way.
+        // WITH a journal it is kept for the driver to reconcile — the
+        // run that timed out waiting for a confirmation is never paid
+        // twice.
+        payjournal::initialize(&mut attempt);
+        let mut journaled = UploadState::default();
+        journaled.pending_payment = Some(attempt);
+        std::fs::write(&path, journaled.checkpoint().unwrap()).unwrap();
+        let restored = load_checkpoint(Some(&path));
+        assert!(restored.pending_payment.is_some());
+        assert!(path.exists());
+        // Garbage is discarded.
         std::fs::write(&path, b"garbage").unwrap();
         let _ = load_checkpoint(Some(&path));
         assert!(!path.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn merkle_freshness_window() {
+        let at = |secs: u64| std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
+        let week = evmlib::merkle_payments::MERKLE_PAYMENT_EXPIRATION;
+        assert!(merkle_fresh(1_000, at(1_000)));
+        assert!(merkle_fresh(1_000, at(1_000 + week - 1)));
+        assert!(!merkle_fresh(1_000, at(1_000 + week)));
+        // A timestamp from the future is never fresh.
+        assert!(!merkle_fresh(1_000, at(999)));
     }
 
     #[test]

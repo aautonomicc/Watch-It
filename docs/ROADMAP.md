@@ -1406,6 +1406,21 @@ decision (2026-10-10).
       Trezor backup completed inside the user's two-device round trip
       (payments landed after a few attempts — the upstream 5 s
       broadcast-timeout class; evmlib#21/#22 remain open).
+- [x] Sign-once batch payments (2026-11-09, ships alpha.129): the
+      first live Trezor BATCH payment looped — confirm on the device,
+      then asked to confirm again, without end. evmlib's legacy
+      `pay_for_merkle_tree` re-estimates gas on every retry of its 5 s
+      send, so on Arbitrum each retry is a different transaction and a
+      fresh device confirmation (the sighash memoization above only
+      joins IDENTICAL transactions). The batch now pays through
+      `payjournal.rs` on evmlib's sign-then-broadcast journal: one
+      signature with no deadline, the signed bytes saved in the
+      checkpoint before the first broadcast, an unconfirmed payment
+      reconciled by the next run instead of paid twice. The one-time
+      token allowance is granted the same way (also up front for
+      Trezor single uploads and backups). Proven on a local chain
+      (Anvil) with a signer that takes 7 s per signature; not yet on a
+      real device.
 
 ## Network & data control (shipped 2026-09-03→06, v0.1.0-alpha.85–.92)
 

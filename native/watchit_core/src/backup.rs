@@ -721,6 +721,14 @@ async fn drive_backup(
 
     // -- upload what the store does not already hold ----------------------
     let client = crate::upload::wallet_client(engine).await?;
+    // A hardware wallet grants the one-time token allowance here, with no
+    // signing deadline, instead of mid-backup through evmlib's 5-second
+    // send (which re-asks for a confirmation on every retry).
+    if _job_session.is_some() {
+        if let Some(wallet) = client.wallet() {
+            crate::payjournal::ensure_unlimited_allowance(wallet).await?;
+        }
+    }
     let mut state = engine
         .backups
         .state_for(&identity_fingerprint(&keys.enc));

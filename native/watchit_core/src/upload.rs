@@ -212,6 +212,14 @@ async fn drive_upload(
         _ => None,
     };
     let client = wallet_client(engine).await?;
+    // A hardware wallet grants the one-time token allowance here, with no
+    // signing deadline, instead of mid-upload through evmlib's 5-second
+    // send (which re-asks for a confirmation on every retry).
+    if _job_session.is_some() {
+        if let Some(wallet) = client.wallet() {
+            crate::payjournal::ensure_unlimited_allowance(wallet).await?;
+        }
+    }
 
     let (tx, rx) = mpsc::channel::<UploadEvent>(64);
     let progress = spawn_progress_mirror(job.clone(), rx);

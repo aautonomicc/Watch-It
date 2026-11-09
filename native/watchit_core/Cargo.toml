@@ -70,7 +70,7 @@ alloy-signer = "2.4"
 # separate surface from the 2.x signer tree above: payment signers must
 # implement THIS tree's TxSigner, so trezor.rs's own Trezor signer
 # (VerifiedTrezor) is a TxSigner over THIS 1.x tree, not 2.4.x.
-alloy = { version = "1.0.32", default-features = false, features = ["std", "network", "signer-local", "consensus"] }
+alloy = { version = "1.0.32", default-features = false, features = ["std", "network", "signer-local", "consensus", "providers"] }
 rand = "0.8"
 # Transient key material (derivation intermediates, passphrase-derived
 # keys, decrypted wallet values in flight) is wiped on drop. Already in

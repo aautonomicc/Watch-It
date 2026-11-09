@@ -362,15 +362,22 @@ pub fn concrete_legacy(
 /// attempt's tap squeaked under the window (the 2026-10-12 live "15
 /// passphrase entries per backup" report).
 ///
-/// The fix, with no evmlib fork: the device conversation runs as a
-/// DETACHED task — a caller dropped at the timeout never cancels it —
-/// and the locally VERIFIED signature lands here keyed by sighash.
-/// evmlib's retry rebuilds the same transaction (same pending nonce;
-/// fees are re-queried but near-constant on Arbitrum), so its sign
-/// request joins the still-waiting conversation or hits the completed
-/// cache and returns in milliseconds — well inside the 5s window — and
-/// the broadcast proceeds. Fee drift between attempts changes the
-/// sighash and simply costs one more confirmation (safe fallback).
+/// The mitigation, with no evmlib fork: the device conversation runs as
+/// a DETACHED task — a caller dropped at the timeout never cancels it —
+/// and the locally VERIFIED signature lands here keyed by sighash, so a
+/// retry that rebuilds the SAME transaction joins the conversation (or
+/// hits the completed cache) instead of prompting again.
+///
+/// That only helps when the retry really is the same transaction, and on
+/// Arbitrum it often is not: evmlib re-estimates the gas on every retry
+/// and the estimate moves with the L1 data price, so the sighash changes
+/// and each retry queues ANOTHER confirmation — the endless confirm loop
+/// on the first live batch payment (2026-11-09). The real fix is to stay
+/// off the deadline-bound send altogether: batch payments and the token
+/// allowance sign through payjournal.rs (once, no deadline), and
+/// ant-core's own uploads and backups sign through evmlib's journal the
+/// same way. This cache stays as the backstop for whatever still goes
+/// through the legacy send.
 ///
 /// Errors are delivered to whoever is waiting but never cached: a
 /// cancelled tap or a transport fault must not poison the next attempt.
