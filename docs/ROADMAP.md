@@ -1442,7 +1442,10 @@ decision (2026-10-10).
       at app start and held the connect up behind it). A batch left on
       its review page until the idle auto-pause no longer fails with
       "network is paused", and a failure decided at the device is not
-      re-run automatically.
+      re-run automatically. Confirmed on a real Trezor 2026-11-09
+      (test10): a sleeping device brought up the "Unlock your Trezor"
+      prompt instead of a failed upload; the reconnect card is
+      emulator-tested only.
 - [x] Device tests on Trezor's firmware emulator (2026-11-09):
       `scripts/trezor-emulator/run.sh` runs seven tests of our signer
       against the real firmware (Safe 5, 2.10.0) — session open on a
