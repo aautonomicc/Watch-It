@@ -13,6 +13,20 @@ ignore = [
   # Clears when alloy moves to k256 0.14 AND evmlib#22 lands. Impact low:
   # local software-wallet signing on a desktop; Trezor signs on-device.
   "RUSTSEC-2026-0387",
+  # libsqlite3-sys 0.30.1 (bundled C SQLite < 3.54.0) can return
+  # uninitialized page-cache memory when a database is opened beside a
+  # crafted `-wal` file of a different page size. Fixed only in
+  # libsqlite3-sys >= 0.39 = rusqlite 0.41, and rusqlite is held at 0.32 by
+  # x0x 0.48.1's `^0.32` pin (one native sqlite copy per graph). Impact for
+  # W@tch: the Rust side opens only its own root_maps.sqlite and x0x's
+  # history.db inside the app's private data dir, never a database from a
+  # bundle, import or the network — an attacker would need write access to
+  # that dir, which already yields everything. (The Flutter side is not
+  # affected: Dart sqlite3 bundles SQLite 3.54.)
+  # REMOVE at the next x0x tag: x0x main already carries the fix (#1839,
+  # rusqlite 0.41) — bump x0x, lift the rusqlite hold in Cargo.toml, delete
+  # this entry, and confirm `cargo audit` still exits 0.
+  "RUSTSEC-2026-0459",
   # (RUSTSEC-2026-0367/0368/0369 on zip 2.x were accepted 2026-10-25 and
   # cleared 2026-11-01 when the ant-core pin moved past zip 2 — see Cargo.toml.)
 ]
