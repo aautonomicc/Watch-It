@@ -13,6 +13,7 @@ import 'trezor_attention.dart';
 import 'ffmpeg.dart' show FfmpegService;
 import 'library_store.dart' show addEntriesToLists;
 import 'match_review.dart';
+import 'network_pause.dart';
 import 'publish_api.dart';
 import 'publish_plan.dart' as plan;
 
@@ -816,6 +817,7 @@ class BatchUploadSession extends MatchReviewSession {
     estimateError = null;
     notifyListeners();
     try {
+      await _liftAutoPause();
       final quote = await _api!.estimate(ready.first.source);
       if (gen != _estimateGen) return;
       final perChunkAtto = quote.costAtto ~/
@@ -959,8 +961,31 @@ class BatchUploadSession extends MatchReviewSession {
     return tasks;
   }
 
+  /// A batch left on its review page long enough for the idle timer to
+  /// pause the network would otherwise fail the moment Upload (or the
+  /// quote) is pressed — "network is paused". Starting one is activity:
+  /// lift an AUTOMATIC pause first; the user's own pause stays theirs.
+  Future<void> _liftAutoPause() async {
+    final pause = NetworkPause.instance;
+    if (!(pause.paused && pause.autoPaused)) return;
+    try {
+      await pause.noteActivity();
+    } catch (_) {
+      // The upload reports the paused network itself if this failed.
+    }
+  }
+
+  /// Did this job fail because of something decided (or left undone) AT
+  /// THE TREZOR — cancelled there, the wait stopped, the wrong wallet?
+  /// Running the batch again by itself would only put the same prompt
+  /// straight back up; the done page's Retry is the user's to press.
+  @visibleForTesting
+  static bool isTrezorRefusal(String? error) =>
+      error != null && error.contains('Trezor');
+
   Future<void> _upload(List<_UploadTask> tasks) async {
     final m = manifest!;
+    await _liftAutoPause();
     final datamapsDir = Directory(p.join(workDir!.path, 'datamaps'))
       ..createSync(recursive: true);
     final encodesDir = Directory(p.join(workDir!.path, 'encodes'));
@@ -1033,7 +1058,8 @@ class BatchUploadSession extends MatchReviewSession {
     // keeps the proofs; only the failed stores retry).
     final retries =
         staged.where((t) => t.entry.status == 'failed').toList();
-    if (retries.isNotEmpty) {
+    if (retries.isNotEmpty &&
+        !retries.every((t) => isTrezorRefusal(t.entry.error))) {
       for (final t in retries) {
         t.entry.status = 'ready';
       }

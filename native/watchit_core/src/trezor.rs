@@ -80,44 +80,94 @@ pub mod attention {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Mutex;
 
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    static CURRENT: Mutex<Option<(u64, &'static str)>> = Mutex::new(None);
+    /// Serializes the unit tests that read the process-global beacon.
+    #[cfg(test)]
+    pub(crate) static TEST_GATE: Mutex<()> = Mutex::new(());
 
-    /// Clears the action on drop — but only if a newer action has not
-    /// replaced it (two overlapping guards never erase each other's
-    /// state out from under the poller).
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    /// The steps open right now, innermost last: (guard id, announced
+    /// seq, action). A step can open INSIDE another — a payment
+    /// signature that first has to wait for the device to be unlocked, a
+    /// session open that asks for the passphrase — and when the inner
+    /// one ends the outer one is what the device is waiting on again.
+    static OPEN: Mutex<Vec<(u64, u64, &'static str)>> = Mutex::new(Vec::new());
+
+    /// Ends its step on drop, wherever it sits: an older guard dropping
+    /// never erases a newer action out from under the poller, and an
+    /// inner step ending hands the beacon back to the step around it.
     pub struct Guard {
-        seq: u64,
+        id: u64,
     }
 
     impl Drop for Guard {
         fn drop(&mut self) {
-            let mut current = CURRENT.lock().unwrap_or_else(|p| p.into_inner());
-            if matches!(*current, Some((seq, _)) if seq == self.seq) {
-                *current = None;
+            let mut open = OPEN.lock().unwrap_or_else(|p| p.into_inner());
+            let Some(at) = open.iter().position(|(id, _, _)| *id == self.id) else {
+                return;
+            };
+            let was_innermost = at + 1 == open.len();
+            open.remove(at);
+            if was_innermost {
+                // The step underneath is what the device waits on again:
+                // give it a fresh seq so the app announces it anew (its
+                // card went away when the inner step took over).
+                if let Some(under) = open.last_mut() {
+                    under.1 = SEQ.fetch_add(1, Ordering::Relaxed) + 1;
+                }
             }
         }
     }
 
-    /// Mark the start of a step that waits on the device's button.
+    /// Mark the start of a step that waits on a human at the device.
     /// `action` is a stable machine word the app maps to copy:
     /// `sign-identity`, `confirm-address`, `sign-payment`,
     /// `unlock-wallet` (the per-job session open, where a
-    /// passphrase-protected device asks for its passphrase once).
+    /// passphrase-protected device asks for its passphrase once),
+    /// `enter-passphrase`, `unlock-device` (the device is locked and
+    /// showing its PIN pad) and `connect-device` (no usable device on
+    /// USB — plug it in / replug it).
     pub fn begin(action: &'static str) -> Guard {
         let seq = SEQ.fetch_add(1, Ordering::Relaxed) + 1;
-        *CURRENT.lock().unwrap_or_else(|p| p.into_inner()) = Some((seq, action));
-        Guard { seq }
+        OPEN.lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push((seq, seq, action));
+        Guard { id: seq }
     }
 
-    /// (active, seq, action) — seq grows per action so a poller can tell
-    /// a NEW tap apart from one it already announced.
+    /// (active, seq, action) for the innermost open step — seq grows per
+    /// announcement so a poller can tell a NEW wait apart from one it
+    /// already announced.
     pub fn snapshot() -> (bool, u64, Option<&'static str>) {
-        let current = CURRENT.lock().unwrap_or_else(|p| p.into_inner());
-        match *current {
-            Some((seq, action)) => (true, seq, Some(action)),
+        let open = OPEN.lock().unwrap_or_else(|p| p.into_inner());
+        match open.last() {
+            Some((_, seq, action)) => (true, *seq, Some(action)),
             None => (false, SEQ.load(Ordering::Relaxed), None),
         }
+    }
+}
+
+/// The app's "Stop waiting" button. A job that finds no usable Trezor on
+/// USB waits for one to be plugged in (see `device::await_device`) — the
+/// one wait the user cannot end at the device itself, so the app can end
+/// it here. Lives outside the desktop-only module so the route compiles
+/// on every target.
+pub mod waiting {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static STOP: AtomicBool = AtomicBool::new(false);
+
+    /// The user gave up on the wait in progress (no-op when none is).
+    pub fn stop() {
+        STOP.store(true, Ordering::Relaxed);
+    }
+
+    /// A new wait starts un-stopped: a stale press never ends a later one.
+    pub fn begin() {
+        STOP.store(false, Ordering::Relaxed);
+    }
+
+    pub fn stopped() -> bool {
+        STOP.load(Ordering::Relaxed)
     }
 }
 
@@ -568,6 +618,257 @@ mod device {
         format!("Trezor: {msg}")
     }
 
+    /// How one exchange with the device ended badly — kept typed (not
+    /// flattened to text) so [`supervise`] can tell a lost link and a
+    /// device that locked itself from a real refusal.
+    #[derive(Debug)]
+    enum DevError {
+        /// No Trezor on USB.
+        Missing,
+        /// The link failed mid-conversation: unplugged, not answering, or
+        /// the two sides out of step. The raw detail rides along for the
+        /// final message.
+        Link(String),
+        /// The device ended the workflow as cancelled — the user's tap on
+        /// Cancel, OR the device locking itself while a screen was still
+        /// waiting (its auto-lock closes whatever is open).
+        Cancelled,
+        /// Everything else, already in end-user words. Final.
+        Fatal(String),
+    }
+
+    impl DevError {
+        /// The end-user sentence for an error nothing could ride out.
+        fn message(self) -> String {
+            match self {
+                DevError::Missing => {
+                    "no Trezor found — plug it in, unlock it, and try again".into()
+                }
+                DevError::Link(detail) if detail.to_lowercase().contains("busy") => format!(
+                    "another program is holding the Trezor ({detail}) — close \
+                     Trezor Suite or any wallet page using it, then try again"
+                ),
+                DevError::Link(detail) => format!(
+                    "lost contact with the Trezor ({detail}) — unplug it, plug \
+                     it back in, unlock it, and try again. Nothing was changed."
+                ),
+                DevError::Cancelled => "cancelled on the Trezor — nothing was changed".into(),
+                DevError::Fatal(msg) => msg,
+            }
+        }
+    }
+
+    /// Sort a transport-layer failure: a permission refusal is final
+    /// (retrying cannot fix missing udev rules), anything else is the
+    /// link.
+    fn link_or_denied(detail: String) -> DevError {
+        let lower = detail.to_lowercase();
+        if lower.contains("denied") || lower.contains("permission") || lower.contains("access") {
+            DevError::Fatal(friendly(detail))
+        } else {
+            DevError::Link(detail)
+        }
+    }
+
+    /// A `Failure` the device answered with.
+    fn failure(f: &protos::Failure) -> DevError {
+        use protos::failure::FailureType as F;
+        match f.code() {
+            F::Failure_ActionCancelled => DevError::Cancelled,
+            F::Failure_PinCancelled => DevError::Fatal(
+                "PIN entry was cancelled on the Trezor — nothing was changed".into(),
+            ),
+            F::Failure_PinInvalid => DevError::Fatal(
+                "the Trezor refused the PIN — nothing was changed".into(),
+            ),
+            _ if f.message().to_lowercase().contains("cancel") => DevError::Cancelled,
+            _ => DevError::Fatal(format!("the Trezor reported: {}", f.message())),
+        }
+    }
+
+    /// trezor-client's error → ours.
+    fn classify(e: trezor_client::Error) -> DevError {
+        use trezor_client::Error as E;
+        match e {
+            E::NoDeviceFound => DevError::Missing,
+            E::DeviceNotUnique => DevError::Fatal(
+                "more than one Trezor is plugged in — leave only the one set \
+                 up with W@tch connected, then try again"
+                    .into(),
+            ),
+            E::TransportConnect(t)
+            | E::TransportBeginSession(t)
+            | E::TransportEndSession(t)
+            | E::TransportSendMessage(t)
+            | E::TransportReceiveMessage(t) => link_or_denied(t.to_string()),
+            E::FailureResponse(f) => failure(&f),
+            // A reply that makes no sense where it arrived: host and
+            // device are out of step (a conversation abandoned earlier).
+            // A fresh handle starts clean.
+            e @ (E::UnexpectedMessageType(_)
+            | E::Protobuf(_)
+            | E::UnexpectedInteractionRequest(_)) => DevError::Link(e.to_string()),
+            other => DevError::Fatal(friendly(other)),
+        }
+    }
+
+    /// How long a conversation may wait for the DEVICE to become usable.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum Wait {
+        /// Fail at once: the presence probe and the setup dialog, which
+        /// show "no Trezor" themselves and let the user try again.
+        Brief,
+        /// A running job (backup, upload): ride out a device that locked
+        /// itself, was unplugged, or stopped answering — the app shows
+        /// what to do — instead of failing work the user already waited
+        /// minutes for.
+        Patient,
+    }
+
+    /// A job gives up on a device that keeps locking itself mid-screen
+    /// after this many rounds (each needs the user's PIN, so this is a
+    /// backstop, not a limit anyone meets).
+    const MAX_RELOCKS: u32 = 20;
+    /// Link failures in a row (device still on the bus) before the user
+    /// is asked to replug it.
+    const LINK_RETRIES: u32 = 2;
+    /// Replug requests per conversation before it fails for good.
+    const MAX_REPLUGS: u32 = 2;
+    /// How long a job waits for a Trezor to be plugged in / replugged.
+    /// (Zero under plain `cargo test`: the suite has no device, and a job
+    /// a test leaves behind must not sit on the shared beacon. The
+    /// emulator-driven device tests wait for real.)
+    fn device_wait() -> std::time::Duration {
+        let unit_test = cfg!(test) && std::env::var_os("WATCHIT_TREZOR_EMU_HOME").is_none();
+        std::time::Duration::from_secs(if unit_test { 0 } else { 10 * 60 })
+    }
+    const DEVICE_POLL: std::time::Duration = std::time::Duration::from_secs(1);
+
+    /// What [`await_device`] waits for.
+    #[derive(Clone, PartialEq, Eq, Debug)]
+    enum Until {
+        /// Any Trezor on the bus.
+        Present,
+        /// A bus that looks different from this snapshot: the device was
+        /// unplugged and plugged back in (USB hands it a new address).
+        Replugged(Vec<String>),
+    }
+
+    /// The Trezors on USB right now — enumeration only, nothing is sent
+    /// to the device (a locked device's PIN pad is closed by any message
+    /// that arrives, so a wait must never poll it with messages).
+    fn bus() -> Vec<String> {
+        trezor_client::find_devices(false)
+            .iter()
+            .map(|d| d.to_string())
+            .collect()
+    }
+
+    /// Wait for a usable device with the app showing `connect-device`
+    /// ("plug it in / replug it"), until it shows up, the user presses
+    /// Stop waiting, or `limit` lapses.
+    fn await_device(
+        until: Until,
+        look: &dyn Fn() -> Vec<String>,
+        limit: std::time::Duration,
+        tick: std::time::Duration,
+    ) -> Result<(), String> {
+        let arrived = |now: &[String]| match &until {
+            Until::Present => !now.is_empty(),
+            Until::Replugged(before) => !now.is_empty() && now != before.as_slice(),
+        };
+        if arrived(&look()) {
+            return Ok(());
+        }
+        if limit.is_zero() {
+            return Err(DevError::Missing.message());
+        }
+        let _attention = super::attention::begin("connect-device");
+        super::waiting::begin();
+        let started = std::time::Instant::now();
+        loop {
+            if super::waiting::stopped() {
+                return Err("stopped waiting for the Trezor — nothing was changed".into());
+            }
+            if started.elapsed() >= limit {
+                return Err(DevError::Missing.message());
+            }
+            std::thread::sleep(tick);
+            if arrived(&look()) {
+                // A device that only just appeared is still starting up.
+                std::thread::sleep(tick);
+                return Ok(());
+            }
+        }
+    }
+
+    /// Run one device conversation to its end, riding out — for a
+    /// [`Wait::Patient`] job — the interruptions that are nobody's
+    /// decision:
+    ///
+    ///   * the device LOCKED ITSELF while a screen was waiting (its
+    ///     auto-lock answers the open request "cancelled"): ask again —
+    ///     the device shows its PIN pad, then the same screens;
+    ///   * NO DEVICE: wait for one to be plugged in;
+    ///   * the LINK FAILED: try again on a fresh handle, and when it
+    ///     keeps failing ask for a replug and wait for it.
+    ///
+    /// A cancel with the device still unlocked is the user's own, and
+    /// final — as is anything else. `open` yields a fresh handle on the
+    /// job's session, `locked` says whether the device is locked right
+    /// now, `settle` is [`await_device`].
+    fn supervise<T>(
+        wait: Wait,
+        mut open: impl FnMut() -> Result<trezor_client::Trezor, DevError>,
+        op: impl Fn(&mut trezor_client::Trezor) -> Result<T, DevError>,
+        mut locked: impl FnMut() -> bool,
+        look: &dyn Fn() -> Vec<String>,
+        mut settle: impl FnMut(Until) -> Result<(), String>,
+        pause: std::time::Duration,
+    ) -> Result<T, String> {
+        let (mut relocks, mut link_failures, mut replugs) = (0u32, 0u32, 0u32);
+        loop {
+            let err = match open().and_then(|mut client| op(&mut client)) {
+                Ok(value) => return Ok(value),
+                Err(e) => e,
+            };
+            if wait == Wait::Brief {
+                return Err(err.message());
+            }
+            match err {
+                DevError::Cancelled if relocks < MAX_RELOCKS && locked() => {
+                    relocks += 1;
+                    tracing::info!(
+                        "the Trezor locked itself while a confirmation was \
+                         waiting — asking again (round {relocks})"
+                    );
+                }
+                DevError::Missing => {
+                    tracing::info!("no Trezor on USB — waiting for it");
+                    settle(Until::Present)?;
+                }
+                DevError::Link(detail) => {
+                    link_failures += 1;
+                    tracing::warn!("Trezor link failed ({detail}), failure {link_failures}");
+                    if link_failures <= LINK_RETRIES {
+                        // Often a one-off (a conversation abandoned
+                        // earlier, a device mid-wake): a fresh handle
+                        // usually just works.
+                        std::thread::sleep(pause);
+                        settle(Until::Present)?;
+                    } else if replugs < MAX_REPLUGS {
+                        replugs += 1;
+                        link_failures = 0;
+                        settle(Until::Replugged(look()))?;
+                    } else {
+                        return Err(DevError::Link(detail).message());
+                    }
+                }
+                other => return Err(other.message()),
+            }
+        }
+    }
+
     /// ONE device conversation at a time, process-wide: two concurrent
     /// USB conversations with the same Trezor interleave messages and
     /// can abort each other's in-progress workflow (the wallet screen's
@@ -624,7 +925,11 @@ mod device {
     ///      failure class cannot recur (the recovery-verify in
     ///      [`VerifiedTrezor`] stays as the backstop regardless).
     pub struct OwnTrezorSigner {
-        session_id: Vec<u8>,
+        /// The device session every conversation resumes. Replaced when
+        /// the device no longer knows it (a replug wipes its sessions):
+        /// the new one is adopted so the passphrase is asked once more,
+        /// not once per message.
+        session_id: std::sync::Mutex<Vec<u8>>,
         path: Vec<u32>,
         address: Address,
         /// Host-side passphrase entry snapshotted at connect; the
@@ -641,22 +946,29 @@ mod device {
         resp: TrezorResponse<'_, T, R>,
         host: bool,
         always_on_device: bool,
-    ) -> Result<T, String> {
+    ) -> Result<T, DevError> {
         match resp {
             TrezorResponse::Ok(value) => Ok(value),
-            TrezorResponse::Failure(f) => Err(friendly(format!(
-                "the Trezor reported: {}",
-                f.message()
-            ))),
+            TrezorResponse::Failure(f) => Err(failure(&f)),
             TrezorResponse::ButtonRequest(req) => {
-                drive(req.ack().map_err(friendly)?, host, always_on_device)
+                let next = {
+                    // A locked device answers any request by putting up
+                    // its PIN pad first; the app says so while it waits
+                    // (the step around this one takes the card back
+                    // when the PIN is in).
+                    let _unlock = (req.request_type()
+                        == trezor_client::ButtonRequestType::ButtonRequest_PinEntry)
+                        .then(|| super::attention::begin("unlock-device"));
+                    req.ack().map_err(classify)?
+                };
+                drive(next, host, always_on_device)
             }
-            TrezorResponse::PinMatrixRequest(_) => Err(
+            TrezorResponse::PinMatrixRequest(_) => Err(DevError::Fatal(
                 "the Trezor is asking for its PIN to be typed on this computer, \
                  which W@tch does not support — unlock the device itself, then \
                  try again"
                     .into(),
-            ),
+            )),
             TrezorResponse::PassphraseRequest(req) => {
                 // Host entry only when the user turned it on AND the
                 // firmware allows it; otherwise exactly the old
@@ -664,35 +976,32 @@ mod device {
                 if host && !always_on_device {
                     match super::passphrase::request() {
                         super::passphrase::Reply::Host(p) => drive(
-                            req.ack_passphrase((*p).clone()).map_err(friendly)?,
+                            req.ack_passphrase((*p).clone()).map_err(classify)?,
                             host,
                             always_on_device,
                         ),
                         super::passphrase::Reply::OnDevice => {
                             let on_device = req.on_device();
-                            drive(req.ack(!on_device).map_err(friendly)?, host, always_on_device)
+                            drive(req.ack(!on_device).map_err(classify)?, host, always_on_device)
                         }
-                        super::passphrase::Reply::Cancelled => Err(
-                            "passphrase entry was cancelled — nothing was changed"
-                                .into(),
-                        ),
+                        super::passphrase::Reply::Cancelled => {
+                            // Nobody answered. Tell the device too, or it
+                            // sits on "enter your passphrase" until the
+                            // next conversation knocks it out of it.
+                            let _ = req.client.call_raw(protos::Cancel::new());
+                            Err(DevError::Fatal(
+                                "no passphrase was entered for the Trezor in \
+                                 time — nothing was changed"
+                                    .into(),
+                            ))
+                        }
                     }
                 } else {
                     let on_device = req.on_device();
-                    drive(req.ack(!on_device).map_err(friendly)?, host, always_on_device)
+                    drive(req.ack(!on_device).map_err(classify)?, host, always_on_device)
                 }
             }
         }
-    }
-
-    /// Open a fresh USB handle resumed onto this signer's session (so a
-    /// passphrase already entered this session is not re-prompted).
-    fn open_session(session_id: &[u8]) -> Result<trezor_client::Trezor, String> {
-        let mut client = trezor_client::unique(false).map_err(friendly)?;
-        client
-            .init_device(Some(session_id.to_vec()))
-            .map_err(friendly)?;
-        Ok(client)
     }
 
     /// EIP-55 address string → `Address`.
@@ -706,7 +1015,7 @@ mod device {
         path: &[u32],
         host: bool,
         always: bool,
-    ) -> Result<String, String> {
+    ) -> Result<String, DevError> {
         let mut req = protos::EthereumGetAddress::new();
         req.address_n = path.to_vec();
         let resp = client
@@ -714,7 +1023,7 @@ mod device {
                 req,
                 Box::new(|_, m: protos::EthereumAddress| Ok(m.address().to_string())),
             )
-            .map_err(friendly)?;
+            .map_err(classify)?;
         drive(resp, host, always)
     }
 
@@ -724,7 +1033,7 @@ mod device {
         message: &[u8],
         host: bool,
         always: bool,
-    ) -> Result<Signature, String> {
+    ) -> Result<Signature, DevError> {
         let mut req = protos::EthereumSignMessage::new();
         req.address_n = path.to_vec();
         req.set_message(message.to_vec());
@@ -743,7 +1052,7 @@ mod device {
                     })
                 }),
             )
-            .map_err(friendly)?;
+            .map_err(classify)?;
         let ts = drive(resp, host, always)?;
         to_alloy_sig(ts)
     }
@@ -757,11 +1066,16 @@ mod device {
         v: u64,
     }
 
-    fn to_alloy_sig(ts: TrezorSig) -> Result<Signature, String> {
+    fn to_alloy_sig(ts: TrezorSig) -> Result<Signature, DevError> {
         let r = U256::from_be_bytes(ts.r);
         let s = U256::from_be_bytes(ts.s);
         let parity = normalize_v(ts.v)
-            .ok_or_else(|| format!("the Trezor returned an invalid signature parity ({})", ts.v))?;
+            .ok_or_else(|| {
+                DevError::Fatal(format!(
+                    "the Trezor returned an invalid signature parity ({})",
+                    ts.v
+                ))
+            })?;
         Ok(Signature::new(r, s, parity))
     }
 
@@ -790,7 +1104,7 @@ mod device {
     fn convert_tx_signature(
         resp: &protos::EthereumTxRequest,
         chain_id: Option<u64>,
-    ) -> Result<TrezorSig, String> {
+    ) -> Result<TrezorSig, DevError> {
         let mut v = resp.signature_v() as u64;
         if let Some(chain_id) = chain_id {
             if v <= 1 {
@@ -800,11 +1114,11 @@ mod device {
         let r: [u8; 32] = resp
             .signature_r()
             .try_into()
-            .map_err(|_| "the Trezor returned a malformed signature".to_string())?;
+            .map_err(|_| DevError::Fatal("the Trezor returned a malformed signature".into()))?;
         let s: [u8; 32] = resp
             .signature_s()
             .try_into()
-            .map_err(|_| "the Trezor returned a malformed signature".to_string())?;
+            .map_err(|_| DevError::Fatal("the Trezor returned a malformed signature".into()))?;
         Ok(TrezorSig { r, s, v })
     }
 
@@ -830,21 +1144,21 @@ mod device {
         mut data: Vec<u8>,
         host: bool,
         always: bool,
-    ) -> Result<protos::EthereumTxRequest, String> {
+    ) -> Result<protos::EthereumTxRequest, DevError> {
         while resp.data_length() > 0 {
             if data.is_empty() {
-                return Err(
+                return Err(DevError::Fatal(
                     "the Trezor asked for more transaction data than the \
                      payment contains — nothing was signed"
                         .into(),
-                );
+                ));
             }
             let take = std::cmp::min(resp.data_length() as usize, data.len());
             let mut ack = protos::EthereumTxAck::new();
             ack.set_data_chunk(data.drain(..take).collect());
             let next = client
                 .call(ack, Box::new(|_, m: protos::EthereumTxRequest| Ok(m)))
-                .map_err(friendly)?;
+                .map_err(classify)?;
             resp = drive(next, host, always)?;
         }
         Ok(resp)
@@ -856,7 +1170,7 @@ mod device {
         tx: &TxEip1559,
         host: bool,
         always: bool,
-    ) -> Result<Signature, String> {
+    ) -> Result<Signature, DevError> {
         let mut data = tx.input.to_vec();
         let mut req = protos::EthereumSignTxEIP1559::new();
         req.address_n = path.to_vec();
@@ -885,7 +1199,7 @@ mod device {
         );
         let resp = client
             .call(req, Box::new(|_, m: protos::EthereumTxRequest| Ok(m)))
-            .map_err(friendly)?;
+            .map_err(classify)?;
         let resp = drive(resp, host, always)?;
         let resp = stream_tx_data(client, resp, data, host, always)?;
         to_alloy_sig(convert_tx_signature(&resp, Some(tx.chain_id))?)
@@ -897,7 +1211,7 @@ mod device {
         tx: &TxLegacy,
         host: bool,
         always: bool,
-    ) -> Result<Signature, String> {
+    ) -> Result<Signature, DevError> {
         let mut data = tx.input.to_vec();
         let mut req = protos::EthereumSignTx::new();
         req.address_n = path.to_vec();
@@ -915,7 +1229,7 @@ mod device {
         );
         let resp = client
             .call(req, Box::new(|_, m: protos::EthereumTxRequest| Ok(m)))
-            .map_err(friendly)?;
+            .map_err(classify)?;
         let resp = drive(resp, host, always)?;
         let resp = stream_tx_data(client, resp, data, host, always)?;
         to_alloy_sig(convert_tx_signature(&resp, tx.chain_id)?)
@@ -930,7 +1244,7 @@ mod device {
         path: &[u32],
         host: bool,
         always: bool,
-    ) -> Result<String, String> {
+    ) -> Result<String, DevError> {
         let mut req = protos::EthereumGetAddress::new();
         req.address_n = path.to_vec();
         req.set_show_display(true);
@@ -939,29 +1253,40 @@ mod device {
                 req,
                 Box::new(|_, m: protos::EthereumAddress| Ok(m.address().to_string())),
             )
-            .map_err(friendly)?;
+            .map_err(classify)?;
         drive(resp, host, always)
     }
 
     impl OwnTrezorSigner {
-        /// Open a brand-new device session (reads the session id and
-        /// resolves the address — the first operation, where a
-        /// passphrase-protected device asks for its passphrase once). The
+        /// Open a brand-new device session and resolve the address — the
+        /// first operation, where a locked device asks for its PIN and a
+        /// passphrase-protected one for its passphrase, once. The
         /// host-passphrase preference is snapshotted here for the whole
         /// signer.
-        fn connect() -> Result<Self, String> {
-            let host = super::host_passphrase::enabled();
-            let path = super::derivation_path_vec();
-            let mut client = trezor_client::unique(false).map_err(friendly)?;
-            client.init_device(None).map_err(friendly)?;
-            let features = client
-                .features()
-                .ok_or_else(|| "could not read the Trezor's features".to_string())?;
-            if !firmware_ok(
-                features.major_version() as u64,
-                features.minor_version() as u64,
-                features.patch_version() as u64,
-            ) {
+        fn connect(wait: Wait) -> Result<Self, String> {
+            let mut signer = Self {
+                session_id: std::sync::Mutex::new(Vec::new()),
+                path: super::derivation_path_vec(),
+                address: Address::ZERO,
+                host_passphrase: super::host_passphrase::enabled(),
+                always_on_device: false,
+            };
+            // Opening the first handle starts the session (adopted in
+            // `open`); its features say what the device can do.
+            let (firmware_fine, always_on_device) = signer.converse(wait, |client| {
+                let features = client.features().ok_or_else(|| {
+                    DevError::Fatal("could not read the Trezor's features".into())
+                })?;
+                Ok((
+                    firmware_ok(
+                        features.major_version() as u64,
+                        features.minor_version() as u64,
+                        features.patch_version() as u64,
+                    ),
+                    features.passphrase_always_on_device(),
+                ))
+            })?;
+            if !firmware_fine {
                 return Err(
                     "this Trezor's firmware is too old to sign the network's \
                      payment transactions — update it in Trezor Suite, then \
@@ -969,85 +1294,143 @@ mod device {
                         .into(),
                 );
             }
-            let session_id = features.session_id().to_vec();
-            let always_on_device = features.passphrase_always_on_device();
-            let address_str = eth_get_address(&mut client, &path, host, always_on_device)?;
-            let address = parse_address(&address_str)?;
-            Ok(Self {
-                session_id,
-                path,
-                address,
-                host_passphrase: host,
-                always_on_device,
-            })
+            signer.always_on_device = always_on_device;
+            let address = signer.get_address(wait)?;
+            signer.address = parse_address(&address)?;
+            Ok(signer)
         }
 
         fn address(&self) -> Address {
             self.address
         }
 
+        /// A fresh USB handle on this signer's device session, so a
+        /// passphrase already entered this session is not asked again.
+        /// A device that no longer knows the session (it was replugged or
+        /// restarted) hands back a new one, adopted here.
+        fn open(&self) -> Result<trezor_client::Trezor, DevError> {
+            let mut client = trezor_client::unique(false).map_err(classify)?;
+            let wanted = self
+                .session_id
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
+            client
+                .init_device((!wanted.is_empty()).then(|| wanted.clone()))
+                .map_err(classify)?;
+            let got = client
+                .features()
+                .map(|f| f.session_id().to_vec())
+                .unwrap_or_default();
+            if !got.is_empty() && got != wanted {
+                if !wanted.is_empty() {
+                    tracing::info!(
+                        "the Trezor no longer knows this job's session (replugged \
+                         or restarted) — carrying on in a new one"
+                    );
+                }
+                *self.session_id.lock().unwrap_or_else(|p| p.into_inner()) = got;
+            }
+            Ok(client)
+        }
+
+        /// Is the device locked right now? (Its features answer without
+        /// unlocking; a device with no PIN cannot lock.)
+        fn locked_now(&self) -> bool {
+            self.open()
+                .ok()
+                .and_then(|client| {
+                    client
+                        .features()
+                        .map(|f| f.pin_protection() && f.has_unlocked() && !f.unlocked())
+                })
+                .unwrap_or(false)
+        }
+
+        /// One conversation on this signer's session, under [`supervise`].
+        fn converse<T>(
+            &self,
+            wait: Wait,
+            op: impl Fn(&mut trezor_client::Trezor) -> Result<T, DevError>,
+        ) -> Result<T, String> {
+            supervise(
+                wait,
+                || self.open(),
+                op,
+                || self.locked_now(),
+                &bus,
+                |until| await_device(until, &bus, device_wait(), DEVICE_POLL),
+                DEVICE_POLL,
+            )
+        }
+
         /// A real USB round trip for the current address — never a cached
         /// value, so a session that silently degraded (stale id after a
         /// replug → the device minted a fresh session, maybe on a
         /// different hidden wallet) is caught before any tap is wasted.
-        fn get_address(&self) -> Result<String, String> {
-            let mut client = open_session(&self.session_id)?;
-            eth_get_address(&mut client, &self.path, self.host_passphrase, self.always_on_device)
+        fn get_address(&self, wait: Wait) -> Result<String, String> {
+            self.converse(wait, |client| {
+                eth_get_address(client, &self.path, self.host_passphrase, self.always_on_device)
+            })
         }
 
-        fn sign_message(&self, message: &[u8]) -> Result<Signature, String> {
-            let mut client = open_session(&self.session_id)?;
-            eth_sign_message(
-                &mut client,
-                &self.path,
-                message,
-                self.host_passphrase,
-                self.always_on_device,
-            )
+        fn sign_message(&self, wait: Wait, message: &[u8]) -> Result<Signature, String> {
+            self.converse(wait, |client| {
+                eth_sign_message(
+                    client,
+                    &self.path,
+                    message,
+                    self.host_passphrase,
+                    self.always_on_device,
+                )
+            })
         }
 
-        fn sign_eip1559(&self, tx: &TxEip1559) -> Result<Signature, String> {
-            let mut client = open_session(&self.session_id)?;
-            eth_sign_eip1559(
-                &mut client,
-                &self.path,
-                tx,
-                self.host_passphrase,
-                self.always_on_device,
-            )
+        fn sign_eip1559(&self, wait: Wait, tx: &TxEip1559) -> Result<Signature, String> {
+            self.converse(wait, |client| {
+                eth_sign_eip1559(
+                    client,
+                    &self.path,
+                    tx,
+                    self.host_passphrase,
+                    self.always_on_device,
+                )
+            })
         }
 
-        fn sign_legacy(&self, tx: &TxLegacy) -> Result<Signature, String> {
-            let mut client = open_session(&self.session_id)?;
-            eth_sign_legacy(
-                &mut client,
-                &self.path,
-                tx,
-                self.host_passphrase,
-                self.always_on_device,
-            )
+        fn sign_legacy(&self, wait: Wait, tx: &TxLegacy) -> Result<Signature, String> {
+            self.converse(wait, |client| {
+                eth_sign_legacy(
+                    client,
+                    &self.path,
+                    tx,
+                    self.host_passphrase,
+                    self.always_on_device,
+                )
+            })
         }
 
-        fn show_address_on_device(&self) -> Result<String, String> {
-            let mut client = open_session(&self.session_id)?;
-            eth_show_address(&mut client, &self.path, self.host_passphrase, self.always_on_device)
+        fn show_address_on_device(&self, wait: Wait) -> Result<String, String> {
+            self.converse(wait, |client| {
+                eth_show_address(client, &self.path, self.host_passphrase, self.always_on_device)
+            })
         }
     }
 
     /// Open the job's one device session, BEFORE any ant-core work: the
-    /// address read inside [`OwnTrezorSigner::connect`] is where a
-    /// passphrase-protected device asks for its passphrase — once (on the
-    /// device, or in the app when host entry is on), covering the
-    /// identity derive and every payment signature of the whole job.
-    /// Refuses a device whose address is not the configured one (and
-    /// fails with the friendly "plug it in" message before any
-    /// encrypt/quote work when no device answers).
+    /// address read inside [`OwnTrezorSigner::connect`] is where a locked
+    /// device asks for its PIN and a passphrase-protected one for its
+    /// passphrase — once (on the device, or in the app when host entry is
+    /// on), covering the identity derive and every payment signature of
+    /// the whole job. A device that is not plugged in is waited for, with
+    /// the app saying so. Refuses a device whose address is not the
+    /// configured one — before any encrypt/quote work.
     pub async fn begin_job_session(
         expected_address: &str,
     ) -> Result<TrezorJobSession, String> {
         let expected = expected_address.to_lowercase();
         let _attention = super::attention::begin("unlock-wallet");
-        let signer = with_fresh_signer(move |s| async move {
+        let signer = with_fresh_signer(Wait::Patient, move |s| async move {
             let found = signer_address(&s);
             if found.to_lowercase() != expected {
                 return Err(format!(
@@ -1066,13 +1449,14 @@ mod device {
     /// Run one device conversation on a blocking thread, holding the
     /// already-acquired conversation lock for its whole duration. The
     /// closure gets the open job-session signer when `reuse_job_session`
-    /// allows and one is open, else a freshly connected signer;
-    /// everything it does is synchronous USB underneath, plus however
-    /// long the user takes at the device's own confirm screen (or the
-    /// app's passphrase field).
+    /// allows and one is open, else a freshly connected signer (opened
+    /// with the given patience); everything it does is synchronous USB
+    /// underneath, plus however long the user takes at the device's own
+    /// confirm screen (or the app's passphrase field).
     async fn with_signer_locked<T, F, Fut>(
         guard: tokio::sync::MutexGuard<'static, ()>,
         reuse_job_session: bool,
+        wait: Wait,
         f: F,
     ) -> Result<T, String>
     where
@@ -1090,7 +1474,7 @@ mod device {
             let _guard = guard;
             let signer = match session {
                 Some(s) => s,
-                None => std::sync::Arc::new(OwnTrezorSigner::connect()?),
+                None => std::sync::Arc::new(OwnTrezorSigner::connect(wait)?),
             };
             handle.block_on(f(signer))
         })
@@ -1100,33 +1484,25 @@ mod device {
 
     /// [with_signer_locked] behind a plain wait on the conversation lock,
     /// reusing the job session when one is open.
-    async fn with_signer<T, F, Fut>(f: F) -> Result<T, String>
+    async fn with_signer<T, F, Fut>(wait: Wait, f: F) -> Result<T, String>
     where
         T: Send + 'static,
         F: FnOnce(std::sync::Arc<OwnTrezorSigner>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<T, String>>,
     {
-        with_signer_locked(DEVICE_LOCK.lock().await, true, f).await
+        with_signer_locked(DEVICE_LOCK.lock().await, true, wait, f).await
     }
 
     /// [with_signer] forced onto a brand-new device session — the setup
     /// ceremony (a fresh binding by intent), the job-session open itself,
     /// and a signing retry that assumes the session went bad.
-    async fn with_fresh_signer<T, F, Fut>(f: F) -> Result<T, String>
+    async fn with_fresh_signer<T, F, Fut>(wait: Wait, f: F) -> Result<T, String>
     where
         T: Send + 'static,
         F: FnOnce(std::sync::Arc<OwnTrezorSigner>) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<T, String>>,
     {
-        with_signer_locked(DEVICE_LOCK.lock().await, false, f).await
-    }
-
-    /// The device's CURRENT address at the signer's path — a real USB
-    /// round trip, never the construction-time cache.
-    /// The device's CURRENT address at the signer's path — a real USB
-    /// round trip, never the construction-time cache.
-    async fn live_address(s: &OwnTrezorSigner) -> Result<String, String> {
-        s.get_address()
+        with_signer_locked(DEVICE_LOCK.lock().await, false, wait, f).await
     }
 
     fn signer_address(s: &OwnTrezorSigner) -> String {
@@ -1135,10 +1511,8 @@ mod device {
 
     /// The full signature (for recovery checks) plus the r‖s bytes the
     /// backup identity derives from.
-    fn sign_identity(s: &OwnTrezorSigner) -> Result<(Signature, [u8; 64]), String> {
-        let sig = s
-            .sign_message(crate::backup::IDENTITY_MESSAGE_V1.as_bytes())
-            .map_err(|e| friendly(format!("identity signing failed: {e}")))?;
+    fn sign_identity(s: &OwnTrezorSigner, wait: Wait) -> Result<(Signature, [u8; 64]), String> {
+        let sig = s.sign_message(wait, crate::backup::IDENTITY_MESSAGE_V1.as_bytes())?;
         let mut rs = [0u8; 64];
         rs[..32].copy_from_slice(&sig.r().to_be_bytes::<32>());
         rs[32..].copy_from_slice(&sig.s().to_be_bytes::<32>());
@@ -1153,7 +1527,10 @@ mod device {
         let Ok(guard) = DEVICE_LOCK.try_lock() else {
             return Err("the Trezor is busy with another W@tch request right now".into());
         };
-        with_signer_locked(guard, true, |s| async move { live_address(&s).await }).await
+        with_signer_locked(guard, true, Wait::Brief, |s| async move {
+            s.get_address(Wait::Brief)
+        })
+        .await
     }
 
     /// The one-time setup ceremony: resolve the address, sign the frozen
@@ -1163,12 +1540,14 @@ mod device {
     /// device; nothing is spent. Cancelling the address screen aborts the
     /// whole setup — nothing has been persisted yet.
     pub async fn setup_ceremony() -> Result<TrezorIdentity, String> {
-        with_fresh_signer(|s| async move {
+        // Brief: the setup dialog shows a missing device itself and
+        // offers the retry.
+        with_fresh_signer(Wait::Brief, |s| async move {
             let address = signer_address(&s);
             let (first_sig, first) = {
                 let _attention = super::attention::begin("sign-identity");
-                let a = sign_identity(&s)?;
-                let b = sign_identity(&s)?;
+                let a = sign_identity(&s, Wait::Brief)?;
+                let b = sign_identity(&s, Wait::Brief)?;
                 // The determinism guard: a signer that does not repeat the
                 // identity signature would mint a backup identity a fresh
                 // install could never re-derive — refuse before deriving.
@@ -1187,7 +1566,7 @@ mod device {
             let keys = derive_keys_from_signature(&first);
             let shown = {
                 let _attention = super::attention::begin("confirm-address");
-                s.show_address_on_device()?
+                s.show_address_on_device(Wait::Brief)?
             };
             if shown.to_lowercase() != address.to_lowercase() {
                 return Err(format!(
@@ -1205,8 +1584,8 @@ mod device {
     /// from the configured one.
     pub async fn derive_write_keys(expected_address: &str) -> Result<BackupKeys, String> {
         let expected = expected_address.to_lowercase();
-        with_signer(move |s| async move {
-            let found = live_address(&s).await?;
+        with_signer(Wait::Patient, move |s| async move {
+            let found = s.get_address(Wait::Patient)?;
             if found.to_lowercase() != expected {
                 return Err(format!(
                     "this Trezor holds a different wallet ({found}) than the \
@@ -1216,7 +1595,7 @@ mod device {
             }
             let (sig, rs) = {
                 let _attention = super::attention::begin("sign-identity");
-                sign_identity(&s)?
+                sign_identity(&s, Wait::Patient)?
             };
             if let Err(got) = identity_recovers_to(&sig, &found) {
                 return Err(format!(
@@ -1241,24 +1620,18 @@ mod device {
         cache: super::sigcache::SigCache,
     }
 
+    /// Build the payment signer for the configured address. NO device
+    /// conversation happens here: the network client attaches this at
+    /// every (re)connect, and a device poked then would put up its PIN
+    /// pad or passphrase prompt out of nowhere and hold the connect up
+    /// until someone answered. The device is checked where it is needed —
+    /// the job-session open, and the live address re-check before every
+    /// signature.
     pub async fn verified_payment_signer(
         expected_address: &str,
     ) -> Result<VerifiedTrezor, String> {
-        let expected = expected_address.to_lowercase();
-        let address = with_signer(move |s| async move {
-            let found = live_address(&s).await?;
-            let parsed = parse_address(&found)?;
-            if found.to_lowercase() != expected {
-                return Err(format!(
-                    "this Trezor holds a different wallet ({found}) than the \
-                     one configured"
-                ));
-            }
-            Ok(parsed)
-        })
-        .await?;
         Ok(VerifiedTrezor {
-            address,
+            address: parse_address(expected_address)?,
             cache: super::sigcache::SigCache::new(),
         })
     }
@@ -1278,8 +1651,12 @@ mod device {
         force_fresh: bool,
     ) -> Result<Signature, String> {
         let expected_lower = expected.to_string().to_lowercase();
-        with_signer_locked(DEVICE_LOCK.lock().await, !force_fresh, move |s| async move {
-            let found = live_address(&s).await?;
+        with_signer_locked(
+            DEVICE_LOCK.lock().await,
+            !force_fresh,
+            Wait::Patient,
+            move |s| async move {
+            let found = s.get_address(Wait::Patient)?;
             if found.to_lowercase() != expected_lower {
                 return Err(format!(
                     "this Trezor holds a different wallet ({found}) than \
@@ -1289,10 +1666,11 @@ mod device {
                 ));
             }
             match tx {
-                OwnedTx::Eip1559(t) => s.sign_eip1559(&t),
-                OwnedTx::Legacy(l) => s.sign_legacy(&l),
+                OwnedTx::Eip1559(t) => s.sign_eip1559(Wait::Patient, &t),
+                OwnedTx::Legacy(l) => s.sign_legacy(Wait::Patient, &l),
             }
-        })
+            },
+        )
         .await
     }
 
@@ -1350,7 +1728,7 @@ mod device {
         }
         let now_reports = tokio::time::timeout(
             std::time::Duration::from_secs(10),
-            with_signer(|s| async move { live_address(&s).await }),
+            with_signer(Wait::Brief, |s| async move { s.get_address(Wait::Brief) }),
         )
         .await
         .ok()
@@ -1529,7 +1907,8 @@ mod device {
                 trezor_client::Model::Trezor,
                 Box::new(FakeDevice(script.clone())),
             );
-            let out = eth_sign_eip1559(&mut client, &[0x8000_002c], tx, false, false);
+            let out = eth_sign_eip1559(&mut client, &[0x8000_002c], tx, false, false)
+                .map_err(DevError::message);
             let written = std::mem::take(&mut script.lock().unwrap().written);
             (out, written)
         }
@@ -1558,6 +1937,336 @@ mod device {
 
         fn kinds(written: &[(Mt, Vec<u8>)]) -> Vec<Mt> {
             written.iter().map(|(k, _)| *k).collect()
+        }
+
+        // ── the conversation supervisor ───────────────────────────────
+
+        /// `Failure { code, message }` on the wire.
+        fn failed(code: u8, message: &str) -> (Mt, Vec<u8>) {
+            let mut bytes = vec![0x08, code, 0x12, message.len() as u8];
+            bytes.extend(message.as_bytes());
+            (Mt::MessageType_Failure, bytes)
+        }
+
+        /// The device closing whatever is open — what its auto-lock (and
+        /// the user's Cancel) both look like.
+        fn cancelled() -> (Mt, Vec<u8>) {
+            failed(4, "Cancelled")
+        }
+
+        fn device(replies: Vec<(Mt, Vec<u8>)>) -> trezor_client::Trezor {
+            trezor_client::client::trezor_with_transport(
+                trezor_client::Model::Trezor,
+                Box::new(FakeDevice(Arc::new(Mutex::new(Script {
+                    replies: replies.into(),
+                    written: Vec::new(),
+                })))),
+            )
+        }
+
+        /// Run [`supervise`] over a queue of `open` outcomes (one per
+        /// handle the supervisor asks for), signing a small payment.
+        /// Returns the result, how many handles were opened, and every
+        /// wait the supervisor asked for.
+        fn supervised(
+            wait: Wait,
+            opens: Vec<Result<Vec<(Mt, Vec<u8>)>, DevError>>,
+            locked: bool,
+            settle_result: Result<(), String>,
+        ) -> (Result<Signature, String>, usize, Vec<Until>) {
+            let tx = payment_tx(100);
+            let queue = std::cell::RefCell::new(VecDeque::from(opens));
+            let opened = std::cell::Cell::new(0usize);
+            let waits = std::cell::RefCell::new(Vec::new());
+            let out = supervise(
+                wait,
+                || {
+                    opened.set(opened.get() + 1);
+                    queue
+                        .borrow_mut()
+                        .pop_front()
+                        .expect("the supervisor opened more handles than scripted")
+                        .map(device)
+                },
+                |client| eth_sign_eip1559(client, &[0x8000_002c], &tx, false, false),
+                || locked,
+                &|| vec!["bus-a".to_string()],
+                |until| {
+                    waits.borrow_mut().push(until);
+                    settle_result.clone()
+                },
+                std::time::Duration::ZERO,
+            );
+            (out, opened.get(), waits.into_inner())
+        }
+
+        /// THE LIVE CASE: a confirmation left waiting until the device
+        /// auto-locked. The device answers the open request "cancelled";
+        /// it is locked, so nobody decided that — ask again (the device
+        /// shows its PIN pad, then the same screens) instead of failing
+        /// the whole upload.
+        #[test]
+        fn a_device_that_locked_itself_mid_confirmation_is_asked_again() {
+            let (out, opened, waits) = supervised(
+                Wait::Patient,
+                vec![Ok(vec![button(), cancelled()]), Ok(vec![button(), signed()])],
+                true,
+                Ok(()),
+            );
+            assert!(out.is_ok(), "{out:?}");
+            assert_eq!(opened, 2, "one handle per attempt");
+            assert!(waits.is_empty(), "the device never left the bus");
+        }
+
+        /// The same answer from a device that is still UNLOCKED is the
+        /// user's own Cancel — final, never re-asked.
+        #[test]
+        fn a_cancel_on_an_unlocked_device_is_final() {
+            let (out, opened, _) = supervised(
+                Wait::Patient,
+                vec![Ok(vec![button(), cancelled()])],
+                false,
+                Ok(()),
+            );
+            assert_eq!(
+                out.unwrap_err(),
+                "cancelled on the Trezor — nothing was changed"
+            );
+            assert_eq!(opened, 1);
+        }
+
+        /// Cancelling at the device's PIN pad is a decision too.
+        #[test]
+        fn a_cancelled_pin_entry_is_final() {
+            let (out, opened, _) = supervised(
+                Wait::Patient,
+                vec![Ok(vec![failed(6, "PIN cancelled")])],
+                true,
+                Ok(()),
+            );
+            assert!(out.unwrap_err().contains("PIN entry was cancelled"));
+            assert_eq!(opened, 1);
+        }
+
+        /// No device: a job waits for one, then carries on.
+        #[test]
+        fn a_missing_device_is_waited_for() {
+            let (out, opened, waits) = supervised(
+                Wait::Patient,
+                vec![Err(DevError::Missing), Ok(vec![button(), signed()])],
+                false,
+                Ok(()),
+            );
+            assert!(out.is_ok(), "{out:?}");
+            assert_eq!(opened, 2);
+            assert_eq!(waits, vec![Until::Present]);
+        }
+
+        /// …unless the user pressed Stop waiting (or the wait ran out):
+        /// whatever the wait reports is the job's error.
+        #[test]
+        fn a_stopped_wait_ends_the_conversation() {
+            let (out, opened, _) = supervised(
+                Wait::Patient,
+                vec![Err(DevError::Missing)],
+                false,
+                Err("stopped waiting for the Trezor — nothing was changed".into()),
+            );
+            assert!(out.unwrap_err().contains("stopped waiting"));
+            assert_eq!(opened, 1);
+        }
+
+        /// The probe and the setup dialog never wait: they report and let
+        /// the user retry.
+        #[test]
+        fn a_brief_conversation_fails_at_once() {
+            let (out, opened, waits) =
+                supervised(Wait::Brief, vec![Err(DevError::Missing)], false, Ok(()));
+            assert_eq!(
+                out.unwrap_err(),
+                "no Trezor found — plug it in, unlock it, and try again"
+            );
+            assert_eq!(opened, 1);
+            assert!(waits.is_empty());
+            let (out, opened, _) = supervised(
+                Wait::Brief,
+                vec![Ok(vec![button(), cancelled()])],
+                true,
+                Ok(()),
+            );
+            assert!(out.unwrap_err().contains("cancelled on the Trezor"));
+            assert_eq!(opened, 1);
+        }
+
+        /// A link that fails once recovers on a fresh handle (the device
+        /// was out of step, or mid-wake).
+        #[test]
+        fn a_link_hiccup_recovers_on_a_fresh_handle() {
+            let (out, opened, waits) = supervised(
+                Wait::Patient,
+                vec![
+                    Err(DevError::Link("Pipe error".into())),
+                    Ok(vec![button(), signed()]),
+                ],
+                false,
+                Ok(()),
+            );
+            assert!(out.is_ok(), "{out:?}");
+            assert_eq!(opened, 2);
+            assert_eq!(waits, vec![Until::Present]);
+        }
+
+        /// A link that KEEPS failing: two quick retries, then the user is
+        /// asked to replug (twice at most), then the conversation fails
+        /// with the reason — it never spins forever.
+        #[test]
+        fn a_link_that_keeps_failing_asks_for_a_replug_then_gives_up() {
+            let fail = || Err(DevError::Link("Operation timed out".into()));
+            let (out, opened, waits) = supervised(
+                Wait::Patient,
+                (0..9).map(|_| fail()).collect(),
+                false,
+                Ok(()),
+            );
+            let err = out.unwrap_err();
+            assert!(err.contains("lost contact with the Trezor"), "{err}");
+            assert!(err.contains("Operation timed out"), "{err}");
+            assert_eq!(opened, 9);
+            let replug = Until::Replugged(vec!["bus-a".to_string()]);
+            assert_eq!(
+                waits,
+                vec![
+                    Until::Present,
+                    Until::Present,
+                    replug.clone(),
+                    Until::Present,
+                    Until::Present,
+                    replug,
+                    Until::Present,
+                    Until::Present,
+                ]
+            );
+        }
+
+        /// A device answering out of turn (a conversation abandoned
+        /// earlier left it mid-workflow) is a link problem, not a
+        /// refusal: the next handle's `Initialize` resets it.
+        #[test]
+        fn a_reply_out_of_step_is_retried() {
+            let (out, opened, _) = supervised(
+                Wait::Patient,
+                vec![
+                    Ok(vec![(Mt::MessageType_Features, Vec::new())]),
+                    Ok(vec![button(), signed()]),
+                ],
+                false,
+                Ok(()),
+            );
+            assert!(out.is_ok(), "{out:?}");
+            assert_eq!(opened, 2);
+        }
+
+        #[test]
+        fn device_errors_are_sorted_into_what_can_be_ridden_out() {
+            use trezor_client::transport::error::Error as T;
+            use trezor_client::Error as E;
+            assert!(matches!(classify(E::NoDeviceFound), DevError::Missing));
+            assert!(matches!(
+                classify(E::TransportSendMessage(T::DeviceDisconnected)),
+                DevError::Link(_)
+            ));
+            assert!(matches!(
+                classify(E::TransportReceiveMessage(T::DeviceBadMagic)),
+                DevError::Link(_)
+            ));
+            assert!(matches!(classify(E::DeviceNotUnique), DevError::Fatal(_)));
+            // A permission refusal is final, with the udev hint on Linux.
+            let denied = link_or_denied("Access denied (insufficient permissions)".into());
+            match denied {
+                DevError::Fatal(msg) => assert!(msg.contains("could not be opened"), "{msg}"),
+                other => panic!("expected a final error, got {other:?}"),
+            }
+            // Another program holding the interface is named as such.
+            assert!(DevError::Link("Resource busy".into())
+                .message()
+                .contains("another program"));
+        }
+
+        /// The wait itself. (Shares the process-global beacon with the
+        /// attention test, hence the gate.)
+        #[test]
+        fn await_device_waits_for_the_bus_to_change() {
+            let _gate = crate::trezor::attention::TEST_GATE
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while crate::trezor::attention::snapshot().0
+                && std::time::Instant::now() < deadline
+            {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            let tick = std::time::Duration::from_millis(1);
+            let limit = std::time::Duration::from_secs(5);
+            let looks = std::cell::Cell::new(0u32);
+            let looks = &looks;
+            // A bus that is empty for the first `n` looks.
+            let bus_after = |n: u32| {
+                looks.set(0);
+                move || {
+                    looks.set(looks.get() + 1);
+                    if looks.get() > n {
+                        vec!["a".to_string()]
+                    } else {
+                        Vec::new()
+                    }
+                }
+            };
+            // Already there: no wait, no card.
+            let look = bus_after(0);
+            assert!(await_device(Until::Present, &look, limit, tick).is_ok());
+            assert_eq!(looks.get(), 1);
+            // Shows up on the third look; the card is up meanwhile.
+            let seen = std::cell::Cell::new(None);
+            let inner = bus_after(2);
+            let look = || {
+                if looks.get() == 1 {
+                    seen.set(crate::trezor::attention::snapshot().2);
+                }
+                inner()
+            };
+            assert!(await_device(Until::Present, &look, limit, tick).is_ok());
+            assert_eq!(seen.get(), Some("connect-device"));
+            assert!(!crate::trezor::attention::snapshot().0, "the card clears");
+            // A replug needs a bus that is non-empty AND different.
+            let before = vec!["a".to_string()];
+            let stage = std::cell::Cell::new(0u32);
+            let look = || {
+                stage.set(stage.get() + 1);
+                match stage.get() {
+                    1 | 2 => vec!["a".to_string()], // still the old address
+                    3 => Vec::new(),                // unplugged
+                    _ => vec!["b".to_string()],     // back, new address
+                }
+            };
+            assert!(await_device(Until::Replugged(before), &look, limit, tick).is_ok());
+            assert!(stage.get() >= 4);
+            // Stop waiting ends it with its own message…
+            let look = || {
+                crate::trezor::waiting::stop();
+                Vec::new()
+            };
+            let err = await_device(Until::Present, &look, limit, tick).unwrap_err();
+            assert!(err.contains("stopped waiting"), "{err}");
+            // …and so does the limit, with the plug-it-in message.
+            let look = || Vec::new();
+            let err = await_device(
+                Until::Present,
+                &look,
+                std::time::Duration::from_millis(5),
+                tick,
+            )
+            .unwrap_err();
+            assert!(err.contains("no Trezor found"), "{err}");
         }
 
         /// CURRENT firmware (the live "Communication with your connected
@@ -1722,6 +2431,334 @@ mod device {
         }
     }
 
+    /// Device tests against Trezor's own firmware EMULATOR — the real
+    /// firmware built for the desktop, driven through its debug link by
+    /// `scripts/trezor-emulator/operator.py` playing the human. They
+    /// cover what a fake transport cannot: what the firmware actually
+    /// does when it is locked, locks itself mid-screen, or restarts.
+    ///
+    /// Ignored by default; `scripts/trezor-emulator/run.sh` starts the
+    /// emulator (PIN 1234, passphrase protection on, 10 s auto-lock) and
+    /// runs them one at a time.
+    #[cfg(test)]
+    mod emulator_tests {
+        use super::*;
+        use alloy::consensus::SignableTransaction;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+        use std::time::Duration;
+
+        /// Hardhat test mnemonic + passphrase "hunter2", m/44'/60'/0'/0/0.
+        const ADDRESS: &str = "0x55585EFaaFc6F444A28Dce28322edf57620c88Bf";
+        const PASSPHRASE: &str = "hunter2";
+
+        fn emu_home() -> std::path::PathBuf {
+            std::env::var_os("WATCHIT_TREZOR_EMU_HOME")
+                .expect("run these through scripts/trezor-emulator/run.sh")
+                .into()
+        }
+
+        fn harness(file: &str) -> std::path::PathBuf {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../scripts/trezor-emulator")
+                .join(file)
+        }
+
+        fn python(script: &str) -> std::process::Command {
+            let mut cmd = std::process::Command::new(emu_home().join("venv/bin/python"));
+            cmd.arg("-I").arg(harness(script));
+            cmd
+        }
+
+        fn ctl(args: &[&str]) {
+            let out = python("ctl.py").args(args).output().expect("ctl.py runs");
+            println!("ctl {args:?}: {}", String::from_utf8_lossy(&out.stdout).trim());
+        }
+
+        /// A freshly set-up device (unlocked, PIN 1234, passphrase
+        /// protection, 10 s auto-lock), whatever the last test left.
+        fn fresh_device() {
+            ctl(&["setup", "10"]);
+        }
+
+        /// `run.sh stop` / `run.sh start`: unplug / plug the device.
+        fn emulator(verb: &str) {
+            let _ = std::process::Command::new(harness("run.sh")).arg(verb).status();
+        }
+
+        /// The human at the device, for as long as this lives.
+        struct Operator(std::process::Child);
+
+        impl Drop for Operator {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+
+        fn operator(args: &[&str]) -> Operator {
+            Operator(
+                python("operator.py")
+                    .arg("300")
+                    .args(args)
+                    .spawn()
+                    .expect("operator.py starts"),
+            )
+        }
+
+        /// The app's half: answers the passphrase card the way the user
+        /// would, and records every action the beacon announces, in
+        /// order — what the prompt cards would have shown.
+        struct App {
+            stop: Arc<AtomicBool>,
+            seen: Arc<Mutex<Vec<&'static str>>>,
+            passphrases: Arc<AtomicUsize>,
+            thread: Option<std::thread::JoinHandle<()>>,
+        }
+
+        impl App {
+            fn start() -> Self {
+                super::super::host_passphrase::set(true);
+                let stop = Arc::new(AtomicBool::new(false));
+                let seen = Arc::new(Mutex::new(Vec::new()));
+                let passphrases = Arc::new(AtomicUsize::new(0));
+                let (s, v, p) = (stop.clone(), seen.clone(), passphrases.clone());
+                let thread = std::thread::spawn(move || {
+                    let mut last_seq = 0;
+                    while !s.load(Ordering::Relaxed) {
+                        let (active, seq, action) = super::super::attention::snapshot();
+                        if active && seq != last_seq {
+                            last_seq = seq;
+                            v.lock().unwrap().push(action.unwrap());
+                        }
+                        if super::super::passphrase::pending()
+                            && super::super::passphrase::deliver(PASSPHRASE.into())
+                        {
+                            p.fetch_add(1, Ordering::Relaxed);
+                        }
+                        std::thread::sleep(Duration::from_millis(40));
+                    }
+                });
+                Self { stop, seen, passphrases, thread: Some(thread) }
+            }
+
+            fn seen(&self) -> Vec<&'static str> {
+                self.seen.lock().unwrap().clone()
+            }
+
+            fn passphrases(&self) -> usize {
+                self.passphrases.load(Ordering::Relaxed)
+            }
+        }
+
+        impl Drop for App {
+            fn drop(&mut self) {
+                self.stop.store(true, Ordering::Relaxed);
+                if let Some(t) = self.thread.take() {
+                    let _ = t.join();
+                }
+            }
+        }
+
+        /// `wanted` appear in `seen` in that order (other actions may sit
+        /// in between).
+        fn in_order(seen: &[&str], wanted: &[&str]) -> bool {
+            let mut it = seen.iter();
+            wanted.iter().all(|w| it.any(|s| s == w))
+        }
+
+        /// A payment-shaped transaction: a contract call with calldata.
+        fn payment(nonce: u64) -> (TxEip1559, alloy::primitives::B256) {
+            payment_with(nonce, 200)
+        }
+
+        fn payment_with(nonce: u64, calldata: usize) -> (TxEip1559, alloy::primitives::B256) {
+            let tx = TxEip1559 {
+                chain_id: 42161,
+                nonce,
+                gas_limit: 300_000,
+                max_fee_per_gas: 20_000_000,
+                max_priority_fee_per_gas: 1,
+                to: TxKind::Call(Address::repeat_byte(0xAB)),
+                value: U256::ZERO,
+                access_list: Default::default(),
+                input: (0..calldata).map(|i| (i % 251) as u8).collect::<Vec<u8>>().into(),
+            };
+            let hash = tx.signature_hash();
+            (tx, hash)
+        }
+
+        fn wallet() -> Address {
+            ADDRESS.parse().unwrap()
+        }
+
+        /// A job that starts on a LOCKED device: the app says "unlock
+        /// your Trezor" while the device shows its PIN pad, the
+        /// passphrase is asked once, and the session opens — nothing
+        /// fails.
+        #[tokio::test(flavor = "multi_thread")]
+        #[ignore]
+        async fn emu_a_job_opens_its_session_on_a_locked_device() {
+            fresh_device();
+            ctl(&["lock"]);
+            let app = App::start();
+            let _human = operator(&["--pin-after=2"]);
+            let session = begin_job_session(ADDRESS).await;
+            assert!(session.is_ok(), "{:?}", session.err());
+            let seen = app.seen();
+            println!("beacon: {seen:?}");
+            // (The opening "unlock-wallet" gives way to the PIN pad
+            // within milliseconds; it is back once the PIN is in.)
+            assert!(
+                in_order(&seen, &["unlock-device", "enter-passphrase", "unlock-wallet"]),
+                "{seen:?}"
+            );
+            assert_eq!(app.passphrases(), 1);
+        }
+
+        /// THE LIVE FAILURE: a payment confirmation left on the screen
+        /// until the device auto-locks. The firmware closes the screen
+        /// and answers "cancelled"; the job used to fail right there.
+        /// Now the device is asked again — PIN pad, then the same
+        /// confirmation — and the payment gets signed.
+        #[tokio::test(flavor = "multi_thread")]
+        #[ignore]
+        async fn emu_a_confirmation_cut_off_by_auto_lock_comes_back() {
+            fresh_device();
+            let app = App::start();
+            let _session = {
+                let _human = operator(&[]);
+                begin_job_session(ADDRESS).await.expect("session opens")
+            };
+            // Nobody touches the first payment screen for 14 s; the
+            // device locks itself after 10.
+            let _human = operator(&["--hold-first=14"]);
+            let (tx, hash) = payment(1);
+            let sig = sign_payment_job(wallet(), OwnedTx::Eip1559(tx), hash).await;
+            let seen = app.seen();
+            println!("beacon: {seen:?}");
+            let sig = sig.expect("the payment is signed after the unlock");
+            assert!(super::super::verify_payment_signature(&hash, &sig, wallet()).is_ok());
+            assert!(
+                in_order(&seen, &["sign-payment", "unlock-device", "sign-payment"]),
+                "{seen:?}"
+            );
+            assert_eq!(app.passphrases(), 1, "the session survives the lock");
+        }
+
+        /// The usual long upload: the device locks itself while the app
+        /// is busy encrypting and quoting, and is locked when the payment
+        /// arrives. PIN pad, then the confirmation — and the passphrase
+        /// is not asked again (the session outlives a lock).
+        #[tokio::test(flavor = "multi_thread")]
+        #[ignore]
+        async fn emu_a_device_that_locked_while_idle_signs_after_its_pin() {
+            fresh_device();
+            let app = App::start();
+            let _human = operator(&[]);
+            let _session = begin_job_session(ADDRESS).await.expect("session opens");
+            tokio::time::sleep(Duration::from_secs(13)).await;
+            let (tx, hash) = payment(2);
+            let sig = sign_payment_job(wallet(), OwnedTx::Eip1559(tx), hash)
+                .await
+                .expect("signed");
+            assert!(super::super::verify_payment_signature(&hash, &sig, wallet()).is_ok());
+            let seen = app.seen();
+            println!("beacon: {seen:?}");
+            assert!(in_order(&seen, &["unlock-device", "sign-payment"]), "{seen:?}");
+            assert_eq!(app.passphrases(), 1);
+        }
+
+        /// The device vanishes mid-job (unplugged) and comes back: the
+        /// job waits with "reconnect your Trezor" instead of failing,
+        /// adopts the device's new session (a restarted device forgets
+        /// them all), asks for the passphrase once more, and signs.
+        ///
+        /// On a device WITHOUT a PIN: a PIN-protected Trezor stays off
+        /// USB after power-up until its PIN is entered at its boot
+        /// screen (firmware `main.py` opens USB after `boot`), and the
+        /// emulator's boot screen cannot be reached by the debug link.
+        /// To the job that boot-screen wait is simply more of the same
+        /// "no device yet" this test covers.
+        #[tokio::test(flavor = "multi_thread")]
+        #[ignore]
+        async fn emu_a_replugged_device_is_waited_for() {
+            ctl(&["setup", "10", "nopin"]);
+            let app = App::start();
+            let _human = operator(&[]);
+            let _session = begin_job_session(ADDRESS).await.expect("session opens");
+            emulator("stop");
+            let back = std::thread::spawn(|| {
+                std::thread::sleep(Duration::from_secs(5));
+                emulator("start");
+            });
+            let (tx, hash) = payment(3);
+            let sig = sign_payment_job(wallet(), OwnedTx::Eip1559(tx), hash).await;
+            back.join().unwrap();
+            let seen = app.seen();
+            println!("beacon: {seen:?}");
+            let sig = sig.expect("signed after the device came back");
+            assert!(super::super::verify_payment_signature(&hash, &sig, wallet()).is_ok());
+            assert!(
+                in_order(&seen, &["connect-device", "enter-passphrase", "sign-payment"]),
+                "{seen:?}"
+            );
+            assert_eq!(app.passphrases(), 2, "a restarted device forgets its sessions");
+        }
+
+        /// A pooled batch payment carries several KB of calldata, which
+        /// the firmware loads in chunks and confirms part-way through
+        /// (the "Communication with your connected device failed" case
+        /// of alpha.129-test7): every chunk request and every screen in
+        /// between is answered, and the signature verifies.
+        #[tokio::test(flavor = "multi_thread")]
+        #[ignore]
+        async fn emu_a_batch_sized_payment_streams_its_calldata() {
+            fresh_device();
+            let _app = App::start();
+            let _human = operator(&[]);
+            let _session = begin_job_session(ADDRESS).await.expect("session opens");
+            let (tx, hash) = payment_with(5, 7000);
+            let sig = sign_payment_job(wallet(), OwnedTx::Eip1559(tx), hash)
+                .await
+                .expect("signed");
+            assert!(super::super::verify_payment_signature(&hash, &sig, wallet()).is_ok());
+        }
+
+        /// Cancel pressed ON the device, with the device unlocked, is the
+        /// user's decision: final, never re-asked.
+        #[tokio::test(flavor = "multi_thread")]
+        #[ignore]
+        async fn emu_a_cancel_on_the_device_is_final() {
+            fresh_device();
+            let _app = App::start();
+            let _session = {
+                let _human = operator(&[]);
+                begin_job_session(ADDRESS).await.expect("session opens")
+            };
+            let _human = operator(&["--refuse-first"]);
+            let (tx, hash) = payment(4);
+            let err = sign_payment_job(wallet(), OwnedTx::Eip1559(tx), hash)
+                .await
+                .unwrap_err();
+            assert!(err.contains("cancelled on the Trezor"), "{err}");
+        }
+
+        /// The whole setup ceremony on the real firmware: two identity
+        /// signatures that match, and the address shown on the device.
+        #[tokio::test(flavor = "multi_thread")]
+        #[ignore]
+        async fn emu_the_setup_ceremony_runs_end_to_end() {
+            fresh_device();
+            let app = App::start();
+            let _human = operator(&[]);
+            let identity = setup_ceremony().await.expect("ceremony completes");
+            assert_eq!(identity.address.to_lowercase(), ADDRESS.to_lowercase());
+            let seen = app.seen();
+            println!("beacon: {seen:?}");
+            assert!(in_order(&seen, &["sign-identity", "confirm-address"]), "{seen:?}");
+        }
+    }
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
@@ -1792,11 +2829,21 @@ mod tests {
         assert_eq!(keys.enc, direct.enc);
     }
 
-    /// The attention beacon: begin publishes, drop clears, and an OLDER
+    /// The attention beacon: begin publishes, drop clears, an OLDER
     /// guard's drop never erases a NEWER action out from under the
-    /// poller. (The only test touching the process-global state.)
+    /// poller, and a step that ends INSIDE another hands the beacon back
+    /// to the outer one under a fresh seq (the app announces it again).
+    /// (Shares the process-global state with the await-device test —
+    /// hence the gate.)
     #[test]
     fn attention_tracks_and_clears_actions() {
+        let _gate = attention::TEST_GATE.lock().unwrap_or_else(|p| p.into_inner());
+        // Other tests start hardware-wallet jobs that hold the beacon for
+        // the moment it takes to find no device — let those pass first.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while attention::snapshot().0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         let (active, _, _) = attention::snapshot();
         assert!(!active, "nothing should be active before the test begins");
         let first = attention::begin("sign-payment");
@@ -1809,13 +2856,29 @@ mod tests {
         assert!(seq2 > seq1, "every action gets a fresh seq");
         assert_eq!(action, Some("confirm-address"));
         drop(first);
-        let (active, _, action) = attention::snapshot();
+        let (active, seq3, action) = attention::snapshot();
         assert!(active, "the stale guard must not clear the newer action");
         assert_eq!(action, Some("confirm-address"));
+        assert_eq!(seq3, seq2, "and must not re-announce it either");
         drop(second);
         let (active, _, action) = attention::snapshot();
         assert!(!active);
         assert_eq!(action, None);
+
+        // Nested: a payment that first waits for the device to be
+        // unlocked. When the unlock ends, the payment is what the device
+        // waits on again — re-announced, not silently dropped.
+        let payment = attention::begin("sign-payment");
+        let (_, seq_payment, _) = attention::snapshot();
+        let unlock = attention::begin("unlock-device");
+        assert_eq!(attention::snapshot().2, Some("unlock-device"));
+        drop(unlock);
+        let (active, seq_back, action) = attention::snapshot();
+        assert!(active);
+        assert_eq!(action, Some("sign-payment"));
+        assert!(seq_back > seq_payment, "the outer step is announced afresh");
+        drop(payment);
+        assert!(!attention::snapshot().0);
     }
 
     /// The local recovery check behind VerifiedTrezor: a signature from
@@ -2031,7 +3094,6 @@ mod tests {
         .into();
         let dyn_legacy: &dyn SignableTransaction<alloy::primitives::Signature> = &legacy;
         assert_eq!(concrete_eip1559(dyn_legacy), None);
-        use alloy::consensus::Transaction as _;
         assert_eq!(dyn_legacy.ty(), 0);
     }
 

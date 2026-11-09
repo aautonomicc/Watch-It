@@ -165,6 +165,13 @@ class PublishApi {
     return json['delivered'] as bool? ?? false;
   }
 
+  /// The "Stop waiting" button of the connect-your-Trezor card: end a
+  /// job's wait for a device to be plugged in (the job then fails
+  /// cleanly; nothing was spent).
+  Future<void> stopTrezorWaiting() async {
+    await _request('POST', '/trezor/stop-waiting');
+  }
+
   /// A fresh 12-word mnemonic + its address. Nothing is stored until the
   /// phrase is imported after the backup ceremony.
   Future<GeneratedWallet> generateWallet() async {

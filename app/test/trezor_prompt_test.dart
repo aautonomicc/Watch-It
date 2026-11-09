@@ -302,12 +302,82 @@ void main() {
     });
   });
 
+  group('waiting for the device itself', () {
+    testWidgets('a locked device gets an unlock card, not a failure',
+        (tester) async {
+      final service = _FakeAttention();
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: TrezorPromptHost(
+          service: service,
+          child: const Scaffold(body: Text('home')),
+        ),
+      ));
+      // A payment is waiting, then the device turns out to be locked.
+      service.emit(
+          const TrezorActivity(active: true, seq: 1, action: 'sign-payment'));
+      await tester.pumpAndSettle();
+      service.emit(
+          const TrezorActivity(active: true, seq: 2, action: 'unlock-device'));
+      await tester.pumpAndSettle();
+      expect(find.text('Unlock your Trezor'), findsOneWidget);
+      expect(find.textContaining('Enter the PIN on the device'),
+          findsOneWidget);
+      expect(find.text('Stop waiting'), findsNothing,
+          reason: 'a PIN prompt is cancelled on the device itself');
+      // Unlocked: the payment card comes back (the core re-announces it).
+      service.emit(
+          const TrezorActivity(active: true, seq: 3, action: 'sign-payment'));
+      await tester.pumpAndSettle();
+      expect(find.text('Confirm the payment on your Trezor'), findsOneWidget);
+      expect(find.text('Unlock your Trezor'), findsNothing);
+
+      service.emit(null);
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('the reconnect card can stop the wait', (tester) async {
+      final fake = FakeEmbeddedHttp();
+      HttpOverrides.global = fake;
+      final service = _FakeAttention();
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: TrezorPromptHost(
+          service: service,
+          api: PublishApi(base: FakeEmbeddedHttp.base, token: 't'),
+          child: const Scaffold(body: Text('home')),
+        ),
+      ));
+      service.emit(const TrezorActivity(
+          active: true, seq: 1, action: 'connect-device'));
+      await tester.pumpAndSettle();
+      expect(find.text('Reconnect your Trezor'), findsOneWidget);
+      expect(find.textContaining('unplug it and plug it back in'),
+          findsOneWidget);
+
+      await tester.tap(find.text('Stop waiting'));
+      await tester.pumpAndSettle();
+      expect(fake.trezorStopWaitingPosts, 1);
+      // A second press cannot double-send while the core winds down.
+      expect(find.text('Stopping…'), findsOneWidget);
+
+      service.emit(null);
+      await tester.pumpAndSettle();
+      expect(find.byType(TrezorPromptCard), findsNothing);
+    });
+  });
+
   test('every beacon action has its own explanation', () {
     expect(trezorPromptBody('sign-identity'), contains('costs '));
     expect(trezorPromptBody('confirm-address'), contains('matches'));
     expect(trezorPromptBody('sign-payment'), contains('amount'));
     expect(trezorPromptBody('unlock-wallet'), contains('passphrase'));
     expect(trezorPromptBody('enter-passphrase'), contains('passphrase'));
+    expect(trezorPromptBody('unlock-device'), contains('PIN'));
+    expect(trezorPromptBody('unlock-device'), contains('nothing has failed'));
+    expect(trezorPromptBody('connect-device'), contains('plug it back in'));
+    expect(trezorPromptTitle('unlock-device'), 'Unlock your Trezor');
+    expect(trezorPromptTitle('connect-device'), 'Reconnect your Trezor');
     expect(trezorPromptBody('something-new'), contains('confirmation'));
     expect(trezorPromptTitle('sign-payment'),
         'Confirm the payment on your Trezor');

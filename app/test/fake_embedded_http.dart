@@ -107,6 +107,9 @@ class FakeEmbeddedHttp extends HttpOverrides {
   int trezorActivitySeq = 0;
   String? trezorActivityAction;
 
+  /// "Stop waiting" presses on the connect-your-Trezor card.
+  int trezorStopWaitingPosts = 0;
+
   /// Host-passphrase: the last mode posted, and delivered passphrases /
   /// on-device requests, for the `/trezor/passphrase*` routes.
   bool? trezorHostPassphraseMode;
@@ -386,6 +389,10 @@ class FakeEmbeddedHttp extends HttpOverrides {
           'action': ?trezorActivityAction,
         }))
       );
+    }
+    if (method == 'POST' && path == '/trezor/stop-waiting') {
+      trezorStopWaitingPosts++;
+      return (200, utf8.encode(jsonEncode({'ok': true})));
     }
     if (method == 'POST' && path == '/trezor/passphrase-mode') {
       final json = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;

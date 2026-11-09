@@ -30,8 +30,21 @@ String trezorPromptBody(String? action) {
           'spending allowance for the payment contract.';
     case 'unlock-wallet':
       return 'W@tch is opening a wallet session on your Trezor for this '
-          'job. If the device asks for its PIN or passphrase, enter it on '
-          'the device — one entry covers every signature in this run.';
+          'job. If the device asks for its PIN or passphrase, or shows a '
+          'passphrase to confirm, do it on the device — one entry covers '
+          'every signature in this run.';
+    case 'unlock-device':
+      return 'Your Trezor is locked and is showing its PIN pad. Enter the '
+          'PIN on the device — W@tch carries on by itself the moment it is '
+          'unlocked, and nothing has failed. If a confirmation was on the '
+          'screen when the device locked, it comes back for you to '
+          'confirm.';
+    case 'connect-device':
+      return 'W@tch cannot reach your Trezor. Plug it in — or, if it is '
+          'plugged in, unplug it and plug it back in — and enter its PIN: '
+          'a Trezor only shows up on this computer once it is unlocked. '
+          'W@tch carries on by itself as soon as the device answers; '
+          'nothing has failed and nothing was spent.';
     case 'enter-passphrase':
       return 'Your Trezor is asking for its passphrase (the hidden-wallet '
           'secret). Type it below to open that wallet for this run, or '
@@ -51,6 +64,10 @@ String trezorPromptTitle(String? action) {
       return 'Confirm the payment on your Trezor';
     case 'unlock-wallet':
       return 'Unlock the wallet on your Trezor';
+    case 'unlock-device':
+      return 'Unlock your Trezor';
+    case 'connect-device':
+      return 'Reconnect your Trezor';
     case 'enter-passphrase':
       return 'Enter your Trezor passphrase';
     default:
@@ -204,6 +221,13 @@ class TrezorPromptCard extends StatelessWidget {
                         ),
                         if (activity.action == 'enter-passphrase')
                           _PassphraseField(api: api ?? PublishApi())
+                        else if (activity.action == 'connect-device')
+                          // The one wait the device itself cannot end
+                          // (it is not there) — so the app can.
+                          _StopWaiting(
+                            api: api ?? PublishApi(),
+                            onHide: onHide,
+                          )
                         else ...[
                           const SizedBox(height: 4),
                           Align(
@@ -223,6 +247,51 @@ class TrezorPromptCard extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// The buttons of the `connect-device` card: Hide (keep waiting, just
+/// without the card) and Stop waiting (give up — the job fails cleanly
+/// and can be retried later).
+class _StopWaiting extends StatefulWidget {
+  const _StopWaiting({required this.api, required this.onHide});
+  final PublishApi api;
+  final VoidCallback onHide;
+
+  @override
+  State<_StopWaiting> createState() => _StopWaitingState();
+}
+
+class _StopWaitingState extends State<_StopWaiting> {
+  bool _busy = false;
+
+  Future<void> _stop() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.api.stopTrezorWaiting();
+    } catch (_) {
+      // The wait ends by itself after ten minutes if this never lands.
+    }
+    // The card goes when the beacon clears.
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Wrap(
+        alignment: WrapAlignment.end,
+        spacing: 8,
+        children: [
+          TextButton(
+            onPressed: _busy ? null : _stop,
+            child: Text(_busy ? 'Stopping…' : 'Stop waiting'),
+          ),
+          TextButton(onPressed: widget.onHide, child: const Text('Hide')),
+        ],
+      ),
     );
   }
 }

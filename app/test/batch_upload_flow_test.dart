@@ -422,6 +422,76 @@ void main() {
     expect(byName['Two Movie (1971).mp4']!.address, addrB);
   });
 
+  test('a failure decided at the Trezor is NOT retried automatically — '
+      'running the batch again would only put the same prompt straight '
+      'back up; Retry on the done page is the user\'s to press', () async {
+    fake.wallet = {'configured': true, 'address': '0xabc', 'storage': 'file'};
+    mediaFile('one.mp4', 1);
+    final addr = 'aa' * 32;
+    fake.uploadResults = [
+      {'address': addr, 'size': 64, 'chunks': 3,
+          'cost_atto': '1000', 'gas_wei': '1'},
+    ];
+    fake.datamaps[addr] = [1, 2, 3];
+    fake.batchFailures['One Movie (1970).mp4'] =
+        'payment failed: cancelled on the Trezor — nothing was changed';
+
+    final session = BatchUploadSession.instance;
+    session.matchOverride = scriptedMatcher({
+      'one.mp4': cli.MatchOutcome(
+          type: 'video',
+          name: 'One Movie (1970).mp4',
+          method: 'tags',
+          confidence: 'high'),
+    });
+    session.probeOverride = (path) async => null;
+    await session.startPrepare(
+      api: api(),
+      paths: [tempDir.path],
+      listName: 'Refused',
+      workDir: dirIn('work'),
+      configDir: dirIn('config'),
+    );
+    while (session.stage == BatchStage.preparing) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    while (session.costEstimate == null && session.estimateError == null) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    await session.startUpload();
+    while (session.stage == BatchStage.uploading) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    expect(session.stage, BatchStage.done);
+    expect(session.failedCount, 1);
+    expect(fake.batchUploadPosts, hasLength(1),
+        reason: 'no automatic second batch after a refusal at the device');
+
+    // The user's own Retry still runs it again — and it goes through.
+    fake.batchFailures.clear();
+    session.retryFailed();
+    while (session.stage == BatchStage.uploading) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    expect(fake.batchUploadPosts, hasLength(2));
+    expect(session.failedCount, 0);
+    expect(session.uploadedCount, 1);
+  });
+
+  test('isTrezorRefusal sorts device refusals from network failures', () {
+    expect(
+        BatchUploadSession.isTrezorRefusal(
+            'cancelled on the Trezor — nothing was changed'),
+        isTrue);
+    expect(
+        BatchUploadSession.isTrezorRefusal(
+            'stopped waiting for the Trezor — nothing was changed'),
+        isTrue);
+    expect(BatchUploadSession.isTrezorRefusal('close group store failed'),
+        isFalse);
+    expect(BatchUploadSession.isTrezorRefusal(null), isFalse);
+  });
+
   test('estimatedPayments: one merkle transaction per 256-chunk '
       'sub-batch, upper bound', () {
     final session = BatchUploadSession.instance;

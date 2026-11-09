@@ -1423,6 +1423,32 @@ decision (2026-10-10).
       on a real Trezor 2026-11-09 (test9 build: a batch upload paid and
       stored with no repeated confirmation — which also proves the
       mid-calldata confirmation fix and the own signer on a device).
+- [x] A locked, sleeping or unplugged Trezor no longer fails the job
+      (2026-11-09, ships alpha.129; from the user's further testing).
+      Reproduced on Trezor's firmware emulator: when the device
+      auto-locks while a confirmation is on its screen, the firmware
+      closes the screen and answers "cancelled" — the upload failed on
+      the spot. Now a job tells that apart from the user's own Cancel
+      (the device is locked afterwards) and asks again: the device shows
+      its PIN pad, the app shows "Unlock your Trezor", and the same
+      confirmation comes back. A Trezor that is unplugged — or plugged
+      in but not yet unlocked, which keeps it off USB entirely — is
+      waited for with a "Reconnect your Trezor" card (Stop waiting ends
+      it; ten minutes at most), and a link that fails is retried on a
+      fresh handle before a replug is asked for. A replugged device's
+      new session is adopted (one more passphrase entry, not one per
+      message). The network client no longer talks to the Trezor at
+      every connect (that put a PIN or passphrase prompt on the device
+      at app start and held the connect up behind it). A batch left on
+      its review page until the idle auto-pause no longer fails with
+      "network is paused", and a failure decided at the device is not
+      re-run automatically.
+- [x] Device tests on Trezor's firmware emulator (2026-11-09):
+      `scripts/trezor-emulator/run.sh` runs seven tests of our signer
+      against the real firmware (Safe 5, 2.10.0) — session open on a
+      locked device, auto-lock mid-confirmation, idle lock, restart,
+      Cancel, a 7 KB batch-sized payment, the setup ceremony. First
+      device-level coverage that needs no hardware.
 
 ## Network & data control (shipped 2026-09-03→06, v0.1.0-alpha.85–.92)
 

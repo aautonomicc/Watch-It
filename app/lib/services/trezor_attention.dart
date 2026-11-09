@@ -37,7 +37,9 @@ class TrezorAttentionService extends ChangeNotifier {
   /// The action the device is waiting on right now, or null. Actions:
   /// `sign-identity` | `confirm-address` | `sign-payment` |
   /// `unlock-wallet` (the per-job session open, where a
-  /// passphrase-protected device asks for its passphrase once).
+  /// passphrase-protected device asks for its passphrase once) |
+  /// `enter-passphrase` | `unlock-device` (the device is locked and
+  /// showing its PIN pad) | `connect-device` (no usable device on USB).
   TrezorActivity? current;
 
   int _scopes = 0;

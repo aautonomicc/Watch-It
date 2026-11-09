@@ -375,10 +375,12 @@ impl Engine {
                 return client;
             }
         };
-        // Hardware signers open a USB session here — an unplugged device
-        // degrades to a wallet-less client (streaming is never gated on
-        // the wallet), and wallet_client() reports the plug-it-in hint
-        // when a paid call then needs it.
+        // No device conversation happens here, even for a hardware
+        // wallet: its signer is built from the configured address alone
+        // (a Trezor poked at every connect would put up its PIN pad or
+        // passphrase prompt out of nowhere and hold the connect up until
+        // someone answered). The device is checked when a job opens its
+        // session and again before every signature.
         match signer.payment_wallet().await {
             Ok(w) => {
                 tracing::info!("upload wallet attached ({})", w.address());

@@ -98,6 +98,9 @@ fn protected_router(engine: &'static Engine) -> Router {
             "/trezor/passphrase",
             post(move |body: Bytes| trezor_passphrase(body)),
         )
+        // The "Stop waiting" button on the app's connect-your-Trezor
+        // card: end a job's wait for a device to be plugged in.
+        .route("/trezor/stop-waiting", post(trezor_stop_waiting))
         // Pause/resume all network use. Protected: only the app should
         // be able to silence (or wake) the user's network client.
         .route(
@@ -824,6 +827,14 @@ async fn trezor_passphrase(body: Bytes) -> Response {
             .into_response();
     };
     json_ok(serde_json::json!({ "delivered": delivered }))
+}
+
+/// `POST /trezor/stop-waiting` — the user gave up on a job's wait for a
+/// Trezor to be plugged in (the `connect-device` attention action). The
+/// waiting job fails cleanly; a no-op when nothing is waiting.
+async fn trezor_stop_waiting() -> Response {
+    crate::trezor::waiting::stop();
+    json_ok(serde_json::json!({ "ok": true }))
 }
 
 /// `GET /wallet/trezor` — is a Trezor answering on USB? `{found, address?,
@@ -2174,6 +2185,7 @@ mod wallet_api_tests {
             ("GET", "/trezor/activity"),
             ("POST", "/trezor/passphrase-mode"),
             ("POST", "/trezor/passphrase"),
+            ("POST", "/trezor/stop-waiting"),
             ("POST", "/wallet/unlock"),
             ("POST", "/wallet/passphrase"),
             ("DELETE", "/wallet/passphrase"),

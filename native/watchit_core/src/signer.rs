@@ -125,10 +125,11 @@ impl Signer {
                 ))]
                 {
                     use alloy::network::EthereumWallet;
-                    // Verified signer: fresh device session per signature,
-                    // address re-check before every tap, and local recovery
-                    // verification of each signature BEFORE evmlib journals
-                    // it (see trezor.rs::VerifiedTrezor).
+                    // Verified signer: built from the configured address
+                    // with no device conversation; every signature re-checks
+                    // the live address before the tap and verifies the
+                    // result locally BEFORE evmlib journals it (see
+                    // trezor.rs::VerifiedTrezor).
                     let signer = crate::trezor::verified_payment_signer(address).await?;
                     Ok(EvmWallet::new(
                         EvmNetwork::ArbitrumOne,

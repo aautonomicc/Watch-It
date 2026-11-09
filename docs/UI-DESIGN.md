@@ -196,7 +196,14 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   passphrase-protected device asks for its passphrase once there,
   covering every signature in the run), and "Enter your Trezor
   passphrase" (2026-11-02 — opt-in host-side entry: the card grows an
-  obscured passphrase field + Unlock + "Enter on device instead"). The
+  obscured passphrase field + Unlock + "Enter on device instead"),
+  "Unlock your Trezor" (2026-11-09 — the device is locked and showing
+  its PIN pad; the job waits, nothing has failed, and a confirmation
+  that was on screen when it locked comes back) and "Reconnect your
+  Trezor" (2026-11-09 — the device is unplugged, or plugged in but not
+  yet unlocked; the job waits up to ten minutes and the card carries
+  Stop waiting beside Hide). When a step ends inside another — the
+  unlock inside a payment — the outer card returns. The
   card follows
   the action live, removes itself when the device stops waiting, and
   Hide silences only that tap — the next one announces again. It is
