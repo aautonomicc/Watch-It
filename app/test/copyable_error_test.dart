@@ -69,4 +69,50 @@ void main() {
     expect(find.text('Error message copied'), findsOneWidget);
     await tester.pumpAndSettle(const Duration(seconds: 3));
   });
+
+  test('an underfunded wallet gets a plain-words line in ANT', () {
+    final hint = fundsHintFor('paying for the backup failed: Insufficient '
+        'tokens to pay for quotes. Have: 0 atto, need: 514836038085937500 '
+        'atto');
+    expect(hint, contains('0.514836 ANT'));
+    expect(hint, contains('has 0 ANT'));
+    expect(fundsHintFor('insufficient funds for gas * price + value'),
+        contains('ETH'));
+    expect(fundsHintFor('cancelled on the Trezor'), isNull);
+  });
+
+  testWidgets('an error dialog stays until acknowledged, explains a '
+      'funds shortfall and copies the raw error', (tester) async {
+    const message = 'Insufficient tokens to pay for quotes. Have: 0 atto, '
+        'need: 514836038085937500 atto';
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => showErrorDialog(Navigator.of(context),
+                title: 'Backup failed', message: message),
+            child: const Text('go'),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    expect(find.text('Backup failed'), findsOneWidget);
+    expect(find.textContaining('0.514836 ANT'), findsOneWidget);
+    expect(find.text(message), findsOneWidget);
+    // Unlike the old snackbar it does not time out or close on a tap
+    // outside.
+    await tester.pump(const Duration(minutes: 5));
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+    expect(find.text('Backup failed'), findsOneWidget);
+    await tester.tap(find.text('Copy'));
+    await tester.pump();
+    expect(copied, [message]);
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(find.text('Backup failed'), findsNothing);
+  });
 }

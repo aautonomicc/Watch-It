@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../services/publish_api.dart' show formatUnits;
 import '../theme/tokens.dart';
 
 /// Error surfaces are tap-to-copy: a long core error (hardware wallet,
@@ -101,4 +102,93 @@ class CopyableErrorText extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A plain-words line for a failure caused by an underfunded wallet, or
+/// null when [message] is some other error. The core reports the
+/// shortfall in atto ("Have: 0 atto, need: 514836038085937500 atto");
+/// this turns it into ANT, and names gas when that is what ran out.
+String? fundsHintFor(String message) {
+  final lower = message.toLowerCase();
+  if (!lower.contains('insufficient')) return null;
+  final m = RegExp(r'have:\s*(\d+)\s*atto,\s*need:\s*(\d+)\s*atto',
+          caseSensitive: false)
+      .firstMatch(message);
+  if (m != null) {
+    final have = BigInt.parse(m.group(1)!);
+    final need = BigInt.parse(m.group(2)!);
+    return 'The upload wallet does not hold enough ANT: this needs about '
+        '${formatUnits(need)} ANT and the wallet has ${formatUnits(have)} '
+        'ANT. Nothing was spent. Add ANT to the wallet (Settings → '
+        'Wallet shows its address), then try again.';
+  }
+  if (lower.contains('gas')) {
+    return 'The upload wallet does not hold enough ETH (on Arbitrum) to '
+        'pay the network fee. Nothing was spent. Add a little ETH to the '
+        'wallet (Settings → Wallet shows its address), then try again.';
+  }
+  return 'The upload wallet does not hold enough funds for this. Add '
+      'funds to the wallet (Settings → Wallet shows its address), then '
+      'try again.';
+}
+
+/// A failure that must be acknowledged: unlike a snackbar it stays up
+/// until dismissed, so someone who walked away from a long job comes
+/// back to the reason it stopped. Takes the [NavigatorState] (grab the
+/// root one before the job starts) so the dialog still appears when the
+/// screen that started the job has been left meanwhile.
+Future<void> showErrorDialog(
+  NavigatorState navigator, {
+  required String title,
+  required String message,
+}) async {
+  if (!navigator.mounted) return;
+  final hint = fundsHintFor(message);
+  await showDialog<void>(
+    context: navigator.context,
+    barrierDismissible: false,
+    builder: (context) {
+      final t = WiTokens.of(context);
+      return AlertDialog(
+        icon: Icon(Icons.error_outline, color: t.rust),
+        title: Text(title),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (hint != null) ...[
+                Text(hint, style: TextStyle(color: t.bone, fontSize: 14)),
+                const SizedBox(height: 12),
+              ],
+              SelectableText(
+                message,
+                style: TextStyle(
+                  color: hint == null ? t.bone : t.rust,
+                  fontSize: hint == null ? 14 : 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: message));
+              if (!context.mounted) return;
+              ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
+                content: Text('Error message copied'),
+                duration: Duration(seconds: 2),
+              ));
+            },
+            child: const Text('Copy'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      );
+    },
+  );
 }

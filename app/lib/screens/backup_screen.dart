@@ -107,6 +107,7 @@ class _BackupScreenState extends State<BackupScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
+    final navigator = Navigator.of(context, rootNavigator: true);
     setState(() {
       _busy = true;
       _progress = null;
@@ -125,10 +126,9 @@ class _BackupScreenState extends State<BackupScreen> {
                 'object(s) uploaded.'),
       ));
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(copyableErrorSnackBar('Backup failed: $e'));
-      }
+      // A dialog, not a snackbar: a backup can run for minutes, and the
+      // reason it stopped must still be there when the user comes back.
+      await showErrorDialog(navigator, title: 'Backup failed', message: '$e');
     } finally {
       if (mounted) {
         setState(() {
@@ -165,6 +165,7 @@ class _BackupScreenState extends State<BackupScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
+    final navigator = Navigator.of(context, rootNavigator: true);
     setState(() {
       _busy = true;
       _progress = null;
@@ -212,10 +213,9 @@ class _BackupScreenState extends State<BackupScreen> {
         ),
       );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(copyableErrorSnackBar('Restore failed: $e'));
-      }
+      // A dialog, not a snackbar: a backup can run for minutes, and the
+      // reason it stopped must still be there when the user comes back.
+      await showErrorDialog(navigator, title: 'Restore failed', message: '$e');
     } finally {
       if (mounted) {
         setState(() {
@@ -313,14 +313,16 @@ class _BackupScreenState extends State<BackupScreen> {
                 label: const Text('Check the backup now'),
                 onPressed: () async {
                   final messenger = ScaffoldMessenger.of(context);
+                  final navigator =
+                      Navigator.of(context, rootNavigator: true);
                   try {
                     final outcome =
                         await BackupFollowService.instance.checkNow();
                     messenger
                         .showSnackBar(SnackBar(content: Text(outcome)));
                   } catch (e) {
-                    messenger.showSnackBar(
-                        copyableErrorSnackBar('Check failed: $e'));
+                    await showErrorDialog(navigator,
+                        title: 'Check failed', message: '$e');
                   }
                 },
               ),

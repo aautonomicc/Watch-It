@@ -538,6 +538,45 @@ void main() {
       expect(fake.backupRunPosts, isEmpty);
     });
 
+    testWidgets('a failed backup stays on screen as a dialog until it is '
+        'acknowledged', (tester) async {
+      fake.backupStatus = {
+        'configured': true,
+        'pointer': 'aa' * 32,
+        'last': null,
+        'job': null,
+      };
+      fake.backupJobStates.add({
+        'kind': 'backup',
+        'phase': 'error',
+        'error': 'Insufficient tokens to pay for quotes. Have: 0 atto, '
+            'need: 514836038085937500 atto',
+      });
+      final screenService = BackupService(
+        api: BackupApi(base: FakeEmbeddedHttp.base, token: 't'),
+      );
+      await tester.pumpWidget(MaterialApp(
+        theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+        home: BackupScreen(service: screenService),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Back up now'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Back up'));
+      for (var i = 0; i < 40 && find.text('Backup failed').evaluate().isEmpty; i++) {
+        await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 50)));
+        await tester.pump(const Duration(seconds: 1));
+      }
+      expect(find.text('Backup failed'), findsOneWidget);
+      expect(find.textContaining('0.514836 ANT'), findsOneWidget);
+      await tester.pump(const Duration(minutes: 5));
+      expect(find.text('Backup failed'), findsOneWidget);
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(find.text('Backup failed'), findsNothing);
+    });
+
     testWidgets('a hardware wallet is told how many confirmations a '
         'backup needs', (tester) async {
       for (final hardware in [true, false]) {
