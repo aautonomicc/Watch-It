@@ -242,6 +242,23 @@ class AppSettings {
     await prefs.setBool(_trezorHostPassphraseKey, value);
   }
 
+  static const _trezorKeepSessionKey = 'trezor_keep_session_v1';
+
+  /// Whether the Trezor's wallet session is kept between jobs for the
+  /// whole app run — one passphrase entry per run instead of one per
+  /// upload or backup (default on; the PIN after a lock and the
+  /// confirmation of every payment stay). Applied to the embedded client
+  /// at startup and on every flip.
+  static Future<bool> trezorKeepSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_trezorKeepSessionKey) ?? true;
+  }
+
+  static Future<void> setTrezorKeepSession(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_trezorKeepSessionKey, value);
+  }
+
   static const _networkPausedKey = 'network_paused_v1';
 
   /// Whether the user has paused all of the app's network activity

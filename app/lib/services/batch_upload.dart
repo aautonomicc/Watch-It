@@ -875,6 +875,20 @@ class BatchUploadSession extends MatchReviewSession {
   /// redone. What the review page's Upload button waits for.
   bool get costKnown => !estimating && estimatedTotalAtto != null;
 
+  /// Why the wallet cannot pay for this batch as quoted, or null when it
+  /// can (or nothing is known yet, or nothing needs paying): `gas` = no
+  /// ETH for the transaction fee, `ant` = fewer storage tokens than the
+  /// estimate. Checked on the review page so a short wallet hears it
+  /// before everything is encoded and encrypted, not at the payment.
+  String? get fundsShortfall {
+    final total = estimatedTotalAtto;
+    final wallet = balances;
+    if (total == null || wallet == null || total == BigInt.zero) return null;
+    if (wallet.ethWei == BigInt.zero) return 'gas';
+    if (wallet.antAtto < total) return 'ant';
+    return null;
+  }
+
   /// Payment transactions the pooled batch is expected to need: one per
   /// 256-chunk merkle sub-batch (an upper bound — chunks already on the
   /// network only lower it). The review page says this up front so the

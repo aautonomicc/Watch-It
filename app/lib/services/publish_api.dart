@@ -156,6 +156,11 @@ class PublishApi {
   Future<void> setTrezorPassphraseMode({required bool host}) =>
       _request('POST', '/trezor/passphrase-mode', body: {'host': host});
 
+  /// Keep the Trezor's wallet session between jobs for the app run (one
+  /// passphrase entry per run, the default) or open a fresh one per job.
+  Future<void> setTrezorSessionMode({required bool keep}) =>
+      _request('POST', '/trezor/session-mode', body: {'keep': keep});
+
   /// Answer a device conversation waiting for its passphrase: hand over
   /// the string the app collected, or (onDevice) tell the device to ask
   /// on its own screen instead.
@@ -203,6 +208,7 @@ class PublishApi {
     return WalletBalances(
       antAtto: BigInt.parse(json['ant_atto'] as String),
       ethWei: BigInt.parse(json['eth_wei'] as String),
+      allowanceGranted: json['allowance_granted'] as bool?,
     );
   }
 
@@ -357,9 +363,18 @@ class GeneratedWallet {
 }
 
 class WalletBalances {
-  const WalletBalances({required this.antAtto, required this.ethWei});
+  const WalletBalances({
+    required this.antAtto,
+    required this.ethWei,
+    this.allowanceGranted,
+  });
   final BigInt antAtto;
   final BigInt ethWei;
+
+  /// Whether the network's payment contract may already move this
+  /// wallet's tokens — false means the first payment needs one extra
+  /// confirmation. Null when the core could not tell.
+  final bool? allowanceGranted;
 }
 
 class UploadEstimate {

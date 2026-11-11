@@ -186,6 +186,17 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   on, the Trezor passphrase (hidden wallet) is typed in the app instead
   of on the device — more convenient, less secure (it passes through
   this computer); some devices force on-device entry regardless.
+- Below it, "Ask for the passphrase once per app run" (2026-11-11, ON
+  by default): the hidden wallet stays open on the device until the app
+  closes or the Trezor is unplugged, so an upload followed by a backup
+  asks once; the PIN after a lock and every payment confirmation stay.
+- The batch review page (2026-11-11) warns in red when the wallet
+  cannot pay: no ETH for the fee blocks Upload; fewer ANT than the
+  estimate blocks it until "Upload anyway" (files already on the
+  network cost nothing); "Check again" re-reads the wallet. A hardware
+  wallet also reads "Your Trezor will ask for N confirmations", counting
+  the one-time allowance when it is still to be granted — which the
+  batch now asks for at the very start, before encrypting.
 - Every Trezor wait shows an app-wide explanation card WITH A CHIME
   the moment the device asks for a tap (2026-10-11): "Check your
   Trezor" (identity signature — costs nothing, setup asks twice),

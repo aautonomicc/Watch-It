@@ -243,6 +243,14 @@ async fn drive_batch(
     } else {
         None
     };
+    let wallet = signer.payment_wallet().await?;
+    // A hardware wallet grants the one-time token allowance HERE, while
+    // the user is still at the device — not after minutes of encryption
+    // and quoting, when the first payment would otherwise ask for it.
+    if _job_session.is_some() {
+        job.lock().unwrap().phase = "allowance";
+        crate::payjournal::ensure_unlimited_allowance(&wallet).await?;
+    }
 
     // ---- 1) Encrypt everything locally (free, no network) ---------------
     let spill_root = engine
@@ -309,7 +317,6 @@ async fn drive_batch(
 
     // ---- 4) Client for quoting/storing, signer for paying ----------------
     let client = engine.client().await?;
-    let wallet = signer.payment_wallet().await?;
 
     let adapter = BatchAdapter {
         spill: spill_root.clone(),

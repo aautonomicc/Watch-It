@@ -100,6 +100,10 @@ fn protected_router(engine: &'static Engine) -> Router {
         )
         // The "Stop waiting" button on the app's connect-your-Trezor
         // card: end a job's wait for a device to be plugged in.
+        .route(
+            "/trezor/session-mode",
+            post(move |body: Bytes| trezor_session_mode(body)),
+        )
         .route("/trezor/stop-waiting", post(trezor_stop_waiting))
         // Pause/resume all network use. Protected: only the app should
         // be able to silence (or wake) the user's network client.
@@ -722,6 +726,7 @@ async fn wallet_import(engine: &'static Engine, body: Bytes) -> Response {
         move || {
             // A software import replaces any hardware wallet whole — a
             // stale kept read key must not outlive its marker.
+            crate::trezor::forget_session();
             engine.trezor_keys.remove();
             engine.wallet.store(&key)
         }
@@ -745,6 +750,7 @@ async fn wallet_import(engine: &'static Engine, body: Bytes) -> Response {
 /// wallet from the live client.
 async fn wallet_delete(engine: &'static Engine) -> Response {
     let _ = tokio::task::spawn_blocking(move || {
+        crate::trezor::forget_session();
         engine.wallet.remove();
         engine.trezor_keys.remove();
     })
@@ -770,10 +776,19 @@ async fn wallet_balances(engine: &'static Engine) -> Response {
         Err(e) => return (StatusCode::BAD_REQUEST, e).into_response(),
     };
     match result {
-        Ok((ant_atto, eth_wei)) => json_ok(serde_json::json!({
-            "ant_atto": ant_atto,
-            "eth_wei": eth_wei,
-        })),
+        Ok((ant_atto, eth_wei, allowance)) => {
+            let mut json = serde_json::json!({
+                "ant_atto": ant_atto,
+                "eth_wei": eth_wei,
+            });
+            // Whether the payment contract may already move this
+            // wallet's tokens (false = the first payment needs one extra
+            // confirmation). Left out when the read failed.
+            if let Some(granted) = allowance {
+                json["allowance_granted"] = serde_json::json!(granted);
+            }
+            json_ok(json)
+        }
         Err(e) => (StatusCode::BAD_GATEWAY, e).into_response(),
     }
 }
@@ -803,7 +818,27 @@ async fn trezor_passphrase_mode(body: Bytes) -> Response {
     };
     let host = json.get("host").and_then(|v| v.as_bool()).unwrap_or(false);
     crate::trezor::host_passphrase::set(host);
+    // A kept session was opened under the old entry mode.
+    crate::trezor::forget_session();
     json_ok(serde_json::json!({ "host": host }))
+}
+
+/// `POST /trezor/session-mode` `{"keep": bool}` — keep the Trezor's
+/// wallet session between jobs for the app run (one passphrase entry per
+/// run, the default) or open a fresh one for every job.
+async fn trezor_session_mode(body: Bytes) -> Response {
+    let json: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("bad JSON: {e}")).into_response(),
+    };
+    let Some(keep) = json.get("keep").and_then(|v| v.as_bool()) else {
+        return (StatusCode::BAD_REQUEST, "body must have \"keep\": bool").into_response();
+    };
+    crate::trezor::keep_session::set(keep);
+    if !keep {
+        crate::trezor::forget_session();
+    }
+    json_ok(serde_json::json!({ "keep": keep }))
 }
 
 /// `POST /trezor/passphrase` — answer a device conversation that is
@@ -2186,6 +2221,7 @@ mod wallet_api_tests {
             ("POST", "/trezor/passphrase-mode"),
             ("POST", "/trezor/passphrase"),
             ("POST", "/trezor/stop-waiting"),
+            ("POST", "/trezor/session-mode"),
             ("POST", "/wallet/unlock"),
             ("POST", "/wallet/passphrase"),
             ("DELETE", "/wallet/passphrase"),

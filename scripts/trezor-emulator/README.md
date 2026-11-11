@@ -7,7 +7,7 @@ fake transport cannot: what the firmware actually does when it is locked,
 locks itself while a confirmation is waiting, or restarts.
 
 ```bash
-scripts/trezor-emulator/run.sh          # set up + run the seven emu_* tests (~1 min)
+scripts/trezor-emulator/run.sh          # set up + run the eight emu_* tests (~1 min)
 scripts/trezor-emulator/run.sh up       # leave the emulator running (to drive the app by hand)
 scripts/trezor-emulator/run.sh down
 ```

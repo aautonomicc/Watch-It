@@ -484,25 +484,20 @@ pub fn address_of(key_hex: &str) -> Result<String, String> {
 /// network — works while the ant client is still connecting. The wallet
 /// object comes from the signer seam (signer.rs) like every other
 /// evmlib wallet in the app.
-pub async fn balances(key_hex: &str) -> Result<(String, String), String> {
-    let wallet = crate::signer::Signer::software(key_hex)?
-        .payment_wallet()
-        .await?;
-    let ant = wallet
-        .balance_of_tokens()
-        .await
-        .map_err(|e| format!("ANT balance query failed: {e}"))?;
-    let eth = wallet
-        .balance_of_gas_tokens()
-        .await
-        .map_err(|e| format!("ETH balance query failed: {e}"))?;
-    Ok((ant.to_string(), eth.to_string()))
+pub async fn balances(key_hex: &str) -> Result<(String, String, Option<bool>), String> {
+    balances_of_address(&address_of(key_hex)?).await
 }
 
 /// Balances for an ADDRESS alone — the hardware-wallet path, where no
 /// key exists to build a signing wallet from. Same RPC the signing
 /// variant uses, via evmlib's free functions.
-pub async fn balances_of_address(address: &str) -> Result<(String, String), String> {
+///
+/// The third value says whether the payment vault already holds a token
+/// allowance from this wallet (`None` when that read failed) — without
+/// one, the first payment asks for an extra confirmation.
+pub async fn balances_of_address(
+    address: &str,
+) -> Result<(String, String, Option<bool>), String> {
     let account: ant_core::data::EvmAddress = address
         .trim()
         .parse()
@@ -514,7 +509,12 @@ pub async fn balances_of_address(address: &str) -> Result<(String, String), Stri
     let eth = evmlib::wallet::balance_of_gas_tokens(account, &network)
         .await
         .map_err(|e| format!("ETH balance query failed: {e}"))?;
-    Ok((ant.to_string(), eth.to_string()))
+    let allowance =
+        evmlib::wallet::token_allowance(&network, account, *network.payment_vault_address())
+            .await
+            .ok()
+            .map(|granted| granted >= (evmlib::common::U256::MAX >> 1));
+    Ok((ant.to_string(), eth.to_string(), allowance))
 }
 
 #[cfg(test)]

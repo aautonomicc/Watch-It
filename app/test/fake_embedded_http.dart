@@ -125,6 +125,13 @@ class FakeEmbeddedHttp extends HttpOverrides {
   String antAtto = '1500000000000000000';
   String ethWei = '20000000000000000';
 
+  /// `allowance_granted` in the balances reply; null leaves it out (an
+  /// older core).
+  bool? allowanceGranted;
+
+  /// What `POST /trezor/session-mode` last set.
+  bool? trezorKeepSessionMode;
+
   /// Responses `GET /upload/<id>` plays back, in order (the last one
   /// repeats). Empty → the job reports done immediately with its result.
   /// Replayed from the start for every new `POST /upload`.
@@ -398,6 +405,11 @@ class FakeEmbeddedHttp extends HttpOverrides {
       final json = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
       trezorHostPassphraseMode = json['host'] as bool? ?? false;
       return (200, utf8.encode(jsonEncode({'host': trezorHostPassphraseMode})));
+    }
+    if (method == 'POST' && path == '/trezor/session-mode') {
+      final json = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
+      trezorKeepSessionMode = json['keep'] as bool?;
+      return (200, utf8.encode(jsonEncode({'keep': trezorKeepSessionMode})));
     }
     if (method == 'POST' && path == '/trezor/passphrase') {
       final json = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
@@ -860,7 +872,11 @@ class FakeEmbeddedHttp extends HttpOverrides {
       }
       return (
         200,
-        utf8.encode(jsonEncode({'ant_atto': antAtto, 'eth_wei': ethWei}))
+        utf8.encode(jsonEncode({
+          'ant_atto': antAtto,
+          'eth_wei': ethWei,
+          'allowance_granted': ?allowanceGranted,
+        }))
       );
     }
     return (404, const <int>[]);

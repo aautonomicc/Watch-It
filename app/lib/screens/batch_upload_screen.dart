@@ -88,6 +88,11 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
   WalletStatus? _wallet;
   List<PreviousBatch> _previous = [];
   bool _rights = false;
+
+  /// The user chose to upload although the wallet looks short of the
+  /// estimate (files already on the network cost nothing, so the real
+  /// bill can be lower).
+  bool _fundsOverride = false;
   late BatchStage _lastStage = _session.stage;
 
   @override
@@ -912,6 +917,16 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
                           'payment transactions (one per ~1 GB of chunks)',
                   style: TextStyle(color: t.boneDim, fontSize: 12),
                 ),
+                if (wallet?.isHardware ?? false) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    trezorConfirmationsLine(
+                      _session.estimatedPayments!,
+                      _session.balances?.allowanceGranted,
+                    ),
+                    style: TextStyle(color: t.accent, fontSize: 12),
+                  ),
+                ],
               ],
               if (_session.balances != null) ...[
                 const SizedBox(height: 4),
@@ -957,6 +972,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
         )
       else if (ready > 0)
         _quotePendingRow(t),
+      ..._fundsWarning(t),
       const SizedBox(height: 12),
       if (wallet != null && !wallet.configured)
         Row(
@@ -1016,7 +1032,8 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
         onPressed: ready > 0
             ? (_rights &&
                     (wallet?.configured ?? false) &&
-                    _session.costKnown
+                    _session.costKnown &&
+                    _fundsAllow
                 ? _session.startUpload
                 : null)
             : _session.dedupCount > 0
@@ -1035,6 +1052,65 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       TextButton(
         onPressed: _session.clear,
         child: Text('Discard upload', style: TextStyle(color: t.ash)),
+      ),
+    ];
+  }
+
+  /// Upload may go ahead as far as the wallet's funds are concerned: no
+  /// ETH for the fee always blocks; short storage tokens block until the
+  /// user says "upload anyway".
+  bool get _fundsAllow => switch (_session.fundsShortfall) {
+        null => true,
+        'ant' => _fundsOverride,
+        _ => false,
+      };
+
+  /// The wallet cannot cover this batch as quoted — said on the review
+  /// page, before anything is encoded, encrypted or confirmed.
+  List<Widget> _fundsWarning(WiTokens t) {
+    final shortfall = _session.fundsShortfall;
+    final total = _session.estimatedTotalAtto;
+    final balances = _session.balances;
+    if (shortfall == null || total == null || balances == null) {
+      return const [];
+    }
+    final gas = shortfall == 'gas';
+    return [
+      const SizedBox(height: 12),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.warning_amber_rounded, color: t.rust, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              gas
+                  ? 'The wallet has no ETH (on Arbitrum) for the '
+                      'transaction fee, so the payment cannot be sent. Add '
+                      'a little ETH to the wallet, then check again.'
+                  : 'The wallet holds ${formatUnits(balances.antAtto)} ANT '
+                      'but this upload is estimated at '
+                      '≈${formatUnits(total)} ANT. Add ANT to the wallet, '
+                      'then check again. Files already on the network cost '
+                      'nothing, so the real cost can be lower.',
+              style: TextStyle(color: t.rust, fontSize: 13, height: 1.4),
+            ),
+          ),
+        ],
+      ),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          if (!gas && !_fundsOverride)
+            TextButton(
+              onPressed: () => setState(() => _fundsOverride = true),
+              child: Text('Upload anyway', style: TextStyle(color: t.ash)),
+            ),
+          TextButton(
+            onPressed: _session.refreshEstimate,
+            child: Text('Check again', style: TextStyle(color: t.accent)),
+          ),
+        ],
       ),
     ];
   }
@@ -1288,6 +1364,7 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
         ? 'Encoding · ${(encoding * 100).round()}%'
         : switch (phase) {
             'starting' => 'Starting upload…',
+            'allowance' => 'Checking the wallet may pay for storage…',
             'encrypting' =>
               'Encrypting files${total > 0 ? ' ($done of $total)' : '…'}',
             'quoting' =>
@@ -1330,14 +1407,18 @@ class _BatchUploadScreenState extends State<BatchUploadScreen> {
       ),
       const SizedBox(height: 8),
       Text(label, style: TextStyle(color: t.boneDim, fontSize: 13)),
-      if (phase == 'paying' && (_wallet?.isHardware ?? false))
+      if ((phase == 'paying' || phase == 'allowance') &&
+          (_wallet?.isHardware ?? false))
         Padding(
           padding: const EdgeInsets.only(top: 6),
           child: Text(
-            'Confirm each payment on your Trezor — it must stay plugged in '
-            'and unlocked. The very first payment from this wallet asks for '
-            'one extra confirmation: a one-time spending allowance for the '
-            'network\'s payment contract.',
+            phase == 'allowance'
+                ? 'The first time this wallet pays, your Trezor asks for '
+                    'one confirmation up front: a one-time spending '
+                    'allowance for the network\'s payment contract. Nothing '
+                    'is spent by it.'
+                : 'Confirm each payment on your Trezor — it must stay '
+                    'plugged in and unlocked.',
             style: TextStyle(color: t.accent, fontSize: 12.5),
           ),
         ),
@@ -1721,4 +1802,21 @@ String locateFfprobeBin() {
   final ext = Platform.isWindows ? '.exe' : '';
   final bundled = '$exeDir${Platform.pathSeparator}ffprobe$ext';
   return File(bundled).existsSync() ? bundled : 'ffprobe';
+}
+
+/// How many confirmations the Trezor will ask for: one per payment, plus
+/// the one-time spending allowance when the wallet has not granted it
+/// ([allowanceGranted] null = the core could not tell).
+String trezorConfirmationsLine(int payments, bool? allowanceGranted) {
+  final count = payments + (allowanceGranted == false ? 1 : 0);
+  final about = payments == 1 ? '' : 'about ';
+  final base = 'Your Trezor will ask for $about$count '
+      '${count == 1 ? 'confirmation' : 'confirmations'}';
+  return switch (allowanceGranted) {
+    false => '$base — a one-time spending allowance first, then one per '
+        'payment.',
+    true => payments == 1 ? '$base.' : '$base — one per payment.',
+    null => '$base${payments == 1 ? '' : ' — one per payment'}, plus one '
+        'more the first time this wallet pays.',
+  };
 }

@@ -1408,6 +1408,14 @@ decision (2026-10-10).
       Trezor backup completed inside the user's two-device round trip
       (payments landed after a few attempts — the upstream 5 s
       broadcast-timeout class; evmlib#21/#22 remain open).
+- [x] Upload path tidy-ups for hardware wallets (2026-11-11, unreleased):
+  the batch grants the one-time spending allowance right after the
+  Trezor session opens instead of after encryption and quoting; the
+  review page blocks an upload the wallet cannot pay for (no ETH for the
+  fee; fewer ANT than the estimate, with "Upload anyway") and says how
+  many Trezor confirmations are coming; the passphrase is asked once per
+  app run (Settings → Wallet switch, on by default) instead of once per
+  upload or backup.
 - [x] Sign-once batch payments (alpha.129): the
       first live Trezor BATCH payment looped — confirm on the device,
       then asked to confirm again, without end. evmlib's legacy

@@ -60,6 +60,7 @@ class _WalletScreenState extends State<WalletScreen> {
   /// device. Loaded from the stored preference; the toggle posts the
   /// mode to the embedded client AND persists it.
   bool _hostPassphrase = false;
+  bool _keepSession = true;
 
   /// Passphrase-locked wallet: the unlock field's state.
   final _unlockController = TextEditingController();
@@ -93,7 +94,13 @@ class _WalletScreenState extends State<WalletScreen> {
       _syncProbeTimer(status);
       if (status.isHardware) {
         final host = await AppSettings.trezorHostPassphrase();
-        if (mounted) setState(() => _hostPassphrase = host);
+        final keep = await AppSettings.trezorKeepSession();
+        if (mounted) {
+          setState(() {
+            _hostPassphrase = host;
+            _keepSession = keep;
+          });
+        }
       }
       if (status.configured && !status.locked) await _loadBalances();
     } catch (e) {
@@ -311,6 +318,16 @@ class _WalletScreenState extends State<WalletScreen> {
     await AppSettings.setTrezorHostPassphrase(value);
     try {
       await _api.setTrezorPassphraseMode(host: value);
+    } catch (e) {
+      if (mounted) _errorSnack('$e');
+    }
+  }
+
+  Future<void> _setKeepSession(bool value) async {
+    setState(() => _keepSession = value);
+    await AppSettings.setTrezorKeepSession(value);
+    try {
+      await _api.setTrezorSessionMode(keep: value);
     } catch (e) {
       if (mounted) _errorSnack('$e');
     }
@@ -587,6 +604,27 @@ class _WalletScreenState extends State<WalletScreen> {
                 'here instead of on the device. More convenient, but less '
                 'secure — the passphrase passes through this computer. Off '
                 'by default; some devices force on-device entry regardless.',
+                style: TextStyle(color: t.ash, fontSize: 11.5, height: 1.35),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 16, 0),
+            child: SwitchListTile(
+              value: _keepSession,
+              onChanged: _setKeepSession,
+              contentPadding: const EdgeInsets.only(left: 8),
+              title: Text(
+                'Ask for the passphrase once per app run',
+                style: TextStyle(color: t.bone, fontSize: 13.5),
+              ),
+              subtitle: Text(
+                'If your Trezor uses a passphrase, W@tch keeps the hidden '
+                'wallet open on the device until you close the app or '
+                'unplug the Trezor, so an upload followed by a backup asks '
+                'for it once. The PIN after a lock and the confirmation of '
+                'every payment stay. Turn off to be asked at the start of '
+                'every upload and backup.',
                 style: TextStyle(color: t.ash, fontSize: 11.5, height: 1.35),
               ),
             ),

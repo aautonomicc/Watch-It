@@ -203,6 +203,27 @@ pub mod host_passphrase {
     }
 }
 
+/// Keep the Trezor's wallet session for the whole app run (the app's
+/// preference, on by default): the next job reuses the session the last
+/// one opened, so the passphrase is entered once per app run instead of
+/// once per job. The device still asks for its PIN after it locks, and
+/// every payment still needs its physical confirmation. Only the
+/// session id is held, in memory — never the passphrase; unplugging the
+/// device ends the session whatever this says.
+pub mod keep_session {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static ENABLED: AtomicBool = AtomicBool::new(true);
+
+    pub fn set(on: bool) {
+        ENABLED.store(on, Ordering::Relaxed);
+    }
+
+    pub fn enabled() -> bool {
+        ENABLED.load(Ordering::Relaxed)
+    }
+}
+
 /// The channel a blocked device conversation waits on for the passphrase
 /// the app collects — and the routes the app POSTs it through.
 ///
@@ -885,6 +906,20 @@ mod device {
     static JOB_SESSION: std::sync::Mutex<Option<std::sync::Arc<OwnTrezorSigner>>> =
         std::sync::Mutex::new(None);
 
+    /// The session the last job opened, kept between jobs while
+    /// [`super::keep_session`] is on. Only a new job picks it up (after a
+    /// live address check) — the presence probe and the setup ceremony
+    /// never do.
+    static KEPT_SESSION: std::sync::Mutex<Option<std::sync::Arc<OwnTrezorSigner>>> =
+        std::sync::Mutex::new(None);
+
+    /// Drop the kept session: the wallet changed, the passphrase-entry
+    /// preference changed, or keeping was switched off. The next job
+    /// opens a fresh one.
+    pub fn forget_session() {
+        *KEPT_SESSION.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    }
+
     /// Guard handed to the job that opened the session; dropping it (job
     /// end, success or failure) closes the reuse window. A newer session
     /// is never clobbered by an older guard's drop.
@@ -1422,7 +1457,9 @@ mod device {
     /// device asks for its PIN and a passphrase-protected one for its
     /// passphrase — once (on the device, or in the app when host entry is
     /// on), covering the identity derive and every payment signature of
-    /// the whole job. A device that is not plugged in is waited for, with
+    /// the whole job — and, while [`super::keep_session`] is on, of every
+    /// later job of this app run, which reuse the session after a live
+    /// address check. A device that is not plugged in is waited for, with
     /// the app saying so. Refuses a device whose address is not the
     /// configured one — before any encrypt/quote work.
     pub async fn begin_job_session(
@@ -1430,18 +1467,52 @@ mod device {
     ) -> Result<TrezorJobSession, String> {
         let expected = expected_address.to_lowercase();
         let _attention = super::attention::begin("unlock-wallet");
-        let signer = with_fresh_signer(Wait::Patient, move |s| async move {
-            let found = signer_address(&s);
+        let different_wallet = |found: &str| {
+            format!(
+                "this Trezor holds a different wallet ({found}) than the \
+                 one configured — if the device uses a passphrase, open \
+                 the same hidden wallet it was set up with, then try again"
+            )
+        };
+        let keep = super::keep_session::enabled();
+        // The session an earlier job left open, when it was opened for
+        // this same wallet. Taken out of the slot: it goes back only
+        // once the device has proved it still answers as that wallet.
+        let kept = KEPT_SESSION
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+            .filter(|s| keep && signer_address(s).to_lowercase() == expected);
+        let signer = if let Some(kept) = kept {
+            // A LIVE read on the kept session: silent while the device
+            // still knows it (PIN pad first if it locked). A device that
+            // was replugged starts a new session here and asks for the
+            // passphrase once more — the wrong hidden wallet is refused.
+            let guard = DEVICE_LOCK.lock().await;
+            let s = kept.clone();
+            let found = tokio::task::spawn_blocking(move || {
+                let _guard = guard;
+                s.get_address(Wait::Patient)
+            })
+            .await
+            .map_err(|e| format!("Trezor task failed: {e}"))??;
             if found.to_lowercase() != expected {
-                return Err(format!(
-                    "this Trezor holds a different wallet ({found}) than the \
-                     one configured — if the device uses a passphrase, open \
-                     the same hidden wallet it was set up with, then try again"
-                ));
+                return Err(different_wallet(&found));
             }
-            Ok(s)
-        })
-        .await?;
+            kept
+        } else {
+            with_fresh_signer(Wait::Patient, move |s| async move {
+                let found = signer_address(&s);
+                if found.to_lowercase() != expected {
+                    return Err(different_wallet(&found));
+                }
+                Ok(s)
+            })
+            .await?
+        };
+        if keep {
+            *KEPT_SESSION.lock().unwrap_or_else(|p| p.into_inner()) = Some(signer.clone());
+        }
         *JOB_SESSION.lock().unwrap_or_else(|p| p.into_inner()) = Some(signer.clone());
         Ok(TrezorJobSession { signer })
     }
@@ -2478,6 +2549,8 @@ mod device {
         /// A freshly set-up device (unlocked, PIN 1234, passphrase
         /// protection, 10 s auto-lock), whatever the last test left.
         fn fresh_device() {
+            // Each test stands for its own app run.
+            forget_session();
             ctl(&["setup", "10"]);
         }
 
@@ -2706,6 +2779,37 @@ mod device {
             assert_eq!(app.passphrases(), 2, "a restarted device forgets its sessions");
         }
 
+        /// Two jobs in one app run (an upload, then a backup): the second
+        /// reuses the session the first opened — the passphrase is asked
+        /// once, and the second job's payment signs. With keeping
+        /// switched off, the next job asks again.
+        #[tokio::test(flavor = "multi_thread")]
+        #[ignore]
+        async fn emu_the_next_job_reuses_the_kept_session() {
+            fresh_device();
+            let app = App::start();
+            let _human = operator(&[]);
+            drop(begin_job_session(ADDRESS).await.expect("first job opens"));
+            assert_eq!(app.passphrases(), 1);
+            {
+                let _second = begin_job_session(ADDRESS).await.expect("second job opens");
+                assert_eq!(app.passphrases(), 1, "the kept session needs no passphrase");
+                let (tx, hash) = payment(7);
+                let sig = sign_payment_job(wallet(), OwnedTx::Eip1559(tx), hash)
+                    .await
+                    .expect("signed on the kept session");
+                assert!(super::super::verify_payment_signature(&hash, &sig, wallet()).is_ok());
+            }
+            assert_eq!(app.passphrases(), 1);
+            // A different configured wallet never picks the session up.
+            assert!(begin_job_session(&Address::repeat_byte(1).to_string()).await.is_err());
+            super::super::keep_session::set(false);
+            let third = begin_job_session(ADDRESS).await;
+            super::super::keep_session::set(true);
+            third.expect("third job opens");
+            assert_eq!(app.passphrases(), 3, "not kept: each job asks");
+        }
+
         /// A pooled batch payment carries several KB of calldata, which
         /// the firmware loads in chunks and confirms part-way through
         /// (the "Communication with your connected device failed" case
@@ -2781,6 +2885,7 @@ mod device_stub {
     pub async fn derive_write_keys(_expected_address: &str) -> Result<BackupKeys, String> {
         Err(UNSUPPORTED.into())
     }
+    pub fn forget_session() {}
     /// Job-session guard stub — no device conversation exists here.
     pub struct TrezorJobSession;
     pub async fn begin_job_session(
@@ -3261,6 +3366,17 @@ mod tests {
     }
 
     /// Host-passphrase toggle: off by default, flips with set().
+    /// Keeping the session is the default; the app's switch turns it
+    /// off and back on.
+    #[test]
+    fn keep_session_defaults_on_and_toggles() {
+        assert!(keep_session::enabled());
+        keep_session::set(false);
+        assert!(!keep_session::enabled());
+        keep_session::set(true);
+        assert!(keep_session::enabled());
+    }
+
     #[test]
     fn host_passphrase_toggle() {
         host_passphrase::set(false);

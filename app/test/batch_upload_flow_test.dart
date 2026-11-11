@@ -2321,4 +2321,105 @@ entries:
     expect(find.textContaining('estimated cost'), findsOneWidget);
     expect(uploadButton().onPressed, isNotNull);
   });
+
+  testWidgets('review page: a wallet that cannot pay is told before the '
+      'upload starts — no ETH blocks, short ANT blocks until "Upload '
+      'anyway", a topped-up wallet unlocks on "Check again"', (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    resetBatchResumeOffer();
+    final src = mediaFile('funds-src.mp4', 95);
+    final root = dirIn('root-funds');
+    final cut = Directory('${root.path}/cut')..createSync();
+    File('${cut.path}/watchit-manifest.yaml').writeAsStringSync('''
+version: 1
+list_name: "Funds"
+created: "2026-09-02T12:00:00"
+entries:
+  - source: "${src.path}"
+    status: "ready"
+    name: "Short (2001).mp4"
+    size_bytes: 64
+''');
+    batchResumeRootOverride = () async => root;
+    addTearDown(() => batchResumeRootOverride = null);
+    fake.wallet = {
+      'configured': true,
+      'address': '0xabc',
+      'storage': 'file',
+      'kind': 'trezor',
+    };
+    final richAnt = fake.antAtto;
+    final richEth = fake.ethWei;
+    addTearDown(() {
+      fake.antAtto = richAnt;
+      fake.ethWei = richEth;
+      fake.allowanceGranted = null;
+    });
+    fake.antAtto = '1';
+    fake.allowanceGranted = false;
+    BatchUploadSession.instance.probeOverride = (path) async => null;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+      home: _ResumeHost(configDir: dirIn('config-funds')),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue upload'));
+    await tester.pumpAndSettle();
+    final session = BatchUploadSession.instance;
+    expect(session.stage, BatchStage.review);
+    expect(session.fundsShortfall, 'ant');
+
+    FilledButton uploadButton() => tester.widget<FilledButton>(find.ancestor(
+        of: find.text('Upload'),
+        matching: find.byWidgetPredicate((w) => w is FilledButton)));
+
+    // A hardware wallet hears how many confirmations are coming.
+    expect(
+        find.textContaining('Your Trezor will ask for 2 confirmations'),
+        findsOneWidget);
+
+    await tester.tap(find.byType(CheckboxListTile));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('this upload is estimated at'), findsOneWidget);
+    expect(uploadButton().onPressed, isNull);
+    await tester.tap(find.text('Upload anyway'));
+    await tester.pumpAndSettle();
+    expect(uploadButton().onPressed, isNotNull);
+
+    // No ETH for the fee: nothing can be sent, so no override either.
+    fake.ethWei = '0';
+    await tester.tap(find.text('Check again'));
+    await tester.pumpAndSettle();
+    expect(session.fundsShortfall, 'gas');
+    expect(find.textContaining('has no ETH'), findsOneWidget);
+    expect(find.text('Upload anyway'), findsNothing);
+    expect(uploadButton().onPressed, isNull);
+
+    // Topped up: the warning goes and Upload unlocks.
+    fake.antAtto = richAnt;
+    fake.ethWei = richEth;
+    fake.allowanceGranted = true;
+    await tester.tap(find.text('Check again'));
+    await tester.pumpAndSettle();
+    expect(session.fundsShortfall, isNull);
+    expect(find.text('Check again'), findsNothing);
+    expect(find.textContaining('Your Trezor will ask for 1 confirmation.'),
+        findsOneWidget);
+    expect(uploadButton().onPressed, isNotNull);
+  });
+
+  test('trezorConfirmationsLine counts payments and the one-time allowance',
+      () {
+    expect(trezorConfirmationsLine(1, true),
+        'Your Trezor will ask for 1 confirmation.');
+    expect(trezorConfirmationsLine(1, false),
+        startsWith('Your Trezor will ask for 2 confirmations — a one-time'));
+    expect(trezorConfirmationsLine(3, true),
+        'Your Trezor will ask for about 3 confirmations — one per payment.');
+    expect(trezorConfirmationsLine(1, null),
+        contains('1 confirmation, plus one more the first time'));
+  });
 }

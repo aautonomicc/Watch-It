@@ -92,6 +92,8 @@ Future<void> main() async {
   // before the Wallet screen is ever opened, so set it here at launch.
   unawaited(AppSettings.trezorHostPassphrase().then(
       (host) => PublishApi().setTrezorPassphraseMode(host: host).catchError((_) {})));
+  unawaited(AppSettings.trezorKeepSession().then(
+      (keep) => PublishApi().setTrezorSessionMode(keep: keep).catchError((_) {})));
   // Background online/offline tracking for Play gating and the Up-next
   // chain (browsing itself is never gated).
   ConnectivityMonitor.instance.start();

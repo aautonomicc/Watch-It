@@ -123,6 +123,28 @@ void main() {
       expect(prefs.getBool('trezor_host_passphrase_v1'), isTrue);
     });
 
+    testWidgets('the once-per-app-run passphrase switch is on by default; '
+        'turning it off posts the session mode and persists', (tester) async {
+      fake.trezorError = null;
+      await openWallet(tester);
+      await tester.tap(find.text('Connect a hardware wallet (Trezor)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Connect'));
+      await tester.pumpAndSettle();
+
+      final sw = find.widgetWithText(
+          SwitchListTile, 'Ask for the passphrase once per app run');
+      await tester.scrollUntilVisible(sw, 200,
+          scrollable: find.byType(Scrollable).first);
+      expect(tester.widget<SwitchListTile>(sw).value, isTrue);
+
+      await tester.tap(sw);
+      await tester.pumpAndSettle();
+      expect(fake.trezorKeepSessionMode, isFalse);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('trezor_keep_session_v1'), isFalse);
+    });
+
     testWidgets('a missing device surfaces the error inside the dialog',
         (tester) async {
       // Default fake state: no device.
