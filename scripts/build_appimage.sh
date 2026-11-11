@@ -29,9 +29,23 @@ CARGO="${CARGO:-$HOME/.cargo/bin/cargo}"
 CORE_LIB="$REPO_ROOT/native/watchit_core/target/release/libwatchit_core.so"
 [ -f "$CORE_LIB" ] || { echo "libwatchit_core.so missing after cargo build"; exit 1; }
 
+# Test builds: WATCHIT_PRERELEASE=v0.1.0-alpha.130-test2 names the build
+# without bumping the pubspec. The app shows it (with the commit and build
+# time) in a bar on the home screen, and the AppImage is named after it.
+DEFINES=()
+if [ -n "${WATCHIT_PRERELEASE:-}" ]; then
+  DEFINES+=(
+    "--dart-define=WATCHIT_PRERELEASE=$WATCHIT_PRERELEASE"
+    "--dart-define=WATCHIT_BASE_VERSION=v$VERSION"
+    "--dart-define=WATCHIT_COMMIT=$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
+    "--dart-define=WATCHIT_BUILT=$(date -u '+%Y-%m-%d %H:%M UTC')"
+  )
+  VERSION="${WATCHIT_PRERELEASE#v}"
+fi
+
 # Extra args (e.g. --dart-define=TMDB_API_KEY=…) pass through to flutter build.
 cd "$APP_DIR"
-flutter build linux --release "$@"
+flutter build linux --release "${DEFINES[@]}" "$@"
 cp "$CORE_LIB" "$BUNDLE/lib/"
 
 STAGE="$(mktemp -d)"

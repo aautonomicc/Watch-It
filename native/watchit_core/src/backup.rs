@@ -31,14 +31,17 @@
 //! head chunk → manifest → objects. Writing is paid from the upload
 //! wallet, so backups only run on a wallet-holding device.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use ant_core::data::client::upload::UploadRecord;
+use ant_core::data::client::upload_state::UploadState;
+use ant_core::data::error::Error as AntError;
 use ant_core::data::{
     ml_dsa_65, pointer_address, DataMap, MlDsaPublicKey, MlDsaSecretKey,
-    PointerTarget, PointerTargetKind,
+    PaymentMode, PointerTarget, PointerTargetKind,
 };
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
@@ -373,8 +376,8 @@ impl BackupState {
 pub struct JobState {
     /// "backup" | "restore"
     pub kind: &'static str,
-    /// deriving → packing → uploading → manifest → head → pointer → done
-    /// (backup); deriving → locating → fetching → importing → done
+    /// deriving → (trezor → allowance) → packing → quoting → paying →
+    /// storing → pointer → done (backup); deriving → locating → fetching → importing → done
     /// (restore); either ends in `error`.
     pub phase: String,
     pub done: usize,
@@ -403,6 +406,11 @@ pub struct BackupManager {
     state_path: Option<PathBuf>,
     job: Mutex<Option<Arc<Mutex<JobState>>>>,
     active: AtomicBool,
+    /// A hardware wallet's derived write keys, kept IN MEMORY for the app
+    /// run (never on disk — the settled key policy) so only the first
+    /// backup after launch asks the device for the identity signature.
+    /// Keyed by wallet address; dropped on any wallet change.
+    write_keys: Mutex<Option<(String, Arc<BackupKeys>)>>,
 }
 
 impl BackupManager {
@@ -413,7 +421,27 @@ impl BackupManager {
                 .map(|d| PathBuf::from(d).join("backup_state.json")),
             job: Mutex::new(None),
             active: AtomicBool::new(false),
+            write_keys: Mutex::new(None),
         }
+    }
+
+    /// Drop the in-memory write keys (wallet imported/removed, device
+    /// session settings changed).
+    pub fn forget_keys(&self) {
+        *self.write_keys.lock().unwrap() = None;
+    }
+
+    fn kept_keys(&self, address: &str, pointer: &[u8; 32]) -> Option<Arc<BackupKeys>> {
+        self.write_keys
+            .lock()
+            .unwrap()
+            .as_ref()
+            .filter(|(a, k)| a.eq_ignore_ascii_case(address) && k.pointer == *pointer)
+            .map(|(_, k)| k.clone())
+    }
+
+    fn keep_keys(&self, address: &str, keys: Arc<BackupKeys>) {
+        *self.write_keys.lock().unwrap() = Some((address.to_string(), keys));
     }
 
     pub fn job_json(&self) -> Option<serde_json::Value> {
@@ -509,6 +537,28 @@ fn set_progress(job: &Arc<Mutex<JobState>>, done: usize, total: usize) {
 }
 
 // ---- backup ------------------------------------------------------------
+
+/// How many times a backup's store/payment step is driven before the job
+/// gives up, and the pause between rounds. A round after the first never
+/// signs or pays again: it watches the journaled payment and re-sends
+/// chunks whose paid proofs it still holds.
+const PUBLISH_ROUNDS: usize = 4;
+const PUBLISH_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Self-encrypt one blob locally and stage its chunks for the pooled
+/// upload — exactly the chunks and data map `Client::data_upload` would
+/// produce, without touching the network or the wallet.
+pub(crate) fn stage_blob(
+    chunks: &mut HashMap<[u8; 32], Bytes>,
+    data: Vec<u8>,
+) -> Result<DataMap, String> {
+    let (map, encrypted) =
+        self_encryption::encrypt(Bytes::from(data)).map_err(|e| e.to_string())?;
+    for chunk in encrypted {
+        chunks.insert(ant_core::data::compute_address(&chunk.content), chunk.content);
+    }
+    Ok(map)
+}
 
 /// One object headed for the store: a label (for errors), its plaintext,
 /// and — for artwork — the file name the manifest records.
@@ -636,7 +686,25 @@ async fn drive_backup(
         set_phase(job, "trezor");
         _job_session = Some(crate::trezor::begin_job_session(&signer.address()?).await?);
     }
-    let keys = signer.backup_write_keys().await?;
+    // The write keys: a hardware wallet signs the identity message
+    // on-device (one confirmation) — once per app run while "ask for the
+    // passphrase once per app run" is on; the derived keys then stay in
+    // memory only, so later backups need just the payment confirmation.
+    let keys: Arc<BackupKeys> = if signer.is_hardware() {
+        let address = signer.address()?;
+        match engine.backups.kept_keys(&address, &signer.pointer()?) {
+            Some(kept) => kept,
+            None => {
+                let derived = Arc::new(signer.backup_write_keys().await?);
+                if crate::trezor::keep_session::enabled() {
+                    engine.backups.keep_keys(&address, derived.clone());
+                }
+                derived
+            }
+        }
+    } else {
+        Arc::new(signer.backup_write_keys().await?)
+    };
     let now_ms = chrono::Utc::now().timestamp_millis();
 
     // -- pack the objects ------------------------------------------------
@@ -719,23 +787,25 @@ async fn drive_backup(
         }
     }
 
-    // -- upload what the store does not already hold ----------------------
-    let client = crate::upload::wallet_client(engine).await?;
+    // -- encrypt everything locally: nothing is paid or sent yet ----------
+    // Every chunk of the backup — new objects, manifest, head — is known
+    // before the wallet is asked for anything, so the whole backup (the
+    // pointer included) is paid by ONE transaction (backuppay.rs).
+    let client = engine.client().await?;
+    let wallet = signer.payment_wallet().await?;
     // A hardware wallet grants the one-time token allowance here, with no
-    // signing deadline, instead of mid-backup through evmlib's 5-second
-    // send (which re-asks for a confirmation on every retry).
+    // signing deadline, while the user is still at the device.
     if _job_session.is_some() {
-        if let Some(wallet) = client.wallet() {
-            crate::payjournal::ensure_unlimited_allowance(wallet).await?;
-        }
+        set_phase(job, "allowance");
+        crate::payjournal::ensure_unlimited_allowance(&wallet).await?;
     }
     let mut state = engine
         .backups
         .state_for(&identity_fingerprint(&keys.enc));
     let total = objects.len();
-    set_phase(job, "uploading");
-    set_progress(job, 0, total);
-    let mut uploaded = 0usize;
+    set_phase(job, "packing");
+    let mut chunks = HashMap::<[u8; 32], Bytes>::new();
+    let mut new_objects = Vec::<(String, (String, u64))>::new();
     let mut manifest_objects = serde_json::Map::new();
     let mut doc_hash = String::new();
     let mut maps_hash: Option<String> = None;
@@ -749,17 +819,12 @@ async fn drive_backup(
             None => {
                 let (sealed_hash, ciphertext) = seal_object(&keys.enc, &obj.plain);
                 debug_assert_eq!(sealed_hash, hash);
-                let result = client
-                    .data_upload(Bytes::from(ciphertext))
-                    .await
-                    .map_err(|e| format!("uploading {} failed: {e}", obj.label))?;
-                let map_bytes = rmp_serde::to_vec(&result.data_map)
+                let map = stage_blob(&mut chunks, ciphertext)
+                    .map_err(|e| format!("packing {} failed: {e}", obj.label))?;
+                let map_bytes = rmp_serde::to_vec(&map)
                     .map_err(|e| format!("map encode failed: {e}"))?;
-                uploaded += 1;
                 let entry = (B64.encode(map_bytes), obj.plain.len() as u64);
-                state.objects.insert(hash.clone(), entry.clone());
-                // Save after every upload: a crashed backup resumes free.
-                engine.backups.save_state(&state);
+                new_objects.push((hash.clone(), entry.clone()));
                 entry
             }
         };
@@ -774,11 +839,9 @@ async fn drive_backup(
             (None, 0) => doc_hash = hash.clone(),
             (None, _) => maps_hash = Some(hash.clone()),
         }
-        set_progress(job, i + 1, total);
     }
+    let uploaded = new_objects.len();
 
-    // -- manifest → head chunk → pointer ----------------------------------
-    set_phase(job, "manifest");
     let manifest = serde_json::json!({
         "v": 1,
         "created_ms": now_ms,
@@ -791,16 +854,12 @@ async fn drive_backup(
         &keys.enc,
         &serde_json::to_vec(&manifest).map_err(|e| e.to_string())?,
     );
-    let manifest_map = client
-        .data_upload(Bytes::from(manifest_ct))
-        .await
-        .map_err(|e| format!("uploading the backup manifest failed: {e}"))?
-        .data_map;
+    let manifest_map = stage_blob(&mut chunks, manifest_ct)
+        .map_err(|e| format!("packing the backup manifest failed: {e}"))?;
     let manifest_map_b64 = B64.encode(
         rmp_serde::to_vec(&manifest_map).map_err(|e| e.to_string())?,
     );
 
-    set_phase(job, "head");
     let prev = state
         .last
         .as_ref()
@@ -819,24 +878,42 @@ async fn drive_backup(
         "prev": prev,
         "backups": backups_count,
     });
-    let head_ct = seal_envelope(
+    let head_ct = Bytes::from(seal_envelope(
         &keys.enc,
         &serde_json::to_vec(&head).map_err(|e| e.to_string())?,
-    );
-    let head_addr = client
-        .chunk_put(Bytes::from(head_ct))
-        .await
-        .map_err(|e| format!("storing the backup head failed: {e}"))?;
+    ));
+    if head_ct.len() > ant_core::data::MAX_CHUNK_SIZE {
+        return Err("the backup head does not fit one chunk".into());
+    }
+    let head_addr = ant_core::data::compute_address(&head_ct);
+    chunks.insert(head_addr, head_ct);
 
-    set_phase(job, "pointer");
-    client
-        .pointer_update(
-            &keys.sk,
-            &keys.pk,
-            PointerTarget::new(PointerTargetKind::Chunk, head_addr),
-        )
-        .await
-        .map_err(|e| format!("updating the backup pointer failed: {e}"))?;
+    // -- one payment, then store ------------------------------------------
+    let progress_job = job.clone();
+    let published = publish_backup(
+        &client,
+        wallet,
+        &keys,
+        chunks,
+        head_addr,
+        Box::new(move |phase, done, total| {
+            let mut s = progress_job.lock().unwrap();
+            s.phase = phase.to_string();
+            s.done = done;
+            s.total = total;
+        }),
+        || {
+            // The objects are on the network now, whatever happens to
+            // the pointer: remember them so the next backup never pays
+            // for them again.
+            for (hash, entry) in new_objects {
+                state.objects.insert(hash, entry);
+            }
+            engine.backups.save_state(&state);
+        },
+    )
+    .await?;
+    let (chunk_count, payments) = (published.chunks, published.payments);
 
     let summary = serde_json::json!({
         "ms": now_ms,
@@ -845,17 +922,149 @@ async fn drive_backup(
         "backups": backups_count,
         "objects": total,
         "uploaded": uploaded,
+        "chunks": chunk_count,
+        "payments": payments,
         "maps_missing": maps_missing,
         "skipped": skipped,
     });
     state.last = Some(summary.clone());
     engine.backups.save_state(&state);
     tracing::info!(
-        "backup #{backups_count} published: {total} objects ({uploaded} uploaded), \
-         head {}",
+        "backup #{backups_count} published: {total} objects ({uploaded} new), \
+         {chunk_count} chunks, {payments} payment(s), head {}",
         hex::encode(head_addr)
     );
     Ok(summary)
+}
+
+type ProgressFn = dyn Fn(&'static str, usize, usize) + Send + Sync;
+
+/// What [`publish_backup`] did.
+pub(crate) struct Published {
+    /// Chunks in the backup (already-stored ones included).
+    pub chunks: usize,
+    /// Wallet transactions it took.
+    pub payments: usize,
+}
+
+/// Everything that touches the network or the wallet: sign + quote the
+/// pointer for `head_addr`, pay for the staged chunks and the pointer in
+/// ONE transaction (backuppay.rs), store the chunks, then store the
+/// pointer with its share of that payment. `on_stored` runs once every
+/// chunk is on the network, before the pointer is written.
+pub(crate) async fn publish_backup(
+    client: &ant_core::data::Client,
+    wallet: ant_core::data::Wallet,
+    keys: &BackupKeys,
+    chunks: HashMap<[u8; 32], Bytes>,
+    head_addr: [u8; 32],
+    progress: Box<ProgressFn>,
+    on_stored: impl FnOnce() + Send,
+) -> Result<Published, String> {
+    // -- the pointer: signed and quoted now, paid with the chunks ---------
+    progress("quoting", 0, 0);
+    let record = client
+        .pointer_sign_update(
+            &keys.sk,
+            &keys.pk,
+            PointerTarget::new(PointerTargetKind::Chunk, head_addr),
+        )
+        .await
+        .map_err(|e| format!("preparing the backup pointer failed: {e}"))?;
+    let pointer_plan = client
+        .prepare_pointer_payment(&record)
+        .await
+        .map_err(|e| format!("quoting the backup pointer failed: {e}"))?;
+
+    let mut addrs: Vec<[u8; 32]> = chunks.keys().copied().collect();
+    addrs.sort_unstable();
+    let records: Vec<UploadRecord> = addrs
+        .iter()
+        .enumerate()
+        .map(|(index, addr)| UploadRecord {
+            address: *addr,
+            size: chunks[addr].len() as u64,
+            index,
+        })
+        .collect();
+    let chunk_count = records.len();
+    // Up to one payment wave rides a single `payForQuotes` transaction
+    // together with the pointer. A bigger backup (a first one with lots
+    // of artwork) pays its chunks through merkle batches and the pointer
+    // on its own.
+    let mode = if chunk_count <= crate::backuppay::SINGLE_PAYMENT_CHUNKS {
+        PaymentMode::Single
+    } else {
+        PaymentMode::Merkle
+    };
+    let progress: Arc<ProgressFn> = Arc::from(progress);
+    let adapter_progress = progress.clone();
+    let adapter = crate::backuppay::BackupAdapter::new(
+        wallet,
+        Arc::new(chunks),
+        Some(pointer_plan),
+        Box::new(move |phase, done, total| {
+            // Quote callbacks carry a record index, not a count.
+            if phase == "storing" {
+                adapter_progress(phase, done, total)
+            } else {
+                adapter_progress(phase, 0, 0)
+            }
+        }),
+    );
+    let mut upload_state = UploadState::default();
+    let mut round = 0;
+    loop {
+        round += 1;
+        match client
+            .upload_records(records.clone(), &mut upload_state, &adapter, mode)
+            .await
+        {
+            Ok(_) => break,
+            Err(e) => {
+                // Worth another round only when money may be in flight (a
+                // journaled payment still unresolved — the next round
+                // watches it, never signs again) or paid chunks fell
+                // short (their proofs are kept — storing again is free).
+                let retry = upload_state.pending_payment.is_some()
+                    || matches!(e, AntError::PartialUpload { .. });
+                if !retry || round >= PUBLISH_ROUNDS {
+                    return Err(format!("storing the backup failed: {e}"));
+                }
+                tracing::warn!("backup: store round {round} fell short ({e}); trying again");
+                tokio::time::sleep(PUBLISH_RETRY_DELAY).await;
+            }
+        }
+    }
+    on_stored();
+
+    // No chunk payment carried the pointer (merkle batches, or every
+    // chunk already stored): it pays on its own.
+    let mut pointer_state = UploadState::default();
+    let mut round = 0;
+    loop {
+        round += 1;
+        match adapter.pay_pointer_alone(&mut pointer_state).await {
+            Ok(()) => break,
+            Err(e) => {
+                if pointer_state.pending_payment.is_none() || round >= PUBLISH_ROUNDS {
+                    return Err(format!("paying for the backup pointer failed: {e}"));
+                }
+                tokio::time::sleep(PUBLISH_RETRY_DELAY).await;
+            }
+        }
+    }
+    let proof = adapter
+        .pointer_proof()
+        .ok_or("the backup pointer was not paid for")?
+        .map_err(|e| format!("building the pointer payment proof failed: {e}"))?;
+
+    progress("pointer", 0, 0);
+    client
+        .pointer_put_paid(&record, proof)
+        .await
+        .map_err(|e| format!("updating the backup pointer failed: {e}"))?;
+    Ok(Published { chunks: chunk_count, payments: adapter.payments() })
 }
 
 // ---- restore -------------------------------------------------------------
@@ -1386,6 +1595,54 @@ mod tests {
         let last = bad.len() - 1;
         bad[last] ^= 1;
         assert!(open_envelope(&keys.enc, &bad).is_err());
+    }
+
+    /// Local staging must produce exactly what `data_upload` would: a
+    /// data map that decrypts the staged chunks back to the blob, with
+    /// every chunk filed under its content address.
+    #[test]
+    fn staged_blobs_decrypt_from_their_own_chunks() {
+        let keys = derive_keys(KEY).unwrap();
+        let plain: Vec<u8> = (0..200_000u32).flat_map(|i| i.to_le_bytes()).collect();
+        let (_, sealed) = seal_object(&keys.enc, &plain);
+        let mut chunks = HashMap::new();
+        let map = stage_blob(&mut chunks, sealed.clone()).unwrap();
+        assert!(chunks.len() >= 3);
+        for (addr, content) in &chunks {
+            assert_eq!(*addr, ant_core::data::compute_address(content));
+        }
+        let staged: Vec<self_encryption::EncryptedChunk> = chunks
+            .values()
+            .map(|content| self_encryption::EncryptedChunk { content: content.clone() })
+            .collect();
+        let back = self_encryption::decrypt(&map, &staged).unwrap();
+        assert_eq!(back.as_ref(), sealed.as_slice());
+        // Deterministic: an unchanged object stages the identical chunks
+        // (so it is found already stored and costs nothing).
+        let mut again = HashMap::new();
+        stage_blob(&mut again, sealed).unwrap();
+        assert_eq!(
+            chunks.keys().collect::<std::collections::BTreeSet<_>>(),
+            again.keys().collect::<std::collections::BTreeSet<_>>()
+        );
+        // Too small to self-encrypt is an error, not a panic.
+        assert!(stage_blob(&mut again, vec![1, 2]).is_err());
+    }
+
+    /// The in-memory write keys answer only for the wallet and backup
+    /// line they were derived for, and are gone after a wallet change.
+    #[test]
+    fn kept_write_keys_are_bound_to_wallet_and_line() {
+        let manager = BackupManager::new(None);
+        let keys = Arc::new(derive_keys(KEY).unwrap());
+        let pointer = keys.pointer;
+        assert!(manager.kept_keys("0xAbC", &pointer).is_none());
+        manager.keep_keys("0xAbC", keys);
+        assert!(manager.kept_keys("0xabc", &pointer).is_some());
+        assert!(manager.kept_keys("0xdef", &pointer).is_none());
+        assert!(manager.kept_keys("0xabc", &[7u8; 32]).is_none());
+        manager.forget_keys();
+        assert!(manager.kept_keys("0xabc", &pointer).is_none());
     }
 
     #[test]

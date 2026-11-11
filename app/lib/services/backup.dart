@@ -158,6 +158,7 @@ class BackupStatus {
     this.last,
     this.lastIsLegacy = false,
     this.locked = false,
+    this.hardware = false,
     this.job,
   });
 
@@ -170,6 +171,7 @@ class BackupStatus {
             : null,
         lastIsLegacy: json['last_is_legacy'] as bool? ?? false,
         locked: json['locked'] as bool? ?? false,
+        hardware: json['hardware'] as bool? ?? false,
         job: json['job'] is Map<String, dynamic>
             ? BackupJob.fromJson(json['job'] as Map<String, dynamic>)
             : null,
@@ -194,6 +196,9 @@ class BackupStatus {
   /// The wallet file is passphrase-locked — unlock it (Settings → Wallet)
   /// before backups can run.
   final bool locked;
+
+  /// The wallet is a hardware wallet: a backup needs its confirmation.
+  final bool hardware;
   final BackupJob? job;
 }
 
@@ -253,8 +258,11 @@ class BackupJob {
         'deriving' => 'Preparing…',
         'trezor' => 'Confirm on your Trezor…',
         'packing' => 'Packing your library…',
-        'uploading' =>
-          'Uploading changes… ${total == 0 ? '' : '($done of $total)'}',
+        'allowance' => 'Checking the wallet may pay for storage…',
+        'quoting' => 'Getting storage quotes…',
+        'paying' => 'Paying for the backup — one payment…',
+        'storing' || 'uploading' =>
+          'Storing the backup… ${total == 0 ? '' : '($done of $total)'}',
         'manifest' || 'head' || 'pointer' => 'Finishing the backup…',
         'locating' => 'Looking up the backup…',
         'fetching' =>

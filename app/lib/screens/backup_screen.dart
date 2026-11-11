@@ -90,7 +90,8 @@ class _BackupScreenState extends State<BackupScreen> {
           'wallet. The first backup uploads everything; later backups '
           'only pay for what changed.\n\n'
           'Anyone with this wallet\'s 12 words can read the backup — '
-          'they are the key.',
+          'they are the key.'
+          '${(_status?.hardware ?? false) ? kTrezorBackupConfirmations : ''}',
           style: TextStyle(color: t.bone, fontSize: 14),
         ),
         actions: [
@@ -560,3 +561,10 @@ class _BackupScreenState extends State<BackupScreen> {
     );
   }
 }
+
+/// What a hardware-wallet backup asks of the device, said up front.
+const kTrezorBackupConfirmations =
+    '\n\nYour Trezor asks for one confirmation: the payment, which covers '
+    'the whole backup. The first backup after starting W@tch also asks '
+    'once to confirm the backup identity, and a brand-new wallet once '
+    'more to allow storage payments.';

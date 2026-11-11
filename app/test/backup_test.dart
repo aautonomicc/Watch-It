@@ -538,6 +538,46 @@ void main() {
       expect(fake.backupRunPosts, isEmpty);
     });
 
+    testWidgets('a hardware wallet is told how many confirmations a '
+        'backup needs', (tester) async {
+      for (final hardware in [true, false]) {
+        fake.backupStatus = {
+          'configured': true,
+          'hardware': hardware,
+          'pointer': 'aa' * 32,
+          'last': null,
+          'job': null,
+        };
+        final screenService = BackupService(
+          api: BackupApi(base: FakeEmbeddedHttp.base, token: 't'),
+        );
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpWidget(MaterialApp(
+          theme: wiTheme(WiTokens.dark, brightness: Brightness.dark),
+          home: BackupScreen(service: screenService),
+        ));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Back up now'));
+        await tester.pumpAndSettle();
+        expect(
+          find.textContaining('Your Trezor asks for one confirmation'),
+          hardware ? findsOneWidget : findsNothing,
+        );
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+      }
+    });
+
+    test('the one-payment job phases read as plain progress lines', () {
+      BackupJob job(String phase, {int done = 0, int total = 0}) =>
+          BackupJob.fromJson(
+              {'kind': 'backup', 'phase': phase, 'done': done, 'total': total});
+      expect(job('quoting').label, 'Getting storage quotes…');
+      expect(job('paying').label, contains('one payment'));
+      expect(job('storing', done: 3, total: 7).label, contains('(3 of 7)'));
+      expect(job('allowance').label, contains('may pay for storage'));
+    });
+
     testWidgets('never-backed-up state reads so', (tester) async {
       fake.backupStatus = {
         'configured': true,

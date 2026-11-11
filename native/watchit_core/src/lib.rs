@@ -14,6 +14,7 @@
 #![recursion_limit = "256"]
 
 pub mod backup;
+pub mod backuppay;
 pub mod batch;
 pub mod cache;
 pub mod datausage;

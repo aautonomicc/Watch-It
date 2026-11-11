@@ -102,7 +102,7 @@ fn protected_router(engine: &'static Engine) -> Router {
         // card: end a job's wait for a device to be plugged in.
         .route(
             "/trezor/session-mode",
-            post(move |body: Bytes| trezor_session_mode(body)),
+            post(move |body: Bytes| trezor_session_mode(engine, body)),
         )
         .route("/trezor/stop-waiting", post(trezor_stop_waiting))
         // Pause/resume all network use. Protected: only the app should
@@ -722,6 +722,7 @@ async fn wallet_import(engine: &'static Engine, body: Bytes) -> Response {
             // A software import replaces any hardware wallet whole — a
             // stale kept read key must not outlive its marker.
             crate::trezor::forget_session();
+            engine.backups.forget_keys();
             engine.trezor_keys.remove();
             engine.wallet.store(&key)
         }
@@ -746,6 +747,7 @@ async fn wallet_import(engine: &'static Engine, body: Bytes) -> Response {
 async fn wallet_delete(engine: &'static Engine) -> Response {
     let _ = tokio::task::spawn_blocking(move || {
         crate::trezor::forget_session();
+        engine.backups.forget_keys();
         engine.wallet.remove();
         engine.trezor_keys.remove();
     })
@@ -821,7 +823,7 @@ async fn trezor_passphrase_mode(body: Bytes) -> Response {
 /// `POST /trezor/session-mode` `{"keep": bool}` — keep the Trezor's
 /// wallet session between jobs for the app run (one passphrase entry per
 /// run, the default) or open a fresh one for every job.
-async fn trezor_session_mode(body: Bytes) -> Response {
+async fn trezor_session_mode(engine: &'static Engine, body: Bytes) -> Response {
     let json: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => return (StatusCode::BAD_REQUEST, format!("bad JSON: {e}")).into_response(),
@@ -832,6 +834,7 @@ async fn trezor_session_mode(body: Bytes) -> Response {
     crate::trezor::keep_session::set(keep);
     if !keep {
         crate::trezor::forget_session();
+        engine.backups.forget_keys();
     }
     json_ok(serde_json::json!({ "keep": keep }))
 }
