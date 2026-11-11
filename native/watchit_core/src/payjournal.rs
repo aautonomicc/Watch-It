@@ -219,10 +219,11 @@ async fn prepare(wallet: &Wallet, request: &PaymentRequest) -> Result<SignedPaym
 }
 
 /// Grant the payment vault its (unlimited, one-time) token allowance up
-/// front when the wallet has not granted it yet. For hardware wallets on
-/// the paid paths ant-core drives itself (single upload, backup): there
-/// the allowance would otherwise be requested mid-job through evmlib's
-/// deadline-bound send, re-asking for a confirmation on every retry.
+/// front when the wallet has not granted it yet. For hardware wallets:
+/// batch uploads ask before encryption instead of at the first payment,
+/// and on the backup path ant-core drives itself the allowance would
+/// otherwise be requested mid-job through evmlib's deadline-bound send,
+/// re-asking for a confirmation on every retry.
 pub async fn ensure_unlimited_allowance(wallet: &Wallet) -> Result<(), String> {
     ensure_allowance(wallet, U256::MAX >> 1).await
 }

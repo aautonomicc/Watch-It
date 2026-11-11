@@ -1,7 +1,7 @@
 //! The signer seam (hardware-wallet plan, phase 2; phase 3 adds Trezor).
 //!
 //! Everything that SIGNS — on-chain payments (merkle batch and quote
-//! payments, pointer updates, chunk puts, single-file uploads) and the
+//! payments, pointer updates, chunk puts) and the
 //! deterministic backup-identity signature — reaches the wallet key
 //! through this one type instead of passing raw key hex into ant-core.
 //!

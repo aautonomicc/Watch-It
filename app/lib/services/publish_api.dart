@@ -223,15 +223,6 @@ class PublishApi {
     );
   }
 
-  /// Start the upload; returns the job id to poll with [jobStatus].
-  Future<int> startUpload(String path, {String? name}) async {
-    final json = await _request('POST', '/upload', body: {
-      'path': path,
-      'name': ?name,
-    });
-    return json['id'] as int;
-  }
-
   /// Start the pooled batch upload — EVERY file in one paid batch, one
   /// merkle payment transaction per ≤256-chunk sub-batch instead of one+
   /// per file (the upload-all flow). Returns the job id to poll with
@@ -268,26 +259,6 @@ class PublishApi {
             chunks: f['chunks'] as int? ?? 0,
           ),
       ],
-    );
-  }
-
-  Future<UploadJob> jobStatus(int id) async {
-    final json = await _request('GET', '/upload/$id');
-    final result = json['result'] as Map<String, dynamic>?;
-    return UploadJob(
-      id: id,
-      phase: json['phase'] as String? ?? 'unknown',
-      done: json['done'] as int? ?? 0,
-      total: json['total'] as int? ?? 0,
-      error: json['error'] as String?,
-      result: result == null
-          ? null
-          : UploadResult(
-              address: result['address'] as String,
-              size: result['size'] as int? ?? 0,
-              chunks: result['chunks'] as int? ?? 0,
-              costAtto: BigInt.parse(result['cost_atto'] as String),
-            ),
     );
   }
 }
@@ -395,25 +366,6 @@ class UploadEstimate {
   bool get alreadyStored => confidence.contains('AlreadyStored');
 }
 
-class UploadJob {
-  const UploadJob({
-    required this.id,
-    required this.phase,
-    required this.done,
-    required this.total,
-    this.error,
-    this.result,
-  });
-  final int id;
-  final String phase;
-  final int done;
-  final int total;
-  final String? error;
-  final UploadResult? result;
-
-  bool get finished => phase == 'done' || phase == 'error';
-}
-
 /// `GET /upload/batch/{id}` — the pooled batch job: phase-scoped
 /// progress (encrypting counts files, quoting/storing count chunks),
 /// payment transactions done/expected, and per-file outcomes in input
@@ -460,19 +412,6 @@ class BatchUploadFile {
   final String? address;
   final int size;
   final int chunks;
-}
-
-class UploadResult {
-  const UploadResult({
-    required this.address,
-    required this.size,
-    required this.chunks,
-    required this.costAtto,
-  });
-  final String address;
-  final int size;
-  final int chunks;
-  final BigInt costAtto;
 }
 
 /// Format a raw 18-decimal base-unit amount (ANT atto / ETH wei) as a

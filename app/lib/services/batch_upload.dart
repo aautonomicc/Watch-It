@@ -126,7 +126,6 @@ class BatchUploadSession extends MatchReviewSession {
   // ── upload progress ──────────────────────────────────────────────────
   int uploadDone = 0;
   int uploadTotal = 0;
-  UploadJob? currentJob;
   String? currentUploadName;
   double? encodeFraction;
 
@@ -1085,7 +1084,6 @@ class BatchUploadSession extends MatchReviewSession {
     await _seedBundleLocally();
     await _autoAddToLibrary();
     currentUploadName = null;
-    currentJob = null;
     batchJob = null;
     encodeFraction = null;
     try {
@@ -1389,7 +1387,6 @@ class BatchUploadSession extends MatchReviewSession {
     prepareStep = null;
     hashFraction = null;
     currentUploadName = null;
-    currentJob = null;
     batchJob = null;
     encodeFraction = null;
     notifyListeners();

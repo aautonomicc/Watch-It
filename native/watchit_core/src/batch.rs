@@ -1,8 +1,8 @@
 //! Upload-all: one paid batch for many files (hardware-wallet plan,
 //! phase 0 — docs/PLAN in CLAUDE.md 2026-10-10).
 //!
-//! The per-file upload path (`upload.rs`) pays once per file — a 10-file
-//! batch is 10+ wallet transactions. This module pools EVERY chunk of the
+//! Paying once per file makes a 10-file batch 10+ wallet transactions.
+//! This module pools EVERY chunk of the
 //! whole batch into ant-core's multi-record upload driver
 //! (`Client::upload_records`), which pays one `payForMerkleTree`
 //! transaction per ≤256-chunk merkle sub-batch — so a typical batch is
@@ -18,7 +18,7 @@
 //! network, partitions the rest ≤256 per tree, pays each tree in one
 //! transaction, stores with close-group replication + retries) → store
 //! each file's root map locally so every uploaded title is instantly
-//! playable/exportable, exactly like the single-file path.
+//! playable/exportable, exactly like a `.datamap` import.
 //!
 //! Crash safety: the driver's recovery state (paid proofs, valid 7 days)
 //! checkpoints to disk after every payment and store wave, keyed by the
@@ -118,8 +118,8 @@ impl BatchJobState {
 
 impl Engine {
     /// Kick off a paid batch upload; returns the job id to poll on
-    /// `GET /upload/batch/{id}`. Shares the single active-upload slot
-    /// with `start_upload` — paid work never runs concurrently.
+    /// `GET /upload/batch/{id}`. Takes the single active-upload slot —
+    /// paid work never runs concurrently.
     pub fn start_batch_upload(
         &'static self,
         files: Vec<(PathBuf, String)>,
@@ -206,7 +206,7 @@ async fn run_batch(engine: &'static Engine, id: u64, job: Arc<Mutex<BatchJobStat
 /// One encrypted file, spilled to disk.
 struct EncryptedFile {
     /// (chunk address, size) in upload order — data chunks plus the root
-    /// map's shrink wrapper chunks, exactly what the single-file upload
+    /// map's shrink wrapper chunks, exactly what a plain `ant file upload`
     /// stores.
     chunks: Vec<([u8; 32], u64)>,
     /// Derived library address + the expanded root map to store locally.
@@ -484,8 +484,8 @@ fn load_checkpoint(path: Option<&Path>) -> UploadState {
 /// Stream-encrypt one file into the spill dir (one file per chunk, named
 /// by content address — identical chunks across files share bytes), and
 /// recover the ROOT data map locally: every chunk is on disk, so the
-/// child-map expansion that `upload.rs` does over the network happens
-/// with zero network rounds here.
+/// child-map expansion a `.datamap` import does over the network
+/// happens with zero network rounds here.
 fn encrypt_file_to_spill(spill: &Path, path: &Path) -> Result<EncryptedFile, String> {
     let file = std::fs::File::open(path).map_err(|e| format!("open failed: {e}"))?;
     let size = file
@@ -792,7 +792,7 @@ mod tests {
     }
 
     /// The spill encryption must reproduce the exact identity the
-    /// single-file upload path derives: same chunk set (incl. shrink
+    /// plain in-memory encryption derives: same chunk set (incl. shrink
     /// wrappers), same derived address, same root map.
     #[test]
     fn spill_encryption_matches_single_file_identity() {
@@ -805,7 +805,7 @@ mod tests {
 
         let enc = encrypt_file_to_spill(&spill, &src).unwrap();
 
-        // Reference identity via the in-memory path (upload.rs test idiom).
+        // Reference identity via the in-memory path (verify.rs test idiom).
         let (shrunk, ref_chunks) = self_encryption::encrypt(content.into()).unwrap();
         assert!(shrunk.is_child());
         let ref_addr =

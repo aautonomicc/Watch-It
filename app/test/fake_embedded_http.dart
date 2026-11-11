@@ -132,12 +132,8 @@ class FakeEmbeddedHttp extends HttpOverrides {
   /// What `POST /trezor/session-mode` last set.
   bool? trezorKeepSessionMode;
 
-  /// Responses `GET /upload/<id>` plays back, in order (the last one
-  /// repeats). Empty → the job reports done immediately with its result.
-  /// Replayed from the start for every new `POST /upload`.
-  final List<Map<String, dynamic>> uploadStates = [];
-  int _uploadPolls = 0;
-  int _uploadsStarted = 0;
+  /// The per-file result a batch job reports when [uploadResults] has
+  /// none for that file.
   Map<String, dynamic> uploadResult = {
     'address': 'ab' * 32,
     'size': 5,
@@ -146,8 +142,8 @@ class FakeEmbeddedHttp extends HttpOverrides {
     'gas_wei': '1000000000000',
   };
 
-  /// Per-upload results by start order (batch tests); falls back to
-  /// [uploadResult] when the list is shorter than the job id.
+  /// Per-file results in input order; falls back to [uploadResult] when
+  /// the list is shorter.
   List<Map<String, dynamic>> uploadResults = [];
 
   /// Raw bodies of every `POST /upload/batch` (the pooled upload-all
@@ -160,7 +156,7 @@ class FakeEmbeddedHttp extends HttpOverrides {
   /// repeats), reset by every new `POST /upload/batch`. Empty → the job
   /// reports done immediately: every posted file succeeds with the
   /// per-order result from [uploadResults] (falling back to
-  /// [uploadResult], like the single-upload route) — except names listed
+  /// [uploadResult]) — except names listed
   /// in [batchFailures], which come back failed with that error (and
   /// flip the job phase to error, like the real core's partial outcome).
   final List<Map<String, dynamic>> batchStates = [];
@@ -437,18 +433,6 @@ class FakeEmbeddedHttp extends HttpOverrides {
         }))
       );
     }
-    if (method == 'POST' && path == '/upload') {
-      if (wallet == null) {
-        return (
-          400,
-          utf8.encode('no upload wallet configured — set one up in '
-              'Settings → Wallet')
-        );
-      }
-      _uploadPolls = 0;
-      _uploadsStarted++;
-      return (200, utf8.encode(jsonEncode({'id': _uploadsStarted})));
-    }
     if (method == 'POST' && path == '/upload/batch') {
       if (wallet == null) {
         return (
@@ -515,32 +499,6 @@ class FakeEmbeddedHttp extends HttpOverrides {
           'cost_atto': '0',
           'gas_wei': '0',
           'files': const [],
-          ...state,
-        }))
-      );
-    }
-    if (method == 'GET' && path.startsWith('/upload/')) {
-      final id = int.parse(path.substring('/upload/'.length));
-      final result =
-          id <= uploadResults.length ? uploadResults[id - 1] : uploadResult;
-      final state = uploadStates.isEmpty
-          ? {
-              'phase': 'done',
-              'done': 1,
-              'total': 1,
-              'error': null,
-              'result': result,
-            }
-          : uploadStates[
-              _uploadPolls.clamp(0, uploadStates.length - 1)];
-      _uploadPolls++;
-      return (
-        200,
-        utf8.encode(jsonEncode({
-          'id': id,
-          'name': 'upload',
-          'done': 0,
-          'total': 0,
           ...state,
         }))
       );

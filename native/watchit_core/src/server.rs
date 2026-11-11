@@ -127,7 +127,6 @@ fn protected_router(engine: &'static Engine) -> Router {
             "/upload/estimate",
             post(move |body: Bytes| upload_estimate(engine, body)),
         )
-        .route("/upload", post(move |body: Bytes| upload_start(engine, body)))
         .route(
             "/upload/batch",
             post(move |body: Bytes| upload_batch_start(engine, body)),
@@ -135,10 +134,6 @@ fn protected_router(engine: &'static Engine) -> Router {
         .route(
             "/upload/batch/{id}",
             get(move |path: Path<u64>| upload_batch_status(engine, path)),
-        )
-        .route(
-            "/upload/{id}",
-            get(move |path: Path<u64>| upload_status(engine, path)),
         )
         // My W@tch device linking. Protected: the invite secret admits a
         // device to the user's private link, so only the app may read it.
@@ -973,40 +968,6 @@ async fn upload_estimate(engine: &'static Engine, body: Bytes) -> Response {
             "confidence": format!("{:?}", est.confidence),
         })),
         Err(e) => (StatusCode::BAD_GATEWAY, format!("estimate failed: {e}")).into_response(),
-    }
-}
-
-/// `POST /upload` `{"path": …, "name": …?}` — start the one paid upload
-/// slot; returns `{"id": N}` to poll on `GET /upload/{id}`.
-async fn upload_start(engine: &'static Engine, body: Bytes) -> Response {
-    let json: serde_json::Value = match serde_json::from_slice(&body) {
-        Ok(v) => v,
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("bad JSON: {e}")).into_response(),
-    };
-    let Some(path) = json.get("path").and_then(|v| v.as_str()) else {
-        return (StatusCode::BAD_REQUEST, "body must have \"path\"").into_response();
-    };
-    let path = std::path::PathBuf::from(path);
-    let name = json
-        .get("name")
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()))
-        .unwrap_or_default();
-    match engine.start_upload(path, name) {
-        Ok(id) => json_ok(serde_json::json!({ "id": id })),
-        Err(e) if e.contains("already running") => {
-            (StatusCode::CONFLICT, e).into_response()
-        }
-        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
-    }
-}
-
-/// `GET /upload/{id}` — current job state (phase/progress/result/error).
-async fn upload_status(engine: &'static Engine, Path(id): Path<u64>) -> Response {
-    match engine.uploads.state(id) {
-        Some(state) => json_ok(state.to_json(id)),
-        None => (StatusCode::NOT_FOUND, "no such upload job").into_response(),
     }
 }
 
@@ -2642,42 +2603,6 @@ mod wallet_api_tests {
         .await;
         assert!(!crate::datausage::usage().on_mobile());
         engine.set_paused(false);
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn upload_refused_without_wallet_and_missing_file() {
-        let app = router(test_engine("upload-guards"));
-        // No wallet configured → 400 with the settings hint.
-        let file = std::env::temp_dir().join("wi-upload-guard-test.bin");
-        std::fs::write(&file, b"hello").unwrap();
-        let (status, body) = send_auth(
-            &app,
-            "POST",
-            "/upload",
-            serde_json::json!({ "path": file.to_str().unwrap() })
-                .to_string()
-                .into_bytes(),
-            None,
-        )
-        .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert!(String::from_utf8_lossy(&body).contains("no upload wallet"));
-        // Missing file → 400 either way.
-        let (status, _) = send_auth(
-            &app,
-            "POST",
-            "/upload",
-            serde_json::json!({ "path": "/does/not/exist" })
-                .to_string()
-                .into_bytes(),
-            None,
-        )
-        .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        // Unknown job id → 404.
-        let (status, _) = send_auth(&app, "GET", "/upload/99", vec![], None).await;
-        assert_eq!(status, StatusCode::NOT_FOUND);
-        let _ = std::fs::remove_file(&file);
     }
 }
 

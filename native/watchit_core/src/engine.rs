@@ -162,7 +162,7 @@ pub struct Engine {
     /// phase-4 sharing default. The wallet store itself holds only the
     /// public marker then; the write half is never persisted anywhere.
     pub trezor_keys: crate::wallet::WalletStore,
-    /// Publish upload jobs (`POST /upload` → poll `GET /upload/{id}`).
+    /// Paid upload jobs (`POST /upload/batch` → poll `GET /upload/batch/{id}`).
     pub uploads: crate::upload::UploadManager,
     /// Seed-phrase backup / restore jobs (`POST /backup/run`,
     /// `POST /backup/restore` → poll `GET /backup`).
