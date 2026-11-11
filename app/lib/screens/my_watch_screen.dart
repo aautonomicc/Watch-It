@@ -11,11 +11,14 @@ import '../widgets/pair_dialogs.dart';
 import '../widgets/tv_dpad_focus.dart';
 import '../services/tv_settings.dart';
 
+import '../services/app_settings.dart';
 import '../services/backup_follow.dart';
 import '../services/library_store.dart';
 import '../services/low_data_mode.dart';
 import '../services/my_watch_api.dart';
 import '../services/my_watch_sync.dart';
+import '../services/network_events.dart';
+import '../services/network_pause.dart';
 import '../services/x0x_cellular.dart';
 import '../theme/tokens.dart';
 import 'qr_scan_screen.dart';
@@ -42,8 +45,10 @@ class MyWatchScreen extends StatefulWidget {
 }
 
 class _MyWatchScreenState extends State<MyWatchScreen> {
-  late final MyWatchApi _api =
-      MyWatchApi(base: widget.apiBase, token: widget.apiToken);
+  late final MyWatchApi _api = MyWatchApi(
+    base: widget.apiBase,
+    token: widget.apiToken,
+  );
 
   MyWatchStatus? _status;
   String? _error;
@@ -54,10 +59,16 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
   void initState() {
     super.initState();
     _load(announce: true);
+    // The switched-off card names offline mode when that is the cause.
+    NetworkPause.instance.ensureLoaded().then((_) {
+      if (mounted) setState(() {});
+    });
     // Records change on other devices' heartbeats; keep the view live
     // while the page is open.
     _refresh = Timer.periodic(
-        const Duration(seconds: 5), (_) => _load(quiet: true));
+      const Duration(seconds: 5),
+      (_) => _load(quiet: true),
+    );
   }
 
   @override
@@ -140,22 +151,136 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
     }
   }
 
+  Future<bool> _confirm({
+    required String title,
+    required String body,
+    required String action,
+  }) async {
+    final t = WiTokens.of(context);
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: SizedBox(
+          width: 420,
+          child: Text(body, style: TextStyle(color: t.bone, fontSize: 14)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(action),
+          ),
+        ],
+      ),
+    );
+    return sure == true;
+  }
+
+  /// Creating, joining and "Turn on" all bring the My W@tch connection
+  /// up. Two settings say the user did not want that right now — offline
+  /// mode, and Wi-Fi only while on mobile data — so those are asked
+  /// about first instead of being overridden silently. Returns false
+  /// when the user backs out.
+  Future<bool> _confirmGoingOnline() async {
+    final pause = NetworkPause.instance;
+    await pause.ensureLoaded();
+    if (!mounted) return false;
+    if (pause.paused) {
+      final ok = await _confirm(
+        title: 'Offline mode is on',
+        body:
+            'My W@tch needs the network to reach your other devices. '
+            'Turn offline mode off and continue?',
+        action: 'Go online',
+      );
+      if (!ok) return false;
+      await pause.setPaused(false);
+      if (!mounted) return false;
+    }
+    if (NetworkEvents.instance.onCellular &&
+        !await AppSettings.myWatchOnCellular()) {
+      if (!mounted) return false;
+      final ok = await _confirm(
+        title: 'Use mobile data?',
+        body:
+            'My W@tch is set to Wi-Fi only and this device is on mobile '
+            'data. Continuing connects now, and the live connection uses '
+            'a lot of data. It stays connected until this device has been '
+            'back on Wi-Fi.',
+        action: 'Continue',
+      );
+      if (!ok) return false;
+    }
+    return mounted;
+  }
+
+  /// Whether the My W@tch switch (Settings → Network → Data) is off
+  /// right now. Creating or joining a link switches it on.
+  bool get _switchedOff => _status?.enabled == false;
+
+  /// After a create/join that found the switch off: the gate must not
+  /// keep believing it holds a pause, and the user is told the switch
+  /// moved.
+  Future<void> _noteSwitchedOn() =>
+      X0xCellularGate.instance.noteManualChange(X0xAgent.myWatch);
+
+  static const _switchedOnNote = 'My W@tch was switched on.';
+
   Future<void> _createLink() async {
+    if (!await _confirmGoingOnline()) return;
     final name = await _askDeviceName('Name this device');
     if (name == null) return;
+    final wasOff = _switchedOff;
     await _runBusy(() async {
       final invite = await _api.createLink(name);
+      if (wasOff) await _noteSwitchedOn();
       await _announceLibrary();
       if (mounted) await _showInvite(invite, fresh: true);
+      if (wasOff && mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text(_switchedOnNote)));
+      }
     });
   }
 
   Future<void> _joinLink() async {
+    if (!await _confirmGoingOnline()) return;
     final result = await _askJoinDetails();
     if (result == null) return;
+    final wasOff = _switchedOff;
     await _runBusy(() async {
       await _api.joinLink(result.$1, result.$2);
+      if (wasOff) await _noteSwitchedOn();
       await _announceLibrary();
+      if (wasOff && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Joined. $_switchedOnNote')),
+        );
+      }
+    });
+  }
+
+  /// The switched-off card's button (and the invite warning's): bring
+  /// the connection up from here instead of sending the user to the
+  /// Data menu.
+  Future<void> _turnOn() async {
+    if (!await _confirmGoingOnline()) return;
+    await _runBusy(() async {
+      if (LowDataMode.instance.enabled) {
+        await LowDataMode.instance.setEnabled(false);
+        return;
+      }
+      // Leaving offline mode may already have switched it back on.
+      final now = await _api.status();
+      if (!now.enabled) {
+        await _noteSwitchedOn();
+        await _api.setEnabled(true);
+      }
     });
   }
 
@@ -168,8 +293,10 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
   /// linked phone to scan — the path for devices with a screen but no
   /// camera (TVs, desktops). Joins the EXISTING link on success.
   Future<void> _pairStart() async {
+    if (!await _confirmGoingOnline()) return;
     final name = await _askDeviceName('Name this device');
     if (name == null) return;
+    final wasOff = _switchedOff;
     await _runBusy(() async {
       final code = await _api.pairStart(name);
       if (!mounted) return;
@@ -178,10 +305,18 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
         barrierDismissible: false,
         builder: (_) => PairCodeDialog(api: _api, code: code),
       );
+      if (linked == true && wasOff) await _noteSwitchedOn();
       if (linked == true && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content:
-                Text('Linked! Syncing with your other devices starts now.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              wasOff
+                  ? 'Linked! $_switchedOnNote Syncing with your other '
+                        'devices starts now.'
+                  : 'Linked! Syncing with your other devices starts now.',
+            ),
+          ),
+        );
       }
     });
   }
@@ -193,7 +328,8 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
       MaterialPageRoute(
         builder: (_) => QrScanScreen(
           title: 'Scan pairing code',
-          hint: 'Point the camera at the pairing code shown on the '
+          hint:
+              'Point the camera at the pairing code shown on the '
               'new device (My W@tch → "Show a pairing code")',
           // Old wtchp1- codes are deliberately scannable too: the core
           // rejects them with the specific "update that device first"
@@ -215,8 +351,11 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
         builder: (_) => PairSendDialog(api: _api),
       );
       if (delivered == true && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Link sent — the new device is joining now.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Link sent — the new device is joining now.'),
+          ),
+        );
       }
     });
   }
@@ -239,8 +378,9 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel')),
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
               child: const Text('Sync'),
@@ -252,8 +392,9 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
       await _runBusy(() async {
         final summary = await LowDataMode.instance.runBurst();
         if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(summary)));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(summary)));
         }
       });
       return;
@@ -261,8 +402,9 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
     await _runBusy(() async {
       final summary = await MyWatchSync.instance.syncNow();
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(summary)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(summary)));
       }
     });
   }
@@ -285,8 +427,9 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel')),
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
               child: const Text('Turn on'),
@@ -300,6 +443,53 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
   }
 
   Future<void> _showExistingInvite() async {
+    // Off (or low-data): a device that joins with this code hears
+    // nothing from this one, which looks like a failed join.
+    if (_switchedOff) {
+      final lowData = LowDataMode.instance.enabled;
+      final t = WiTokens.of(context);
+      final choice = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('This device is not connected'),
+          content: SizedBox(
+            width: 420,
+            child: Text(
+              lowData
+                  ? 'Low-data mode keeps this device disconnected. A new '
+                        'device can still join with the code, but it receives '
+                        'nothing until this device or another linked one is '
+                        'connected.'
+                  : 'My W@tch is off on this device. A new device can '
+                        'still join with the code, but it receives nothing '
+                        'until this device or another linked one is '
+                        'connected.',
+              style: TextStyle(color: t.bone, fontSize: 14),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'show'),
+              child: const Text('Show code anyway'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, 'on'),
+              child: Text(lowData ? 'Turn off low-data mode' : 'Turn on'),
+            ),
+          ],
+        ),
+      );
+      if (choice == null || !mounted) return;
+      if (choice == 'on') {
+        await _turnOn();
+        // Backed out of a confirmation, or the switch failed.
+        if (!mounted || _switchedOff) return;
+      }
+    }
     await _runBusy(() async {
       final invite = await _api.invite();
       if (mounted) await _showInvite(invite, fresh: false);
@@ -313,13 +503,15 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Unlink this device?'),
         content: const Text(
-            'This device leaves the link and forgets its secret. Your '
-            'other devices stay linked to each other. You can join '
-            'again later with a fresh invite from one of them.'),
+          'This device leaves the link and forgets its secret. Your '
+          'other devices stay linked to each other. You can join '
+          'again later with a fresh invite from one of them.',
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: t.rust),
             onPressed: () => Navigator.pop(context, true),
@@ -357,21 +549,21 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
         onScanQr: !canScan
             ? null
             : () => Navigator.of(context).push<String>(
-                  MaterialPageRoute(
-                    builder: (_) => QrScanScreen(
-                      title: 'Scan invite',
-                      hint: 'Point the camera at the QR code shown on '
-                          'your linked device',
-                      // Old wtch1- invites scan too — the core answers
-                      // with the "update that device first" message.
-                      accept: (v) {
-                        final c = v.trim().toLowerCase();
-                        return c.startsWith('wtch2-') ||
-                            c.startsWith('wtch1-');
-                      },
-                    ),
+                MaterialPageRoute(
+                  builder: (_) => QrScanScreen(
+                    title: 'Scan invite',
+                    hint:
+                        'Point the camera at the QR code shown on '
+                        'your linked device',
+                    // Old wtch1- invites scan too — the core answers
+                    // with the "update that device first" message.
+                    accept: (v) {
+                      final c = v.trim().toLowerCase();
+                      return c.startsWith('wtch2-') || c.startsWith('wtch1-');
+                    },
                   ),
                 ),
+              ),
       ),
     );
   }
@@ -414,7 +606,8 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
             onPressed: () {
               Clipboard.setData(ClipboardData(text: invite));
               ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Invite code copied')));
+                const SnackBar(content: Text('Invite code copied')),
+              );
             },
           ),
           FilledButton(
@@ -428,8 +621,9 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
 
   static String relativeTime(int? ms) {
     if (ms == null) return 'never';
-    final delta = DateTime.now()
-        .difference(DateTime.fromMillisecondsSinceEpoch(ms));
+    final delta = DateTime.now().difference(
+      DateTime.fromMillisecondsSinceEpoch(ms),
+    );
     if (delta.inSeconds < 60) return 'just now';
     if (delta.inMinutes < 60) {
       return '${delta.inMinutes} min ago';
@@ -445,42 +639,46 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
     // TvInitialFocus: on TV the screen opens with a visible focus ring
     // instead of a dark screen the D-pad has to hunt across.
     return TvInitialFocus(
-        child: Scaffold(
-      appBar: AppBar(title: const Text('My W@tch')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        // TV: lay the whole (short) list out — D-pad scrolling advances
-        // by focus, and a lazy list stops laying out rows past its
-        // cache (the Settings ABOUT fix, same class here).
-        scrollCacheExtent: TvSettings.instance.enabled
-            ? const ScrollCacheExtent.pixels(kTvListCacheExtent)
-            : null,
-        children: [
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(_error!,
-                  style: TextStyle(color: t.rust, fontSize: 13)),
-            ),
-          if (status == null && _error == null)
-            const Center(
+      child: Scaffold(
+        appBar: AppBar(title: const Text('My W@tch')),
+        body: ListView(
+          padding: const EdgeInsets.all(16),
+          // TV: lay the whole (short) list out — D-pad scrolling advances
+          // by focus, and a lazy list stops laying out rows past its
+          // cache (the Settings ABOUT fix, same class here).
+          scrollCacheExtent: TvSettings.instance.enabled
+              ? const ScrollCacheExtent.pixels(kTvListCacheExtent)
+              : null,
+          children: [
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: t.rust, fontSize: 13),
+                ),
+              ),
+            if (status == null && _error == null)
+              const Center(
                 child: Padding(
-              padding: EdgeInsets.all(32),
-              child: CircularProgressIndicator(),
-            ))
-          else if (status != null && !status.supported)
-            Text(
-              'My W@tch is not available on this platform yet — link '
-              'from a desktop W@tch for now.',
-              style: TextStyle(color: t.boneDim),
-            )
-          else if (status != null && !status.linked)
-            ..._unlinkedBody(t)
-          else if (status != null)
-            ..._linkedBody(t, status),
-        ],
+                  padding: EdgeInsets.all(32),
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else if (status != null && !status.supported)
+              Text(
+                'My W@tch is not available on this platform yet — link '
+                'from a desktop W@tch for now.',
+                style: TextStyle(color: t.boneDim),
+              )
+            else if (status != null && !status.linked)
+              ..._unlinkedBody(t)
+            else if (status != null)
+              ..._linkedBody(t, status),
+          ],
+        ),
       ),
-    ));
+    );
   }
 
   /// The three unlinked actions grouped by the user's SITUATION, not the
@@ -495,10 +693,13 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
   List<Widget> _unlinkedBody(WiTokens t) {
     final canScan = _canScan;
     Widget header(String text) => Text(
-          text,
-          style: TextStyle(
-              fontSize: 13, fontWeight: FontWeight.w700, color: t.bone),
-        );
+      text,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w700,
+        color: t.bone,
+      ),
+    );
     final startLabel = const Text('Start a new My W@tch');
     const startIcon = Icon(Icons.add_link);
     final start = canScan
@@ -520,8 +721,9 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
       label: joinLabel,
       onPressed: _busy ? null : _joinLink,
     );
-    final pairLabel =
-        const Text('Show a pairing code (scan it with a linked phone)');
+    final pairLabel = const Text(
+      'Show a pairing code (scan it with a linked phone)',
+    );
     const pairIcon = Icon(Icons.qr_code_2);
     final pair = canScan
         ? OutlinedButton.icon(
@@ -587,35 +789,7 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
       // Switched off in Settings: nothing is coming up — say so instead
       // of showing the connecting spinner forever.
       if (!status.enabled)
-        Card(
-          color: t.ink2,
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                Icon(Icons.power_settings_new, size: 18, color: t.ash),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    LowDataMode.instance.enabled
-                        ? 'Low-data mode — this device syncs from the '
-                            'shared backup instead of staying connected '
-                            'to your devices. Changes made here reach '
-                            'the others when you run "Sync now".'
-                        : X0xCellularGate.instance.isPaused(X0xAgent.myWatch)
-                            ? 'My W@tch is paused while on mobile data — '
-                                'sync resumes on Wi-Fi (change this under '
-                                'Settings → Network → Data).'
-                            : 'My W@tch is switched off — nothing syncs '
-                                'until you turn it back on in Settings → '
-                                'Network → Data.',
-                    style: TextStyle(fontSize: 13, color: t.boneDim),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        )
+        _switchedOffCard(t)
       // State banner while the agent is still coming up (or retrying).
       else if (starting)
         Card(
@@ -625,9 +799,10 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
             child: Row(
               children: [
                 const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2)),
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
@@ -678,9 +853,9 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
               mode.bursting
                   ? (mode.burstStage ?? 'Running a live sync session…')
                   : 'Sync from the shared backup instead of the live '
-                      'device connection, which uses a lot of data '
-                      'while on. "Sync now" runs one brief live '
-                      'session.',
+                        'device connection, which uses a lot of data '
+                        'while on. "Sync now" runs one brief live '
+                        'session.',
               style: TextStyle(color: t.boneDim, fontSize: 12),
             ),
             value: mode.enabled,
@@ -694,19 +869,17 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
           leading: Icon(Icons.link, color: t.boneDim),
           title: const Text('Linked since'),
           subtitle: Text(
-            DateTime.fromMillisecondsSinceEpoch(status.linkedSinceMs!)
-                .toLocal()
-                .toString()
-                .split('.')
-                .first,
+            DateTime.fromMillisecondsSinceEpoch(
+              status.linkedSinceMs!,
+            ).toLocal().toString().split('.').first,
             style: TextStyle(color: t.boneDim),
           ),
           // Focusable stepping stone for the TV D-pad; the tap copies
           // the date for a bug report.
           onTap: () => _copyLine(
-            DateTime.fromMillisecondsSinceEpoch(status.linkedSinceMs!)
-                .toLocal()
-                .toString(),
+            DateTime.fromMillisecondsSinceEpoch(
+              status.linkedSinceMs!,
+            ).toLocal().toString(),
             'Linked-since date copied',
           ),
         ),
@@ -728,7 +901,7 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
             starting
                 ? 'Device records appear once the connection is up.'
                 : 'Only this device so far — add another with the '
-                    'invite below.',
+                      'invite below.',
             style: TextStyle(fontSize: 13, color: t.boneDim),
           ),
         )
@@ -770,6 +943,15 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
           label: const Text('Add a device — scan its pairing code'),
           onPressed: _busy || starting ? null : _pairSend,
         ),
+        if (!status.enabled)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              'Scanning needs My W@tch connected — turn it on at the top '
+              'of this page first.',
+              style: TextStyle(fontSize: 12, color: t.ash),
+            ),
+          ),
       ],
       const SizedBox(height: 12),
       OutlinedButton.icon(
@@ -782,10 +964,59 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
       if (status.agentId != null)
         Text(
           'This device\'s address: ${status.agentId!.substring(0, 16)}…',
-          style: TextStyle(
-              fontSize: 11, color: t.ash, fontFamily: 'monospace'),
+          style: TextStyle(fontSize: 11, color: t.ash, fontFamily: 'monospace'),
         ),
     ];
+  }
+
+  /// Off: nothing is coming up. Says why, and (outside low-data mode,
+  /// whose own switch sits right below) offers to turn it on here.
+  Widget _switchedOffCard(WiTokens t) {
+    final lowData = LowDataMode.instance.enabled;
+    final String text;
+    if (lowData) {
+      text =
+          'Low-data mode — this device syncs from the shared backup '
+          'instead of staying connected to your devices. Changes made '
+          'here reach the others when you run "Sync now".';
+    } else if (NetworkPause.instance.paused) {
+      text =
+          'Offline mode is on — My W@tch is paused with the rest of '
+          'the network. Nothing syncs until it is back on.';
+    } else if (X0xCellularGate.instance.isPaused(X0xAgent.myWatch)) {
+      text =
+          'My W@tch is paused while on mobile data — sync resumes on '
+          'Wi-Fi (change this under Settings → Network → Data).';
+    } else {
+      text =
+          'My W@tch is switched off — nothing syncs until you turn it '
+          'back on.';
+    }
+    return Card(
+      color: t.ink2,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Icon(Icons.power_settings_new, size: 18, color: t.ash),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                text,
+                style: TextStyle(fontSize: 13, color: t.boneDim),
+              ),
+            ),
+            if (!lowData) ...[
+              const SizedBox(width: 12),
+              FilledButton(
+                onPressed: _busy ? null : _turnOn,
+                child: const Text('Turn on'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   /// Copy [text] to the clipboard and confirm with [note] — the useful
@@ -799,15 +1030,15 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
   /// The full sync report as plain text — for pasting into a bug
   /// report.
   static String syncReportText(MyWatchSyncStatus s) => [
-        s.syncing
-            ? (s.activity ?? 'Syncing…')
-            : (s.lastSummary ?? 'Waiting for the first sync cycle…'),
-        if (!s.syncing && s.lastCycleAtMs != null)
-          'Checked ${relativeTime(s.lastCycleAtMs)}',
-        if (s.pendingMaps > 0) '${s.pendingMaps} data map(s) pending',
-        if (s.pendingArt > 0) '${s.pendingArt} artwork file(s) pending',
-        ...s.problems,
-      ].join('\n');
+    s.syncing
+        ? (s.activity ?? 'Syncing…')
+        : (s.lastSummary ?? 'Waiting for the first sync cycle…'),
+    if (!s.syncing && s.lastCycleAtMs != null)
+      'Checked ${relativeTime(s.lastCycleAtMs)}',
+    if (s.pendingMaps > 0) '${s.pendingMaps} data map(s) pending',
+    if (s.pendingArt > 0) '${s.pendingArt} artwork file(s) pending',
+    ...s.problems,
+  ].join('\n');
 
   /// The sync progress card: a spinner + stage while a cycle runs, the
   /// last outcome with its time while idle, and every problem the last
@@ -835,9 +1066,10 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                 children: [
                   if (s.syncing)
                     const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2))
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   else
                     Icon(
                       s.problems.isEmpty &&
@@ -849,13 +1081,15 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                       color: s.problems.isNotEmpty
                           ? t.rust
                           : s.pendingMaps > 0 || s.pendingArt > 0
-                              ? WiTokens.warnAmber
-                              : t.signalOk,
+                          ? WiTokens.warnAmber
+                          : t.signalOk,
                     ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(headline,
-                        style: TextStyle(fontSize: 13, color: t.bone)),
+                    child: Text(
+                      headline,
+                      style: TextStyle(fontSize: 13, color: t.bone),
+                    ),
                   ),
                 ],
               ),
@@ -879,7 +1113,9 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                     "can't play on this device yet. Retrying automatically; "
                     'Sync now retries immediately.',
                     style: const TextStyle(
-                        fontSize: 11.5, color: WiTokens.warnAmber),
+                      fontSize: 11.5,
+                      color: WiTokens.warnAmber,
+                    ),
                   ),
                 ),
               // Same honesty for artwork still on its way — the
@@ -891,14 +1127,18 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
                     '${s.pendingArt} artwork file(s) still arriving — '
                     'retrying automatically; Sync now retries immediately.',
                     style: const TextStyle(
-                        fontSize: 11.5, color: WiTokens.warnAmber),
+                      fontSize: 11.5,
+                      color: WiTokens.warnAmber,
+                    ),
                   ),
                 ),
               for (final p in s.problems)
                 Padding(
                   padding: const EdgeInsets.only(top: 6, left: 24),
-                  child:
-                      Text(p, style: TextStyle(fontSize: 11.5, color: t.rust)),
+                  child: Text(
+                    p,
+                    style: TextStyle(fontSize: 11.5, color: t.rust),
+                  ),
                 ),
             ],
           ),
@@ -910,14 +1150,13 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
   Widget _deviceTile(WiTokens t, MyWatchDevice device, int? docMs) {
     final subtitle = device.isSelf
         ? '${device.platform} · this device · '
-            '${device.lists} lists · ${device.entries} items'
+              '${device.lists} lists · ${device.entries} items'
         : '${device.platform} · last heard ${relativeTime(device.updatedAtMs)}'
-            ' · ${device.lists} lists · ${device.entries} items';
+              ' · ${device.lists} lists · ${device.entries} items';
     // The green dot only proves the device's heartbeat; the doc line
     // says how fresh its SHARED DATA is — the two can disagree (online
     // but its library never reached us), which the dot alone hid.
-    final docLine =
-        device.isSelf || docMs == null ? null : relativeTime(docMs);
+    final docLine = device.isSelf || docMs == null ? null : relativeTime(docMs);
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: Icon(
@@ -948,7 +1187,7 @@ class _MyWatchScreenState extends State<MyWatchScreen> {
       // stone); the tap copies the device line for a bug report.
       onTap: () => _copyLine(
         '${device.name} · $subtitle'
-        '${docLine == null ? '' : ' · sync data updated $docLine'}',
+            '${docLine == null ? '' : ' · sync data updated $docLine'}',
         'Device info copied',
       ),
     );

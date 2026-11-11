@@ -315,6 +315,13 @@ mono for content addresses, the `W@tch` wordmark in Anton (since 2026-07-31; for
   Android). When its pill is set to Off in Settings → Network → Data
   (the Built-in x0x client switch until 2026-09-06), the linked view
   shows a "switched off" card instead of the connecting spinner.
+  The card carries a **Turn on** button (no trip to the Data menu) and
+  names the cause: switched off, offline mode, or paused on mobile data.
+  Creating or joining a link while the switch is off says "My W@tch was
+  switched on"; showing an invite code while off warns that the new
+  device receives nothing until a linked device is connected; offline
+  mode and Wi-Fi-only-on-mobile-data are asked about before anything
+  connects.
 - Unlinked (regrouped by intent, alpha.102):
   "Setting up your first device?" → **Start a new My W@tch** (names
   the device, shows the invite as a branded QR + copyable `wtch2-…`
