@@ -1099,7 +1099,8 @@ dependencies = [
 [[package]]
 name = "ant-core"
 version = "0.15.0"
-source = "git+https://github.com/WithAutonomi/ant-client?tag=ant-core-v0.15.0#f56bd0d67ffcd9a425d2acd376800938a3749be9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57dae28312123abd934591ef8ae44500b23ca56efa8d25d8f8ba80d0b511fe0d"
 dependencies = [
  "ant-protocol",
  "async-stream",

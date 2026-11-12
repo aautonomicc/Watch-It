@@ -42,7 +42,11 @@ cc = "1"
 # `cargo update` refused to resolve (un-yanked by 2026-10-18). Keep the
 # lockfile under version control and read `cargo update` output before
 # trusting it.
-ant-core = { git = "https://github.com/WithAutonomi/ant-client", tag = "ant-core-v0.15.0" }
+# SOURCE (2026-11-12): crates.io, not the git tag. The WithAutonomi GitHub
+# org answered 404 on the alpha.130 release day and CI could not clone the
+# tag. crates.io 0.15.0 is the same commit (f56bd0d6 in its
+# .cargo_vcs_info.json; src/ diffed identical against the tag checkout).
+ant-core = "=0.15.0"
 self_encryption = "0.36"
 # batch.rs implements ant-core's UploadAdapter trait (the pooled-payment
 # upload driver), which is declared with async_trait — implementors need

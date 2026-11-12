@@ -1686,8 +1686,9 @@ mod rootmap_tests {
             );
         }
         assert_eq!(v["x0x"], env!("WATCHIT_DEP_X0X"));
-        // The git-pinned ant-core carries its short rev.
-        assert!(v["ant_core"].as_str().unwrap().contains("git "));
+        // ant-core comes from crates.io since alpha.130 (a git pin would
+        // carry its short rev after the number).
+        assert_eq!(v["ant_core"], env!("WATCHIT_DEP_ANT_CORE"));
     }
 
     #[tokio::test]
