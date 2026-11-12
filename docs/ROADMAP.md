@@ -836,6 +836,7 @@ Implementation notes in [ARCHITECTURE.md](ARCHITECTURE.md) → My W@tch.
       pending counts into the doc so every device can also show the
       OTHER side's remaining work
 - [x] Seed-phrase backup — PHASE 1 IMPLEMENTED 2026-10-06 (shipped in alpha.110; planned 2026-10-05/06, plan ADOPTED
+- [x] Backup artwork packs + library-first restore (2026-11-12, unreleased): artwork is stored in pack objects (about 100 posters in 3–4 chunks instead of 300) that are never rewritten; a restore or a joining device merges the library as soon as the state document and data maps arrive and fills artwork in afterwards, fetching several packs at once. Old backups stay restorable; the first backup after the update stores all artwork once more; linked devices on older builds get the library but not the artwork from a pack backup.
       2026-10-06). Shipped shape: Settings → Backup (admin, beside
       Wallet) with **Back up now** and **Restore from backup**; the
       native side (`backup.rs`) derives the identity from the wallet

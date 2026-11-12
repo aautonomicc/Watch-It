@@ -537,7 +537,7 @@ changed identity starts a clean line (fresh head chain, no stale object
 cache), and `GET /backup` hides a `last` recorded under a different
 identity so the phase-2 key share never advertises an empty line. Storage is a content-addressed encrypted object store:
 each object (the sync-doc-shaped state document, the root-map bundle,
-each artwork file) is encrypted DETERMINISTICALLY (key/nonce from the
+each artwork pack) is encrypted DETERMINISTICALLY (key/nonce from the
 backup key ‖ the object's blake3 content hash), so unchanged objects
 are byte-identical ciphertext → identical chunks → re-backups are
 nearly free via network dedup (a local `backup_state.json` skips the
@@ -558,6 +558,23 @@ two-way channel; the backup is the paid, slow-cadence, one-writer
 recovery layer on the wallet-holding device. Routes (token-guarded):
 `GET /backup`, `POST /backup/run`, `POST /backup/restore`,
 `POST /backup/peek`, `POST /backup/follow`.
+
+Artwork packs and library-first restore (2026-11-12, unreleased): a
+self-encrypted object is at least three chunks however small, so
+artwork is no longer one object per file. New artwork is concatenated
+into pack objects of up to 16 MiB (`pack_art`, backup.rs) and the
+manifest (`"v": 2`) records each file as `{file, hash, pack, off,
+len}`. Packs are never rewritten: `backup_state.json` remembers which
+pack holds which content hash, and a backup packs only the files no
+stored pack holds. A manifest entry with no `pack` (a backup written
+before packs) is still read as an object of its own. The restore walk
+fetches the state document and data maps first and publishes them as
+the job's result while its phase is `art`; the app merges the library
+at that point (`BackupService._applyLibrary`, which also releases the
+follower's bootstrap gate) and installs artwork when the job ends
+(`_applyArtwork`). Artwork is fetched one pack (or one pre-pack file)
+per task, six at a time. A build from before packs that reads a pack
+backup restores the library and reports the artwork as not fetched.
 
 Phase 2 — shared read keys (implemented 2026-10-06, shipped in alpha.110): the
 wallet holder publishes its derived READ keys (pointer address +

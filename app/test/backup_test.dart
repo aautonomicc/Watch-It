@@ -389,6 +389,154 @@ void main() {
       expect(summary.problems, isEmpty);
     });
 
+    test('the library is merged while the artwork is still being fetched',
+        () async {
+      await ProfileStore.instance.ensureLoaded();
+      final userArt = List<int>.generate(600, (i) => (i * 5) % 251);
+      final userArtSha = crypto.sha256.convert(userArt).toString();
+      final avatarBytes = List<int>.generate(90, (i) => (i * 11) % 251);
+      final avatarSha = crypto.sha256.convert(avatarBytes).toString();
+      String? artDir;
+      fake.onBackupRestore = (dir) => artDir = dir;
+      final doc = {
+        'v': 1,
+        'updated_ms': 50000,
+        'lists': [
+          {
+            'title': 'Movies',
+            'entries': [
+              {'name': 'Early (2022).mp4', 'address': _addr(4), 'added_ms': 10},
+            ],
+          },
+        ],
+        'have': const <String>[],
+        'meta': {
+          'v': 1,
+          'rows': [
+            {
+              'key': 'movie:early:2022',
+              'updated_ms': 900,
+              'title': 'Early, Edited',
+              'year': 2022,
+              'art': {'sha256': userArtSha, 'size': userArt.length},
+            },
+          ],
+        },
+        'tmdb': {
+          'v': 1,
+          'rows': [
+            {
+              'key': 'movie:other:2021',
+              'updated_ms': 777,
+              'title': 'Other',
+              'type': 'movie',
+              'tmdb_id': 8,
+              'poster': 'movie_8.jpg',
+            },
+          ],
+          'files': {
+            'movie_8.jpg': {'sha256': 'cd' * 32, 'size': 3},
+          },
+        },
+        'profiles': {
+          'v': 1,
+          'items': {
+            'sid-sam': {
+              'name': 'Sam',
+              'kind': 'kid',
+              'updated_ms': 500,
+              'art': {'sha256': avatarSha, 'size': avatarBytes.length},
+              'allow': ['Movies'],
+            },
+          },
+        },
+      };
+      final library = {
+        'created_ms': 50000,
+        'head': 'ee' * 32,
+        'doc': doc,
+        'maps_imported': 1,
+        'maps_failed': 0,
+      };
+      fake.backupJobStates.addAll([
+        {'kind': 'restore', 'phase': 'fetching', 'done': 1, 'total': 2},
+        // The core reports the library before any artwork has arrived…
+        {
+          'kind': 'restore',
+          'phase': 'art',
+          'done': 0,
+          'total': 3,
+          'result': library,
+        },
+        {
+          'kind': 'restore',
+          'phase': 'art',
+          'done': 2,
+          'total': 3,
+          'result': library,
+        },
+        {
+          'kind': 'restore',
+          'phase': 'done',
+          'result': {
+            ...library,
+            'art_files': ['user_x.jpg', 'movie_8.jpg', 'profile_avatar_p_1.img'],
+            'art_failed': 0,
+          },
+        },
+      ]);
+
+      var libraryCalls = 0;
+      final labels = <String>[];
+      final summary = await service.restore(
+        onProgress: (j) => labels.add(j.label),
+        onLibraryApplied: () {
+          libraryCalls++;
+          // …and at that moment the library is already usable: entry,
+          // profile and edited details are in, their artwork is not.
+          final sam = ProfileStore.instance.profiles
+              .where((p) => p.name == 'Sam')
+              .single;
+          expect(sam.avatar, isNull);
+          expect(File('${tempDir.path}/posters/movie_8.jpg').existsSync(),
+              isFalse);
+          // The artwork lands in staging only now.
+          File('$artDir/user_x.jpg').writeAsBytesSync(userArt);
+          File('$artDir/movie_8.jpg').writeAsBytesSync([8, 8, 8]);
+          File('$artDir/profile_avatar_p_1.img').writeAsBytesSync(avatarBytes);
+        },
+      );
+      expect(libraryCalls, 1);
+      expect(labels, contains(startsWith('Library restored — fetching artwork')));
+
+      final lists = await LibraryStore.load();
+      expect(
+          lists.singleWhere((l) => l.title == 'Movies').entries.single.address,
+          _addr(4));
+      expect(summary.entriesAdded, 1);
+      expect(summary.head, 'ee' * 32);
+      expect(summary.detailsApplied, 1);
+      expect(summary.tmdbApplied, 1);
+      expect(summary.profilesChanged, 1);
+
+      // Stage two installed all three kinds of artwork.
+      final row = await metadataRowFor('movie:early:2022');
+      expect(row!.title, 'Early, Edited');
+      expect(row.posterFile, startsWith('user_'));
+      expect(
+          File('${tempDir.path}/posters/${row.posterFile}').readAsBytesSync(),
+          userArt);
+      expect(File('${tempDir.path}/posters/movie_8.jpg').readAsBytesSync(),
+          [8, 8, 8]);
+      final sam =
+          ProfileStore.instance.profiles.where((p) => p.name == 'Sam').single;
+      expect(File('${tempDir.path}/posters/${sam.avatar}').readAsBytesSync(),
+          avatarBytes);
+      expect(summary.artInstalled, 1);
+      expect(summary.problems, isEmpty);
+      expect(Directory('${tempDir.path}/staging').existsSync(), isFalse);
+    });
+
     test('a failed restore cleans the staging dir too', () async {
       await ProfileStore.instance.ensureLoaded();
       fake.backupJobStates.add({

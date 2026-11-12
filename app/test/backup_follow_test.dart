@@ -711,6 +711,52 @@ void main() {
       expect(follow.deferGossipMergeFor(const []), isFalse);
     });
 
+    test('resolves as soon as the library is in, while artwork is still '
+        'being fetched', () async {
+      await seedKeys();
+      fake.backupPeek = {'found': true, 'head': 'ee' * 32, 'counter': 1};
+      final library = {
+        'created_ms': 1,
+        'head': 'ee' * 32,
+        'doc': {'v': 1, 'lists': const []},
+        'maps_imported': 0,
+        'maps_failed': 0,
+      };
+      fake.backupJobStates.addAll([
+        {'kind': 'follow', 'phase': 'fetching', 'done': 1, 'total': 2},
+        {'kind': 'follow', 'phase': 'art', 'total': 9, 'result': library},
+        {
+          'kind': 'follow',
+          'phase': 'art',
+          'done': 4,
+          'total': 9,
+          'result': library,
+        },
+        {
+          'kind': 'follow',
+          'phase': 'done',
+          'result': {...library, 'art_files': const [], 'art_failed': 0},
+        },
+      ]);
+      final deferred = <String, bool>{};
+      void listener() {
+        final s = BackupFollowService.status.value;
+        if (!s.fetching) return;
+        final stage = s.stage ?? '';
+        final key = stage.startsWith('Fetching the backup')
+            ? 'library'
+            : (stage.contains('artwork') && s.done == 4 ? 'artwork' : '');
+        if (key.isNotEmpty) deferred[key] = follow.deferGossipMergeFor(const []);
+      }
+
+      BackupFollowService.status.addListener(listener);
+      addTearDown(() => BackupFollowService.status.removeListener(listener));
+      await follow.checkNow();
+      // Held back while the library was on its way; released for the
+      // artwork stretch.
+      expect(deferred, {'library': true, 'artwork': false});
+    });
+
     test('a junk-only section never activates the gate', () async {
       expect(
         follow.deferGossipMergeFor([

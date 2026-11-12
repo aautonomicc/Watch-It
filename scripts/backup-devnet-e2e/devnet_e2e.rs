@@ -169,6 +169,50 @@ async fn run(nodes: usize, big: bool) {
         let (counter, head, manifest) = read_back(&client, &keys).await;
         assert_eq!((counter, head, manifest), (3, head4, manifest4));
     }
+    if !big {
+        // -- artwork packs: 40 posters ride ONE object of a few chunks,
+        //    paid with the pointer in one transaction, and every file
+        //    comes back out of the pack read from the network -----------
+        let posters: Vec<(String, Vec<u8>)> = (0..40usize)
+            .map(|n| {
+                let bytes: Vec<u8> =
+                    (0..20_000 + n).map(|i| (i * 31 + n * 7) as u8).collect();
+                (format!("movie_{n}.jpg"), bytes)
+            })
+            .collect();
+        let packing = pack_art(
+            posters.clone(),
+            &std::collections::BTreeMap::new(),
+            |_| false,
+            PACK_TARGET_BYTES,
+        );
+        assert_eq!(packing.packs.len(), 1);
+        let (pack_hash, pack_plain) = packing.packs[0].clone();
+        let (chunks, head5, _) = build(&keys, &[pack_plain], 5);
+        let n = chunks.len();
+        assert!(n <= 8, "40 posters should be a handful of chunks, got {n}");
+        let sig_before = signatures.load(Ordering::SeqCst);
+        let out = publish_backup(&client, wallet.clone(), &keys, chunks, head5,
+            Box::new(|_, _, _| {}), || {})
+            .await
+            .expect("pack publish");
+        eprintln!("packs: 40 files in {} chunks, {} payment(s)", out.chunks, out.payments);
+        assert_eq!(out.payments, 1);
+        assert_eq!(signatures.load(Ordering::SeqCst) - sig_before, 1);
+        let (counter, head, manifest) = read_back(&client, &keys).await;
+        assert_eq!((counter, head), (3, head5));
+        let m: serde_json::Value = serde_json::from_slice(&manifest).unwrap();
+        let map: DataMap = rmp_serde::from_slice(
+            &hex::decode(m["maps"][0].as_str().unwrap()).unwrap(),
+        )
+        .unwrap();
+        let fetched = client.data_download(&map).await.expect("pack download");
+        let opened = open_object(&keys.enc, &pack_hash, &fetched).unwrap();
+        for ((file, hash, loc), (name, bytes)) in packing.entries.iter().zip(&posters) {
+            assert_eq!(file, name);
+            assert_eq!(unpack_art(&opened, hash, loc).unwrap(), bytes.as_slice());
+        }
+    }
     let _ = devnet.shutdown().await;
 }
 

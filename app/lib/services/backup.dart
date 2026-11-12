@@ -268,6 +268,8 @@ class BackupJob {
         'fetching' =>
           'Fetching the backup… ${total == 0 ? '' : '($done of $total)'}',
         'importing' => 'Importing data maps…',
+        'art' => 'Library restored — fetching artwork… '
+            '${total == 0 ? '' : '($done of $total)'}',
         'done' => 'Done.',
         'error' => 'Failed.',
         _ => phase,
@@ -600,14 +602,27 @@ class BackupService {
     );
   }
 
+  /// [onLibrary] runs once, with the job's early result, when a restore
+  /// reports its library (state document + data maps) while the artwork
+  /// is still being fetched.
   Future<BackupJob> _awaitJob(
-      String kind, void Function(BackupJob job)? onProgress) async {
+      String kind, void Function(BackupJob job)? onProgress,
+      {Future<void> Function(Map<String, dynamic> result)? onLibrary}) async {
+    var libraryHandled = false;
     while (true) {
       await Future<void>.delayed(pollInterval);
       final status = await _api.status();
       final job = status.job;
       if (job == null || job.kind != kind) continue;
       onProgress?.call(job);
+      final early = job.result;
+      if (!libraryHandled &&
+          onLibrary != null &&
+          job.phase == 'art' &&
+          early != null) {
+        libraryHandled = true;
+        await onLibrary(early);
+      }
       if (!job.finished) continue;
       if (job.phase == 'error') {
         throw BackupException(job.error ?? 'the $kind failed');
@@ -623,12 +638,18 @@ class BackupService {
   /// detail edits, TMDB metadata, artwork — through the exact My W@tch
   /// sync merge rules, so a restore never regresses newer local state.
   /// Root maps were already imported natively, so entries play.
+  ///
+  /// The library is merged in as soon as it arrives — [onLibraryApplied]
+  /// fires then — and the artwork follows when its fetch finishes.
   Future<RestoreSummary> restore(
-      {String? walletKey, void Function(BackupJob job)? onProgress}) =>
+      {String? walletKey,
+      void Function(BackupJob job)? onProgress,
+      void Function()? onLibraryApplied}) =>
       _fetchAndApply(
         'restore',
         (artDir) => _api.restoreStart(key: walletKey, artDir: artDir),
         onProgress,
+        onLibraryApplied,
       );
 
   /// Phase 2: fetch another device's backup with the read keys it shared
@@ -639,11 +660,13 @@ class BackupService {
     required String ptr,
     required String key,
     void Function(BackupJob job)? onProgress,
+    void Function()? onLibraryApplied,
   }) =>
       _fetchAndApply(
         'follow',
         (artDir) => _api.followStart(ptr: ptr, key: key, artDir: artDir),
         onProgress,
+        onLibraryApplied,
       );
 
   /// One free pointer read against [ptr] (see [BackupApi.peek]).
@@ -653,6 +676,7 @@ class BackupService {
     String kind,
     Future<void> Function(String artDir) start,
     void Function(BackupJob job)? onProgress,
+    void Function()? onLibraryApplied,
   ) async {
     final staging = await _stagingDir();
     if (staging.existsSync()) staging.deleteSync(recursive: true);
@@ -660,11 +684,23 @@ class BackupService {
     try {
       // A paranoid-mode hardware restore asks the device for one derive
       // tap — announce it like every other Trezor wait.
+      // The library (lists, watch points, profiles, details) is merged
+      // as soon as the core has it; artwork is installed when its fetch
+      // ends. A core that reports nothing early gets both at the end.
+      _RestoredLibrary? library;
       final job = await TrezorAttentionService.instance.during(() async {
         await start(staging.path);
-        return _awaitJob(kind, onProgress);
+        return _awaitJob(kind, onProgress, onLibrary: (early) async {
+          library = await _applyLibrary(early);
+          onLibraryApplied?.call();
+        });
       });
-      return await _applyRestore(job.result ?? const {}, staging);
+      final result = job.result ?? const <String, dynamic>{};
+      if (library == null) {
+        library = await _applyLibrary(result);
+        onLibraryApplied?.call();
+      }
+      return await _applyArtwork(result, staging, library!);
     } finally {
       // Covers the failed-job path too — a "no backup found" must not
       // leave an empty staging dir behind.
@@ -674,8 +710,8 @@ class BackupService {
     }
   }
 
-  Future<RestoreSummary> _applyRestore(
-      Map<String, dynamic> result, Directory staging) async {
+  /// Stage one of a restore: everything except artwork bytes.
+  Future<_RestoredLibrary> _applyLibrary(Map<String, dynamic> result) async {
     final problems = <String>[];
     final doc = result['doc'] is Map<String, dynamic>
         ? result['doc'] as Map<String, dynamic>
@@ -683,23 +719,7 @@ class BackupService {
     final docs = [
       RemoteSyncDoc(agentId: 'backup', doc: doc, maps: const {}),
     ];
-
-    // Staged artwork, lazily hashed (user art + avatars match by sha).
-    final stagedByName = <String, File>{};
-    if (staging.existsSync()) {
-      for (final f in staging.listSync()) {
-        if (f is File) stagedByName[f.uri.pathSegments.last] = f;
-      }
-    }
-    final shaCache = <String, String>{};
-    Future<File?> stagedBySha(String sha256) async {
-      for (final e in stagedByName.entries) {
-        final known = shaCache[e.key] ??=
-            crypto.sha256.convert(await e.value.readAsBytes()).toString();
-        if (known == sha256) return e.value;
-      }
-      return null;
-    }
+    final wantedAvatars = <WantedAvatar>[];
 
     // 1. Lists — the LWW element-set merge (the backup doc carries the
     // master's tombstones, so deletions propagate too).
@@ -742,25 +762,13 @@ class BackupService {
           watchApplied += await WatchStateStore.instance
               .mergeAll(e.value, profileId: localId);
         }
-        for (final w in apply.wantedAvatars) {
-          final staged = await stagedBySha(w.sha256);
-          if (staged == null) continue;
-          final member = await ProfileStore.saveAvatarImage(
-              w.profileId, await staged.readAsBytes());
-          final store = ProfileStore.instance;
-          final p =
-              store.profiles.where((p) => p.id == w.profileId).firstOrNull;
-          if (p != null) {
-            await store.updateProfile(p.copyWith(avatar: member),
-                updatedMs: p.updatedMs);
-          }
-        }
+        wantedAvatars.addAll(apply.wantedAvatars);
       }
     } catch (e) {
       problems.add('Restoring profiles failed: $e');
     }
 
-    // 4. Detail edits — LWW per row; artwork bytes from staging.
+    // 4. Detail edits — LWW per row; their artwork follows in stage two.
     var detailsApplied = 0;
     for (final w in MyWatchSync.remoteMetaWinners(docs)) {
       try {
@@ -784,21 +792,12 @@ class BackupService {
           postersDirProvider: postersDirOverride,
         );
         detailsApplied++;
-        final art = w.art;
-        if (art != null) {
-          final staged = await stagedBySha(art.sha256);
-          if (staged != null) {
-            await applyRemotePoster(w.key, await staged.readAsBytes(),
-                postersDirProvider: postersDirOverride);
-          }
-        }
       } catch (e) {
         problems.add('Restoring details for "${w.title ?? w.key}" failed: $e');
       }
     }
 
-    // 5. TMDB rows (fill-only — never beats a user edit or own match),
-    // then their artwork files under the original shared names.
+    // 5. TMDB rows (fill-only — never beats a user edit or own match).
     var tmdbApplied = 0;
     for (final w in MyWatchSync.remoteTmdbWinners(docs)) {
       try {
@@ -827,6 +826,93 @@ class BackupService {
         problems.add('Restoring details for "${w.title ?? w.key}" failed: $e');
       }
     }
+    if (detailsApplied + tmdbApplied > 0) {
+      MetadataService.instance.notifyExternalSeed();
+    }
+    return _RestoredLibrary(
+      docs: docs,
+      entriesAdded: merge.entriesAdded,
+      watchApplied: watchApplied,
+      profilesChanged: profilesChanged,
+      detailsApplied: detailsApplied,
+      tmdbApplied: tmdbApplied,
+      wantedAvatars: wantedAvatars,
+      problems: problems,
+    );
+  }
+
+  /// Stage two of a restore: the artwork the core staged — profile
+  /// avatars and user posters (matched by content hash), then TMDB files
+  /// under their original shared names.
+  Future<RestoreSummary> _applyArtwork(Map<String, dynamic> result,
+      Directory staging, _RestoredLibrary library) async {
+    final problems = library.problems;
+    final docs = library.docs;
+
+    // Staged artwork, lazily hashed (user art + avatars match by sha).
+    final stagedByName = <String, File>{};
+    if (staging.existsSync()) {
+      for (final f in staging.listSync()) {
+        if (f is File) stagedByName[f.uri.pathSegments.last] = f;
+      }
+    }
+    final shaCache = <String, String>{};
+    Future<File?> stagedBySha(String sha256) async {
+      for (final e in stagedByName.entries) {
+        final known = shaCache[e.key] ??=
+            crypto.sha256.convert(await e.value.readAsBytes()).toString();
+        if (known == sha256) return e.value;
+      }
+      return null;
+    }
+
+    try {
+      for (final w in library.wantedAvatars) {
+        final staged = await stagedBySha(w.sha256);
+        if (staged == null) continue;
+        final member = await ProfileStore.saveAvatarImage(
+            w.profileId, await staged.readAsBytes());
+        final store = ProfileStore.instance;
+        final p = store.profiles.where((p) => p.id == w.profileId).firstOrNull;
+        if (p != null) {
+          await store.updateProfile(p.copyWith(avatar: member),
+              updatedMs: p.updatedMs);
+        }
+      }
+    } catch (e) {
+      problems.add('Restoring profile pictures failed: $e');
+    }
+
+    // User posters: only for rows this device adopted (a newer local
+    // edit keeps its own artwork) and does not already hold.
+    var postersApplied = 0;
+    final posters = await _postersDir();
+    for (final w in MyWatchSync.remoteMetaWinners(docs)) {
+      final art = w.art;
+      if (art == null) continue;
+      try {
+        final local = await metadataRowFor(w.key);
+        if (local == null || !local.userEdited) continue;
+        if (local.fetchedAt > w.updatedMs) continue;
+        final current = local.posterFile;
+        if (current != null && current.startsWith('user_')) {
+          final held = File('${posters.path}/$current');
+          if (held.existsSync() &&
+              crypto.sha256.convert(await held.readAsBytes()).toString() ==
+                  art.sha256) {
+            continue;
+          }
+        }
+        final staged = await stagedBySha(art.sha256);
+        if (staged == null) continue;
+        await applyRemotePoster(w.key, await staged.readAsBytes(),
+            postersDirProvider: postersDirOverride);
+        postersApplied++;
+      } catch (e) {
+        problems.add('Restoring artwork for "${w.title ?? w.key}" failed: $e');
+      }
+    }
+
     var artInstalled = 0;
     try {
       final dir = await _postersDir();
@@ -842,7 +928,7 @@ class BackupService {
     } catch (e) {
       problems.add('Restoring artwork failed: $e');
     }
-    if (artInstalled > 0) {
+    if (artInstalled + postersApplied > 0) {
       MetadataService.instance.notifyExternalSeed();
     }
 
@@ -859,15 +945,37 @@ class BackupService {
     return RestoreSummary(
       head: result['head'] as String?,
       createdMs: result['created_ms'] as int? ?? 0,
-      entriesAdded: merge.entriesAdded,
-      watchApplied: watchApplied,
-      profilesChanged: profilesChanged,
-      detailsApplied: detailsApplied,
-      tmdbApplied: tmdbApplied,
+      entriesAdded: library.entriesAdded,
+      watchApplied: library.watchApplied,
+      profilesChanged: library.profilesChanged,
+      detailsApplied: library.detailsApplied,
+      tmdbApplied: library.tmdbApplied,
       mapsImported: result['maps_imported'] as int? ?? 0,
       artInstalled: artInstalled,
       problems: problems,
       legacy: result['legacy'] == true,
     );
   }
+}
+
+/// What stage one of a restore merged, carried to the artwork stage.
+class _RestoredLibrary {
+  _RestoredLibrary({
+    required this.docs,
+    required this.entriesAdded,
+    required this.watchApplied,
+    required this.profilesChanged,
+    required this.detailsApplied,
+    required this.tmdbApplied,
+    required this.wantedAvatars,
+    required this.problems,
+  });
+  final List<RemoteSyncDoc> docs;
+  final int entriesAdded;
+  final int watchApplied;
+  final int profilesChanged;
+  final int detailsApplied;
+  final int tmdbApplied;
+  final List<WantedAvatar> wantedAvatars;
+  final List<String> problems;
 }

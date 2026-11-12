@@ -405,6 +405,9 @@ class BackupFollowService {
             stage: job.label,
             done: job.done,
             total: job.total),
+        // The library is in once the state document has merged — live
+        // sync can lead from here while the artwork is still arriving.
+        onLibraryApplied: () => _bootstrapResolved = true,
       );
       _bootstrapResolved = true;
       _cancelRetry();
