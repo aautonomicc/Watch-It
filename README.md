@@ -106,18 +106,31 @@ for you. (As above, the titles shown are invented for the screenshots.)*
    is itself stored on the network where any node operator can find it and
    watch the file. That's why W@tch takes datamaps only, and has no
    public-address entry type. One thing a private upload does **not**
-   hide is *who paid for it*: every upload is paid with a public
-   transaction on Arbitrum from your wallet, and that payment commits to
-   the addresses of the chunks it bought. The chunks themselves carry no
-   owner or payer, and nobody can work backwards from the chain to
-   unknown content — but anyone who already has a copy of a file (or its
-   datamap) can recompute its chunk addresses and confirm that a given
-   wallet paid to store it, and the handful of nodes storing each chunk
-   see the payer's address with the payment proof. Wallet → person is
-   then ordinary chain analysis (an exchange withdrawal that funded the
-   wallet, for instance). This is how the network's payments work, not
-   something W@tch can change: fund the upload wallet from a source you
-   are comfortable linking to your uploads, keep it for uploads only, and
+   hide is *that a wallet paid*: every upload is paid with a public
+   transaction on Arbitrum from your wallet. How much that transaction
+   says about *what* was bought depends on the payment type (this comes
+   from reading the network's payment code — evmlib 0.10.0, ant-core
+   0.15.0, ant-node 0.24.0 — and has not been tested against the live
+   chain). W@tch uploads use **merkle batch payments**: the transaction
+   carries no chunk addresses and nothing computable from them (each
+   address is mixed with a random salt before it enters the payment
+   tree), so even someone holding a copy of the file cannot confirm from
+   the chain that your wallet paid for it. The link exists only in the
+   payment proof sent with each chunk, which the nodes storing that chunk
+   see and pass to their replacements. **Per-chunk payments** — used by
+   the `ant` CLI for small files or with `--no-merkle`, and by W@tch's
+   small backup payments — are more exposed: each one pays a node close
+   to the chunk's address, so someone who already has a public or shared
+   file can look up those nodes and search the public payment events for
+   one wallet paying them, a statistical match that firms up with every
+   extra chunk. (A backup's contents are encrypted under keys only you
+   hold, so outsiders have no chunk list to test.) Either way the chunks
+   themselves carry no owner or payer, nobody can work backwards from the
+   chain to unknown content, and wallet → person is ordinary chain
+   analysis (an exchange withdrawal that funded the wallet, for
+   instance). This is how the network's payments work, not something
+   W@tch can change: fund the upload wallet from a source you are
+   comfortable linking to your uploads, keep it for uploads only, and
    use a fresh wallet when you want uploads kept apart from each other.
 2. **Lists of media.** Import `.datamap` files into one or more lists; export
    a library as a `.watch-list` bundle (datamaps + artwork) that imports
