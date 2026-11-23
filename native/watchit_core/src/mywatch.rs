@@ -1154,7 +1154,7 @@ mod imp {
                 .with_agent_key_path(dir.join("agent.key"))
                 .with_identity_dir(&dir)
                 .with_peer_cache_dir(dir.join("peers"))
-                .with_network_config(x0x::network::NetworkConfig::default())
+                .with_network_config(crate::x0x_tune::network_config())
                 .with_gossip_config(crate::x0x_tune::gossip_config("mywatch"))
                 .build()
                 .await
@@ -1628,7 +1628,7 @@ mod imp {
             .with_agent_key_path(dir.join("agent.key"))
             .with_identity_dir(dir)
             .with_peer_cache_dir(dir.join("peers"))
-            .with_network_config(x0x::network::NetworkConfig::default())
+            .with_network_config(crate::x0x_tune::network_config())
             .build()
             .await
             .map_err(|e| format!("pairing agent build failed: {e}"))?;

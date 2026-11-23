@@ -88,8 +88,11 @@ impl MapStore {
         self.conn
             .lock()
             .unwrap()
-            .query_row("SELECT COUNT(*) FROM root_maps", [], |row| row.get(0))
-            .unwrap_or(0usize)
+            // rusqlite 0.41 no longer reads an INTEGER as usize.
+            .query_row("SELECT COUNT(*) FROM root_maps", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap_or(0) as usize
     }
 }
 

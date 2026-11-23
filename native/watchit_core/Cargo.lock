@@ -65,18 +65,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ahash"
-version = "0.8.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
-dependencies = [
- "cfg-if",
- "once_cell",
- "version_check",
- "zerocopy",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1179,9 +1167,9 @@ dependencies = [
 
 [[package]]
 name = "ant-quic"
-version = "0.27.61"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d15265aaf8f0c542778a8f2b0be2e9cf4b1e49cbd8d9da2608b31aa466a4fbdd"
+checksum = "02b1ccd6aaac67e935fc4a8e2a877804166a1f7192dbf3cbab976ccbcaecc299"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3570,9 +3558,9 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 
 [[package]]
 name = "form_urlencoded"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+checksum = "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e"
 dependencies = [
  "percent-encoding",
 ]
@@ -3875,9 +3863,6 @@ name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
-dependencies = [
- "ahash",
-]
 
 [[package]]
 name = "hashbrown"
@@ -3903,11 +3888,11 @@ dependencies = [
 
 [[package]]
 name = "hashlink"
-version = "0.9.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ba4ff7128dee98c7dc9794b6a411377e1404dba1c97deb8d1a55297bd25d8af"
+checksum = "a596f1b20ed2cc5ecac41a164aaebc7258057060f06c0cf7a2ba3991ee7990fb"
 dependencies = [
- "hashbrown 0.14.5",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -4791,9 +4776,9 @@ dependencies = [
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.30.1"
+version = "0.39.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149"
+checksum = "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3"
 dependencies = [
  "cc",
  "pkg-config",
@@ -6156,6 +6141,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rsqlite-vfs"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "353b74f9810d5b085b6c42c9d86a5f0fdb795553235cdd48753b32e3809d18a7"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "ruint"
 version = "1.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6203,9 +6197,9 @@ dependencies = [
 
 [[package]]
 name = "rusqlite"
-version = "0.32.1"
+version = "0.41.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7753b721174eb8ff87a9a0e799e2d7bc3749323e773db92e0984debb00019d6e"
+checksum = "da9bba6f3506135e120a6586df05be18b48d18896600646a4bec8f993d91a594"
 dependencies = [
  "bitflags",
  "fallible-iterator",
@@ -6213,6 +6207,7 @@ dependencies = [
  "hashlink",
  "libsqlite3-sys",
  "smallvec",
+ "sqlite-wasm-rs",
 ]
 
 [[package]]
@@ -6469,9 +6464,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-coordinator"
-version = "0.5.90"
+version = "0.5.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c85247c6c5101f7da93fdf63c8061386786abd6cca5f3866967bdce200973db"
+checksum = "9f27b2207df37601b6845d81fd2fddc11c4d9826ec14fad2bb91b68338f96427"
 dependencies = [
  "ant-quic",
  "anyhow",
@@ -6492,9 +6487,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-crdt-sync"
-version = "0.5.90"
+version = "0.5.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91f66424b93931f40f1b66e7908955e97fc1062925e8a089e1999a7cd57adb49"
+checksum = "c28f0e5afb63cd397844220505af81550cf20ade38aa5b8ce8079f752709c706"
 dependencies = [
  "anyhow",
  "blake3",
@@ -6507,9 +6502,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-groups"
-version = "0.5.90"
+version = "0.5.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7433db8dee03c9763f3e14bb22ec325b3a96d18907a24dfa6f6afbb46e3bc44"
+checksum = "4f46d88199be580b14062bb9abf9cfbd08e794e38de8443f8bd714e7ac6b3ea2"
 dependencies = [
  "anyhow",
  "blake3",
@@ -6520,9 +6515,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-identity"
-version = "0.5.90"
+version = "0.5.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe785e5f52ca199be491d7f23fdd0ff082ff8ce101dd3d13a043b4d4d46a4afe"
+checksum = "e31bb019ab5829e8db5ea28edc902b9e001464f228bd9f3675d5d2e07bb87cdb"
 dependencies = [
  "anyhow",
  "blake3",
@@ -6535,9 +6530,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-membership"
-version = "0.5.90"
+version = "0.5.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ebdbcfebbf788baeba2456240a347fc1ee9397d5ff6dcd21206cdb2a7347628"
+checksum = "515f25a0767f07dc68bc503298ff121a22b99df71b2e9d856b2cff47c16b235d"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6553,9 +6548,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-presence"
-version = "0.5.90"
+version = "0.5.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33c5038cde028ae13ff5446513287d18dbae7f8d3d246bd87fb6252dc1d95c30"
+checksum = "f37674d6b305def4bc358e90dc9191ba5ff808bca1f9ffadd736a3caf294a4a1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6575,9 +6570,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-pubsub"
-version = "0.5.90"
+version = "0.5.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae450e28dd005cd606e006815fde51e515c6c0dc671a94e5fc044e35228320b0"
+checksum = "e4a433ec9d2b31bc1f47a12c512c14fb3bdcb765ccd393183d88d5a51948ece6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6598,9 +6593,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-rendezvous"
-version = "0.5.90"
+version = "0.5.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a5fbfe521143fcfc1d93bd643d3e24a019e4e6b61f2f18e2af42f1e00510db0"
+checksum = "666d03ef48be870cefc1155f7c039e78e095b0d2acc139c5b9e322a93713ee2f"
 dependencies = [
  "anyhow",
  "blake3",
@@ -6614,9 +6609,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-runtime"
-version = "0.5.90"
+version = "0.5.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c74a4ad248d3ead9d619cc6455b2ac95733b1d287da3cef3872bf43463dcd141"
+checksum = "591c1b6876f9074b7af8ac88025b477c933ed7081bf359cb29ffffe835babbdc"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6640,9 +6635,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-transport"
-version = "0.5.90"
+version = "0.5.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f7a36aafe2ddb00d903d7ca61416680302a703acaf823118a75bdb57cac94d4"
+checksum = "efc3ace5d916a48eb7bb8c993a09128583032eca38b071bd0590e1190dcfcd14"
 dependencies = [
  "ant-quic",
  "anyhow",
@@ -6662,9 +6657,9 @@ dependencies = [
 
 [[package]]
 name = "saorsa-gossip-types"
-version = "0.5.90"
+version = "0.5.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ee6fed3b8933236e10bf0a41053e581eaec5f00355e766d4d9509e1c52b4da4"
+checksum = "27cd92a2d06e3993d59fa0d72c3d65bf8eebfd040fa86d7f70137414b57b94c1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7390,6 +7385,16 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "sqlite-wasm-rs"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6cd504cecbfe7eef649988840f9a6cb768d11085efec138f8e99f160632d867"
+dependencies = [
+ "cc",
+ "rsqlite-vfs",
 ]
 
 [[package]]
@@ -8205,9 +8210,9 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "url"
-version = "2.5.8"
+version = "2.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+checksum = "f00cd2407bb42c0ef17be88d4cf020f5cceffd121665bac9b8b9493a369b3b1a"
 dependencies = [
  "form_urlencoded",
  "idna",
@@ -9142,9 +9147,9 @@ dependencies = [
 
 [[package]]
 name = "x0x"
-version = "0.48.1"
+version = "0.49.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42fae28fc4a2e1fca2b4e7fc7f6c128d2c3b5a9e53d9bf33c70e1c3e9cbc274a"
+checksum = "43cee3e6e2cd0200ea97b4740b7d38531fa8e02663cd734bd3278bc3585fdffb"
 dependencies = [
  "ant-quic",
  "anyhow",

@@ -111,6 +111,37 @@ pub(crate) fn gossip_config(label: &str) -> x0x::gossip::GossipConfig {
     cfg
 }
 
+/// Network config for both My W@tch agents (the linked agent and the
+/// throwaway pairing agent).
+///
+/// x0x 0.49 made serving MASQUE relay sessions for OTHER peers optional
+/// (`relay_service_enabled`, ant-quic ADR-019) but left the library
+/// default at `true`; only the x0xd daemon turns it off for a Leaf by
+/// itself. A W@tch device is a Leaf that should never carry strangers'
+/// traffic, so it is OFF here: the agent refuses relay requests with
+/// 403 and still USES relays, coordinates hole punching and observes
+/// addresses. `WATCHIT_X0X_RELAY_SERVICE=1` is the field escape hatch
+/// back to the library default.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos",
+    target_os = "android"
+))]
+pub(crate) fn network_config() -> x0x::network::NetworkConfig {
+    let serve = matches!(
+        std::env::var("WATCHIT_X0X_RELAY_SERVICE").as_deref(),
+        Ok("1") | Ok("true") | Ok("on")
+    );
+    if serve {
+        tracing::info!("x0x relay serving ON by env");
+    }
+    x0x::network::NetworkConfig {
+        relay_service_enabled: serve,
+        ..Default::default()
+    }
+}
+
 #[cfg(all(
     test,
     any(
@@ -146,6 +177,17 @@ mod tests {
             x0x::gossip::LeafBytePolicy::ShedNormal
         );
         std::env::remove_var("WATCHIT_X0X_BYTE_POLICY");
+    }
+
+    /// A W@tch Leaf never serves MASQUE relay sessions for other peers
+    /// unless the env escape hatch asks for it.
+    #[test]
+    fn relay_serving_is_off_with_env_escape_hatch() {
+        std::env::remove_var("WATCHIT_X0X_RELAY_SERVICE");
+        assert!(!network_config().relay_service_enabled);
+        std::env::set_var("WATCHIT_X0X_RELAY_SERVICE", "1");
+        assert!(network_config().relay_service_enabled);
+        std::env::remove_var("WATCHIT_X0X_RELAY_SERVICE");
     }
 }
 
