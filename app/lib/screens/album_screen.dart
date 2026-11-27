@@ -65,6 +65,8 @@ class _AlbumScreenState extends State<AlbumScreen>
     trackInfo: _trackInfo,
     playerFactory: widget.playerFactory,
     sourceOverride: widget.sourceOverride,
+    confirmOffline: () async =>
+        mounted && await confirmLeaveOfflineMode(context),
     confirmCellular: () async =>
         mounted && await confirmCellularStreaming(context) == true,
     pauseDownloadsPrompt: () async =>

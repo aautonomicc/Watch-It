@@ -64,6 +64,7 @@ class PlayQueueController extends ChangeNotifier {
     required this.trackInfo,
     AlbumAudioPlayer Function()? playerFactory,
     this.sourceOverride,
+    this.confirmOffline,
     this.confirmCellular,
     this.pauseDownloadsPrompt,
     this.onMessage,
@@ -83,6 +84,11 @@ class PlayQueueController extends ChangeNotifier {
   /// embedded client).
   final ({String url, bool local})? Function(MediaEntry entry)?
       sourceOverride;
+
+  /// Asked before streaming while offline mode is on; returns whether
+  /// playback may go ahead (the owning screen offers to go online).
+  /// Null = carry on as before (only an automatic pause lifts itself).
+  final Future<bool> Function()? confirmOffline;
 
   /// Asked before streaming on mobile data with the Ask policy; null =
   /// refuse (headless use). The owning screen passes a dialog.
@@ -212,6 +218,7 @@ class PlayQueueController extends ChangeNotifier {
       return;
     }
     if (!source.local) {
+      if (await confirmOffline?.call() == false) return;
       // Mobile-data policy (Settings → Network), then the shared
       // pause-downloads-while-streaming preference.
       final gate = await streamingGateNow();

@@ -14,6 +14,7 @@ import '../services/library_store.dart';
 import '../services/metadata.dart';
 import '../services/metadata_service.dart';
 import '../services/embedded_client.dart';
+import '../services/network_pause.dart';
 import '../services/network_policy.dart';
 import '../services/organize.dart';
 import '../services/profiles.dart';
@@ -301,6 +302,9 @@ class _DetailScreenState extends State<DetailScreen> {
       );
       return;
     }
+    // Offline mode: ask before going online for a streamed title.
+    if (!source.local && !await confirmLeaveOfflineMode(context)) return;
+    if (!context.mounted) return;
     // Mobile-data policy (Settings → Network): streamed playback may be
     // blocked on cellular, or ask first — once per session.
     if (!source.local) {
@@ -897,6 +901,73 @@ Future<bool> maybePauseDownloadsForStreaming(BuildContext context) async {
   }
   if (!pause) return false;
   return DownloadManager.instance.pauseAllForPlayback();
+}
+
+/// Asked before STREAMED playback while offline mode is on (Settings →
+/// Network). A pause the user switched on by hand is never lifted
+/// silently: the dialog offers to go online, and Cancel leaves
+/// everything as it was. A pause the idle timer applied lifts without
+/// asking. Either way the call waits (briefly) for the connection to
+/// come back, so the player's first request is not refused. Returns
+/// whether playback may go ahead. Downloaded files never come here.
+Future<bool> confirmLeaveOfflineMode(
+  BuildContext context, {
+  Future<ClientHealth> Function()? probe,
+}) async {
+  final pause = NetworkPause.instance;
+  await pause.ensureLoaded();
+  if (!pause.paused) return true;
+  if (!pause.autoPaused) {
+    if (!context.mounted) return false;
+    final t = WiTokens.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: t.ink2,
+        title: Text(
+          'Offline mode is on',
+          style: TextStyle(color: t.bone, fontSize: 16),
+        ),
+        content: Text(
+          'This title is not downloaded, so playing it needs the '
+          'network. Turn offline mode off and play?',
+          style: TextStyle(color: t.boneDim, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text('Cancel', style: TextStyle(color: t.ash)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Go online', style: TextStyle(color: t.accent)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return false;
+  }
+  await pause.setPaused(false);
+  // The core reconnects in a few seconds; a stream opened before then
+  // is refused ("not connected yet"). No native client (tests) reads
+  // as `unavailable` and ends the wait at once.
+  final health = probe ?? EmbeddedClient.health;
+  var told = false;
+  for (var i = 0; i < 40; i++) {
+    final h = await health();
+    if (h.state != 'connecting' && h.state != 'paused') break;
+    if (!told) {
+      told = true;
+      wiMessengerKey.currentState?.showSnackBar(
+        const SnackBar(
+          duration: Duration(seconds: 3),
+          content: Text('Going online…'),
+        ),
+      );
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+  }
+  return true;
 }
 
 /// Once-per-session confirmation for streaming over mobile data

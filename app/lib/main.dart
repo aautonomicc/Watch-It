@@ -9,6 +9,7 @@ import 'models/media_list.dart';
 import 'screens/album_screen.dart';
 import 'screens/artist_screen.dart';
 import 'screens/batch_upload_screen.dart' show offerBatchResume;
+import 'services/link_epoch.dart';
 import 'screens/publish_screen.dart' show isDesktopPlatform;
 import 'screens/detail_screen.dart';
 import 'screens/profile_picker_screen.dart';
@@ -173,6 +174,10 @@ Future<void> main() async {
   // while linked (a silent no-op otherwise). A cycle also fires the
   // moment the Autonomi connection comes back, so maps and artwork that
   // failed offline retry at once instead of after the period.
+  // A release whose x0x cannot sync with the previous one bumps the
+  // link epoch: the old link is removed here and the home screen tells
+  // the user to pair the devices again.
+  await LinkEpoch.enforce();
   MyWatchSync.instance.start();
   MyWatchSync.instance.bindConnectivity(ConnectivityMonitor.instance);
   // Seed-phrase backup, phase 2: a wallet-holding device shares its
@@ -468,6 +473,8 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
     // kid profile shouldn't see.
     if (ProfileStore.instance.isAdmin) {
       unawaited(offerBatchResume(context, onLibraryChanged: _reload));
+      // My W@tch is an admin page; the notice waits for an admin.
+      unawaited(offerRelinkNotice(context));
     }
     _reload();
   }

@@ -68,6 +68,8 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     trackInfo: _trackInfo,
     playerFactory: widget.playerFactory,
     sourceOverride: widget.sourceOverride,
+    confirmOffline: () async =>
+        mounted && await confirmLeaveOfflineMode(context),
     confirmCellular: () async =>
         mounted && await confirmCellularStreaming(context) == true,
     pauseDownloadsPrompt: () async =>
@@ -167,6 +169,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
       return;
     }
     if (!source.local) {
+      if (!mounted || !await confirmLeaveOfflineMode(context)) return;
       final gate = await streamingGateNow();
       if (gate == StreamingGate.block) {
         _snack(
