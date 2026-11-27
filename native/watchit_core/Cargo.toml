@@ -186,8 +186,17 @@ tracing-android = "0.2"
 # ant-quic 0.27.61 -> 0.29.0 CHANGES PACKETS ON THE WIRE (path-MTU
 # probes, ECN) and upstream ran no mixed-version test — tell users to
 # update linked devices together.
+# 0.50.1 (2026-11-27; 0.50.0 2026-11-26): Full/relay eager degree 6 -> 3,
+# `send_direct` raw-QUIC-first with an 8 s receive ACK (#2187),
+# saorsa-gossip 0.6.1 (PRUNE/GRAFT, IDONTWANT, batched control frames,
+# negotiated per peer — 0.5.x peers keep the old wire). ant-quic stays
+# 0.29.0. Synced both ways with 0.48.1 and 0.49.1 devservers on one host
+# (2026-11-27), so kLinkEpoch was not bumped.
+# GIT TAG, not crates.io: upstream had not published 0.50.x to crates.io
+# on 2026-11-27 (its publish job was new and waiting). Change back to
+# `x0x = "0.50.1"` (or newer) once crates.io has it.
 # Pin a release, never git main.
-x0x = "0.49.1"
+x0x = { git = "https://github.com/saorsa-labs/x0x", tag = "v0.50.1" }
 # CancellationToken for the mywatch heartbeat/watch task (already in the
 # x0x tree, so free on desktop).
 tokio-util = "0.7"
